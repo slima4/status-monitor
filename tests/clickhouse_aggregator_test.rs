@@ -180,7 +180,13 @@ async fn build_round_trips_seeded_data() {
     let unique = format!("agg-test-{}", Uuid::now_v7());
     let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let target = store
-        .create(org_id, public_target(&unique), WriteSource::Ui, i64::MAX)
+        .create(
+            org_id,
+            public_target(&unique),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .expect("create public target");
     let target_id = target.id;
@@ -246,7 +252,13 @@ async fn component_history_returns_strip_for_public_target() {
     let unique = format!("hist-test-{}", Uuid::now_v7());
     let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let target = store
-        .create(org_id, public_target(&unique), WriteSource::Ui, i64::MAX)
+        .create(
+            org_id,
+            public_target(&unique),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .expect("create public target");
     let target_id = target.id;
@@ -302,11 +314,23 @@ async fn build_excludes_internal_incidents() {
     // so the public and internal incidents live on separate page components;
     // the aggregator must still drop the internal one by visibility alone.
     let pub_target = store
-        .create(org_id, mk_target("pub"), WriteSource::Ui, i64::MAX)
+        .create(
+            org_id,
+            mk_target("pub"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .expect("create public target");
     let int_target = store
-        .create(org_id, mk_target("int"), WriteSource::Ui, i64::MAX)
+        .create(
+            org_id,
+            mk_target("int"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .expect("create internal target");
     let pub_target_id = pub_target.id;
@@ -405,7 +429,13 @@ async fn published_postmortem_surfaces_on_public_incident() {
     let unique = format!("agg-pm-{}", Uuid::now_v7());
     let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let target = store
-        .create(org_id, public_target(&unique), WriteSource::Ui, i64::MAX)
+        .create(
+            org_id,
+            public_target(&unique),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .expect("create public target");
     let target_id = target.id;

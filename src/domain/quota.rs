@@ -50,6 +50,8 @@ pub struct Plan {
     pub sms_alerts_enabled: bool,
     pub incident_narration_enabled: bool,
     pub on_call_enabled: bool,
+    /// Cap on browser-flow monitors; 0 both disables the kind and gates it.
+    pub max_flow_checks: i32,
 
     // Metadata
     pub is_listed: bool,

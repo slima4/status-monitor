@@ -66,6 +66,7 @@ async fn make_heartbeat_target(pool: &sqlx::PgPool, org: OrgId, name: &str, enab
             heartbeat_target(name, enabled),
             WriteSource::Ui,
             i64::MAX,
+            i64::MAX,
         )
         .await
         .expect("create target")

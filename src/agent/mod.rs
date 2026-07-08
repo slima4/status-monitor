@@ -54,15 +54,22 @@ pub struct AgentPullSource {
     client: OutboundHttpClient,
     url: String,
     token: String,
+    flow_capable: bool,
     cache: Mutex<PullCache>,
 }
 
 impl AgentPullSource {
-    pub fn new(client: OutboundHttpClient, base_url: &str, token: String) -> Self {
+    pub fn new(
+        client: OutboundHttpClient,
+        base_url: &str,
+        token: String,
+        flow_capable: bool,
+    ) -> Self {
         Self {
             client,
             url: format!("{}/api/agent/targets", base_url.trim_end_matches('/')),
             token,
+            flow_capable,
             cache: Mutex::new(PullCache {
                 etag: None,
                 targets: Vec::new(),
@@ -87,6 +94,9 @@ impl EnabledTargetSource for AgentPullSource {
         let etag = self.cache.lock().await.etag.clone();
         let mut builder =
             Request::get(&self.url).header(AUTHORIZATION, format!("Bearer {}", self.token));
+        if self.flow_capable {
+            builder = builder.header("x-flow-capable", "true");
+        }
         if let Some(e) = &etag {
             builder = builder.header(IF_NONE_MATCH, e.clone());
         }
@@ -210,6 +220,7 @@ struct AgentDispatchClient {
     token: String,
     http_clients: Arc<HttpClients>,
     domain_runtime: Arc<DomainExpiryRuntime>,
+    flow_engine: Option<Arc<crate::worker::flow::engine::CdpEngine>>,
 }
 
 /// Backoff before reconnecting a long-poll that errored (control plane down).
@@ -238,6 +249,7 @@ impl AgentDispatchClient {
             let deps = WorkerDeps {
                 http: self.http_clients.as_ref(),
                 domain_expiry: self.domain_runtime.as_ref(),
+                flow: self.flow_engine.as_deref(),
             };
             let target_id = check.target_id.unwrap_or_else(Uuid::nil);
             let (result, probe) =
@@ -326,8 +338,13 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
     let outbound =
         http_outbound::build_outbound_client(SsrfGuard::new(cfg.security.allow_private_targets));
 
-    let source: Arc<dyn EnabledTargetSource> =
-        Arc::new(AgentPullSource::new(outbound.clone(), &base, token.clone()));
+    let flow_capable = cfg.flow.enabled;
+    let source: Arc<dyn EnabledTargetSource> = Arc::new(AgentPullSource::new(
+        outbound.clone(),
+        &base,
+        token.clone(),
+        flow_capable,
+    ));
     let results_url = Url::parse(&format!("{base}/api/agent/results"))
         .context("agent.control_plane_url is not a valid URL")?;
     let sink: Arc<dyn ResultSink> = Arc::new(AgentResultSink {
@@ -360,14 +377,31 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         host_throttle.clone(),
         DEFAULT_MAX_STALENESS,
     ));
-    let pool = Arc::new(WorkerPool::new(
-        cfg.checker.max_concurrent_checks,
-        (*http_clients).clone(),
-        cfg.circuit_breaker,
-        fanout,
-        host_throttle,
-        domain_runtime.clone(),
-    ));
+    let flow_engine = flow_capable.then(|| {
+        Arc::new(crate::worker::flow::engine::CdpEngine::new(
+            crate::worker::flow::engine::FlowEngineConfig {
+                binary: cfg.flow.lightpanda_path.clone().into(),
+                max_concurrency: cfg.flow.max_concurrency,
+                mem_limit_bytes: cfg.flow.mem_limit_mb.saturating_mul(1024 * 1024),
+                block_private_networks: cfg.flow.block_private_networks,
+                block_cidrs: cfg.flow.block_cidrs.clone(),
+                v8_max_heap_mb: cfg.flow.v8_max_heap_mb,
+                max_response_bytes: cfg.flow.max_response_mb.saturating_mul(1024 * 1024),
+                user_agent_suffix: cfg.flow.user_agent_suffix.clone(),
+            },
+        ))
+    });
+    let pool = Arc::new(
+        WorkerPool::new(
+            cfg.checker.max_concurrent_checks,
+            (*http_clients).clone(),
+            cfg.circuit_breaker,
+            fanout,
+            host_throttle,
+            domain_runtime.clone(),
+        )
+        .with_flow_engine(flow_engine.clone()),
+    );
     let registry = Arc::new(TargetRegistry::new(source));
     let mut sched_cfg = cfg.scheduler.clone();
     sched_cfg.target_refresh_interval_secs = cfg.agent.pull_interval_secs;
@@ -418,6 +452,7 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
         token,
         http_clients: http_clients.clone(),
         domain_runtime,
+        flow_engine,
     };
     let job_handle = {
         let token = root.clone();

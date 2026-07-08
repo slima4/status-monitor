@@ -736,6 +736,7 @@ impl TargetStore for InMemoryTargetStore {
         new: NewTarget,
         source: WriteSource,
         max_targets: i64,
+        max_flow_checks: i64,
     ) -> Result<Target> {
         let mut guard = self.targets.lock();
         // Lock held across count + push, so this is atomic for the same
@@ -747,6 +748,20 @@ impl TargetStore for InMemoryTargetStore {
                 max_targets,
                 "free",
             ));
+        }
+        if matches!(new.check, crate::domain::CheckSpec::Flow(_)) {
+            let flow_current = guard
+                .iter()
+                .filter(|t| matches!(t.check, crate::domain::CheckSpec::Flow(_)))
+                .count() as i64;
+            if flow_current + 1 > max_flow_checks {
+                return Err(crate::error::AppError::quota_exceeded(
+                    "max_flow_checks",
+                    flow_current,
+                    max_flow_checks,
+                    "free",
+                ));
+            }
         }
         let target = Self::materialize(new, source);
         guard.push(target.clone());
@@ -832,6 +847,7 @@ impl TargetStore for InMemoryTargetStore {
         items: Vec<NewTarget>,
         source: WriteSource,
         max_targets: i64,
+        max_flow_checks: i64,
     ) -> Result<Vec<Target>> {
         let mut guard = self.targets.lock();
         if guard.len() as i64 + items.len() as i64 > max_targets {
@@ -841,6 +857,24 @@ impl TargetStore for InMemoryTargetStore {
                 max_targets,
                 "free",
             ));
+        }
+        let flow_len = items
+            .iter()
+            .filter(|i| matches!(i.check, crate::domain::CheckSpec::Flow(_)))
+            .count() as i64;
+        if flow_len > 0 {
+            let flow_current = guard
+                .iter()
+                .filter(|t| matches!(t.check, crate::domain::CheckSpec::Flow(_)))
+                .count() as i64;
+            if flow_current + flow_len > max_flow_checks {
+                return Err(crate::error::AppError::quota_exceeded(
+                    "max_flow_checks",
+                    flow_current,
+                    max_flow_checks,
+                    "free",
+                ));
+            }
         }
         let mut created = Vec::with_capacity(items.len());
         for new in items {
@@ -992,6 +1026,10 @@ impl TargetStore for InMemoryTargetStore {
     ) -> Result<Option<Vec<String>>> {
         let exists = self.targets.lock().iter().any(|t| t.id == target_id);
         Ok(exists.then(Vec::new))
+    }
+
+    async fn flow_capable_regions(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
     }
 
     async fn set_target_regions(

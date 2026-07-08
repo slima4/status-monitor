@@ -127,6 +127,7 @@ pub(crate) fn describe_check(spec: &CheckSpec) -> (&'static str, String) {
         CheckSpec::TlsCert(c) => ("TLS", format!("{}:{}", c.host, c.port)),
         CheckSpec::DomainExpiry(c) => ("DOMAIN", c.domain.clone()),
         CheckSpec::Dns(c) => ("DNS", format!("{} {}", c.record_type.as_str(), c.domain)),
+        CheckSpec::Flow(c) => ("FLOW", c.start_url.to_string()),
     }
 }
 

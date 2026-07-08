@@ -73,6 +73,9 @@ pub struct AppConfig {
     pub escalation: EscalationConfig,
     #[serde(default)]
     pub agent: AgentConfig,
+
+    #[serde(default)]
+    pub flow: FlowConfig,
     #[serde(default)]
     pub operator: OperatorConfig,
     #[serde(default)]
@@ -231,6 +234,49 @@ impl Default for OperatorConfig {
         Self {
             admin_token: empty_secret(),
             agent_stale_after_secs: default_agent_stale_after_secs(),
+        }
+    }
+}
+
+/// `[flow]`. Browser-driven flow monitors, off by default. Runs where `enabled`
+/// is set and the Lightpanda engine is at `lightpanda_path`.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct FlowConfig {
+    pub enabled: bool,
+    pub lightpanda_path: String,
+    pub max_concurrency: usize,
+    /// Per-check browser RSS ceiling (MB); over it the run is killed as `Error`
+    /// so one heavy page can't OOM the node. 0 = off.
+    pub mem_limit_mb: u64,
+    /// Runtime SSRF guard: block private/internal IPs after DNS resolution, which
+    /// the save-time URL check can't (redirects/`fetch`/rebinding resolve later).
+    pub block_private_networks: bool,
+    /// Extra CIDRs to block, comma-separated (`-` exempts). Defaults add metadata,
+    /// loopback, CGNAT, and IPv6 ULA (Fly 6PN = `fc00::/7`)/link-local.
+    pub block_cidrs: String,
+    /// In-engine V8 heap cap per browser (MB); 0 = engine default. A belt for the
+    /// RSS watchdog — set below `mem_limit_mb` to trip on JS-heap runaway first.
+    pub v8_max_heap_mb: u64,
+    /// Reject any single browser response larger than this (MB); 0 = no limit.
+    pub max_response_mb: u64,
+    /// Appended to the browser User-Agent for attribution; empty = none.
+    pub user_agent_suffix: String,
+}
+
+impl Default for FlowConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            lightpanda_path: "lightpanda".into(),
+            max_concurrency: 2,
+            mem_limit_mb: 250,
+            block_private_networks: true,
+            block_cidrs: "169.254.0.0/16,127.0.0.0/8,100.64.0.0/10,::1/128,fc00::/7,fe80::/10"
+                .into(),
+            v8_max_heap_mb: 0,
+            max_response_mb: 0,
+            user_agent_suffix: String::new(),
         }
     }
 }

@@ -792,6 +792,13 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
             };
             "domain_expiry"
         }
+        // The classic per-kind form has no step-list fields; flow uses its own.
+        CheckSpec::Flow(_) => {
+            return Err(AppError::bad_request(
+                crate::api::error::codes::INVALID_FLOW_PARAMS,
+                "flow monitors are not editable in this form",
+            ));
+        }
     };
 
     let (mode, id, action, submit_method, name) = match kind {

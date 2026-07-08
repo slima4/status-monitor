@@ -129,6 +129,7 @@ async fn add_and_remove_component_write_audit_rows() {
             },
             WriteSource::Ui,
             i64::MAX,
+            i64::MAX,
         )
         .await
         .unwrap();

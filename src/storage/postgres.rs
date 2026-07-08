@@ -384,6 +384,7 @@ impl TargetStore for PostgresTargetStore {
         new: NewTarget,
         source: WriteSource,
         max_targets: i64,
+        max_flow_checks: i64,
     ) -> Result<Target> {
         let check_json = self.encode_check(&new.check)?;
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
@@ -411,6 +412,25 @@ impl TargetStore for PostgresTargetStore {
                 max_targets,
                 "free",
             ));
+        }
+        // Flow carries a tighter sub-cap, enforced under the same lock so
+        // concurrent creators can't each pass a stale snapshot and overshoot it.
+        if matches!(new.check, CheckSpec::Flow(_)) {
+            let (flow_current,): (i64,) =
+                sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1 AND kind = 'flow'")
+                    .bind(org.0)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .context("create target: flow count")?;
+            if flow_current + 1 > max_flow_checks {
+                tx.rollback().await.ok();
+                return Err(AppError::quota_exceeded(
+                    "max_flow_checks",
+                    flow_current,
+                    max_flow_checks,
+                    "free",
+                ));
+            }
         }
         let row: TargetRow = sqlx::query_as::<_, TargetRow>(
             r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled, tags, alerts,
@@ -568,10 +588,15 @@ impl TargetStore for PostgresTargetStore {
         items: Vec<NewTarget>,
         source: WriteSource,
         max_targets: i64,
+        max_flow_checks: i64,
     ) -> Result<Vec<Target>> {
         if items.is_empty() {
             return Ok(Vec::new());
         }
+        let flow_len = items
+            .iter()
+            .filter(|i| matches!(i.check, CheckSpec::Flow(_)))
+            .count() as i64;
 
         // Same lock-then-count-then-write pattern as the singular path:
         // the per-org advisory lock makes the count accurate against a
@@ -628,6 +653,23 @@ impl TargetStore for PostgresTargetStore {
                 max_targets,
                 "free",
             ));
+        }
+        if flow_len > 0 {
+            let (flow_current,): (i64,) =
+                sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1 AND kind = 'flow'")
+                    .bind(org.0)
+                    .fetch_one(&mut *tx)
+                    .await
+                    .context("bulk create: flow count")?;
+            if flow_current + flow_len > max_flow_checks {
+                tx.rollback().await.ok();
+                return Err(AppError::quota_exceeded(
+                    "max_flow_checks",
+                    flow_current,
+                    max_flow_checks,
+                    "free",
+                ));
+            }
         }
 
         let rows: Vec<TargetRow> = if let Some(cipher) = &self.cipher {
@@ -913,6 +955,18 @@ impl TargetStore for PostgresTargetStore {
                 .fetch_all(&self.pool)
                 .await
                 .context("postgres available_regions")?;
+        Ok(rows.into_iter().map(|(r,)| r).collect())
+    }
+
+    async fn flow_capable_regions(&self) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT a.region FROM agents a \
+             JOIN regions r ON r.id = a.region \
+             WHERE a.enabled AND a.flow_capable AND r.enabled ORDER BY a.region",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("postgres flow_capable_regions")?;
         Ok(rows.into_iter().map(|(r,)| r).collect())
     }
 

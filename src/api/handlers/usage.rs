@@ -80,6 +80,7 @@ pub struct UsageFeatures {
     pub white_label_enabled: bool,
     pub sms_alerts_enabled: bool,
     pub incident_narration_enabled: bool,
+    pub max_flow_checks: i32,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -169,6 +170,7 @@ pub async fn get_org_usage(
             white_label_enabled: p.white_label_enabled,
             sms_alerts_enabled: p.sms_alerts_enabled,
             incident_narration_enabled: p.incident_narration_enabled,
+            max_flow_checks: p.max_flow_checks,
         },
     }))
 }

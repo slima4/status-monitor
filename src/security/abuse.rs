@@ -244,6 +244,15 @@ impl AbuseGuard {
             CheckSpec::TlsCert(c) => crate::security::unbracket(&c.host),
             CheckSpec::DomainExpiry(d) => d.domain.as_str(),
             CheckSpec::Dns(d) => d.domain.as_str(),
+            CheckSpec::Flow(f) => {
+                if let Some(i) = s.url_patterns.matches(f.start_url.as_str()).iter().next() {
+                    return Some(AbuseHit {
+                        kind: AbuseKind::UrlPattern,
+                        detail: format!("pattern #{i}"),
+                    });
+                }
+                f.start_url.host_str()?
+            }
         };
         s.domain_hit(host).or_else(|| s.reputation_hit(host))
     }

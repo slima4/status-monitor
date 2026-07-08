@@ -16,6 +16,7 @@ use crate::domain::agent_wire::{
 };
 use crate::error::{AppError, Result};
 use crate::storage::admin::AdminRepo;
+use crate::storage::operator::OperatorRepo;
 use crate::web::AgentIdentity;
 
 /// Max interactive checks handed to one agent per long-poll return.
@@ -34,8 +35,15 @@ pub async fn pull_targets(
     agent: AgentIdentity,
 ) -> Result<Response> {
     let region = agent.region;
-    let pool = state.require_db()?.clone();
-    let repo = AdminRepo::new(pool, state.cipher.clone(), "agent_config_pull");
+    // Self-reported: only a flow-capable agent is handed flow checks. A change
+    // ships with an agent restart, which clears its etag cache and forces a full
+    // re-pull, so the region etag need not encode capability.
+    let flow_capable = headers
+        .get("x-flow-capable")
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+    let db = state.require_db()?.clone();
+    let repo = AdminRepo::new(db.clone(), state.cipher.clone(), "agent_config_pull");
 
     // Validate the cheap etag first so an unchanged poll returns 304 without
     // decrypting any credentials.
@@ -48,7 +56,20 @@ pub async fn pull_targets(
         return Ok((StatusCode::NOT_MODIFIED, [(header::ETAG, etag)]).into_response());
     }
 
-    let targets = repo.list_enabled_targets_for_region(&region).await?;
+    // Persist it for create-time region validation before returning, so a create
+    // right after an agent first reports capability can't miss it. Only full
+    // pulls reach here (a 304 returned above), so the extra write is rare.
+    if let Ok(id) = agent.agent_id.parse::<uuid::Uuid>()
+        && let Err(err) = OperatorRepo::new(db)
+            .set_agent_flow_capable(id, flow_capable)
+            .await
+    {
+        tracing::warn!(error = %err, "persisting agent flow_capable failed");
+    }
+
+    let targets = repo
+        .list_enabled_targets_for_region(&region, flow_capable)
+        .await?;
     let body = AgentTargetsResponse {
         region,
         targets: targets

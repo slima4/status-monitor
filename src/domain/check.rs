@@ -16,12 +16,13 @@ pub enum CheckSpec {
     TlsCert(TlsCertCheck),
     DomainExpiry(DomainExpiryCheck),
     Dns(DnsCheck),
+    Flow(FlowCheck),
 }
 
 impl CheckSpec {
     /// Every kind string `kind()` can return. Bounded set — safe as a metric
     /// label and lets inventory emit a 0 for kinds with no enabled monitors.
-    pub const ALL_KINDS: [&'static str; 7] = [
+    pub const ALL_KINDS: [&'static str; 8] = [
         "http",
         "tcp",
         "ping",
@@ -29,6 +30,7 @@ impl CheckSpec {
         "dns",
         "tls_cert",
         "domain_expiry",
+        "flow",
     ];
 
     pub fn kind(&self) -> &'static str {
@@ -40,6 +42,7 @@ impl CheckSpec {
             CheckSpec::Dns(_) => "dns",
             CheckSpec::TlsCert(_) => "tls_cert",
             CheckSpec::DomainExpiry(_) => "domain_expiry",
+            CheckSpec::Flow(_) => "flow",
         }
     }
 
@@ -56,6 +59,8 @@ impl CheckSpec {
 pub fn min_interval_secs_for_kind(kind: &str) -> u64 {
     match kind {
         "tls_cert" | "domain_expiry" => 3_600,
+        // A headless-browser run is far heavier than a single probe.
+        "flow" => 300,
         "heartbeat" => 60,
         _ => 10,
     }
@@ -275,6 +280,61 @@ pub struct DnsCheck {
     pub timeout: Duration,
 }
 
+/// A browser-driven login/transaction flow: a step sequence replayed against a
+/// real page through a headless engine. It carries cookies across steps and runs
+/// page JavaScript, so it verifies a login *session* (form → submit →
+/// authenticated page), not just that a login endpoint responds.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct FlowCheck {
+    #[schema(value_type = String, format = "uri", example = "https://app.example.com/login")]
+    pub start_url: Url,
+    pub steps: Vec<FlowStep>,
+    /// Whole-flow budget.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 1000, maximum = 120000, example = 30000)]
+    pub timeout: Duration,
+    /// Per-step wait for a selector to appear.
+    #[serde(with = "duration_ms")]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 5000)]
+    pub step_timeout: Duration,
+    pub verify_tls: bool,
+}
+
+impl FlowCheck {
+    pub const MAX_STEPS: usize = 30;
+}
+
+/// One action in a [`FlowCheck`]. `Fill.value` may carry a `{{secret}}` token
+/// resolved at probe time; every other field is literal.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum FlowStep {
+    Goto {
+        #[schema(value_type = String, format = "uri")]
+        url: Url,
+    },
+    Click {
+        selector: String,
+    },
+    Fill {
+        selector: String,
+        value: String,
+    },
+    WaitFor {
+        selector: String,
+    },
+    /// Assert that a substring is present, optionally scoped to a selector's
+    /// text rather than the whole page.
+    AssertText {
+        #[schema(nullable = true)]
+        selector: Option<String>,
+        contains: String,
+    },
+    AssertUrl {
+        contains: String,
+    },
+}
+
 // Null or absent port becomes 0 so port validation flags it, not serde.
 fn deserialize_port<'de, D: serde::Deserializer<'de>>(d: D) -> Result<u16, D::Error> {
     Ok(Option::<u16>::deserialize(d)?.unwrap_or(0))
@@ -310,7 +370,8 @@ mod tests {
             | CheckSpec::Heartbeat(_)
             | CheckSpec::Dns(_)
             | CheckSpec::TlsCert(_)
-            | CheckSpec::DomainExpiry(_) => {}
+            | CheckSpec::DomainExpiry(_)
+            | CheckSpec::Flow(_) => {}
         }
     }
 
@@ -320,7 +381,7 @@ mod tests {
         for k in CheckSpec::ALL_KINDS {
             assert!(seen.insert(k), "duplicate kind in ALL_KINDS: {k}");
         }
-        assert_eq!(CheckSpec::ALL_KINDS.len(), 7);
+        assert_eq!(CheckSpec::ALL_KINDS.len(), 8);
     }
 
     #[test]

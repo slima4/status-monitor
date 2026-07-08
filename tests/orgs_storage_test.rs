@@ -674,7 +674,7 @@ async fn update_org_slug_keeps_resources_reachable_by_id() {
         owner_user_id: None,
     };
     let target = store
-        .create(org.id, new, WriteSource::Ui, i64::MAX)
+        .create(org.id, new, WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .unwrap();
 

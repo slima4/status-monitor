@@ -58,12 +58,14 @@ pub mod usage_keys {
     pub const NOTIFICATION_CHANNELS: &str = "max_notification_channels";
     pub const ESCALATION_POLICIES: &str = "max_escalation_policies";
     pub const ON_CALL_SCHEDULES: &str = "max_on_call_schedules";
+    pub const FLOW_CHECKS: &str = "max_flow_checks";
 }
 
 /// The org-scoped count queries. Declared once and shared by the atomic
 /// friendly-check path *and* the usage snapshot so the number a customer is
 /// blocked at always equals the number the usage page shows (single source).
 const SQL_COUNT_TARGETS: &str = "SELECT count(*) FROM targets WHERE org_id = $1";
+const SQL_COUNT_FLOW: &str = "SELECT count(*) FROM targets WHERE org_id = $1 AND kind = 'flow'";
 // Public components are now distinct monitors curated onto any page — the
 // per-org cap counts a monitor once no matter how many pages it sits on.
 const SQL_COUNT_PUBLIC_COMPONENTS: &str =
@@ -113,6 +115,7 @@ struct PlanRow {
     sms_alerts_enabled: bool,
     incident_narration_enabled: bool,
     on_call_enabled: bool,
+    max_flow_checks: i32,
     is_listed: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -151,6 +154,7 @@ impl From<PlanRow> for Plan {
             sms_alerts_enabled: r.sms_alerts_enabled,
             incident_narration_enabled: r.incident_narration_enabled,
             on_call_enabled: r.on_call_enabled,
+            max_flow_checks: r.max_flow_checks,
             is_listed: r.is_listed,
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -232,7 +236,7 @@ impl QuotaService {
                      p.test_now_per_minute, p.check_now_per_minute, \
                      p.custom_domain_enabled, p.white_label_enabled, \
                      p.sms_alerts_enabled, p.incident_narration_enabled, \
-                     p.on_call_enabled, \
+                     p.on_call_enabled, p.max_flow_checks, \
                      p.is_listed, p.created_at, p.updated_at \
                      FROM organizations o JOIN plans p ON p.id = o.plan_id \
                      WHERE o.id = $1",
@@ -311,6 +315,31 @@ impl QuotaService {
             self.record_block(org, user, "max_targets", current, limit);
             return Err(AppError::quota_exceeded(
                 "max_targets",
+                current,
+                limit,
+                plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Friendly pre-check for `n` new flow monitors against the plan's
+    /// `max_flow_checks`. Flow is heavy (a browser per check), so it carries a
+    /// tighter sub-cap than the overall monitor limit. `0` is also the gate,
+    /// caught earlier by `gate_flow` with a clearer message.
+    pub async fn check_can_create_flow(
+        &self,
+        org: OrgId,
+        user: Option<UserId>,
+        n: i64,
+    ) -> Result<()> {
+        let plan = self.limit_for_org(org).await?;
+        let limit = i64::from(plan.max_flow_checks);
+        let current = self.count(SQL_COUNT_FLOW, org).await?;
+        if current + n > limit {
+            self.record_block(org, user, usage_keys::FLOW_CHECKS, current, limit);
+            return Err(AppError::quota_exceeded(
+                usage_keys::FLOW_CHECKS,
                 current,
                 limit,
                 plan.id.clone(),
@@ -806,6 +835,8 @@ fn unlimited_plan() -> Plan {
         sms_alerts_enabled: false,
         incident_narration_enabled: true,
         on_call_enabled: true,
+        // Dark until launch enables flow per-plan; self-host flips it in the DB.
+        max_flow_checks: 0,
         is_listed: false,
         created_at: now,
         updated_at: now,

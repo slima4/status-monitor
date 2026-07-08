@@ -155,6 +155,7 @@ async fn two_tenants_never_see_each_others_data() {
             target_named(&format!("a-target-{}", Uuid::now_v7())),
             WriteSource::Ui,
             i64::MAX,
+            i64::MAX,
         )
         .await
         .expect("create target in a");
@@ -163,6 +164,7 @@ async fn two_tenants_never_see_each_others_data() {
             b.org,
             target_named(&format!("b-target-{}", Uuid::now_v7())),
             WriteSource::Ui,
+            i64::MAX,
             i64::MAX,
         )
         .await

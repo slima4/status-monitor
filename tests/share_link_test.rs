@@ -72,7 +72,7 @@ async fn make_target(store: &dyn TargetStore, org: OrgId, name: &str, secret: bo
         owner_user_id: None,
     };
     store
-        .create(org, nt, WriteSource::Ui, i64::MAX)
+        .create(org, nt, WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .unwrap()
         .id

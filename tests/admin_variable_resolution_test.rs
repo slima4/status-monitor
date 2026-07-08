@@ -115,7 +115,10 @@ async fn region_pull_resolves_variables_and_etag_tracks_them() {
     let repo = AdminRepo::new(pool.clone(), Some(test_cipher()), "test");
 
     // Served spec carries resolved values, not the `{{ }}` literals.
-    let served = repo.list_enabled_targets_for_region(region).await.unwrap();
+    let served = repo
+        .list_enabled_targets_for_region(region, true)
+        .await
+        .unwrap();
     assert_eq!(served.len(), 1);
     let h = http(&served[0].1.check);
     assert_eq!(h.url.as_str(), "https://api.example.com/health");
@@ -131,7 +134,10 @@ async fn region_pull_resolves_variables_and_etag_tracks_them() {
     assert_ne!(etag1, etag2, "variable edit must bump the region etag");
 
     // Re-pull serves the rotated secret.
-    let served2 = repo.list_enabled_targets_for_region(region).await.unwrap();
+    let served2 = repo
+        .list_enabled_targets_for_region(region, true)
+        .await
+        .unwrap();
     assert_eq!(http(&served2[0].1.check).headers["x-api-key"], "sk-rotated");
 
     pool.close().await;

@@ -67,6 +67,7 @@ fn test_plan(per_min: i32) -> Plan {
         sms_alerts_enabled: false,
         incident_narration_enabled: true,
         on_call_enabled: true,
+        max_flow_checks: 0,
         is_listed: false,
         created_at: now,
         updated_at: now,
@@ -713,6 +714,65 @@ async fn status_page_cap_blocks_create_live_pg() {
         .await;
     let _ = sqlx::query("DELETE FROM plans WHERE id = $1")
         .bind(&_pid)
+        .execute(&pool)
+        .await;
+}
+
+// ── flow monitors carry a tighter sub-cap than the overall target limit ─
+#[tokio::test]
+async fn flow_cap_blocks_second_flow_monitor() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (pid, org) = seed_org_on_plan(&pool, 20, 5, 10, 10).await;
+    // The cloned free plan inherits max_flow_checks = 0; raise it to 1 for this org.
+    sqlx::query("UPDATE plans SET max_flow_checks = 1 WHERE id = $1")
+        .bind(&pid)
+        .execute(&pool)
+        .await
+        .expect("set flow cap");
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+
+    // Zero flow monitors: within the cap of 1.
+    svc.check_can_create_flow(org, None, 1)
+        .await
+        .expect("first flow within cap");
+
+    sqlx::query(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
+         VALUES ($1, 'f', $2::jsonb, 300, true)",
+    )
+    .bind(org.0)
+    .bind(serde_json::json!({
+        "type": "flow",
+        "start_url": "https://example.com/login",
+        "steps": [{"op": "assert_url", "contains": "/x"}],
+        "timeout": 30000,
+        "step_timeout": 10000,
+        "verify_tls": true,
+    }))
+    .execute(&pool)
+    .await
+    .expect("insert flow target");
+
+    // At the cap now: a second is rejected, and a batch of two never fit at all.
+    match svc.check_can_create_flow(org, None, 1).await {
+        Err(AppError::QuotaExceeded { quota, .. }) => assert_eq!(quota, "max_flow_checks"),
+        other => panic!("expected max_flow_checks quota error, got {other:?}"),
+    }
+    assert!(svc.check_can_create_flow(org, None, 2).await.is_err());
+
+    let _ = sqlx::query("DELETE FROM targets WHERE org_id = $1")
+        .bind(org.0)
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org.0)
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM plans WHERE id = $1")
+        .bind(&pid)
         .execute(&pool)
         .await;
 }

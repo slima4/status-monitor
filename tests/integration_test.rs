@@ -416,6 +416,7 @@ async fn execute_stamps_passed_org_id_on_result() {
     let deps = uptimepage::worker::WorkerDeps {
         http: &client,
         domain_expiry: &domain_expiry,
+        flow: None,
     };
     let result = uptimepage::worker::execute(target_id, org_id, &spec, &deps).await;
 

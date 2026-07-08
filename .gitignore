@@ -69,3 +69,6 @@ terraform/override.tf
 terraform/*_override.tf
 crash.log
 crash.*.log
+
+# Local flow-testing browser binary (just flow-dev)
+/lightpanda

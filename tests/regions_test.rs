@@ -64,6 +64,22 @@ async fn assign(pool: &PgPool, target_id: Uuid, region: &str) {
         .unwrap();
 }
 
+async fn insert_agent(pool: &PgPool, region: &str, name: &str, enabled: bool, flow_capable: bool) {
+    sqlx::query(
+        "INSERT INTO agents (region, name, token_hash, token_prefix, enabled, flow_capable) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(region)
+    .bind(name)
+    .bind(format!("h-{name}"))
+    .bind(format!("p-{name}"))
+    .bind(enabled)
+    .bind(flow_capable)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 #[ignore]
 async fn reconcile_upserts_region_and_backfills_unassigned() {
@@ -128,7 +144,7 @@ async fn region_source_returns_only_that_region() {
 
     let repo = AdminRepo::new(pool.clone(), None, "test");
     let ids: Vec<Uuid> = repo
-        .list_enabled_targets_for_region("eu-rgtest2")
+        .list_enabled_targets_for_region("eu-rgtest2", true)
         .await
         .unwrap()
         .into_iter()
@@ -281,5 +297,37 @@ async fn available_regions_detailed_carries_labels_and_excludes_disabled() {
     assert!(
         !detailed.iter().any(|r| r.id == "us-detail-off"),
         "a disabled region must not appear in the catalog"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn flow_capable_regions_lists_only_enabled_capable_agents() {
+    use uptimepage::storage::{PostgresTargetStore, TargetStore};
+
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    ensure_region(&pool, "eu-flowcap").await;
+    ensure_region(&pool, "us-flowcap").await;
+    ensure_region(&pool, "ap-flowcap").await;
+    insert_agent(&pool, "eu-flowcap", "cap-eu", true, true).await;
+    insert_agent(&pool, "us-flowcap", "cap-us-off", false, true).await;
+    insert_agent(&pool, "ap-flowcap", "cap-ap-plain", true, false).await;
+
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let caps = store.flow_capable_regions().await.unwrap();
+
+    assert!(
+        caps.contains(&"eu-flowcap".to_string()),
+        "enabled + capable"
+    );
+    assert!(
+        !caps.contains(&"us-flowcap".to_string()),
+        "a disabled agent's region is not capable"
+    );
+    assert!(
+        !caps.contains(&"ap-flowcap".to_string()),
+        "a non-flow agent's region is not capable"
     );
 }

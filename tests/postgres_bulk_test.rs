@@ -55,6 +55,59 @@ fn make(name: &str, tags: Vec<String>) -> NewTarget {
     }
 }
 
+fn make_flow(name: &str) -> NewTarget {
+    use uptimepage::domain::{FlowCheck, FlowStep};
+    NewTarget {
+        name: name.into(),
+        check: CheckSpec::Flow(FlowCheck {
+            start_url: Url::parse("https://example.com/login").unwrap(),
+            steps: vec![FlowStep::AssertUrl {
+                contains: "/x".into(),
+            }],
+            timeout: Duration::from_secs(30),
+            step_timeout: Duration::from_secs(5),
+            verify_tls: true,
+        }),
+        interval: Duration::from_secs(300),
+        enabled: true,
+        tags: vec![],
+        alerts: Default::default(),
+        region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
+        renotify_interval_secs: 3600,
+        group_name: None,
+        owner_user_id: None,
+    }
+}
+
+#[sqlx::test(migrations = "./migrations/postgres")]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn flow_sub_cap_enforced_atomically(pool: PgPool) {
+    let (store, org) = store_with_default_org(pool, None).await;
+    // Generous overall cap, flow sub-cap of 1: the first flow lands, the second
+    // is rejected by the in-INSERT guard even though max_targets has room.
+    store
+        .create(org, make_flow("f1"), WriteSource::Ui, 100, 1)
+        .await
+        .expect("first flow within sub-cap");
+    let err = store
+        .create(org, make_flow("f2"), WriteSource::Ui, 100, 1)
+        .await
+        .expect_err("second flow over sub-cap");
+    match err {
+        uptimepage::error::AppError::QuotaExceeded { quota, .. } => {
+            assert_eq!(quota, "max_flow_checks");
+        }
+        other => panic!("expected max_flow_checks quota error, got {other:?}"),
+    }
+    // A non-flow target is unaffected by the flow sub-cap.
+    store
+        .create(org, make("http-ok", vec![]), WriteSource::Ui, 100, 1)
+        .await
+        .expect("http target unaffected by flow cap");
+}
+
 #[sqlx::test(migrations = "./migrations/postgres")]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn bulk_create_with_ragged_tags(pool: PgPool) {
@@ -66,7 +119,7 @@ async fn bulk_create_with_ragged_tags(pool: PgPool) {
     ];
 
     let created = store
-        .bulk_create(org, items, WriteSource::Ui, i64::MAX)
+        .bulk_create(org, items, WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .expect("bulk_create succeeds");
 
@@ -84,7 +137,7 @@ async fn bulk_create_with_ragged_tags(pool: PgPool) {
 async fn bulk_create_empty_is_noop(pool: PgPool) {
     let (store, org) = store_with_default_org(pool, None).await;
     let result = store
-        .bulk_create(org, vec![], WriteSource::Ui, i64::MAX)
+        .bulk_create(org, vec![], WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .expect("empty bulk ok");
     assert!(result.is_empty());
@@ -114,7 +167,7 @@ async fn credentials_stored_as_ciphertext_envelope(pool: PgPool) {
     };
 
     let created = store
-        .create(org, new, WriteSource::Ui, i64::MAX)
+        .create(org, new, WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .expect("create");
 
@@ -157,7 +210,7 @@ async fn no_credentials_no_envelope(pool: PgPool) {
     let (store, org) = store_with_default_org(pool.clone(), Some(test_cipher())).await;
     let new = make("plain", vec![]);
     let created = store
-        .create(org, new, WriteSource::Ui, i64::MAX)
+        .create(org, new, WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .expect("create");
 

@@ -91,14 +91,16 @@ pub trait TargetStore: Send + Sync {
     ) -> Result<std::collections::HashMap<Uuid, (String, String)>>;
     /// Create one target. `max_targets` is the plan cap; the INSERT is
     /// guarded by `(count) + 1 <= max_targets` so the bound holds even
-    /// against a concurrent create (no check-then-act). Returns
-    /// `AppError::QuotaExceeded` when the cap is reached.
+    /// against a concurrent create (no check-then-act). A flow monitor is
+    /// additionally held to `max_flow_checks` under the same lock. Returns
+    /// `AppError::QuotaExceeded` when either cap is reached.
     async fn create(
         &self,
         org: OrgId,
         new: NewTarget,
         source: WriteSource,
         max_targets: i64,
+        max_flow_checks: i64,
     ) -> Result<Target>;
     async fn update(
         &self,
@@ -120,6 +122,7 @@ pub trait TargetStore: Send + Sync {
         items: Vec<NewTarget>,
         source: WriteSource,
         max_targets: i64,
+        max_flow_checks: i64,
     ) -> Result<Vec<Target>>;
     async fn list_updated_since(&self, org: OrgId, since: DateTime<Utc>) -> Result<Vec<Target>>;
     /// Aggregate tag inventory across all targets. `prefix` filters tag names
@@ -159,6 +162,9 @@ pub trait TargetStore: Send + Sync {
     /// Regions one target is assigned to, sorted. `None` if the target is not in
     /// the org (so a guessed id from another tenant reads as not-found).
     async fn regions_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<Vec<String>>>;
+    /// Enabled regions with at least one enabled, flow-capable agent. A flow
+    /// monitor must land on one of these or it never runs.
+    async fn flow_capable_regions(&self) -> Result<Vec<String>>;
     /// Replace a target's region assignments with `regions`. `false` if the
     /// target is not in the org. Caller validates the regions exist + are
     /// enabled and within the plan's `max_regions`.

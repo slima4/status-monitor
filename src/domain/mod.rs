@@ -27,9 +27,9 @@ pub mod write_source;
 
 pub use alert::{AlertBinding, TargetAlerts};
 pub use check::{
-    CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus, HeartbeatCheck,
-    HttpCheck, HttpMethod, PingCheck, TcpCheck, TlsCertCheck, min_interval_secs_for_kind,
-    reduced_domain_hint, registered_domain,
+    CheckSpec, DnsCheck, DnsRecordType, DomainExpiryCheck, ExpectedStatus, FlowCheck, FlowStep,
+    HeartbeatCheck, HttpCheck, HttpMethod, PingCheck, TcpCheck, TlsCertCheck,
+    min_interval_secs_for_kind, reduced_domain_hint, registered_domain,
 };
 pub use check_error::humanize_check_error;
 pub use escalation_policy::{

@@ -112,6 +112,35 @@ run-dashboard:
     RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
         cargo run --bin uptimepage
 
+# Turnkey local browser-flow testing: native SaaS-mode run with the flow engine
+# on and in-process probing, so this one process serves the API AND runs flow
+# monitors. Needs `just up` and a Lightpanda binary — set LIGHTPANDA_BIN or drop
+# it at ./lightpanda (github.com/lightpanda-io/browser/releases). Then, in
+# another shell: `just dev-login` then `bash scripts/flow-create.sh`.
+flow-dev:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    bin="${LIGHTPANDA_BIN:-./lightpanda}"
+    if [ ! -x "$bin" ]; then
+      echo "Lightpanda binary not found or not executable at: $bin" >&2
+      echo "Download from github.com/lightpanda-io/browser/releases, chmod +x," >&2
+      echo "then set LIGHTPANDA_BIN=/abs/path or drop it at ./lightpanda." >&2
+      exit 1
+    fi
+    UPTIMEPAGE_TENANCY__PATH_BASED_PUBLIC_ROUTES=false \
+    UPTIMEPAGE_TENANCY__SUBDOMAIN_PUBLIC_ROUTES=true \
+    UPTIMEPAGE_PUBLIC_STATUS__BASE_DOMAIN=lvh.me \
+    UPTIMEPAGE_AUTH__FINGERPRINT_SALT=dev-only-fingerprint-salt-not-for-prod \
+    UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE=false \
+    UPTIMEPAGE_SERVER__API_BIND=127.0.0.1:8080 \
+    UPTIMEPAGE_SCHEDULER__ENABLED=true \
+    UPTIMEPAGE_SCHEDULER__REGION=eu-helsinki \
+    UPTIMEPAGE_SCHEDULER__DEFAULT_REGION=eu-helsinki \
+    UPTIMEPAGE_FLOW__ENABLED=true \
+    UPTIMEPAGE_FLOW__LIGHTPANDA_PATH="$bin" \
+    RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
+        cargo run --bin uptimepage
+
 build:
     cargo build --release --bins
 

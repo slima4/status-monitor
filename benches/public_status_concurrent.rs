@@ -202,6 +202,7 @@ async fn build_fixture() -> Option<Fixture> {
                     http_target(&format!("conc-{i}-{j}")),
                     WriteSource::Ui,
                     i64::MAX,
+                    i64::MAX,
                 )
                 .await
                 .expect("create target");

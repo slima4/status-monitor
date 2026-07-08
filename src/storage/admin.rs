@@ -55,6 +55,9 @@ pub struct RegionTargetSource {
     repo: AdminRepo,
     region: String,
     heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
+    /// Whether this control plane runs flow in-process (single-node/self-host).
+    /// Distributed deployments leave flow to a capable agent and set this `false`.
+    flow_capable: bool,
 }
 
 impl RegionTargetSource {
@@ -62,11 +65,13 @@ impl RegionTargetSource {
         repo: AdminRepo,
         region: String,
         heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
+        flow_capable: bool,
     ) -> Self {
         Self {
             repo,
             region,
             heartbeat,
+            flow_capable,
         }
     }
 }
@@ -75,7 +80,8 @@ impl RegionTargetSource {
 impl EnabledTargetSource for RegionTargetSource {
     async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
         let (mut targets, heartbeats) = tokio::try_join!(
-            self.repo.list_enabled_targets_for_region(&self.region),
+            self.repo
+                .list_enabled_targets_for_region(&self.region, self.flow_capable),
             enabled_heartbeats_synced(&self.repo, &self.heartbeat),
         )?;
         targets.extend(heartbeats);
@@ -448,7 +454,10 @@ impl AdminRepo {
     pub async fn list_enabled_targets_for_region(
         &self,
         region: &str,
+        include_flow: bool,
     ) -> Result<Vec<(OrgId, Target)>> {
+        // Flow monitors run only on flow-capable nodes; a node that can't run
+        // one must never be handed it (it would just error every cycle).
         let sql = format!(
             "SELECT {TARGET_COLUMNS} \
              FROM targets t \
@@ -456,10 +465,12 @@ impl AdminRepo {
              JOIN target_regions tr ON tr.target_id = t.id \
              JOIN regions rg ON rg.id = tr.region \
              WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1 \
-               AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat'"
+               AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat' \
+               AND ($2 OR t.kind IS DISTINCT FROM 'flow')"
         );
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
             .bind(region)
+            .bind(include_flow)
             .fetch_all(&self.pool)
             .await
             .context("admin: list enabled targets for region")?;
@@ -479,15 +490,21 @@ impl AdminRepo {
 
         use crate::domain::{CheckSpec, VarMap};
         use crate::storage::variables::{PgVariableStore, VariableStore};
-        use crate::worker::interpolate::{resolve_http_spec, uses_vars};
+        use crate::worker::interpolate::{
+            flow_uses_vars, resolve_flow_spec, resolve_http_spec, uses_vars,
+        };
 
-        fn http_uses_vars(spec: &CheckSpec) -> bool {
-            matches!(spec, CheckSpec::Http(h) if uses_vars(h))
+        fn spec_uses_vars(spec: &CheckSpec) -> bool {
+            match spec {
+                CheckSpec::Http(h) => uses_vars(h),
+                CheckSpec::Flow(f) => flow_uses_vars(f),
+                _ => false,
+            }
         }
 
         let orgs: HashSet<OrgId> = targets
             .iter()
-            .filter(|(_, t)| http_uses_vars(&t.check))
+            .filter(|(_, t)| spec_uses_vars(&t.check))
             .map(|(o, _)| *o)
             .collect();
         if orgs.is_empty() {
@@ -509,19 +526,22 @@ impl AdminRepo {
         }
 
         let mut out = Vec::with_capacity(targets.len());
-        for (org, mut target) in targets {
-            if let CheckSpec::Http(http) = &target.check
-                && uses_vars(http)
-            {
+        'target: for (org, mut target) in targets {
+            if spec_uses_vars(&target.check) {
                 let Some(map) = maps.get(&org) else {
                     tracing::warn!(target_id = %target.id, "dropping target: org variables unavailable");
                     continue;
                 };
-                match resolve_http_spec(http, map) {
-                    Ok(resolved) => target.check = CheckSpec::Http(resolved),
+                let resolved = match &target.check {
+                    CheckSpec::Http(http) => resolve_http_spec(http, map).map(CheckSpec::Http),
+                    CheckSpec::Flow(flow) => resolve_flow_spec(flow, map).map(CheckSpec::Flow),
+                    other => Ok(other.clone()),
+                };
+                match resolved {
+                    Ok(spec) => target.check = spec,
                     Err(err) => {
                         tracing::warn!(target_id = %target.id, %err, "dropping target: variable resolution failed");
-                        continue;
+                        continue 'target;
                     }
                 }
             }

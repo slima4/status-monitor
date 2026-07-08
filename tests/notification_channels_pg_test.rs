@@ -272,7 +272,7 @@ async fn target_alert_binding_channel_lookup_is_org_scoped_live_pg() {
         owner_user_id: None,
     };
     let created = targets
-        .create(org_a, new_target, WriteSource::Ui, i64::MAX)
+        .create(org_a, new_target, WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .expect("A creates a target bound to its own channel");
 
@@ -353,6 +353,7 @@ async fn unbind_channel_scrubs_only_that_binding_in_org_live_pg() {
             ),
             WriteSource::Ui,
             i64::MAX,
+            i64::MAX,
         )
         .await
         .unwrap();
@@ -366,6 +367,7 @@ async fn unbind_channel_scrubs_only_that_binding_in_org_live_pg() {
                 }],
             ),
             WriteSource::Ui,
+            i64::MAX,
             i64::MAX,
         )
         .await
@@ -383,6 +385,7 @@ async fn unbind_channel_scrubs_only_that_binding_in_org_live_pg() {
                 }],
             ),
             WriteSource::Ui,
+            i64::MAX,
             i64::MAX,
         )
         .await
@@ -490,15 +493,33 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
     }
 
     let overdue_t = targets
-        .create(org, mk_target("overdue", 3600), WriteSource::Ui, i64::MAX)
+        .create(
+            org,
+            mk_target("overdue", 3600),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .unwrap();
     let recent_t = targets
-        .create(org, mk_target("recent", 3600), WriteSource::Ui, i64::MAX)
+        .create(
+            org,
+            mk_target("recent", 3600),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .unwrap();
     let off_t = targets
-        .create(org, mk_target("off", 0), WriteSource::Ui, i64::MAX)
+        .create(
+            org,
+            mk_target("off", 0),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
         .await
         .unwrap();
 

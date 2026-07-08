@@ -31,6 +31,17 @@ fn http_check_spec() -> serde_json::Value {
     })
 }
 
+fn flow_check_spec() -> serde_json::Value {
+    serde_json::json!({
+        "type": "flow",
+        "start_url": "https://example.com/login",
+        "steps": [{"op": "assert_url", "contains": "/x"}],
+        "timeout": 30000,
+        "step_timeout": 10000,
+        "verify_tls": true,
+    })
+}
+
 async fn seed_org_with_target(pool: &PgPool, slug: &str) -> (Uuid, Uuid) {
     let (org_id,): (Uuid,) =
         sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
@@ -207,7 +218,7 @@ async fn region_list_skips_undecodable_row() {
 
     let repo = AdminRepo::new(pool.clone(), None, "test");
     let ids: Vec<Uuid> = repo
-        .list_enabled_targets_for_region(region)
+        .list_enabled_targets_for_region(region, true)
         .await
         .unwrap()
         .into_iter()
@@ -218,6 +229,71 @@ async fn region_list_skips_undecodable_row() {
         !ids.contains(&bad),
         "undecodable row skipped in region list"
     );
+
+    pool.close().await;
+    common::drop_test_db(&db_name).await;
+}
+
+/// A flow monitor is withheld from a node that can't run it (`include_flow =
+/// false`) and served to one that can (`true`). Non-flow kinds are unaffected.
+#[tokio::test]
+#[ignore]
+async fn region_list_filters_flow_by_capability() {
+    let Some((db_url, db_name)) = common::fresh_test_db("admin_repo").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let region = "eu-flowcap";
+    sqlx::query("INSERT INTO regions (id, name, city, enabled) VALUES ($1, $1, '', true)")
+        .bind(region)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let org = seed_org(&pool, "flow-cap").await;
+    let http = seed_good_target(&pool, org).await;
+    let (flow,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
+         VALUES ($1, 'f', $2::jsonb, 300, true) RETURNING id",
+    )
+    .bind(org)
+    .bind(flow_check_spec())
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    for t in [http, flow] {
+        sqlx::query("INSERT INTO target_regions (target_id, region) VALUES ($1, $2)")
+            .bind(t)
+            .bind(region)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+
+    let repo = AdminRepo::new(pool.clone(), None, "test");
+    let without: Vec<Uuid> = repo
+        .list_enabled_targets_for_region(region, false)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t.id)
+        .collect();
+    assert!(without.contains(&http), "http always served");
+    assert!(
+        !without.contains(&flow),
+        "flow withheld from a non-capable node"
+    );
+
+    let with: Vec<Uuid> = repo
+        .list_enabled_targets_for_region(region, true)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t.id)
+        .collect();
+    assert!(with.contains(&flow), "flow served to a capable node");
+    assert!(with.contains(&http), "http still served alongside flow");
 
     pool.close().await;
     common::drop_test_db(&db_name).await;

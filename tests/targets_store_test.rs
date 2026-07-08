@@ -35,7 +35,7 @@ async fn seed(
         owner_user_id: None,
     };
     store
-        .create(org, nt, WriteSource::Ui, i64::MAX)
+        .create(org, nt, WriteSource::Ui, i64::MAX, i64::MAX)
         .await
         .unwrap()
         .id

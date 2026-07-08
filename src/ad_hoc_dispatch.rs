@@ -218,9 +218,11 @@ pub async fn run_local_executor(
             continue;
         }
         let domain_runtime = worker_pool.domain_expiry_runtime();
+        let flow_engine = worker_pool.flow_engine();
         let deps = WorkerDeps {
             http: &http_clients,
             domain_expiry: &domain_runtime,
+            flow: flow_engine.as_deref(),
         };
         for check in claimed {
             let target_id = check.target_id.unwrap_or_else(Uuid::nil);

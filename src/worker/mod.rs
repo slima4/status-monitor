@@ -1,6 +1,7 @@
 pub mod circuit_breaker;
 pub mod dns;
 pub mod domain_expiry;
+pub mod flow;
 pub mod heartbeat;
 pub mod host_throttle;
 pub mod http_check;
@@ -64,6 +65,9 @@ where
 pub struct WorkerDeps<'a> {
     pub http: &'a HttpClients,
     pub domain_expiry: &'a DomainExpiryRuntime,
+    /// Browser-flow engine on a flow-capable node; `None` elsewhere (routing
+    /// never sends flow to a node without it).
+    pub flow: Option<&'a crate::worker::flow::engine::CdpEngine>,
 }
 
 /// Maps a `days_remaining` value to the canonical Up/Degraded/Down ladder used
@@ -160,6 +164,7 @@ pub async fn execute(
             .await
         }
         CheckSpec::Dns(d) => dns::execute_dns_check(target_id, org_id, d, deps.http).await,
+        CheckSpec::Flow(flow) => flow::execute_flow_check(target_id, org_id, flow, deps.flow).await,
     }
 }
 

@@ -262,14 +262,31 @@ async fn main() -> Result<()> {
             host_throttle.clone(),
             uptimepage::worker::domain_expiry::DEFAULT_MAX_STALENESS,
         ));
-    let pool = Arc::new(WorkerPool::new(
-        cfg.checker.max_concurrent_checks,
-        (*http_clients).clone(),
-        cfg.circuit_breaker,
-        fanout,
-        host_throttle.clone(),
-        domain_expiry_runtime,
-    ));
+    let flow_engine = cfg.flow.enabled.then(|| {
+        Arc::new(uptimepage::worker::flow::engine::CdpEngine::new(
+            uptimepage::worker::flow::engine::FlowEngineConfig {
+                binary: cfg.flow.lightpanda_path.clone().into(),
+                max_concurrency: cfg.flow.max_concurrency,
+                mem_limit_bytes: cfg.flow.mem_limit_mb.saturating_mul(1024 * 1024),
+                block_private_networks: cfg.flow.block_private_networks,
+                block_cidrs: cfg.flow.block_cidrs.clone(),
+                v8_max_heap_mb: cfg.flow.v8_max_heap_mb,
+                max_response_bytes: cfg.flow.max_response_mb.saturating_mul(1024 * 1024),
+                user_agent_suffix: cfg.flow.user_agent_suffix.clone(),
+            },
+        ))
+    });
+    let pool = Arc::new(
+        WorkerPool::new(
+            cfg.checker.max_concurrent_checks,
+            (*http_clients).clone(),
+            cfg.circuit_breaker,
+            fanout,
+            host_throttle.clone(),
+            domain_expiry_runtime,
+        )
+        .with_flow_engine(flow_engine),
+    );
     // With in-process probing disabled the scheduler still runs, fed only the
     // passive heartbeat set (agents can't evaluate that state). Both sources
     // reconcile the anchor cache on every refresh before dispatching.
@@ -278,6 +295,7 @@ async fn main() -> Result<()> {
             storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),
             cfg.scheduler.region.clone(),
             pool.heartbeat_runtime(),
+            cfg.flow.enabled,
         ))
     } else {
         Arc::new(storage::admin::HeartbeatTargetSource::new(

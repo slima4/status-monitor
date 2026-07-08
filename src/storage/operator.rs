@@ -276,4 +276,19 @@ impl OperatorRepo {
             .context("operator: touch agent last_seen")?;
         Ok(())
     }
+
+    /// Persist an agent's self-reported flow capability. Conditional so a repeat
+    /// pull reporting the same value writes nothing.
+    pub async fn set_agent_flow_capable(&self, id: Uuid, capable: bool) -> Result<()> {
+        sqlx::query(
+            "UPDATE agents SET flow_capable = $2 \
+             WHERE id = $1 AND flow_capable IS DISTINCT FROM $2",
+        )
+        .bind(id)
+        .bind(capable)
+        .execute(&self.pool)
+        .await
+        .context("operator: set agent flow_capable")?;
+        Ok(())
+    }
 }

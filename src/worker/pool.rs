@@ -77,9 +77,11 @@ pub fn host_for_spec(spec: &CheckSpec) -> String {
         // HTTP URL with no host_str. Listed explicitly so a future
         // CheckSpec variant is forced through the match and can't
         // silently collapse onto this catch-all.
-        CheckSpec::Http(_) | CheckSpec::Tcp(_) | CheckSpec::Ping(_) | CheckSpec::TlsCert(_) => {
-            "unknown".to_owned()
-        }
+        CheckSpec::Http(_)
+        | CheckSpec::Tcp(_)
+        | CheckSpec::Ping(_)
+        | CheckSpec::TlsCert(_)
+        | CheckSpec::Flow(_) => "unknown".to_owned(),
     }
 }
 
@@ -139,6 +141,8 @@ pub struct WorkerPool {
     /// `InFlightGuard`) so panics also release. Bounds duplicate probes when
     /// a slow check outlasts its cadence.
     in_flight: Arc<DashSet<Uuid>>,
+    /// Browser-flow engine; `None` on nodes that don't run flow.
+    flow_engine: Option<Arc<crate::worker::flow::engine::CdpEngine>>,
 }
 
 impl WorkerPool {
@@ -161,7 +165,17 @@ impl WorkerPool {
             domain_expiry,
             heartbeat: Arc::new(crate::worker::heartbeat::HeartbeatRuntime::default()),
             in_flight: Arc::new(DashSet::new()),
+            flow_engine: None,
         }
+    }
+
+    /// Builder-style so pools without flow keep the shorter `new` signature.
+    pub fn with_flow_engine(
+        mut self,
+        engine: Option<Arc<crate::worker::flow::engine::CdpEngine>>,
+    ) -> Self {
+        self.flow_engine = engine;
+        self
     }
 
     pub fn host_throttle(&self) -> Arc<HostThrottle> {
@@ -170,6 +184,11 @@ impl WorkerPool {
 
     pub fn domain_expiry_runtime(&self) -> Arc<crate::worker::domain_expiry::DomainExpiryRuntime> {
         self.domain_expiry.clone()
+    }
+
+    /// Lets the interactive (test / check-now) executor reuse the same engine.
+    pub fn flow_engine(&self) -> Option<Arc<crate::worker::flow::engine::CdpEngine>> {
+        self.flow_engine.clone()
     }
 
     pub fn heartbeat_runtime(&self) -> Arc<crate::worker::heartbeat::HeartbeatRuntime> {
@@ -238,6 +257,7 @@ impl WorkerPool {
         let deps = crate::worker::WorkerDeps {
             http: &self.http_clients,
             domain_expiry: &self.domain_expiry,
+            flow: self.flow_engine.as_deref(),
         };
         let result = crate::worker::execute(target_id, org_id, spec, &deps).await;
         breaker.record(result.status);
@@ -290,6 +310,7 @@ impl WorkerPool {
         let fanout = self.fanout.clone();
         let throttle = self.host_throttle.clone();
         let domain_expiry = self.domain_expiry.clone();
+        let flow_engine = self.flow_engine.clone();
         let org_id = task.org_id;
 
         tokio::spawn(async move {
@@ -315,6 +336,7 @@ impl WorkerPool {
             let deps = crate::worker::WorkerDeps {
                 http: &clients,
                 domain_expiry: &domain_expiry,
+                flow: flow_engine.as_deref(),
             };
             let result =
                 crate::worker::execute(task.target.id, org_id.0, &task.target.check, &deps).await;

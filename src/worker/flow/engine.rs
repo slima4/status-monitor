@@ -1,0 +1,268 @@
+//! CDP engine for flow monitors. Lightpanda exposes one global browser context
+//! and one target per connection, so isolation is per-process: each run spawns a
+//! fresh Lightpanda `serve`, drives one flow over CDP, then tears the process
+//! down. A fresh process is a clean cookie jar, which is the isolation a shared
+//! browser context would otherwise provide.
+
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use chromiumoxide::Browser;
+use futures::StreamExt;
+use tokio::process::{Child, Command};
+use tokio::sync::Semaphore;
+
+use super::executor::{RunResult, run_steps};
+use crate::domain::FlowCheck;
+
+pub struct FlowEngineConfig {
+    pub binary: PathBuf,
+    pub max_concurrency: usize,
+    /// Per-run browser RSS ceiling in bytes; 0 disables the watchdog.
+    pub mem_limit_bytes: u64,
+    /// Block the browser's outbound requests to private/internal IPs after DNS
+    /// resolution (runtime SSRF guard).
+    pub block_private_networks: bool,
+    /// Extra CIDRs to block, comma-separated (Lightpanda `--block-cidrs` form);
+    /// empty to add none.
+    pub block_cidrs: String,
+    /// V8 heap cap per browser (MB); 0 = engine default.
+    pub v8_max_heap_mb: u64,
+    /// Per-response size cap in bytes; 0 = no limit.
+    pub max_response_bytes: u64,
+    /// User-Agent suffix for attribution; empty = none.
+    pub user_agent_suffix: String,
+}
+
+/// Spawns and drives Lightpanda processes. Concurrency is bounded so a burst of
+/// flow checks can't fork an unbounded number of browser processes.
+pub struct CdpEngine {
+    binary: PathBuf,
+    sem: Arc<Semaphore>,
+    mem_limit_bytes: u64,
+    block_private_networks: bool,
+    block_cidrs: String,
+    v8_max_heap_mb: u64,
+    max_response_bytes: u64,
+    user_agent_suffix: String,
+}
+
+impl CdpEngine {
+    pub fn new(cfg: FlowEngineConfig) -> Self {
+        Self {
+            binary: cfg.binary,
+            sem: Arc::new(Semaphore::new(cfg.max_concurrency.max(1))),
+            mem_limit_bytes: cfg.mem_limit_bytes,
+            block_private_networks: cfg.block_private_networks,
+            block_cidrs: cfg.block_cidrs,
+            v8_max_heap_mb: cfg.v8_max_heap_mb,
+            max_response_bytes: cfg.max_response_bytes,
+            user_agent_suffix: cfg.user_agent_suffix,
+        }
+    }
+
+    /// Runs the flow and returns its result plus the elapsed probe time in ms.
+    /// The step list is assumed already variable-resolved by the caller.
+    pub async fn run(&self, flow: &FlowCheck) -> (RunResult, u32) {
+        let _permit = match self.sem.acquire().await {
+            Ok(p) => p,
+            Err(_) => return (RunResult::Engine("flow engine shut down".into()), 0),
+        };
+        // Clock and deadline both start only once a slot is held, so time spent
+        // queued for a permit is never charged against the flow's own budget.
+        let started = Instant::now();
+        let result = match tokio::time::timeout(flow.timeout, self.run_once(flow)).await {
+            Ok(r) => r,
+            Err(_) => RunResult::Engine(format!(
+                "flow exceeded its {} ms budget",
+                flow.timeout.as_millis()
+            )),
+        };
+        let elapsed = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
+        (result, elapsed)
+    }
+
+    /// One flow attempt, retried on a fresh port when the engine dies during
+    /// startup — a freed ephemeral port can be taken before Lightpanda binds it.
+    async fn run_once(&self, flow: &FlowCheck) -> RunResult {
+        let mut last = String::new();
+        for _ in 0..3 {
+            let port = match free_port() {
+                Ok(p) => p,
+                Err(e) => return RunResult::Engine(format!("no free port: {e}")),
+            };
+            let mut child = match self.spawn(port, flow.verify_tls) {
+                Ok(c) => c,
+                Err(e) => return RunResult::Engine(format!("spawn lightpanda: {e}")),
+            };
+            // A heavy page can't OOM the node: if RSS crosses the ceiling the
+            // watchdog wins the race and the process is torn down.
+            let result = match (child.id(), self.mem_limit_bytes) {
+                (Some(pid), limit) if limit > 0 => tokio::select! {
+                    r = drive(&mut child, port, flow) => r,
+                    _ = watch_rss(pid, limit) => RunResult::Engine(format!(
+                        "engine exceeded {} MB memory limit",
+                        limit / (1024 * 1024)
+                    )),
+                },
+                _ => drive(&mut child, port, flow).await,
+            };
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            if let RunResult::Engine(e) = &result
+                && let Some(startup) = e.strip_prefix(STARTUP_FAILED)
+            {
+                last = startup.to_string();
+                continue;
+            }
+            return result;
+        }
+        RunResult::Engine(format!("engine did not start after retries: {last}"))
+    }
+
+    fn spawn(&self, port: u16, verify_tls: bool) -> std::io::Result<Child> {
+        let mut cmd = Command::new(&self.binary);
+        cmd.arg("serve")
+            .arg("--host")
+            .arg("127.0.0.1")
+            .arg("--port")
+            .arg(port.to_string());
+        if !verify_tls {
+            cmd.arg("--insecure-disable-tls-host-verification");
+        }
+        // Runtime egress sandbox: the engine re-checks every request's resolved
+        // IP, so a redirect or JS fetch to an internal address is blocked even
+        // though the save-time URL check only saw the public start URL.
+        if self.block_private_networks {
+            cmd.arg("--block-private-networks");
+        }
+        let cidrs = self.block_cidrs.trim();
+        if !cidrs.is_empty() {
+            cmd.arg("--block-cidrs").arg(cidrs);
+        }
+        // Optional resource + attribution belts (default off).
+        if self.v8_max_heap_mb > 0 {
+            cmd.arg("--v8-max-heap-mb")
+                .arg(self.v8_max_heap_mb.to_string());
+        }
+        if self.max_response_bytes > 0 {
+            cmd.arg("--http-max-response-size")
+                .arg(self.max_response_bytes.to_string());
+        }
+        let ua = self.user_agent_suffix.trim();
+        if !ua.is_empty() {
+            cmd.arg("--user-agent-suffix").arg(ua);
+        }
+        cmd.stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+    }
+}
+
+/// Marks an error as a startup miss (the engine never came up), so the caller
+/// retries on a fresh port instead of reporting a false verdict on the target.
+const STARTUP_FAILED: &str = "engine did not start: ";
+
+async fn drive(child: &mut Child, port: u16, flow: &FlowCheck) -> RunResult {
+    let ws = format!("ws://127.0.0.1:{port}/");
+    let (browser, mut handler) = match connect_with_retry(child, &ws).await {
+        Ok(pair) => pair,
+        Err(e) => return RunResult::Engine(format!("{STARTUP_FAILED}{e}")),
+    };
+    let pump = tokio::spawn(async move { while handler.next().await.is_some() {} });
+
+    let outcome = async {
+        let page = browser
+            .new_page(flow.start_url.as_str())
+            .await
+            .map_err(|e| format!("open page: {e}"))?;
+        page.wait_for_navigation()
+            .await
+            .map_err(|e| format!("initial navigation: {e}"))?;
+        Ok::<RunResult, String>(run_steps(&page, &flow.steps, flow.step_timeout).await)
+    }
+    .await;
+
+    pump.abort();
+    match outcome {
+        Ok(r) => r,
+        Err(e) => RunResult::Engine(e),
+    }
+}
+
+/// Poll the engine's RSS via `ps` (portable, cheap at this cadence); returns once
+/// it exceeds `limit`. A vanished process reads as 0 and keeps the loop harmless.
+async fn watch_rss(pid: u32, limit_bytes: u64) {
+    loop {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        if rss_bytes(pid).await > limit_bytes {
+            return;
+        }
+    }
+}
+
+async fn rss_bytes(pid: u32) -> u64 {
+    #[cfg(target_os = "linux")]
+    {
+        // Resident pages from /proc (field 2 of statm), ×4 KiB. No fork, so the
+        // watchdog can't be silently defeated by `ps` failing under the memory
+        // pressure it exists to catch. A vanished pid reads as 0 (harmless).
+        match tokio::fs::read_to_string(format!("/proc/{pid}/statm")).await {
+            Ok(s) => s
+                .split_whitespace()
+                .nth(1)
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(0)
+                .saturating_mul(4096),
+            Err(_) => 0,
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        match Command::new("ps")
+            .args(["-o", "rss=", "-p", &pid.to_string()])
+            .output()
+            .await
+        {
+            Ok(out) => String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .parse::<u64>()
+                .unwrap_or(0)
+                .saturating_mul(1024),
+            Err(_) => 0,
+        }
+    }
+}
+
+/// Ask the OS for a free loopback port, then release it for Lightpanda to bind.
+fn free_port() -> std::io::Result<u16> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    Ok(listener.local_addr()?.port())
+}
+
+/// Lightpanda opens its CDP socket a moment after spawn; retry the connect for
+/// up to ~5s before giving up.
+async fn connect_with_retry(
+    child: &mut Child,
+    ws: &str,
+) -> Result<(Browser, chromiumoxide::Handler), String> {
+    let mut last = String::new();
+    for _ in 0..50 {
+        // Stop early if the engine already exited (e.g. lost the port race), so
+        // the caller retries on a fresh port instead of waiting out the loop.
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(format!("lightpanda exited on startup ({status})"));
+        }
+        match Browser::connect(ws).await {
+            Ok(pair) => return Ok(pair),
+            Err(e) => {
+                last = e.to_string();
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
+    }
+    Err(format!("CDP connect failed after retries: {last}"))
+}

@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use crate::domain::{HttpCheck, VarMap, validate_var_key};
+use crate::domain::{FlowCheck, FlowStep, HttpCheck, VarMap, validate_var_key};
 
 /// Where a resolved value lands, deciding whether a secret may go there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,13 +14,18 @@ pub enum FieldKind {
     HeaderValue,
     Body,
     Assertion,
+    StepValue,
 }
 
 impl FieldKind {
     /// Secrets leak through a URL (logs, redirects) and can echo back from an
-    /// assertion, so they are confined to header values and bodies.
+    /// assertion, so they are confined to header values, bodies, and the value
+    /// typed into a flow-step form field.
     fn allows_secret(self) -> bool {
-        matches!(self, FieldKind::HeaderValue | FieldKind::Body)
+        matches!(
+            self,
+            FieldKind::HeaderValue | FieldKind::Body | FieldKind::StepValue
+        )
     }
 
     fn label(self) -> &'static str {
@@ -29,6 +34,7 @@ impl FieldKind {
             FieldKind::HeaderValue => "header value",
             FieldKind::Body => "body",
             FieldKind::Assertion => "assertion",
+            FieldKind::StepValue => "step value",
         }
     }
 }
@@ -158,6 +164,28 @@ pub fn resolve_http(check: &HttpCheck, vars: &VarMap) -> Result<ResolvedHttp, Re
         body,
         expected_body_contains,
     })
+}
+
+/// True if any step value carries a `{{` token, so a flow with none skips
+/// resolution entirely.
+pub fn flow_uses_vars(check: &FlowCheck) -> bool {
+    check.steps.iter().any(|s| match s {
+        FlowStep::Fill { value, .. } => value.contains("{{"),
+        _ => false,
+    })
+}
+
+/// Resolve `{{var}}` in a flow's step values into a fresh check (the stored spec
+/// is never mutated). Only `Fill.value` is interpolable — a secret is allowed
+/// there because it is typed into a form field, never echoed to a URL/assertion.
+pub fn resolve_flow_spec(check: &FlowCheck, vars: &VarMap) -> Result<FlowCheck, ResolveError> {
+    let mut out = check.clone();
+    for step in &mut out.steps {
+        if let FlowStep::Fill { value, .. } = step {
+            *value = resolve(value, vars, FieldKind::StepValue)?;
+        }
+    }
+    Ok(out)
 }
 
 /// A repoint-and-exfil shape on one check: a variable in the URL (whose value
@@ -483,6 +511,59 @@ mod tests {
         let static_url = http_check("https://api.x/v1", &[("X-Api-Key", "{{api_key}}")]);
         let v = vars(&[("api_key", "sk", true)]);
         assert!(repoint_risk(&static_url, &v).is_none());
+    }
+
+    fn flow(steps: Vec<FlowStep>) -> FlowCheck {
+        use std::time::Duration;
+        FlowCheck {
+            start_url: url::Url::parse("https://app.x/login").unwrap(),
+            steps,
+            timeout: Duration::from_secs(30),
+            step_timeout: Duration::from_secs(5),
+            verify_tls: true,
+        }
+    }
+
+    #[test]
+    fn flow_uses_vars_detects_fill_tokens_only() {
+        let with = flow(vec![FlowStep::Fill {
+            selector: "#pw".into(),
+            value: "{{password}}".into(),
+        }]);
+        let without = flow(vec![
+            FlowStep::Fill {
+                selector: "#pw".into(),
+                value: "literal".into(),
+            },
+            FlowStep::AssertUrl {
+                contains: "{{marker}}".into(),
+            },
+        ]);
+        assert!(flow_uses_vars(&with));
+        // Only Fill values are interpolable; a token elsewhere is left literal.
+        assert!(!flow_uses_vars(&without));
+    }
+
+    #[test]
+    fn resolve_flow_spec_substitutes_secret_into_fill_only() {
+        let f = flow(vec![
+            FlowStep::Fill {
+                selector: "#email".into(),
+                value: "user@x.com".into(),
+            },
+            FlowStep::Fill {
+                selector: "#pw".into(),
+                value: "{{password}}".into(),
+            },
+            FlowStep::Click {
+                selector: "#submit".into(),
+            },
+        ]);
+        let v = vars(&[("password", "s3cr3t", true)]);
+        let out = resolve_flow_spec(&f, &v).unwrap();
+        assert!(matches!(&out.steps[0], FlowStep::Fill { value, .. } if value == "user@x.com"));
+        assert!(matches!(&out.steps[1], FlowStep::Fill { value, .. } if value == "s3cr3t"));
+        assert!(matches!(&out.steps[2], FlowStep::Click { selector } if selector == "#submit"));
     }
 
     fn http_check(url: &str, headers: &[(&str, &str)]) -> HttpCheck {

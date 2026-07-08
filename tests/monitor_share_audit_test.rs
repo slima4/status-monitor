@@ -52,6 +52,7 @@ async fn mint_and_revoke_share_write_audit_rows() {
             },
             WriteSource::Ui,
             i64::MAX,
+            i64::MAX,
         )
         .await
         .unwrap();
