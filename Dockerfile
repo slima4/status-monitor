@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
+# Final runtime image. Overridable so a flow-capable agent can build on a glibc
+# base (distroless/cc) that the Lightpanda/v8 engine needs; default stays a
+# minimal static-distroless for the control plane and non-flow agents.
+ARG FINAL_IMAGE=gcr.io/distroless/static-debian12:nonroot
+
 # Alpine builder = musl libc native → static binaries without crt-static gymnastics.
 # cargo-chef splits dependency compile (slow, rarely invalidated) from app compile
 # (fast, invalidated on every src change). Unchanged-deps rebuilds drop from ~5min
@@ -74,13 +79,43 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # distroless-static is ~2 MB and ships ca-certificates + /etc/passwd → enough for
 # a static Rust binary that talks HTTPS via rustls-native-certs.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Optional flow-monitor engine. Off by default so the control-plane image ships
+# no browser. A flow-capable agent builds with `--build-arg WITH_LIGHTPANDA=true`
+# plus the glibc base (`--build-arg FINAL_IMAGE=gcr.io/distroless/cc-debian12:nonroot`).
+# The binary is picked per TARGETARCH so the image runs on both amd64 and arm64
+# hosts. Pin tracks the Lightpanda `nightly` channel (stable 0.3.x predates the
+# runtime egress flags the engine passes); bump both checksums when it rolls.
+FROM alpine:3.21 AS lightpanda
+ARG WITH_LIGHTPANDA=false
+ARG TARGETARCH
+ARG LIGHTPANDA_VERSION=nightly
+ARG LIGHTPANDA_SHA256_AMD64=4022b6036a02e9f676f2184099d92ab608456d9d7e9e8ea2a04ec6ea7407247e
+ARG LIGHTPANDA_SHA256_ARM64=8e6d4d556453b814a1bef5decb2529e42310bb7b71db90ae59cdcbc9cc65a894
+RUN mkdir -p /lp && \
+    if [ "$WITH_LIGHTPANDA" = "true" ]; then \
+        apk add --no-cache curl && \
+        case "$TARGETARCH" in \
+          amd64) asset=lightpanda-x86_64-linux;  sum="$LIGHTPANDA_SHA256_AMD64" ;; \
+          arm64) asset=lightpanda-aarch64-linux; sum="$LIGHTPANDA_SHA256_ARM64" ;; \
+          *) echo "no lightpanda build for arch: ${TARGETARCH:-unknown}" >&2; exit 1 ;; \
+        esac && \
+        curl -fsSL -o /lp/lightpanda \
+          "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/${asset}" && \
+        echo "${sum}  /lp/lightpanda" | sha256sum -c - && \
+        chmod 0755 /lp/lightpanda ; \
+    else \
+        touch /lp/.keep ; \
+    fi
+
+FROM ${FINAL_IMAGE}
 WORKDIR /app
 
 COPY --from=builder /out/uptimepage /usr/local/bin/uptimepage
 COPY --from=builder /out/loadtest /usr/local/bin/loadtest
 COPY --from=builder /usr/src/uptimepage/config /app/config
 COPY --from=builder /usr/src/uptimepage/migrations /app/migrations
+# The Lightpanda binary when WITH_LIGHTPANDA=true; otherwise just a .keep marker.
+COPY --from=lightpanda /lp/ /usr/local/bin/
 
 ENV UPTIMEPAGE_SERVER__API_BIND=0.0.0.0:8080 \
     UPTIMEPAGE_SERVER__METRICS_BIND=0.0.0.0:9090

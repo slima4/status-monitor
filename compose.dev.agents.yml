@@ -21,9 +21,23 @@ x-dev-agent: &dev-agent
       CARGO_PROFILE_RELEASE_LTO: "false"
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
       CARGO_PROFILE_RELEASE_OPT_LEVEL: "1"
+      # Ship the browser engine on a glibc base so agent-eu can run real flows
+      # (v8 needs glibc). apac/us get the binary too but never spawn it —
+      # flow.enabled is false there.
+      WITH_LIGHTPANDA: "true"
+      FINAL_IMAGE: "gcr.io/distroless/cc-debian12:nonroot"
   image: uptimepage:dev-agent
   restart: unless-stopped
   stop_grace_period: 30s
+  # Distroless has no writable /tmp; Lightpanda needs scratch space.
+  tmpfs:
+    - /tmp
+  # Agents dial the control plane by its app host so the marketing host-router
+  # classifies them as the operator surface (a bare service name resolves to
+  # HostShape::Other → marketing 404). The CP listens on the host's :8080 in
+  # both the containerized and native runs, so host-gateway reaches it either way.
+  extra_hosts:
+    - "app.lvh.me:host-gateway"
   # No published ports — like a real agent box, nothing is exposed to the host.
   # (The agent serves metrics on :9090 inside the container; not needed here.)
 
@@ -32,13 +46,13 @@ services:
     <<: *dev-agent
     environment: &dev-agent-env
       UPTIMEPAGE_AGENT__ENABLED: "true"
-      # Reach the dev control plane. Default = the dev-app container over the
-      # internal docker network (`just up-app`). For a NATIVE control plane
-      # (`just run` on the host) the harness passes
-      # AGENT_CONTROL_PLANE_URL=http://host.docker.internal:8080.
-      # Either way it's a private address, so the agent's control-plane client
-      # needs the allow_private_targets opt-in below (default-strict in prod).
-      UPTIMEPAGE_AGENT__CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL:-http://uptimepage:8080}
+      # Reach the dev control plane by its app host (`app.lvh.me`), routed to the
+      # host's :8080 by the extra_hosts host-gateway mapping above. Using the app
+      # host is required: the marketing host-router serves a 404 to any Host it
+      # can't classify as the operator surface (a bare service name → 404).
+      # It's a private address, so the agent's control-plane client needs the
+      # allow_private_targets opt-in below (default-strict in prod).
+      UPTIMEPAGE_AGENT__CONTROL_PLANE_URL: ${AGENT_CONTROL_PLANE_URL:-http://app.lvh.me:8080}
       UPTIMEPAGE_AGENT__PULL_INTERVAL_SECS: "10"
       UPTIMEPAGE_AGENT__FLUSH_INTERVAL_SECS: "5"
       # Allow probing private/loopback fixtures AND the private control plane.
@@ -48,6 +62,11 @@ services:
       UPTIMEPAGE_AUTH__FINGERPRINT_SALT: "dev-only-fingerprint-salt-not-for-prod"
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       RUST_LOG: "uptimepage=debug,info"
+      # Prod topology: exactly one region runs browser flows. eu-helsinki is
+      # flow-capable (apac/us override this to false below); the binary lands at
+      # this path once the image ships Lightpanda.
+      UPTIMEPAGE_FLOW__ENABLED: "true"
+      UPTIMEPAGE_FLOW__LIGHTPANDA_PATH: "/usr/local/bin/lightpanda"
       UPTIMEPAGE_AGENT__REGION: "eu-helsinki"
       UPTIMEPAGE_AGENT__TOKEN: ${AGENT_EU_TOKEN:-}
 
@@ -55,6 +74,7 @@ services:
     <<: *dev-agent
     environment:
       <<: *dev-agent-env
+      UPTIMEPAGE_FLOW__ENABLED: "false"
       UPTIMEPAGE_AGENT__REGION: "apac-sg"
       UPTIMEPAGE_AGENT__TOKEN: ${AGENT_APAC_TOKEN:-}
 
@@ -62,5 +82,6 @@ services:
     <<: *dev-agent
     environment:
       <<: *dev-agent-env
+      UPTIMEPAGE_FLOW__ENABLED: "false"
       UPTIMEPAGE_AGENT__REGION: "us-east"
       UPTIMEPAGE_AGENT__TOKEN: ${AGENT_US_TOKEN:-}

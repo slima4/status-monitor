@@ -23,10 +23,9 @@
 #   BASE            control-plane URL the SCRIPT calls (default: http://app.lvh.me:8080)
 #   OPERATOR_TOKEN  operator secret                    (default: dev-operator-token)
 #   AGENT_CONTROL_PLANE_URL  URL the AGENT CONTAINERS use to reach the control
-#                   plane. Auto-detected when unset: http://uptimepage:8080 if
-#                   the containerized CP (`just up-app`) is up, else
-#                   http://host.docker.internal:8080 for a native CP (`just
-#                   run`). Set explicitly to override the detection.
+#                   plane. Defaults to http://app.lvh.me:8080 (the app host the
+#                   marketing router accepts), resolved to the host's :8080 by
+#                   the extra_hosts host-gateway mapping. Set to override.
 set -euo pipefail
 
 ACTION="${1:-up}"
@@ -69,21 +68,16 @@ token_origin() {
   echo "script default"
 }
 
-# URL the AGENT CONTAINERS use to reach the control plane. An explicit
-# AGENT_CONTROL_PLANE_URL always wins. Otherwise auto-detect: if the
-# containerized control plane (`just up-app`, compose service `uptimepage`)
-# exists in this project, agents reach it by that service name over the shared
-# docker network; for a NATIVE control plane (`just run` on the host) there is
-# no such container, so agents must dial the host. (host.docker.internal is a
-# Docker Desktop / macOS convenience; native-Linux docker needs an
-# extra_hosts: host-gateway mapping.)
+# URL the AGENT CONTAINERS use to reach the control plane. Agents dial the app
+# host (`app.lvh.me`), not the compose service name, because the marketing
+# host-router 404s any Host it can't classify as the operator surface. The
+# `extra_hosts: app.lvh.me:host-gateway` mapping points it at the host's :8080.
+# AGENT_CONTROL_PLANE_URL overrides.
 resolve_agent_cp_url() {
   if [[ -n ${AGENT_CONTROL_PLANE_URL:-} ]]; then
     echo "$AGENT_CONTROL_PLANE_URL"
-  elif "${COMPOSE[@]}" ps -a --services 2>/dev/null | grep -qx uptimepage; then
-    echo "http://uptimepage:8080"
   else
-    echo "http://host.docker.internal:8080"
+    echo "http://app.lvh.me:8080"
   fi
 }
 
@@ -192,10 +186,8 @@ purge_agents
 AGENT_CP_URL=$(resolve_agent_cp_url)
 if [[ -n ${AGENT_CONTROL_PLANE_URL:-} ]]; then
   log "agents -> control plane: $AGENT_CP_URL (explicit AGENT_CONTROL_PLANE_URL)"
-elif [[ $AGENT_CP_URL == *uptimepage:8080* ]]; then
-  log "agents -> control plane: $AGENT_CP_URL (detected containerized CP)"
 else
-  log "agents -> control plane: $AGENT_CP_URL (detected native CP on host)"
+  log "agents -> control plane: $AGENT_CP_URL"
 fi
 
 : > "$ENV_FILE"
