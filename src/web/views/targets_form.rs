@@ -319,6 +319,10 @@ pub struct FormModel {
     /// Whether the region assignment + policy section renders (edit only — a
     /// not-yet-created monitor has no id to assign regions to).
     pub show_regions: bool,
+    /// Whether the flow check-type card is offered, gated on the org plan
+    /// allowing at least one flow monitor. Editing an existing flow still shows
+    /// its card regardless, so a plan downgrade never hides a live monitor.
+    pub flow_available: bool,
 }
 
 /// One option in the detection-threshold dropdown. `value` is what the form
@@ -602,6 +606,7 @@ fn empty_create_form() -> FormModel {
         region_groups: Vec::new(),
         region_threshold_options: Vec::new(),
         show_regions: false,
+        flow_available: false,
     }
 }
 
@@ -743,6 +748,7 @@ pub async fn new_form(
     form.tag_options = tag_options;
     ensure_tags_listed(&mut form);
     form.show_escalation = state.cfg.escalation.enabled;
+    form.flow_available = plan.max_flow_checks > 0;
     form.min_interval_s = plan_min_interval(&plan);
     // A new monitor is prefilled with 60s; raise it if the plan floor is
     // higher so the default the user sees would actually be accepted.
@@ -814,6 +820,7 @@ pub async fn edit_form(
     // Edit keeps the saved interval as-is; if a plan floor rose past it the
     // save will surface the API error rather than silently rewriting it.
     form.min_interval_s = plan_min_interval(&plan);
+    form.flow_available = plan.max_flow_checks > 0;
     Ok(FormPage {
         active_tab: "targets",
         form,
@@ -954,6 +961,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         region_groups: Vec::new(),
         region_threshold_options: Vec::new(),
         show_regions: false,
+        flow_available: false,
     })
 }
 

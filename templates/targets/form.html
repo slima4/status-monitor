@@ -45,7 +45,9 @@
         {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
+        {% if form.flow_available || form.check_type == "flow" %}
         {% call reg::chooser_card("data-check-card", "check_type", "flow", form.check_type == "flow", "flow", "browser login / journey") %}{% endcall %}
+        {% endif %}
       </div>
     </fieldset>
 
