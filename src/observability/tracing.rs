@@ -32,8 +32,23 @@ impl TracingGuard {
 }
 
 pub fn init(cfg: &ObservabilityConfig) -> TracingGuard {
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&cfg.log_level));
+    // Lightpanda's CDP server emits messages chromiumoxide can't model, so its
+    // conn/handler layers log an ERROR per message during a flow run even though
+    // the flow itself succeeds. The flow verdict comes from the step runner, not
+    // these logs, so silence the two noisy targets to keep the stream (and the
+    // error-rate alerts) clean. Any RUST_LOG override still layers on top.
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new(&cfg.log_level))
+        .add_directive(
+            "chromiumoxide::conn=off"
+                .parse()
+                .expect("static filter directive"),
+        )
+        .add_directive(
+            "chromiumoxide::handler=off"
+                .parse()
+                .expect("static filter directive"),
+        );
 
     let fmt_layer = match cfg.log_format {
         LogFormat::Json => fmt::layer().json().boxed(),
