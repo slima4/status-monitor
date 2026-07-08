@@ -12,3 +12,37 @@
 {# Mirror of loadingPlaceholder() in htmx_loader.js — keep in step. #}
 <p class="px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
 {% endmacro %}
+
+{# One flow step row, shared by the prefill loop and the clone <template>.
+   Only the fields the op uses are visible; flow_steps.js re-toggles on change. #}
+{% macro flow_step_row(op, url, selector, value, contains) %}
+<div data-flow-row class="flex items-start gap-2 rounded-sm border border-[color:var(--theme-line)] p-2">
+  <span data-flow-drag class="flex cursor-grab select-none items-center self-stretch px-1 text-quiet" aria-label="Drag to reorder">⠿</span>
+  <span data-flow-num class="w-4 pt-2 text-right font-mono text-xs tabular-nums text-muted"></span>
+  <div class="flex flex-1 flex-wrap items-center gap-2">
+    <select data-flow-op data-sm-combobox aria-label="Step" class="field w-[8.5rem]">
+      <option value="goto"{% if op == "goto" %} selected{% endif %}>goto</option>
+      <option value="click"{% if op == "click" %} selected{% endif %}>click</option>
+      <option value="fill"{% if op == "fill" %} selected{% endif %}>fill</option>
+      <option value="wait_for"{% if op == "wait_for" %} selected{% endif %}>wait for</option>
+      <option value="assert_text"{% if op == "assert_text" %} selected{% endif %}>assert text</option>
+      <option value="assert_url"{% if op == "assert_url" %} selected{% endif %}>assert url</option>
+    </select>
+    <div data-flow-field="url" class="min-w-[14rem] flex-1{% if op != "goto" %} hidden{% endif %}">
+      <input type="url" data-flow-url value="{{ url }}" placeholder="https://app.example.com/next" aria-label="URL" autocomplete="off" spellcheck="false" class="field w-full">
+    </div>
+    <div data-flow-field="selector" class="min-w-[10rem] flex-1{% if op != "click" && op != "fill" && op != "wait_for" && op != "assert_text" %} hidden{% endif %}">
+      <input type="text" data-flow-selector value="{{ selector }}" placeholder="#username or .btn-login" aria-label="CSS selector" autocomplete="off" spellcheck="false" class="field w-full font-mono">
+    </div>
+    <div data-flow-field="value" class="min-w-[12rem] flex-1{% if op != "fill" %} hidden{% endif %}">
+      <input type="text" data-flow-value value="{{ value }}" placeholder="value or secret reference" aria-label="Value" autocomplete="off" spellcheck="false" class="field w-full font-mono">
+    </div>
+    <div data-flow-field="contains" class="min-w-[12rem] flex-1{% if op != "assert_text" && op != "assert_url" %} hidden{% endif %}">
+      <input type="text" data-flow-contains value="{{ contains }}" placeholder="text or URL fragment to expect" aria-label="Contains" autocomplete="off" class="field w-full">
+    </div>
+    <p data-flow-reason class="flow-step__reason hidden"></p>
+  </div>
+  <span data-flow-status class="flow-step__status" aria-hidden="true"></span>
+  <button type="button" data-flow-remove class="row-remove" aria-label="Remove step"></button>
+</div>
+{% endmacro %}

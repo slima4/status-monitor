@@ -66,7 +66,9 @@
 
   {# Heartbeat checks carry no latency, so the charts would just draw zero. #}
   {% if kind != "HEARTBEAT" %}
-  <section class="grid gap-4 lg:grid-cols-2">
+  {# Flow runs a browser journey with no per-phase network timing, so the
+     breakdown would be one meaningless band; show latency full-width instead. #}
+  <section class="grid gap-4{% if kind != "FLOW" %} lg:grid-cols-2{% endif %}">
     <div class="sticker-card p-5">
       <h2 class="panel-label">latency (p50/p95/p99)</h2>
       <div id="latency-chart"
@@ -75,6 +77,7 @@
            {% if regions.len() > 1 && selected_region.is_none() %}data-overlay-endpoint="/api/v1/targets/{{ id }}/latency/by-region?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"{% endif %}
            aria-label="Latency p50/p95/p99 over time"></div>
     </div>
+    {% if kind != "FLOW" %}
     <div class="sticker-card p-5">
       <h2 class="panel-label">latency breakdown</h2>
       <div id="breakdown-chart"
@@ -82,6 +85,7 @@
            data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
            aria-label="Mean latency phase breakdown over time"></div>
     </div>
+    {% endif %}
   </section>
   {% endif %}
 

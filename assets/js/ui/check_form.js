@@ -29,17 +29,30 @@
 
     function applyKindIntervalDefaults(kind) {
         const want = isSlowKind(kind) ? "slow" : "fast";
+        const floor = kindFloor(kind);
         let active = null;
         form.querySelectorAll("[data-interval-rail]").forEach((rail) => {
             const on = rail.dataset.intervalRail === want;
             rail.hidden = !on;
             if (on) active = rail;
         });
-        if (!active || active.querySelector("input[name='interval_s']:checked")) return;
-        const pick = (v) => active.querySelector(`input[name='interval_s'][value='${v}']`);
-        const def = pick(active.dataset.last)
-            || pick(isSlowKind(kind) ? 86400 : 60)
-            || active.querySelector("input[name='interval_s']");
+        if (!active) return;
+        // Hide + disable presets below this kind's floor (e.g. flow can't run
+        // under 5m), tracking the smallest one still allowed.
+        let firstValid = null;
+        active.querySelectorAll("input[name='interval_s']").forEach((o) => {
+            const below = Number(o.value) < floor;
+            o.disabled = below;
+            const seg = o.closest(".sm-rail__seg");
+            if (seg) seg.classList.toggle("hidden", below);
+            if (!below && !firstValid) firstValid = o;
+        });
+        // Keep a still-valid current pick; otherwise snap to the smallest allowed
+        // preset so the default never violates the floor.
+        const cur = active.querySelector("input[name='interval_s']:checked");
+        if (cur && !cur.disabled) return;
+        const last = active.querySelector(`input[name='interval_s'][value='${active.dataset.last}']`);
+        const def = last && !last.disabled ? last : firstValid;
         if (def) def.checked = true;
     }
 
@@ -55,6 +68,33 @@
         if (regions) regions.hidden = passive;
     }
 
+    // A flow only runs where an engine exists, so on the flow kind the picker
+    // disables the regions that can't run it (their checked state is left alone;
+    // the server clamps on save). Test-now and the region save both skip disabled
+    // boxes, so a flow never fans out to a region that would fail.
+    function applyFlowRegions(kind) {
+        const flow = kind === "flow";
+        let flowRegions = 0;
+        document.querySelectorAll("[data-region-checkbox]").forEach((cb) => {
+            const capable = cb.dataset.flowCapable === "true";
+            if (capable) flowRegions++;
+            const off = flow && !capable;
+            cb.disabled = off;
+            const label = cb.closest("label");
+            if (label) {
+                label.classList.toggle("scope-token--off", off);
+                label.title = off ? "No flow engine in this region" : "";
+            }
+        });
+        const note = document.querySelector("[data-flow-region-note]");
+        if (note) note.classList.toggle("hidden", !flow);
+        // Region quorum only decides anything with 2+ regions probing. A flow
+        // monitor that can reach only one flow-capable region has no quorum to
+        // pick, so the threshold clamps to 1 whatever is chosen — disable it.
+        const policy = document.querySelector("[data-region-policy]");
+        if (policy) policy.disabled = flow && flowRegions < 2;
+    }
+
     form.addEventListener("change", (evt) => {
         if (evt.target.name === "interval_s") {
             const rail = evt.target.closest("[data-interval-rail]");
@@ -68,11 +108,13 @@
         });
         applyKindIntervalDefaults(want);
         applyPassiveKind(want);
+        applyFlowRegions(want);
     });
 
     const initialKind = form.querySelector("input[name='check_type']:checked")?.value || "http";
     applyKindIntervalDefaults(initialKind);
     applyPassiveKind(initialKind);
+    applyFlowRegions(initialKind);
 
     // Expected-status quick presets: a segmented rail that fills the text
     // field (the source of truth). A class preset writes its range; "custom"
@@ -281,7 +323,7 @@
         const regionRoot = document.querySelector("[data-monitor-regions]");
         if (regionRoot) {
             const sel = regionRoot.querySelector("[data-region-policy]");
-            if (sel) {
+            if (sel && !sel.disabled) {
                 const n = parseInt(sel.value, 10);
                 built.payload.region_policy = Number.isInteger(n) ? { count: n } : sel.value;
             }
@@ -334,6 +376,7 @@
             // coverage on create). Skipped for heartbeats, which the server rejects.
             if (regionRoot && id && currentCheckType() !== "heartbeat") {
                 const regions = [...regionRoot.querySelectorAll("[data-region-checkbox]:checked")]
+                    .filter((c) => !c.disabled)
                     .map((c) => c.value);
                 if (regions.length) {
                     try {
@@ -520,6 +563,30 @@
                 },
             };
         }
+        if (checkType === "flow") {
+            const startUrl = (data.get("flow_start_url") || "").trim();
+            if (startUrl === "") {
+                return { error: "Start URL is required.", field: "check.start_url" };
+            }
+            const timeout = numField("flow_timeout_s", 1, 120, "Timeout", "check.timeout");
+            if (timeout.error) return timeout;
+            const stepTimeout = numField("flow_step_timeout_s", 1, 60, "Step timeout", "check.step_timeout");
+            if (stepTimeout.error) return stepTimeout;
+            const steps = window.smCollectFlowSteps ? window.smCollectFlowSteps() : [];
+            if (steps.length === 0) {
+                return { error: "Add at least one step.", field: "check.steps" };
+            }
+            return {
+                check: {
+                    type: "flow",
+                    start_url: startUrl,
+                    steps,
+                    timeout: timeout.value * 1000,
+                    step_timeout: stepTimeout.value * 1000,
+                    verify_tls: data.get("flow_verify_tls") === "on",
+                },
+            };
+        }
         return { error: `Unknown check type: ${checkType}` };
     }
 
@@ -631,14 +698,14 @@
             });
         } catch (err) {
             window.smRenderCheckError(resultEl, `Network error: ${err.message || err}`);
-            return;
+            return null;
         }
         if (res.status === 429) {
             const retry = res.headers.get("retry-after");
             window.smRenderCheckError(resultEl, retry
                 ? `Rate limited — retry in ${retry}s`
                 : "Rate limited — slow down");
-            return;
+            return null;
         }
         // Read once as text, then try to parse: error responses are not always
         // our JSON envelope. A body-deserialize rejection (e.g. a missing
@@ -654,17 +721,18 @@
                 || "Test rejected.";
             const message = detail.length > 300 ? `${detail.slice(0, 300)}…` : detail;
             window.smRenderCheckError(resultEl, `${code}: ${message}`);
-            return;
+            return null;
         }
         if (!body) {
             window.smRenderCheckError(resultEl, "Bad JSON in test response.");
-            return;
+            return null;
         }
         window.smRenderCheckResult(resultEl, body.result || {}, {
             matched: body.matched_expectations,
             headers: body.response_headers_preview || [],
             body: body.response_body_snippet || null,
         });
+        return body.result || null;
     }
 
     async function handleTestNow(btn) {
@@ -680,7 +748,7 @@
         // runs the probe.
         const allBoxes = [...form.querySelectorAll("[data-region-checkbox]")];
         const regions = allBoxes
-            .filter((c) => c.checked)
+            .filter((c) => c.checked && !c.disabled)
             .map((c) => ({ id: c.value, label: (c.closest("label")?.textContent || c.value).trim() }));
         // Selector shown but every region deselected → an explicit "no regions"
         // choice; don't silently probe the default region.
@@ -692,15 +760,23 @@
         btn.setAttribute("aria-busy", "true");
         const btnLabel = btn.innerHTML;
         btn.innerHTML = "testing…";
+        // Per-step playback only makes sense for a single verdict; a multi-region
+        // fan-out keeps its per-region banners.
+        const isFlow = built.check.type === "flow";
+        const paintFlow = isFlow && regions.length <= 1;
+        if (paintFlow) window.smFlowTestStart?.();
+        else if (isFlow) window.smFlowTestReset?.();
         try {
             if (regions.length === 0) {
                 // No region selector (single-region plan) → test the default region.
                 window.smRenderCheckRunning(resultEl);
-                await runTest(resultEl, built.check, null);
+                const result = await runTest(resultEl, built.check, null);
+                if (paintFlow) window.smFlowTestResult?.(result);
                 return;
             }
             const rows = window.smRenderRegionTestRunning(resultEl, regions);
-            await Promise.all(regions.map((r) => runTest(rows[r.id], built.check, r.id)));
+            const results = await Promise.all(regions.map((r) => runTest(rows[r.id], built.check, r.id)));
+            if (paintFlow) window.smFlowTestResult?.(results[0]);
         } finally {
             btn.disabled = false;
             btn.removeAttribute("aria-busy");

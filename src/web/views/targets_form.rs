@@ -164,6 +164,94 @@ impl DomainExpiryFields {
     }
 }
 
+/// One step row in the flow builder. Only the fields the step's `op` uses are
+/// populated; the rest stay empty and the template hides them.
+pub struct FlowStepFields {
+    pub op: &'static str,
+    pub url: String,
+    pub selector: String,
+    pub value: String,
+    pub contains: String,
+}
+
+pub struct FlowFields {
+    pub start_url: String,
+    pub steps: Vec<FlowStepFields>,
+    pub timeout_s: u64,
+    pub step_timeout_s: u64,
+    pub verify_tls: bool,
+}
+
+impl Default for FlowFields {
+    fn default() -> Self {
+        Self {
+            start_url: String::new(),
+            steps: Vec::new(),
+            timeout_s: 30,
+            step_timeout_s: 10,
+            verify_tls: true,
+        }
+    }
+}
+
+/// Build the flow form fields from a stored monitor. The owner's edit form shows
+/// the real fill values so they can see and adjust their test credentials without
+/// re-typing; this is an authenticated, edit-scoped owner surface. Every non-edit
+/// surface masks them: the detail config panel and API via `redact_check`, the
+/// public share view via `redact_check_for_public`.
+fn flow_fields_from(f: crate::domain::FlowCheck) -> FlowFields {
+    use crate::domain::FlowStep;
+    let steps = f
+        .steps
+        .into_iter()
+        .map(|s| {
+            let mut r = FlowStepFields {
+                op: "",
+                url: String::new(),
+                selector: String::new(),
+                value: String::new(),
+                contains: String::new(),
+            };
+            match s {
+                FlowStep::Goto { url } => {
+                    r.op = "goto";
+                    r.url = url.to_string();
+                }
+                FlowStep::Click { selector } => {
+                    r.op = "click";
+                    r.selector = selector;
+                }
+                FlowStep::Fill { selector, value } => {
+                    r.op = "fill";
+                    r.selector = selector;
+                    r.value = value;
+                }
+                FlowStep::WaitFor { selector } => {
+                    r.op = "wait_for";
+                    r.selector = selector;
+                }
+                FlowStep::AssertText { selector, contains } => {
+                    r.op = "assert_text";
+                    r.selector = selector.unwrap_or_default();
+                    r.contains = contains;
+                }
+                FlowStep::AssertUrl { contains } => {
+                    r.op = "assert_url";
+                    r.contains = contains;
+                }
+            }
+            r
+        })
+        .collect();
+    FlowFields {
+        start_url: f.start_url.to_string(),
+        steps,
+        timeout_s: f.timeout.as_secs(),
+        step_timeout_s: f.step_timeout.as_secs(),
+        verify_tls: f.verify_tls,
+    }
+}
+
 /// One row in the monitor form's Alerts section: an org channel plus whether
 /// this monitor binds to it. Channels are pure delivery targets — the firing
 /// policy (confirmations, recovery) is monitor-level.
@@ -205,6 +293,7 @@ pub struct FormModel {
     pub dns: DnsFields,
     pub tls_cert: TlsCertFields,
     pub domain_expiry: DomainExpiryFields,
+    pub flow: FlowFields,
     /// The org's notification channels, with this monitor's bindings prefilled.
     pub channels: Vec<ChannelChoice>,
     /// Consecutive failing checks before this monitor alerts (monitor-level).
@@ -405,6 +494,9 @@ pub struct RegionChoice {
     pub id: String,
     pub label: String,
     pub selected: bool,
+    /// Whether this region can run a flow. The picker disables the rest when the
+    /// flow kind is selected, since a flow only runs where an engine exists.
+    pub flow_capable: bool,
 }
 
 /// Regions bucketed under a continent heading for the assignment picker.
@@ -418,6 +510,7 @@ pub struct RegionGroup {
 fn region_groups(
     available: Vec<crate::storage::RegionOption>,
     selected: impl Fn(&str) -> bool,
+    flow_capable: &std::collections::HashSet<String>,
 ) -> Vec<RegionGroup> {
     use crate::domain::region::Continent;
     use crate::web::views::region_display::region_label;
@@ -429,6 +522,7 @@ fn region_groups(
         let choice = RegionChoice {
             selected: selected(&r.id),
             label: region_label(&r),
+            flow_capable: flow_capable.contains(&r.id),
             id: r.id,
         };
         by_cont.entry(cont).or_default().push(choice);
@@ -497,6 +591,7 @@ fn empty_create_form() -> FormModel {
         dns: DnsFields::default(),
         tls_cert: TlsCertFields::default(),
         domain_expiry: DomainExpiryFields::default(),
+        flow: FlowFields::default(),
         channels: Vec::new(),
         alert_confirmations: 2,
         notify_recovery: true,
@@ -661,7 +756,8 @@ pub async fn new_form(
             crate::api::handlers::targets::default_region_set(ids, max_regions, &default_region);
         let chosen: std::collections::HashSet<String> = default_set.into_iter().collect();
         let cap = available.len().min(max_regions.max(1) as usize);
-        form.region_groups = region_groups(available, |id| chosen.contains(id));
+        let flow_capable = crate::api::handlers::targets::flow_capable_set(&state).await?;
+        form.region_groups = region_groups(available, |id| chosen.contains(id), &flow_capable);
         form.region_threshold_options =
             region_threshold_choices(RegionIncidentPolicy::default(), cap);
         form.show_regions = true;
@@ -710,7 +806,8 @@ pub async fn edit_form(
             .into_iter()
             .collect();
         let cap = available.len().min(max_regions.max(1) as usize);
-        form.region_groups = region_groups(available, |id| assigned.contains(id));
+        let flow_capable = crate::api::handlers::targets::flow_capable_set(&state).await?;
+        form.region_groups = region_groups(available, |id| assigned.contains(id), &flow_capable);
         form.region_threshold_options = region_threshold_choices(region_policy, cap);
         form.show_regions = true;
     }
@@ -735,6 +832,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
     let mut dns = DnsFields::default();
     let mut tls_cert = TlsCertFields::default();
     let mut domain_expiry = DomainExpiryFields::default();
+    let mut flow = FlowFields::default();
     let check_type: &'static str = match t.check {
         CheckSpec::Http(h) => {
             http = http_fields_from(h);
@@ -792,12 +890,9 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
             };
             "domain_expiry"
         }
-        // The classic per-kind form has no step-list fields; flow uses its own.
-        CheckSpec::Flow(_) => {
-            return Err(AppError::bad_request(
-                crate::api::error::codes::INVALID_FLOW_PARAMS,
-                "flow monitors are not editable in this form",
-            ));
+        CheckSpec::Flow(f) => {
+            flow = flow_fields_from(f);
+            "flow"
         }
     };
 
@@ -848,6 +943,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         dns,
         tls_cert,
         domain_expiry,
+        flow,
         channels: Vec::new(),
         alert_confirmations,
         notify_recovery,
@@ -1080,7 +1176,11 @@ mod tests {
             region("eu", Some("europe")),
             region("mystery", None),
         ];
-        let groups = region_groups(available, |id| id == "eu");
+        let groups = region_groups(
+            available,
+            |id| id == "eu",
+            &std::collections::HashSet::new(),
+        );
         let labels: Vec<&str> = groups.iter().map(|g| g.label.as_str()).collect();
         // Continent::ALL order (Europe before North America), unknown → Other last.
         assert_eq!(labels, vec!["Europe", "North America", "Other"]);

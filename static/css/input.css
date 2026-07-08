@@ -1424,6 +1424,60 @@
     @media (prefers-reduced-motion: reduce) {
         .scope-token:active { scale: 1; }
     }
+    .scope-token--off {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+    .scope-token--off:hover {
+        border-color: var(--theme-line);
+        color: var(--theme-text-quiet);
+    }
+    .scope-token--off:active { scale: 1; }
+
+    /* Flow builder — Test-now per-step playback. Rows tint to the last run's
+       verdict via a left inset edge; the marker slot carries ✓ / ✗ / spinner. */
+    [data-flow-row] {
+        transition: border-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
+    }
+    .flow-step--pass {
+        border-color: var(--theme-state-ok-line);
+        box-shadow: inset 3px 0 0 var(--theme-state-ok-strong);
+    }
+    .flow-step--fail {
+        border-color: var(--theme-state-bad-line);
+        box-shadow: inset 3px 0 0 var(--theme-state-bad-strong);
+    }
+    .flow-step--run {
+        box-shadow: inset 3px 0 0 var(--theme-text-quiet);
+    }
+    .flow-step--skip { opacity: 0.5; }
+    .flow-step__status {
+        display: inline-flex;
+        width: 1rem;
+        justify-content: center;
+        align-self: center;
+        font-family: var(--font-mono);
+        font-size: 0.8rem;
+        line-height: 1;
+    }
+    .flow-step--pass .flow-step__status { color: var(--theme-state-ok-fg-onsoft); }
+    .flow-step--fail .flow-step__status { color: var(--theme-state-bad-fg-onsoft); }
+    .flow-step--run .flow-step__status { color: var(--theme-text-quiet); }
+    .flow-step__spin {
+        display: inline-block;
+        animation: flow-spin 0.7s linear infinite;
+    }
+    @keyframes flow-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) {
+        .flow-step__spin { animation: none; }
+    }
+    .flow-step__reason {
+        flex-basis: 100%;
+        margin-top: 0.15rem;
+        font-family: var(--font-mono);
+        font-size: 0.7rem;
+        color: var(--theme-state-bad-fg-onsoft);
+    }
     /* Inner checkbox (label chips) or aria-expanded (button toggles) → ink box. */
     .scope-token:has(input:checked),
     .scope-token[aria-expanded="true"] {
@@ -3443,6 +3497,12 @@
     .sm-combobox__trigger:focus-visible {
         border-color: var(--theme-accent);
         outline: none;
+    }
+    .sm-combobox--disabled .sm-combobox__trigger,
+    .sm-combobox--disabled .sm-combobox__trigger:hover {
+        opacity: 0.45;
+        cursor: not-allowed;
+        border-color: var(--theme-line);
     }
     .sm-combobox__label {
         min-width: 0;

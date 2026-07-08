@@ -89,6 +89,24 @@ pub struct ResultRow {
     /// Probe region; `Some` only where the row is region-tagged (the drill
     /// drawer). `None` on the region-agnostic recent-results table.
     pub region: Option<String>,
+    /// For a flow failure, the `step N/M · op` badge parsed off the error, so
+    /// the drawer can surface which step broke. `None` for every other error.
+    pub flow_step: Option<String>,
+}
+
+/// Split a flow step-failure error (`step N/M op: reason`) into a compact badge
+/// and the bare reason. `None` for engine errors and non-flow errors.
+fn parse_flow_step(raw: &str) -> Option<(String, String)> {
+    let rest = raw.strip_prefix("step ")?;
+    let (frac, tail) = rest.split_once(' ')?;
+    let (n, m) = frac.split_once('/')?;
+    n.parse::<u32>().ok()?;
+    m.parse::<u32>().ok()?;
+    let (op, reason) = tail.split_once(": ")?;
+    if op.is_empty() || op.contains(' ') {
+        return None;
+    }
+    Some((format!("step {n}/{m} · {op}"), reason.to_string()))
 }
 
 impl ResultRow {
@@ -1021,7 +1039,12 @@ fn config_json_with_derived(
     check: &CheckSpec,
     registered_domain: Option<&str>,
 ) -> Result<String, AppError> {
-    let mut value = serde_json::to_value(check).map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
+    // The panel shows the config to any org member, so mask credential inputs
+    // (HTTP auth, flow fill values) the same way the API and share views do.
+    let mut check = check.clone();
+    crate::api::redaction::redact_check(&mut check);
+    let mut value =
+        serde_json::to_value(&check).map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
     if let (Some(rd), Some(object)) = (registered_domain, value.as_object_mut()) {
         object.insert("registered_domain".into(), rd.into());
     }
@@ -1126,21 +1149,25 @@ fn wider_status_window(from: DateTime<Utc>, to: DateTime<Utc>) -> Option<TimeRan
 
 impl From<CheckResult> for ResultRow {
     fn from(r: CheckResult) -> Self {
+        let (flow_step, error) = match r.error.as_deref() {
+            Some(raw) => match parse_flow_step(raw) {
+                Some((label, reason)) => (Some(label), fmt_error_display(&reason)),
+                None => (None, fmt_error_display(raw)),
+            },
+            None => (None, String::new()),
+        };
         Self {
             timestamp: r.timestamp,
             status: r.status.as_str(),
             duration_ms: r.duration_ms,
             response_code: r.response_code.map(|c| c.to_string()).unwrap_or_default(),
-            error: r
-                .error
-                .as_deref()
-                .map(fmt_error_display)
-                .unwrap_or_default(),
+            error,
             dns_ms: r.dns_ms,
             connect_ms: r.connect_ms,
             tls_ms: r.tls_ms,
             ttfb_ms: r.ttfb_ms,
             region: None,
+            flow_step,
         }
     }
 }

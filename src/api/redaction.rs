@@ -35,7 +35,7 @@ impl<T: RedactInPlace> RedactInPlace for Vec<T> {
     }
 }
 
-fn redact_check(check: &mut CheckSpec) {
+pub(crate) fn redact_check(check: &mut CheckSpec) {
     match check {
         CheckSpec::Http(http) => {
             if let Some((u, p)) = http.basic_auth.as_mut() {

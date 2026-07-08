@@ -45,6 +45,7 @@
         {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
         {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", "flow", form.check_type == "flow", "flow", "browser login / journey") %}{% endcall %}
       </div>
     </fieldset>
 
@@ -433,6 +434,63 @@
       </fieldset>
       </div>
     </fieldset>
+
+    <fieldset data-variant="flow"
+              class="{% if form.check_type != "flow" %}hidden{% endif %}">
+      <legend class="float-left mb-3 w-full"><span class="form-legend">flow check</span></legend>
+      <div class="clear-both space-y-5">
+      <p class="mb-5 text-xs text-muted">
+        Drives a real browser through a login or multi-step journey and verifies
+        the session, not just one request. Use a <span class="hl">dedicated
+        low-privilege test account</span> for logins.
+      </p>
+        <div>
+          <label class="field-outline">
+            <span class="field-outline__label">start url</span>
+            <input name="flow_start_url" type="url" value="{{ form.flow.start_url }}"
+                   placeholder="https://app.example.com/login"
+                   autocomplete="off" spellcheck="false" class="w-full field">
+          </label>
+          <span class="mt-1 block text-xs text-muted">The browser opens this first, then runs the steps below.</span>
+        </div>
+
+        <div class="space-y-2">
+          <span class="block text-xs text-muted">Steps run top to bottom; drag <span class="font-mono">⠿</span> to reorder. Include at least one <code>assert</code> so a broken login fails the check.</span>
+          <div data-flow-steps class="space-y-2">
+            {% for s in form.flow.steps %}
+            {% call reg::flow_step_row(s.op, s.url, s.selector, s.value, s.contains) %}{% endcall %}
+            {% endfor %}
+          </div>
+          <button type="button" data-flow-add class="scope-token">+ add step</button>
+        </div>
+
+        <div>
+          <div class="flex flex-wrap items-start gap-3">
+            <label class="field-outline w-36">
+              <span class="field-outline__label">Timeout</span>
+              <input name="flow_timeout_s" type="number" min="1" max="120" value="{{ form.flow.timeout_s }}"
+                     class="w-full field pr-8">
+              <span class="field-outline__unit" aria-hidden="true">s</span>
+            </label>
+            <label class="field-outline w-36">
+              <span class="field-outline__label">Step timeout</span>
+              <input name="flow_step_timeout_s" type="number" min="1" max="60" value="{{ form.flow.step_timeout_s }}"
+                     class="w-full field pr-8">
+              <span class="field-outline__unit" aria-hidden="true">s</span>
+            </label>
+            <label class="scope-token self-end">
+              <input name="flow_verify_tls" type="checkbox" class="sr-only"{% if form.flow.verify_tls %} checked{% endif %}>
+              verify-tls
+            </label>
+          </div>
+          <span class="mt-1 block text-xs text-muted">Timeout caps the whole run; step timeout caps each step's wait. verify-tls fails on invalid or self-signed certificates — <span class="hl">switch it off only for internal endpoints</span>.</span>
+        </div>
+      </div>
+
+      <template id="flow-step-template">
+        {% call reg::flow_step_row("fill", "", "", "", "") %}{% endcall %}
+      </template>
+    </fieldset>
     </div>
 
     <div class="space-y-6 lg:border-l lg:border-[color:var(--theme-line)] lg:pl-8">
@@ -580,7 +638,7 @@
                   <div class="flex flex-wrap gap-1.5">
                     {% for r in g.regions %}
                     <label class="scope-token">
-                      <input type="checkbox" data-region-checkbox value="{{ r.id }}" class="sr-only"{% if r.selected %} checked{% endif %}>
+                      <input type="checkbox" data-region-checkbox data-flow-capable="{{ r.flow_capable }}" value="{{ r.id }}" class="sr-only"{% if r.selected %} checked{% endif %}>
                       {{ r.label }}
                     </label>
                     {% endfor %}
@@ -588,6 +646,7 @@
                 </div>
                 {% endfor %}
               </div>
+              <span data-flow-region-note class="mt-1.5 hidden text-xs text-muted">Flow monitors run only in <span class="hl">flow-capable regions</span>; the rest are disabled here.</span>
               <span class="mt-1 block text-xs text-muted">
                 Which locations probe this monitor. Need more regions?
                 <a href="mailto:support@uptimepage.dev?subject=More%20monitoring%20regions"
@@ -709,6 +768,7 @@
 <script defer src="{{ "js/ui/group_select.js"|asset }}"></script>
 <script defer src="{{ "js/ui/collapsible.js"|asset }}"></script>
 <script defer src="{{ "js/ui/optional_fields.js"|asset }}"></script>
+<script defer src="{{ "js/ui/flow_steps.js"|asset }}"></script>
 <script defer src="{{ "js/ui/check_form.js"|asset }}"></script>
 <script defer src="{{ "js/ui/monitor_escalation.js"|asset }}"></script>
 {% endblock %}

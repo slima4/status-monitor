@@ -38,7 +38,7 @@
     {% endif %}
     {% if has_error %}
     <div class="{% if has_timing %}mt-2 {% endif %}result-row-detail__error">
-      <span class="text-muted mr-2">error:</span>{{ r.error }}
+      {% if let Some(step) = r.flow_step %}<span class="mr-2 inline-block rounded-sm border border-[color:var(--theme-line)] px-1.5 py-0.5 font-mono text-[0.7rem] tabular-nums text-muted">{{ step }}</span>{% endif %}<span class="text-muted mr-2">error:</span>{{ r.error }}
     </div>
     {% endif %}
   </td>

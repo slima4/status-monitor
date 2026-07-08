@@ -73,6 +73,12 @@
             const opt = select.options[select.selectedIndex];
             label.textContent = opt ? opt.text : "";
         }
+        function reflectDisabled() {
+            const off = select.disabled;
+            trigger.disabled = off;
+            root.classList.toggle("sm-combobox--disabled", off);
+            if (off && openApi && openApi.root === root) close();
+        }
         rebuildOptions();
         syncLabel();
 
@@ -89,6 +95,7 @@
         root.appendChild(trigger);
         root.appendChild(panel);
         root.appendChild(select);
+        reflectDisabled();
 
         function position() {
             window.smPositionFloating(trigger, panel, { minWidth: true });
@@ -175,8 +182,16 @@
         // listener also keeps the visible label in sync if something
         // programmatic flips select.value. Observer is stashed on the select
         // so htmx:beforeCleanupElement can disconnect it before GC.
-        const mo = new MutationObserver(() => { rebuildOptions(); syncLabel(); });
-        mo.observe(select, { childList: true });
+        const mo = new MutationObserver((records) => {
+            let opts = false, dis = false;
+            for (const r of records) {
+                if (r.type === "childList") opts = true;
+                else if (r.attributeName === "disabled") dis = true;
+            }
+            if (opts) { rebuildOptions(); syncLabel(); }
+            if (dis) reflectDisabled();
+        });
+        mo.observe(select, { childList: true, attributes: true, attributeFilter: ["disabled"] });
         select._smComboboxObserver = mo;
         select.addEventListener("change", syncLabel);
 

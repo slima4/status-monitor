@@ -279,12 +279,26 @@ pub async fn update(
                 carry_credentials(http, stored, carry_basic, carry_bearer);
             }
         }
+        // For a flow edit, read the stored monitor once: carry masked fill
+        // secrets forward (an untouched `***` keeps the stored value) before
+        // validation, and reuse it to tell a net-new flow from an edit.
+        let flow_stored = if matches!(check, crate::domain::CheckSpec::Flow(_)) {
+            state.target_store.get(org, id).await?
+        } else {
+            None
+        };
+        if let crate::domain::CheckSpec::Flow(flow) = check
+            && let Some(existing) = &flow_stored
+            && let crate::domain::CheckSpec::Flow(stored) = &existing.check
+        {
+            carry_flow_secrets(flow, stored);
+        }
         validate_check(check, &ssrf_guard(&state))?;
         check_abuse(&state, org, check)?;
         validate_variable_refs(&state, org, check).await?;
         if matches!(check, crate::domain::CheckSpec::Flow(_)) {
             let was_flow = matches!(
-                state.target_store.get(org, id).await?.map(|t| t.check),
+                flow_stored.as_ref().map(|t| &t.check),
                 Some(crate::domain::CheckSpec::Flow(_))
             );
             // Gate + count only a net-new flow; editing an existing one stays
@@ -1113,7 +1127,9 @@ async fn resolve_check_now_region(state: &AppState, org: OrgId, id: Uuid) -> Res
 /// any. Prefers a live region so the dispatch doesn't 503; errors if none qualify.
 /// Regions that can actually run a flow: agents self-reporting the capability,
 /// plus the control-plane region when it runs the engine in-process.
-async fn flow_capable_set(state: &AppState) -> Result<std::collections::HashSet<String>> {
+pub(crate) async fn flow_capable_set(
+    state: &AppState,
+) -> Result<std::collections::HashSet<String>> {
     let mut capable: std::collections::HashSet<String> = state
         .target_store
         .flow_capable_regions()
@@ -1563,6 +1579,25 @@ fn carry_credentials(
     }
     if carry_bearer {
         http.bearer_token = stored.bearer_token.clone();
+    }
+}
+
+/// Carry each masked (`***`) fill value forward from the stored flow, matched by
+/// selector, so an edit that leaves a login secret untouched keeps it. A
+/// sentinel with no stored match survives and `validate_check` rejects it, which
+/// tells the user to re-enter that value.
+fn carry_flow_secrets(new: &mut crate::domain::FlowCheck, stored: &crate::domain::FlowCheck) {
+    use crate::domain::FlowStep;
+    for step in &mut new.steps {
+        if let FlowStep::Fill { selector, value } = step
+            && value == REDACTED
+            && let Some(FlowStep::Fill { value: prev, .. }) = stored
+                .steps
+                .iter()
+                .find(|s| matches!(s, FlowStep::Fill { selector: ss, .. } if ss == selector))
+        {
+            *value = prev.clone();
+        }
     }
 }
 
