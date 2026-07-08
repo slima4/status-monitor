@@ -23,7 +23,7 @@ Stack: Rust 1.95 (edition 2024), Tokio, Axum, Askama for compile-time HTML templ
 
 Monitors are low-cardinality relational data that gets mutated by API calls: targets, regions, channels, incidents, plans. That is Postgres. Check results are append-only, high-cardinality, and almost always queried by time range. That is ClickHouse.
 
-Trying to force one of those into the other is where uptime monitors usually fall over. Putting billions of check results in Postgres turns every dashboard query into a sequential scan. Putting your relational config in ClickHouse means fighting its update model forever. So: Postgres for the world, ClickHouse for the firehose. Both run their migrations at process startup, so there is no separate migrator to forget.
+Trying to force one of those into the other is where uptime monitors usually fall over. Putting billions of check results in Postgres turns every dashboard query into a sequential scan. Putting your relational config in ClickHouse means fighting its update model forever. So: Postgres for the world, ClickHouse for the firehose. Both run their migrations at process startup, so there is no separate migrator to forget. I go deeper on that split, the column codecs, and per-row retention in [a post on why I run both](/blog/postgres-vs-clickhouse-uptime-monitor).
 
 ## The HTTP client I did not want to write
 

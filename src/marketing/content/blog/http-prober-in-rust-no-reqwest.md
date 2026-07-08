@@ -120,4 +120,4 @@ For your program? Almost certainly reqwest. Going down to hyper means you own re
 
 It is worth it here for one reason: measuring and guarding the request is the product, not a detail of it. When the request itself is the thing you sell, you want to own every millisecond and every IP it touches.
 
-Uptimepage is open source, AGPL-3.0, and the whole probe path is in the repo: [github.com/uptimepage/uptimepage](https://github.com/uptimepage/uptimepage). If you want the wider build story, one binary and two databases, [that is a separate post](/blog/building-an-uptime-monitor-in-rust). Or just [start free on the hosted tier](/) and point a check at something.
+Uptimepage is open source, AGPL-3.0, and the whole probe path is in the repo: [github.com/uptimepage/uptimepage](https://github.com/uptimepage/uptimepage). The rows this probe writes land in ClickHouse, and [why I store them there](/blog/postgres-vs-clickhouse-uptime-monitor) is its own post. If you want the wider build story, one binary and two databases, [that is a separate post](/blog/building-an-uptime-monitor-in-rust). Or just [start free on the hosted tier](/) and point a check at something.
