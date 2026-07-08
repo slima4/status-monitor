@@ -18,18 +18,19 @@ use crate::domain::{
     ActorType, AlertBinding, ChannelConfig, ChannelKind, CheckResult, CheckSpec, CheckStatus,
     ComponentHistoryResponse, DayState, DnsCheck, DnsRecordType, DomainExpiryCheck,
     EscalationPolicy, EscalationPolicySummary, EscalationStep, EscalationTarget,
-    EscalationTargetType, ExpectedStatus, HeartbeatCheck, HttpCheck, HttpMethod, Incident,
-    IncidentEvent, IncidentEventKind, IncidentNarrationUpdate, IncidentOrigin, IncidentSeverity,
-    IncidentState, IncidentStatusPhase, IncidentUrgency, IncidentVisibility, MaintenanceFilter,
-    MaintenanceWindow, MaintenanceWindowUpdate, NewEscalationPolicy, NewEscalationStep,
-    NewEscalationTarget, NewIncidentUpdate, NewMaintenanceWindow, NewManualIncident,
-    NewNotificationChannel, NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant,
-    NewOnCallSchedule, NewTarget, NotificationChannel, NotificationChannelUpdate, OnCallLayer,
-    OnCallOverride, OnCallParticipant, OnCallSchedule, OnCallScheduleDetail, OnCallScheduleSummary,
-    OpsIncident, OverallState, OverallStatus, PingCheck, PublicActionItem, PublicComponent,
-    PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicIncidentUpdate,
-    PublicMaintenance, PublicMaintenanceList, PublicPostmortem, PublicStatusPage, RotationType,
-    Target, TargetAlerts, TargetUpdate, TcpCheck, TlsCertCheck, WriteSource,
+    EscalationTargetType, ExpectedStatus, FlowCheck, FlowStep, HeartbeatCheck, HttpCheck,
+    HttpMethod, Incident, IncidentEvent, IncidentEventKind, IncidentNarrationUpdate,
+    IncidentOrigin, IncidentSeverity, IncidentState, IncidentStatusPhase, IncidentUrgency,
+    IncidentVisibility, MaintenanceFilter, MaintenanceWindow, MaintenanceWindowUpdate,
+    NewEscalationPolicy, NewEscalationStep, NewEscalationTarget, NewIncidentUpdate,
+    NewMaintenanceWindow, NewManualIncident, NewNotificationChannel, NewOnCallLayer,
+    NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, NewTarget, NotificationChannel,
+    NotificationChannelUpdate, OnCallLayer, OnCallOverride, OnCallParticipant, OnCallSchedule,
+    OnCallScheduleDetail, OnCallScheduleSummary, OpsIncident, OverallState, OverallStatus,
+    PingCheck, PublicActionItem, PublicComponent, PublicComponentGroup, PublicComponentStatus,
+    PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
+    PublicPostmortem, PublicStatusPage, RotationType, Target, TargetAlerts, TargetUpdate, TcpCheck,
+    TlsCertCheck, WriteSource,
 };
 use crate::storage::UptimeStats;
 
@@ -37,7 +38,7 @@ use crate::storage::UptimeStats;
 #[openapi(
     info(
         title = "uptimepage",
-        description = "HTTP / TCP / ping / heartbeat / TLS-cert / domain-expiry / DNS health-check service. \
+        description = "HTTP / TCP / ping / heartbeat / TLS-cert / domain-expiry / DNS / browser-flow health-check service. \
                        Schedules checks against configured targets, stores results, \
                        exposes a REST API.",
         license(name = "MIT"),
@@ -192,6 +193,8 @@ use crate::storage::UptimeStats;
             DomainExpiryCheck,
             DnsCheck,
             DnsRecordType,
+            FlowCheck,
+            FlowStep,
             HttpMethod,
             ExpectedStatus,
             CheckResult,
