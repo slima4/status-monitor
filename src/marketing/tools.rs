@@ -214,7 +214,11 @@ static UPTIME_SLA_CACHED: OnceLock<CachedRender> = OnceLock::new();
 
 fn render_uptime_sla(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = format!("{}{}", cfg.canonical_origin, UPTIME_SLA_PATH);
-    let mut og = OpenGraph::default_for(&format!("{UPTIME_SLA_TITLE} | {BRAND}"), &canonical_url);
+    let mut og = OpenGraph::default_for(
+        &format!("{UPTIME_SLA_TITLE} | {BRAND}"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
     og.description = UPTIME_SLA_DESCRIPTION.to_string();
     let page = UptimeSlaPage {
         app_url: cfg.app_url.clone(),
@@ -353,7 +357,11 @@ static CRON_CACHED: OnceLock<CachedRender> = OnceLock::new();
 
 fn render_cron(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = format!("{}{}", cfg.canonical_origin, CRON_PATH);
-    let mut og = OpenGraph::default_for(&format!("{CRON_TITLE} | {BRAND}"), &canonical_url);
+    let mut og = OpenGraph::default_for(
+        &format!("{CRON_TITLE} | {BRAND}"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
     og.description = CRON_DESCRIPTION.to_string();
     let page = CronPage {
         app_url: cfg.app_url.clone(),

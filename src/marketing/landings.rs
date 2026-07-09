@@ -2973,7 +2973,7 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
         .map(|l| {
             let canonical_url = format!("{}{}", cfg.canonical_origin, l.path);
             let title = format!("{} | {BRAND}", l.title);
-            let mut og = OpenGraph::default_for(&title, &canonical_url);
+            let mut og = OpenGraph::default_for(&title, &canonical_url, &cfg.canonical_origin);
             og.description = l.meta_description.to_string();
             let faqs = page_faqs(l.path);
             let doc = LandingDoc {

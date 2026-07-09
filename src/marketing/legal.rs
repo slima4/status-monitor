@@ -111,7 +111,11 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
         .iter()
         .map(|route| {
             let canonical_url = format!("{}{}", cfg.canonical_origin, route.path);
-            let og = OpenGraph::default_for(&format!("{} | {BRAND}", route.title), &canonical_url);
+            let og = OpenGraph::default_for(
+                &format!("{} | {BRAND}", route.title),
+                &canonical_url,
+                &cfg.canonical_origin,
+            );
             let page = LegalPage {
                 title: route.title,
                 body: route.body.as_str(),

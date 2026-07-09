@@ -249,6 +249,24 @@ async fn cron_tool_renders_without_db() {
 }
 
 #[tokio::test]
+async fn og_image_is_rooted_at_origin_on_subpages() {
+    for path in [
+        "/pricing",
+        "/tools/cron-expression-generator",
+        "/vs/uptimerobot",
+    ] {
+        let (status, body, _) = get(path).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(
+            body.contains(
+                r#"property="og:image" content="https://uptimepage.dev/static/marketing/og.png""#
+            ),
+            "{path} must root og:image at the origin, not the page URL"
+        );
+    }
+}
+
+#[tokio::test]
 async fn sitemap_lists_the_tools() {
     let (status, body, _) = get("/sitemap.xml").await;
     assert_eq!(status, StatusCode::OK);

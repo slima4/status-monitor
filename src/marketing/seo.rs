@@ -111,12 +111,12 @@ pub struct OpenGraph {
 }
 
 impl OpenGraph {
-    pub fn default_for(title: &str, canonical_origin: &str) -> Self {
+    pub fn default_for(title: &str, url: &str, canonical_origin: &str) -> Self {
         Self {
             title: title.to_string(),
             description: META_DESCRIPTION.to_string(),
             og_type: "website".to_string(),
-            url: canonical_origin.to_string(),
+            url: url.to_string(),
             image: absolute_asset(canonical_origin, "/static/marketing/og.png"),
         }
     }
@@ -688,9 +688,14 @@ mod tests {
 
     #[test]
     fn og_image_is_absolute_https() {
-        let og = OpenGraph::default_for("Hi", "https://uptimepage.dev");
-        assert!(og.image.starts_with("https://"), "got {}", og.image);
-        assert!(og.url.starts_with("https://"));
+        let og = OpenGraph::default_for(
+            "Hi",
+            "https://uptimepage.dev/pricing",
+            "https://uptimepage.dev",
+        );
+        // og:url is the page; og:image is rooted at the origin, not the page.
+        assert_eq!(og.url, "https://uptimepage.dev/pricing");
+        assert_eq!(og.image, "https://uptimepage.dev/static/marketing/og.png");
     }
 
     #[test]

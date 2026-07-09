@@ -129,6 +129,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
     let mut og = OpenGraph::default_for(
         &format!("{BRAND}: open-source uptime monitoring & status pages"),
         &canonical_url,
+        &cfg.canonical_origin,
     );
     og.description = "Free, open-source uptime and website monitoring: dashboard, multi-region checks, alerts, public status page. Manage it by API or Terraform.".to_string();
     let page = LandingPage {
@@ -242,6 +243,7 @@ fn render_pricing(cfg: &MarketingCfg) -> CachedRender {
     let mut og = OpenGraph::default_for(
         &format!("Uptime Monitoring Pricing: Free & Pro | {BRAND}"),
         &canonical_url,
+        &cfg.canonical_origin,
     );
     og.description = "Uptimepage pricing: a free Standard plan with no card, founding \
          free for the first 1,000 accounts, and Pro for teams in production. \
