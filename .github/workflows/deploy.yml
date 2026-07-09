@@ -1167,8 +1167,12 @@ jobs:
             docker compose up -d --no-build --force-recreate caddy
           fi
 
-          # Metrics+logs sidecar: profile-gated, scoped to `alloy` so the
-          # app / postgres / caddy are never recreated as a side effect.
+          # Metrics+logs sidecar + host-metrics exporter: profile-gated,
+          # scoped by service so the app / postgres / caddy are never
+          # recreated as a side effect. node-exporter is alloy's local scrape
+          # target for host disk and CPU; started idempotently (no
+          # --force-recreate, no drifting config, restart:unless-stopped keeps
+          # it up across deploys).
           # Same all-three-metrics-creds gate as the .env upsert (logs ride
           # this same container, so the metrics trio is the prerequisite —
           # a Loki-only config never starts the sidecar). --force-recreate
@@ -1179,6 +1183,7 @@ jobs:
           if [ -n "${GRAFANA_CLOUD_PROM_URL:-}" ] \
              && [ -n "${GRAFANA_CLOUD_PROM_USER:-}" ] \
              && [ -n "${GRAFANA_CLOUD_API_TOKEN:-}" ]; then
+            docker compose --profile metrics up -d --no-build node-exporter
             docker compose --profile metrics up -d --no-build --force-recreate alloy
           fi
 
