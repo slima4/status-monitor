@@ -9,17 +9,17 @@ draft = false
 
 > **TL;DR**
 >
-> A monitoring alert said I was dropping check results. The disk was 100% full. My actual data was 20 MB. ClickHouse had quietly written 12 GB of logs about its own internals, mostly `system.text_log` and `system.trace_log`. Those same logs also burn CPU at idle. The fix is a few lines of ClickHouse config that disable the noisy logs and slow the metrics collector. Full config is below.
+> A monitoring alert said I was dropping check results. The disk was 100% full. My actual data was 20 MB. ClickHouse had quietly written 12 GB of logs about itself, mostly `system.text_log` and `system.trace_log`. Those same logs also burn CPU at idle. The fix is a few lines of ClickHouse config that disable the noisy logs and slow the metrics collector. Full config is below.
 
 ## The alert
 
-One morning a critical alert fired: `UptimepageResultsLost`. Its description is blunt: storage write failures or dropped results, checks run but results are not persisting. Then it did something worse than fire once. It cleared, fired again, cleared, and fired again. A flapping critical.
+One morning a critical alert fired: `UptimepageResultsLost`. Its description is blunt: storage write failures or dropped results, checks run but results are not persisting. Then it did something worse than fire once. It cleared, fired again, cleared, and fired again, over and over.
 
 I run Uptimepage, an uptime monitoring service. "Results not persisting" means the one thing customers pay for, recording whether their sites are up, might be failing. So it had my full attention.
 
-The good news first: no data was lost. The write path retries, and every failed write was absorbed by a retry. The counter that tracks results actually dropped stayed at zero the whole time. But something was clearly wrong underneath.
+The good news first: no data was lost. The write path retries, and every failed write was caught by a retry. I keep a counter for results that actually get dropped, and it stayed at zero the whole time. But something was clearly wrong underneath.
 
-## The dead end: a full disk
+## The real signal: a full disk
 
 The first real signal came from Postgres, which had crashed and restarted a couple of minutes earlier:
 
@@ -34,7 +34,7 @@ Code: 243. DB::Exception: Cannot reserve 1.00 MiB, not enough space:
 While executing WaitForAsyncInsert. (NOT_ENOUGH_SPACE)
 ```
 
-So the flapping alert was a symptom. The disease was a full disk. That reframes the question: I do not store much, so what filled it?
+So the alert was a symptom. The real problem was a full disk. That reframes the question: I do not store much, so what filled it?
 
 ## Leak one: old Docker images
 
@@ -71,13 +71,13 @@ Breaking `system` down by table:
 
 ![ClickHouse system tables ranked by on-disk size: text_log 5.29 GiB, trace_log 3.02 GiB, part_log 1.11 GiB and smaller logs, next to the actual data table at 2.8 MiB](/static/marketing/blog-clickhouse-system-logs.webp)
 
-Two tables did most of the damage. `system.text_log` (5.29 GiB) is a copy of the server's own log output written into a table. `system.trace_log` (3.02 GiB) is the query profiler, which samples running queries. Both are handy when you are actively debugging ClickHouse. Neither earns multiple gigabytes sitting idle, and `text_log` is off by default in ClickHouse, so something in the setup had turned it on.
+Two tables did most of the damage. `system.text_log` (5.29 GiB) is a copy of the server's own log output written into a table. `system.trace_log` (3.02 GiB) is the query profiler, which samples running queries. Both are handy when you are actively debugging ClickHouse. Neither is worth multiple gigabytes when I am not. And `text_log` is off by default, so something in my setup had switched it on.
 
 ## The fix
 
 Two parts: reclaim the space now, and stop it coming back.
 
-**Reclaim now.** The system log tables are diagnostic ring buffers, not data. Truncate them:
+**Reclaim now.** The system log tables are throwaway diagnostics, not real data. Truncate them:
 
 ```sql
 TRUNCATE TABLE IF EXISTS system.text_log;
@@ -87,7 +87,7 @@ TRUNCATE TABLE IF EXISTS system.trace_log;
 
 That gave back 12 GB at once and took the disk from 74% down to 41%.
 
-**Stop the regrowth.** Truncating is a one-time cleanup. Without a cap, the logs fill right back up. The durable fix is ClickHouse config, dropped in `/etc/clickhouse-server/config.d/`. I watch ClickHouse through Grafana, not these tables, so I disable almost all of them and keep only `query_log` and `part_log`, bounded, for the rare hands-on debugging session:
+**Stop the regrowth.** Truncating is a one-time cleanup. Without a cap, the logs fill right back up. The durable fix is ClickHouse config, added under `/etc/clickhouse-server/config.d/`. I watch ClickHouse through Grafana, not these tables. So I disable almost all of them and keep only `query_log` and `part_log`, both bounded, for the rare hands-on debugging session:
 
 ```xml
 <clickhouse>
@@ -130,11 +130,11 @@ That gave back 12 GB at once and took the disk from 74% down to 41%.
 
 > **Bonus: lower CPU, not just disk**
 >
-> Those log tables are written constantly, and on a small server that steady write load shows up as CPU. A long-running ClickHouse issue tracks the server using noticeable CPU at zero load, [#60016](https://github.com/ClickHouse/ClickHouse/issues/60016). People there report dropping from 40 to 70% CPU down to about 1.5% after disabling the logs and slowing the async-metrics collector. That is the `asynchronous_metrics_update_period_s` line and the `remove="1"` block earning their keep twice.
+> Those log tables are written constantly, and on a small server that steady write load shows up as CPU. A long-running ClickHouse issue tracks the server using noticeable CPU at zero load, [#60016](https://github.com/ClickHouse/ClickHouse/issues/60016). People there report dropping from 40 to 70% CPU down to about 1.5% after disabling the logs and slowing the async-metrics collector. So those two settings, the `asynchronous_metrics_update_period_s` line and the `remove="1"` block, pay off twice: less disk and less CPU.
 
 ## The real lesson: alert on the cause, not the effect
 
-Here is the part that stings. I had an alert for "results are being dropped." I did not have an alert for "the disk is filling up." So a full disk, which is a slow and predictable problem that builds over days, only reached me as a sudden downstream symptom, after Postgres had already crashed once.
+Here is the part that stings. I had an alert for "results are being dropped." I did not have an alert for "the disk is filling up." So a full disk is a slow, predictable problem that builds over days. But it only reached me as a sudden downstream symptom, after Postgres had already crashed once.
 
 A downstream alert like "results lost" is not a substitute for watching the resource that actually runs out. I added the missing one: a plain host disk-space alert on `node_filesystem_avail_bytes`, firing at 80% and 90% used, well before anything starts failing. That is the alert that should have caught this on day one.
 
