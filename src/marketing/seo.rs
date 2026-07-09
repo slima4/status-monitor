@@ -35,6 +35,7 @@ const ORG_SAME_AS: &[&str] = &[
     "https://stackshare.io/uptimepage",
     "https://alternativeto.net/software/uptimepage/",
     "https://www.nxgntools.com/tools/uptimepage",
+    "https://ufind.best/products/uptimepage",
 ];
 
 /// Prose overview for `llms.txt` / `llms-full.txt` — what the product is,
