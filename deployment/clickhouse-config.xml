@@ -30,10 +30,34 @@
         </default>
     </profiles>
 
-    <!-- Unbounded system logs filled the disk (~12 GB of logs vs ~20 MB of data). -->
+    <!-- Sample async metrics every 60s instead of every second: their
+         collection is the main idle-CPU cost on a small box (ClickHouse#60016). -->
+    <asynchronous_metrics_update_period_s>60</asynchronous_metrics_update_period_s>
+
+    <!-- Unbounded system logs filled the disk (12 GB of logs vs 20 MB of data)
+         and their writes burn CPU at idle. We observe ClickHouse through Grafana,
+         not these tables, so disable them all except query_log and part_log,
+         kept bounded for on-hand debugging. remove="1" on an absent table is a
+         no-op, so the list stays valid across versions. -->
+    <asynchronous_metric_log remove="1"/>
+    <asynchronous_insert_log remove="1"/>
+    <backup_log remove="1"/>
+    <error_log remove="1"/>
+    <crash_log remove="1"/>
+    <metric_log remove="1"/>
+    <query_metric_log remove="1"/>
+    <query_thread_log remove="1"/>
+    <query_views_log remove="1"/>
+    <session_log remove="1"/>
     <text_log remove="1"/>
     <trace_log remove="1"/>
+    <opentelemetry_span_log remove="1"/>
+    <zookeeper_log remove="1"/>
+    <zookeeper_connection_log remove="1"/>
+    <aggregated_zookeeper_log remove="1"/>
     <processors_profile_log remove="1"/>
+    <latency_log remove="1"/>
+    <background_schedule_pool_log remove="1"/>
 
     <query_log>
         <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
@@ -45,20 +69,4 @@
         <max_size_rows>1048576</max_size_rows>
         <flush_interval_milliseconds>7500</flush_interval_milliseconds>
     </part_log>
-    <metric_log>
-        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
-        <max_size_rows>1048576</max_size_rows>
-    </metric_log>
-    <asynchronous_metric_log>
-        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
-        <max_size_rows>2097152</max_size_rows>
-    </asynchronous_metric_log>
-    <query_views_log>
-        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
-        <max_size_rows>1048576</max_size_rows>
-    </query_views_log>
-    <asynchronous_insert_log>
-        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
-        <max_size_rows>1048576</max_size_rows>
-    </asynchronous_insert_log>
 </clickhouse>
