@@ -1245,6 +1245,23 @@ jobs:
           exit 1
           REMOTE
 
+      - name: prune old images
+        run: |
+          set -euo pipefail
+          # Every deploy pulls a fresh image; unpruned they pile up until the
+          # disk fills and stalls ClickHouse writes. Runs only after a healthy
+          # gate. prune -a spares any image a container references, so the
+          # active color and the stopped previous color (instant rollback) both
+          # survive; deeper rollbacks re-pull from GHCR. Best-effort, never
+          # fails a deploy.
+          ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
+              "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s <<'REMOTE' || true
+          echo "disk before:"; df -h / | tail -1
+          docker image prune -af || true
+          docker builder prune -af || true
+          echo "disk after:"; df -h / | tail -1
+          REMOTE
+
       - name: annotate grafana (optional)
         env:
           ANNO_URL: ${{ secrets.GRAFANA_ANNOTATIONS_URL }}
