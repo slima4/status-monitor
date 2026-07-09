@@ -160,6 +160,10 @@ pub const LANDINGS: &[Landing] = &[
                 href: "/pricing",
             },
             ResourceLink {
+                label: "Uptime SLA calculator",
+                href: "/tools/uptime-sla-calculator",
+            },
+            ResourceLink {
                 label: "Versus Statuspage",
                 href: "/vs/statuspage",
             },
@@ -518,6 +522,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Terraform provider",
                 href: "/terraform-uptime-monitoring",
+            },
+            ResourceLink {
+                label: "Uptime SLA calculator",
+                href: "/tools/uptime-sla-calculator",
             },
             ResourceLink {
                 label: "Best self-hosted monitors",

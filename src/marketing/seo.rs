@@ -24,6 +24,7 @@ use super::config::{
 use super::landings;
 use super::legal;
 use super::pages::{APPLICATION_XML, TEXT_PLAIN};
+use super::tools;
 
 const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=86400");
 
@@ -52,7 +53,7 @@ The source is AGPL to self-host with no limits.";
 const LLMS_FACTS: &[(&str, &str)] = &[
     (
         "Check types",
-        "HTTP/HTTPS, TCP, DNS, TLS certificate, ICMP ping",
+        "HTTP/HTTPS, TCP, DNS, TLS certificate, domain expiry, ICMP ping",
     ),
     ("Check interval", "every 60 seconds"),
     (
@@ -186,6 +187,30 @@ pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
             "price": "0",
             "priceCurrency": "USD",
         },
+    });
+    JsonLd::from_value(payload)
+}
+
+/// `WebApplication` for a standalone free tool: its own entity, marked free,
+/// published by the org. Distinct from `json_ld_software_application`, which
+/// describes the product itself.
+pub fn json_ld_web_application(
+    canonical_origin: &str,
+    name: &str,
+    path: &str,
+    description: &str,
+) -> JsonLd {
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": name,
+        "url": format!("{canonical_origin}{path}"),
+        "description": description,
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Web",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "publisher": { "@id": format!("{canonical_origin}/#organization") },
     });
     JsonLd::from_value(payload)
 }
@@ -485,6 +510,14 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
         }
     }
 
+    s.push_str("## Tools\n");
+    s.push_str(&format!(
+        "- [{title}]({origin}{path}): {desc}\n\n",
+        title = tools::UPTIME_SLA_TITLE,
+        path = tools::UPTIME_SLA_PATH,
+        desc = tools::UPTIME_SLA_DESCRIPTION,
+    ));
+
     s.push_str("## Developers & automation\n");
     s.push_str(&format!(
         "- [MCP server]({MCP_URL}): Connect an LLM client (Claude, IDEs) to read monitors and incidents and take fenced actions. OAuth one-click.\n"
@@ -585,6 +618,7 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
             Some(landing.lastmod.to_string()),
         ));
     }
+    urls.push((format!("{origin}{}", tools::UPTIME_SLA_PATH), None));
     for route in legal::ROUTES {
         urls.push((format!("{origin}{}", route.path), None));
     }

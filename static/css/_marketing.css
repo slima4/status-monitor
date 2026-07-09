@@ -566,6 +566,43 @@ html:has(.marketing-shell) {
 .cmp .part { color: oklch(0.62 0.13 66); }
 .cmp__note { font-family: var(--mk-font-mono); font-size: 0.6875rem; color: var(--mk-quiet); margin-top: 0.6rem; }
 
+/* ── Free tools: interactive calculator ───────────────────────────── */
+.tool-calc { padding: 1.5rem; border-radius: 2px; box-shadow: var(--mk-shadow-frame); }
+.tool-calc__head { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }
+.tool-calc__label { font-family: var(--mk-font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mk-quiet); }
+.tool-calc__field { display: inline-flex; align-items: baseline; gap: 0.15rem; border-bottom: 2px solid var(--mk-rule); padding-bottom: 0.15rem; }
+.tool-calc__field:focus-within { border-bottom-color: var(--mk-ok); }
+.tool-input { width: 6ch; border: 0; background: transparent; color: var(--mk-ink); font-size: 2rem; font-weight: 600; line-height: 1; padding: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.tool-input:focus { outline: none; }
+.tool-input[aria-invalid="true"] { color: var(--mk-down); }
+.tool-input::-webkit-outer-spin-button, .tool-input::-webkit-inner-spin-button { appearance: none; margin: 0; }
+.tool-input__suffix { font-size: 1.25rem; font-weight: 600; color: var(--mk-quiet); }
+
+.tool-presets { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem; margin-top: 1.1rem; }
+.tool-preset { display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-bg-2); color: var(--mk-ink-soft); font-size: 0.75rem; line-height: 1; padding: 0.45rem 0.7rem; cursor: pointer; transition: border-color 140ms ease, color 140ms ease, background 140ms ease, transform 120ms ease; }
+.tool-preset:hover { border-color: var(--mk-rule-hover); color: var(--mk-ink); }
+.tool-preset:focus-visible { outline: 2px solid var(--mk-ok); outline-offset: 1px; }
+.tool-preset:active { transform: scale(0.96); }
+.tool-preset.is-active { border-color: var(--mk-ok); background: var(--mk-ok-soft); color: var(--mk-ink); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .tool-preset:active { transform: none; } }
+@media (pointer: coarse) { .tool-preset { min-height: 44px; } }
+
+.tool-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin-top: 1.5rem; background: var(--mk-rule); border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; }
+@media (min-width: 640px) { .tool-grid { grid-template-columns: repeat(4, 1fr); } }
+.tool-metric { display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.1rem; background: var(--mk-surface); }
+.tool-metric__value { font-size: 1.25rem; font-weight: 600; color: var(--mk-ok); font-variant-numeric: tabular-nums; }
+.tool-metric__label { font-family: var(--mk-font-mono); font-size: 0.625rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mk-quiet); }
+.tool-note { font-size: 0.75rem; margin-top: 1rem; text-align: center; }
+.tool-note .mk-ok { font-variant-numeric: tabular-nums; }
+
+.tool-rev { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem 0.75rem; margin-top: 0.75rem; }
+.tool-input--sm { font-size: 1.5rem; width: 4ch; text-align: center; border-bottom: 2px solid var(--mk-rule); padding-bottom: 0.1rem; }
+.tool-input--sm:focus { border-bottom-color: var(--mk-ok); }
+.tool-btngroup { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; }
+.tool-rev__per { font-size: 0.8125rem; }
+.tool-rev__out { font-size: 1.125rem; color: var(--mk-ink-soft); margin-top: 1.25rem; }
+.tool-rev__out .mk-ok { font-weight: 600; font-variant-numeric: tabular-nums; }
+
 /* ── Shared helpers (replace inline styles the marketing CSP blocks) ─ */
 .mk-panel { border: 1px solid var(--mk-rule); background: var(--mk-surface); }
 .mk-ink-soft { color: var(--mk-ink-soft); }

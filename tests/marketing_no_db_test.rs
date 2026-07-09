@@ -179,6 +179,55 @@ async fn llms_txt_renders() {
 }
 
 #[tokio::test]
+async fn uptime_sla_tool_renders_without_db() {
+    let (status, body, headers) = get("/tools/uptime-sla-calculator").await;
+    assert_eq!(status, StatusCode::OK);
+    // Server-rendered default state: 99.9% resolves to these before any JS.
+    assert!(
+        body.contains("43m 12s"),
+        "must render the 99.9% monthly downtime server-side"
+    );
+    assert!(
+        body.contains("8h 45m 36s"),
+        "must render the 99.9% yearly downtime in the reference table"
+    );
+    assert!(
+        body.contains("js/marketing/uptime_sla"),
+        "must load the calculator script"
+    );
+    assert!(
+        body.contains("uptime percentage calculator"),
+        "must cover the secondary keyword"
+    );
+    assert!(
+        body.contains("99.8611%"),
+        "reverse widget must render its default uptime server-side"
+    );
+    assert!(
+        body.contains("WebApplication") && body.contains("isAccessibleForFree"),
+        "must carry the free WebApplication schema"
+    );
+    assert!(
+        body.contains("https://app.uptimepage.dev/login"),
+        "tool CTA should link to app_url"
+    );
+    assert!(
+        headers.contains_key(header::ETAG),
+        "tool page must set a strong ETag"
+    );
+}
+
+#[tokio::test]
+async fn sitemap_lists_the_tool() {
+    let (status, body, _) = get("/sitemap.xml").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("https://uptimepage.dev/tools/uptime-sla-calculator"),
+        "sitemap must list the SLA tool"
+    );
+}
+
+#[tokio::test]
 async fn automation_landing_renders() {
     let (status, body, _) = get("/automation").await;
     assert_eq!(status, StatusCode::OK);

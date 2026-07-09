@@ -118,4 +118,8 @@ production. It's also how we'd tell you to read [the open-source and
 self-hosted tools](/blog/best-self-hosted-uptime-monitoring-tools): pick the
 dull one you'll never have to think about.
 
+And before you promise anyone a number, it's worth seeing [what each uptime
+percentage actually costs you in downtime](/tools/uptime-sla-calculator): the
+gap between three nines and four is a lot bigger than it reads on a slide.
+
 Your future self, at 2:47 a.m. on some Tuesday, will thank you.

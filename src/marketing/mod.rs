@@ -23,6 +23,7 @@ pub mod landings;
 pub mod legal;
 pub mod pages;
 pub mod seo;
+pub mod tools;
 
 use std::sync::Arc;
 
@@ -52,6 +53,7 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .route("/llms-full.txt", get(seo::llms_full_txt));
     r = legal::mount(r);
     r = landings::mount(r);
+    r = tools::mount(r);
     if state.blog_enabled {
         r = r
             .route("/blog", get(blog::index))
@@ -76,6 +78,7 @@ fn warm_caches(state: &Arc<MarketingCfg>) {
     pages::warm(state);
     legal::warm(state);
     landings::warm(state);
+    tools::warm(state);
     if state.blog_enabled {
         blog::warm(state);
     }
