@@ -83,14 +83,18 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # no browser. A flow-capable agent builds with `--build-arg WITH_LIGHTPANDA=true`
 # plus the glibc base (`--build-arg FINAL_IMAGE=gcr.io/distroless/cc-debian12:nonroot`).
 # The binary is picked per TARGETARCH so the image runs on both amd64 and arm64
-# hosts. Pin tracks the Lightpanda `nightly` channel (stable 0.3.x predates the
-# runtime egress flags the engine passes); bump both checksums when it rolls.
+# hosts. Fetched from our own release mirror, not upstream: Lightpanda publishes
+# only a rolling `nightly` tag, so pulling it directly would break the build the
+# moment upstream re-rolls (checksum mismatch). The mirror holds the exact pinned
+# bytes; bump the tag + both checksums together to move to a newer engine. The
+# stable 0.3.x line predates the runtime egress flags the engine passes, so we
+# track nightly rather than a stable release.
 FROM alpine:3.21 AS lightpanda
 ARG WITH_LIGHTPANDA=false
 ARG TARGETARCH
-ARG LIGHTPANDA_VERSION=nightly
-ARG LIGHTPANDA_SHA256_AMD64=4022b6036a02e9f676f2184099d92ab608456d9d7e9e8ea2a04ec6ea7407247e
-ARG LIGHTPANDA_SHA256_ARM64=8e6d4d556453b814a1bef5decb2529e42310bb7b71db90ae59cdcbc9cc65a894
+ARG LIGHTPANDA_MIRROR_TAG=lightpanda-mirror-2026-07-09
+ARG LIGHTPANDA_SHA256_AMD64=55b358a7a3bcabcfb7ab5038708f035e20713ebcbb699dcda864035048ffd455
+ARG LIGHTPANDA_SHA256_ARM64=2937ae335d2790bb316c59312d141f123a400f5db8bef4f7dbd5f8fb6d92917a
 RUN mkdir -p /lp && \
     if [ "$WITH_LIGHTPANDA" = "true" ]; then \
         apk add --no-cache curl && \
@@ -100,7 +104,7 @@ RUN mkdir -p /lp && \
           *) echo "no lightpanda build for arch: ${TARGETARCH:-unknown}" >&2; exit 1 ;; \
         esac && \
         curl -fsSL -o /lp/lightpanda \
-          "https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}/${asset}" && \
+          "https://github.com/uptimepage/uptimepage/releases/download/${LIGHTPANDA_MIRROR_TAG}/${asset}" && \
         echo "${sum}  /lp/lightpanda" | sha256sum -c - && \
         chmod 0755 /lp/lightpanda ; \
     else \

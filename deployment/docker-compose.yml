@@ -215,10 +215,17 @@ services:
     image: ${UPTIMEPAGE_IMAGE:-uptimepage:latest}
     restart: unless-stopped
     stop_grace_period: 30s
+    # Distroless ships no writable /tmp; the flow engine needs scratch space.
+    tmpfs:
+      - /tmp
     expose:
       - "9090"
     environment:
       UPTIMEPAGE_AGENT__ENABLED: "true"
+      # Browser flow probing. Off unless AGENT_FLOW_ENABLED=true in .env, so only
+      # the region wired for it runs flows; the engine ships in every image.
+      UPTIMEPAGE_FLOW__ENABLED: ${AGENT_FLOW_ENABLED:-false}
+      UPTIMEPAGE_FLOW__LIGHTPANDA_PATH: /usr/local/bin/lightpanda
       # Bind metrics on all interfaces (default is loopback) so the Alloy
       # sidecar can scrape the agent's probe-side metrics over the network.
       UPTIMEPAGE_SERVER__METRICS_BIND: 0.0.0.0:9090

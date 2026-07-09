@@ -237,6 +237,9 @@ jobs:
           UPTIMEPAGE_SCHEDULER_ENABLED: ${{ vars.UPTIMEPAGE_SCHEDULER_ENABLED }}
           UPTIMEPAGE_SCHEDULER_REGION: ${{ vars.UPTIMEPAGE_SCHEDULER_REGION }}
           UPTIMEPAGE_SCHEDULER_DEFAULT_REGION: ${{ vars.UPTIMEPAGE_SCHEDULER_DEFAULT_REGION }}
+          # Flips browser-flow probing on the co-located agent (compose gates the
+          # agent's UPTIMEPAGE_FLOW__ENABLED on it). Absent = stays off.
+          AGENT_FLOW_ENABLED: ${{ vars.AGENT_FLOW_ENABLED }}
         run: |
           set -euo pipefail
           # Lowercase only the repo (GHCR requires it); OCI tags are
@@ -290,6 +293,7 @@ jobs:
                UPTIMEPAGE_SCHEDULER_ENABLED='${UPTIMEPAGE_SCHEDULER_ENABLED}' \
                UPTIMEPAGE_SCHEDULER_REGION='${UPTIMEPAGE_SCHEDULER_REGION}' \
                UPTIMEPAGE_SCHEDULER_DEFAULT_REGION='${UPTIMEPAGE_SCHEDULER_DEFAULT_REGION}' \
+               AGENT_FLOW_ENABLED='${AGENT_FLOW_ENABLED}' \
                bash -s" <<'REMOTE'
           # This script is delivered to `bash -s` over the ssh heredoc — i.e. on
           # stdin (fd 0). A `docker compose exec -T` / `docker exec -i` / nested
@@ -640,7 +644,8 @@ jobs:
           # revert, clear the key in .env. Same per-key write-once contract as
           # the blocks above.
           for k in HOME_AGENT_TOKEN UPTIMEPAGE_SCHEDULER_ENABLED \
-                   UPTIMEPAGE_SCHEDULER_REGION UPTIMEPAGE_SCHEDULER_DEFAULT_REGION; do
+                   UPTIMEPAGE_SCHEDULER_REGION UPTIMEPAGE_SCHEDULER_DEFAULT_REGION \
+                   AGENT_FLOW_ENABLED; do
             v=$(printenv "$k" || true)
             [ -n "$v" ] || continue
             cp .env ".env.bak.$(date +%s).split.${k}"

@@ -130,9 +130,14 @@ jobs:
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
           # AGPL-3.0 §13 source-offer identity baked into the binary.
+          # Ship the browser engine on a glibc base so a flow-capable agent can
+          # run real flows (v8 needs glibc); the brain + non-flow agents carry
+          # it unused, gated off by flow.enabled.
           build-args: |
             SM_SOURCE_COMMIT=${{ github.sha }}
             SM_SOURCE_URL=${{ github.server_url }}/${{ github.repository }}
+            WITH_LIGHTPANDA=true
+            FINAL_IMAGE=gcr.io/distroless/cc-debian12:nonroot
           labels: ${{ steps.meta.outputs.labels }}
           # Push the arch image with no tag; the merge job references it by
           # digest. name-canonical keeps the digest tied to the final repo name.
