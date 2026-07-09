@@ -29,4 +29,36 @@
             <max_memory_usage>1500000000</max_memory_usage>
         </default>
     </profiles>
+
+    <!-- Unbounded system logs filled the disk (~12 GB of logs vs ~20 MB of data). -->
+    <text_log remove="1"/>
+    <trace_log remove="1"/>
+    <processors_profile_log remove="1"/>
+
+    <query_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        <max_size_rows>1048576</max_size_rows>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </query_log>
+    <part_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        <max_size_rows>1048576</max_size_rows>
+        <flush_interval_milliseconds>7500</flush_interval_milliseconds>
+    </part_log>
+    <metric_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        <max_size_rows>1048576</max_size_rows>
+    </metric_log>
+    <asynchronous_metric_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        <max_size_rows>2097152</max_size_rows>
+    </asynchronous_metric_log>
+    <query_views_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        <max_size_rows>1048576</max_size_rows>
+    </query_views_log>
+    <asynchronous_insert_log>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+        <max_size_rows>1048576</max_size_rows>
+    </asynchronous_insert_log>
 </clickhouse>
