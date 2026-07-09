@@ -16,7 +16,7 @@ futures = "0.3"
 # Headless CDP client for browser-driven flow monitors (drives a Lightpanda
 # engine over the Chrome DevTools Protocol). Pinned to the version validated
 # end-to-end against Lightpanda.
-chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+chromiumoxide = "0.9"
 
 # HTTP client (custom hyper-util stack for connect/tls timing + pool gauges)
 hyper = { version = "1.9", features = ["client", "http1", "http2"] }
