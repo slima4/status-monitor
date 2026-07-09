@@ -2318,6 +2318,11 @@
     details[open] > .sm-help-summary .sm-help-tri { transform: rotate(90deg); }
     @media (prefers-reduced-motion: reduce) { .sm-help-tri { transition: none; } }
 
+    /* Login: email sign-in hides behind a quiet disclosure line. */
+    .magic-summary { list-style: none; }
+    .magic-summary::-webkit-details-marker { display: none; }
+    .magic-summary:hover { color: var(--theme-text); }
+
     .usage-row__label {
         @apply text-sm font-medium;
         color: var(--theme-text);

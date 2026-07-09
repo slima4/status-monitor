@@ -91,30 +91,19 @@
 
     {% if magic_link_enabled %}
     {% if github_enabled || google_enabled %}
-    <p class="text-center text-xs text-muted" aria-hidden="true"><span class="cli-brackets">or</span></p>
-    {% endif %}
-    <form id="magic-link-form" class="space-y-3" novalidate>
-      <label class="sr-only" for="magic-link-email">Email address</label>
-      <input id="magic-link-email" name="email" type="email" required autocomplete="email"
-             placeholder="you@company.com" spellcheck="false"
-             class="w-full field">
-      <button type="submit"
-              class="sticker-btn sticker-btn--accent relative inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
-        email me a sign-in link
+    {# Email sign-in only redeems existing or invited accounts, so it hides
+       behind a disclosure and OAuth stays the new-account path. Open by
+       default when it was the last method used. #}
+    <details{% if last_magic %} open{% endif %}>
+      <summary class="magic-summary relative cursor-pointer text-center text-sm text-muted">
+        Already registered? <span class="underline decoration-dotted underline-offset-2">email me a sign-in link</span>
         {% if last_magic %}{% include "auth/_last_used.html" %}{% endif %}
-      </button>
-      {% if github_enabled || google_enabled %}
-      <p class="text-center text-xs text-muted">signs in existing accounts &mdash; new here? use github or google above</p>
-      {% endif %}
-      <div id="magic-link-error" role="alert" aria-live="polite"
-           class="hidden alert-card alert-card--error"></div>
-    </form>
-    <p id="magic-link-sent" class="alert-card alert-card--muted hidden text-sm">
-      Check your inbox &mdash; if that address has an account, a sign-in link is
-      on its way. The link works once and expires in
-      {{ magic_link_expiry_minutes }} minutes. Nothing arrived? You can
-      request another shortly.
-    </p>
+      </summary>
+      {% include "auth/_magic_link_form.html" %}
+    </details>
+    {% else %}
+    {% include "auth/_magic_link_form.html" %}
+    {% endif %}
     <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
     <script defer src="{{ "js/ui/login_magic_link.js"|asset }}"></script>
     {% endif %}
