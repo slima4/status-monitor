@@ -332,6 +332,25 @@ services:
     # No depends_on the app: Alloy scrapes/tails over the network and must
     # survive either color being the one that's down.
 
+  # Host metrics for Grafana Cloud. A full disk once stalled ClickHouse writes
+  # with no early signal; node_filesystem_avail_bytes feeds the disk-space
+  # alerts. Filesystem collector only, so ingest stays tiny. Reads the host
+  # rootfs read-only. Metrics profile, like alloy; internal port, not published.
+  node-exporter:
+    image: prom/node-exporter:v1.11.1
+    restart: unless-stopped
+    profiles: ["metrics"]
+    command:
+      - --path.procfs=/host/proc
+      - --path.rootfs=/rootfs
+      - --collector.disable-defaults
+      - --collector.filesystem
+    volumes:
+      - /proc:/host/proc:ro
+      - /:/rootfs:ro
+    expose:
+      - "9100"
+
 volumes:
   caddy_data:
   caddy_config:

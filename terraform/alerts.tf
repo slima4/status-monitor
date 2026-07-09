@@ -607,6 +607,94 @@ resource "grafana_rule_group" "pipeline" {
       model = local.threshold_c
     }
   }
+
+  # Root disk filling. A full disk stalls ClickHouse inserts (Code 243
+  # NOT_ENOUGH_SPACE) and crashes Postgres on ENOSPC, and the pipeline alerts
+  # only fire once results are already lost. Warn at 80% used so there is time
+  # to reclaim (prune images, cap system logs) before the wall. Used-fraction
+  # (not free) so the value stays positive at 100% full and ref-C's `> 0` keeps
+  # firing. Sourced from the node-exporter sidecar (metrics profile); no_data =
+  # OK so a host without that profile never false-fires. Blind spot: if
+  # node-exporter alone dies while the app keeps reporting, disk goes unwatched
+  # until it returns.
+  rule {
+    name           = "UptimepageDiskSpaceLow"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: root disk over 80% full"
+      description = "less than 20% root-disk space free for 10m. Reclaim before it fills: prune docker images, check ClickHouse system-log and data growth. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}) > 0.80"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Root disk nearly full: ClickHouse NOT_ENOUGH_SPACE and a Postgres ENOSPC
+  # crash are minutes away at this point. Critical, and a lower `for` than the
+  # warning so it pages fast.
+  rule {
+    name           = "UptimepageDiskSpaceCritical"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: root disk over 90% full"
+      description = "less than 10% root-disk space free for 5m. ClickHouse inserts and Postgres will start failing as it reaches 100%. Reclaim disk now. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}) > 0.90"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
 }
 
 # Availability / dead-man alerts. Every rule above assumes data is flowing

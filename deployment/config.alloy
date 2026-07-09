@@ -41,6 +41,18 @@ prometheus.scrape "uptimepage_agent" {
   scrape_interval = "15s"
 }
 
+// Host filesystem metrics from the node-exporter sidecar (present only under
+// the `metrics` profile, same as this collector). Feeds the disk-space alerts
+// so a filling disk pages before it stalls ClickHouse writes.
+prometheus.scrape "node" {
+  targets = [
+    { __address__ = "node-exporter:9100" },
+  ]
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  job_name        = "node"
+  scrape_interval = "30s"
+}
+
 // Remote-write to Grafana Cloud Prometheus. URL and credentials are
 // environment-specific and supplied via the container env:
 //   GRAFANA_CLOUD_PROM_URL   e.g. https://prometheus-prod-XX-<zone>.grafana.net/api/prom/push
