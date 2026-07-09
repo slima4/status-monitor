@@ -137,6 +137,7 @@ fn kind_label(kind: &str) -> &'static str {
         "dns" => "DNS",
         "tls_cert" => "TLS",
         "domain_expiry" => "Domain",
+        "flow" => "Flow",
         _ => "Check",
     }
 }
@@ -150,6 +151,7 @@ fn name_hint(kind: &str) -> &'static str {
         "dns" => "e.g. DNS",
         "tls_cert" => "e.g. TLS certificate",
         "domain_expiry" => "e.g. Domain expiry",
+        "flow" => "e.g. Login flow",
         _ => "Public display name",
     }
 }

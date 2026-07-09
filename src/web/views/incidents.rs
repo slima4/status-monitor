@@ -229,6 +229,7 @@ fn kind_label(kind: &str) -> &'static str {
         "dns" => "dns",
         "tls_cert" => "tls",
         "domain_expiry" => "domain",
+        "flow" => "flow",
         _ => "http",
     }
 }

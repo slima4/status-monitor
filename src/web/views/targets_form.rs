@@ -1031,17 +1031,22 @@ mod tests {
         }
         .render()
         .unwrap();
-        // Heartbeat is temporarily hidden from the create picker; every other
-        // kind gets a card, and every kind (heartbeat included) keeps its panel.
-        let picker_kinds = CheckSpec::ALL_KINDS.iter().filter(|k| **k != "heartbeat");
+        // Heartbeat is hidden from the create picker outright; flow is hidden
+        // unless the plan allows it (empty_create_form is the dark default).
+        // Every remaining kind gets a card, and every kind keeps its panel.
+        let picker_kinds = CheckSpec::ALL_KINDS
+            .iter()
+            .filter(|k| **k != "heartbeat" && **k != "flow");
         assert_eq!(
             html.matches("data-check-card").count(),
             picker_kinds.clone().count()
         );
-        assert!(
-            !html.contains(r#"name="check_type" value="heartbeat""#),
-            "heartbeat card must be hidden on the create form"
-        );
+        for hidden in ["heartbeat", "flow"] {
+            assert!(
+                !html.contains(&format!(r#"name="check_type" value="{hidden}""#)),
+                "{hidden} card must be hidden on the default create form"
+            );
+        }
         for v in picker_kinds {
             assert!(
                 html.contains(&format!(r#"value="{v}""#)),
@@ -1057,6 +1062,20 @@ mod tests {
         }
         // Default selection lands on HTTP.
         assert!(html.contains(r#"name="check_type" value="http" checked"#));
+
+        // When the plan allows flow, its card appears.
+        let mut form = empty_create_form();
+        form.flow_available = true;
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(
+            html.contains(r#"value="flow""#),
+            "flow card must show when the plan allows it"
+        );
     }
 
     #[test]

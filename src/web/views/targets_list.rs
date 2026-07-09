@@ -463,6 +463,7 @@ fn chip_to_db_kind(label: &str) -> Option<String> {
         "DNS" => Some("dns"),
         "TLS" => Some("tls_cert"),
         "DOMAIN" => Some("domain_expiry"),
+        "FLOW" => Some("flow"),
         _ => None,
     }
     .map(str::to_owned)
@@ -478,6 +479,7 @@ fn db_kind_to_chip(kind: &str) -> Option<&'static str> {
         "dns" => Some("DNS"),
         "tls_cert" => Some("TLS"),
         "domain_expiry" => Some("DOMAIN"),
+        "flow" => Some("FLOW"),
         _ => None,
     }
 }
