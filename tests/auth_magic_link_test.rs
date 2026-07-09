@@ -59,6 +59,72 @@ async fn create_then_consume_roundtrip() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
+async fn peek_is_read_only_and_does_not_consume() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created = magic_link::create(&pool, "peek@example.test", None, 15, None, None)
+        .await
+        .expect("create");
+
+    // Peek returns the row but must leave the token spendable.
+    let peeked = magic_link::peek(&pool, &created.token)
+        .await
+        .expect("peek")
+        .expect("row");
+    assert_eq!(peeked.id, created.row.id);
+    let unused: bool =
+        sqlx::query_scalar("SELECT used_at IS NULL FROM magic_link_tokens WHERE id = $1")
+            .bind(created.row.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(unused, "peek must not mark the token used");
+
+    // A second peek still succeeds, and consume then still redeems once.
+    assert!(
+        magic_link::peek(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        magic_link::consume(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        magic_link::consume(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_none(),
+        "consume after peek is still single-use"
+    );
+
+    // Peek of a now-spent token, and of an unknown token, both return None.
+    assert!(
+        magic_link::peek(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_none(),
+        "peek of a spent token is None"
+    );
+    assert!(
+        magic_link::peek(&pool, "this-token-was-never-issued")
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
 async fn consume_with_unknown_token_returns_none() {
     let Some((db, name)) = fresh_pg().await else {
         return;

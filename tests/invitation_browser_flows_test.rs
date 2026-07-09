@@ -106,6 +106,59 @@ async fn get(app: &axum::Router, uri: &str) -> (StatusCode, Option<String>) {
     (status, location)
 }
 
+/// First Set-Cookie value for `name`, stripped of attributes.
+fn cookie_value(resp: &axum::response::Response, name: &str) -> Option<String> {
+    let prefix = format!("{name}=");
+    resp.headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .find_map(|c| c.strip_prefix(&prefix))
+        .and_then(|rest| rest.split(';').next())
+        .map(str::to_string)
+}
+
+/// Drive the two-step verify: GET the confirmation page (read-only, must not
+/// consume the token) then POST it back with the double-submit nonce the GET
+/// set. Returns (GET status, POST status, POST Location).
+async fn magic_verify(app: &axum::Router, token: &str) -> (StatusCode, StatusCode, Option<String>) {
+    let get_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/auth/magic-link/verify?token={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let get_status = get_resp.status();
+    let Some(nonce) = cookie_value(&get_resp, "_sm_ml_confirm") else {
+        // No nonce issued (invalid token); the GET status is the outcome.
+        return (get_status, get_status, None);
+    };
+    let post_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/magic-link/verify")
+                .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                .header(header::COOKIE, format!("_sm_ml_confirm={nonce}"))
+                .body(Body::from(format!("token={token}&csrf={nonce}")))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let post_status = post_resp.status();
+    let location = post_resp
+        .headers()
+        .get(header::LOCATION)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    (get_status, post_status, location)
+}
+
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
 async fn get_accept_without_session_bounces_to_login_without_mutating() {
@@ -245,11 +298,12 @@ async fn magic_verify_existing_user_auto_accepts_and_lands_in_org() {
     .unwrap();
 
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
-    let (status, location) = get(
-        &app,
-        &format!("/auth/magic-link/verify?token={}", minted.token),
-    )
-    .await;
+    let (get_status, status, location) = magic_verify(&app, &minted.token).await;
+    assert_eq!(
+        get_status,
+        StatusCode::OK,
+        "confirm page must render for a live token"
+    );
     assert!(status.is_redirection(), "expected redirect, got {status}");
     assert_eq!(
         location.as_deref(),
@@ -294,11 +348,12 @@ async fn magic_verify_bootstraps_invited_unknown_email() {
     .unwrap();
 
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
-    let (status, location) = get(
-        &app,
-        &format!("/auth/magic-link/verify?token={}", minted.token),
-    )
-    .await;
+    let (get_status, status, location) = magic_verify(&app, &minted.token).await;
+    assert_eq!(
+        get_status,
+        StatusCode::OK,
+        "confirm page must render for a live token"
+    );
     assert!(status.is_redirection(), "expected redirect, got {status}");
     assert_eq!(
         location.as_deref(),
@@ -338,11 +393,12 @@ async fn magic_verify_unknown_email_without_invitation_is_410_no_user() {
         .await
         .unwrap();
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
-    let (status, _) = get(
-        &app,
-        &format!("/auth/magic-link/verify?token={}", minted.token),
-    )
-    .await;
+    let (get_status, status, _) = magic_verify(&app, &minted.token).await;
+    assert_eq!(
+        get_status,
+        StatusCode::OK,
+        "confirm page must render for a live token"
+    );
     assert_eq!(status, StatusCode::GONE);
     let users: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM users WHERE email = 'ghost7@example.test'::citext",
@@ -379,11 +435,12 @@ async fn magic_verify_bootstrap_email_mismatch_is_410_no_user() {
     .await
     .unwrap();
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
-    let (status, _) = get(
-        &app,
-        &format!("/auth/magic-link/verify?token={}", minted.token),
-    )
-    .await;
+    let (get_status, status, _) = magic_verify(&app, &minted.token).await;
+    assert_eq!(
+        get_status,
+        StatusCode::OK,
+        "confirm page must render for a live token"
+    );
     assert_eq!(status, StatusCode::GONE);
     let users: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM users WHERE email = 'stranger8@example.test'::citext",
@@ -412,11 +469,12 @@ async fn magic_verify_plain_login_resolves_active_org() {
         .await
         .unwrap();
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
-    let (status, _) = get(
-        &app,
-        &format!("/auth/magic-link/verify?token={}", minted.token),
-    )
-    .await;
+    let (get_status, status, _) = magic_verify(&app, &minted.token).await;
+    assert_eq!(
+        get_status,
+        StatusCode::OK,
+        "confirm page must render for a live token"
+    );
     assert!(status.is_redirection());
     // Regression pin: magic sessions used to be minted with NULL active_org,
     // which CurrentOrg rejects.
@@ -493,11 +551,12 @@ async fn b2_full_org_creates_no_user_and_keeps_invitation() {
     .await
     .unwrap();
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
-    let (status, _) = get(
-        &app,
-        &format!("/auth/magic-link/verify?token={}", minted.token),
-    )
-    .await;
+    let (get_status, status, _) = magic_verify(&app, &minted.token).await;
+    assert_eq!(
+        get_status,
+        StatusCode::OK,
+        "confirm page must render for a live token"
+    );
     assert_eq!(status, StatusCode::GONE);
     let users: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM users WHERE email = 'fresh11@example.test'::citext",
@@ -554,6 +613,123 @@ async fn get_accept_rotates_session_active_org() {
             .await
             .unwrap();
     assert_eq!(active, Some(org.0), "session must open in the joined org");
+
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn magic_verify_get_prefetch_does_not_consume_then_post_signs_in() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let user = seed_user(&pool, "scan13@example.test").await;
+    let _org = seed_org(&pool, user).await;
+    let minted = magic_link::create(&pool, "scan13@example.test", None, 15, None, None)
+        .await
+        .unwrap();
+
+    let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
+
+    // A mail link-scanner prefetches the URL: the GET renders the confirm page
+    // but must NOT burn the single-use token (issue #92).
+    let get_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/auth/magic-link/verify?token={}", minted.token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(get_resp.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(get_resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert!(
+        String::from_utf8_lossy(&body).contains("scan13@example.test"),
+        "confirm page must name the account being signed into"
+    );
+    let unused: bool =
+        sqlx::query_scalar("SELECT used_at IS NULL FROM magic_link_tokens WHERE id = $1")
+            .bind(minted.row.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(unused, "GET prefetch consumed the token (#92 regression)");
+
+    // The recipient then completes sign-in via the confirmation POST.
+    let (_get, post, _loc) = magic_verify(&app, &minted.token).await;
+    assert!(
+        post.is_redirection(),
+        "human POST should sign in, got {post}"
+    );
+
+    // The link is now spent: a fresh confirm-page GET peeks nothing and 410s.
+    let (dead_get, _p, _l) = magic_verify(&app, &minted.token).await;
+    assert_eq!(
+        dead_get,
+        StatusCode::GONE,
+        "a spent token's confirm page must 410"
+    );
+
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn magic_verify_post_with_missing_or_mismatched_nonce_is_forbidden() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let user = seed_user(&pool, "csrf14@example.test").await;
+    let _org = seed_org(&pool, user).await;
+    let minted = magic_link::create(&pool, "csrf14@example.test", None, 15, None, None)
+        .await
+        .unwrap();
+
+    let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
+
+    let forged_post = |cookie: Option<&str>, csrf: &str| {
+        let mut req = Request::builder()
+            .method("POST")
+            .uri("/auth/magic-link/verify")
+            .header(header::CONTENT_TYPE, "application/x-www-form-urlencoded");
+        if let Some(c) = cookie {
+            req = req.header(header::COOKIE, format!("_sm_ml_confirm={c}"));
+        }
+        req.body(Body::from(format!("token={}&csrf={csrf}", minted.token)))
+            .unwrap()
+    };
+    let unused = || async {
+        sqlx::query_scalar::<_, bool>("SELECT used_at IS NULL FROM magic_link_tokens WHERE id = $1")
+            .bind(minted.row.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+
+    // No confirmation nonce at all: the double-submit fails closed.
+    let resp = app.clone().oneshot(forged_post(None, "")).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert!(unused().await, "forged POST must not consume the token");
+
+    // Cookie present but its value differs from the posted field.
+    let resp = app
+        .clone()
+        .oneshot(forged_post(Some("aaaaaaaa"), "bbbbbbbb"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert!(
+        unused().await,
+        "mismatched nonce must not consume the token"
+    );
 
     common::drop_test_db(&name).await;
 }

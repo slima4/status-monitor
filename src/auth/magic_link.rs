@@ -82,15 +82,11 @@ pub async fn create(
     })
 }
 
-/// Find and atomically mark-used the row matching `raw_token`. Returns the
-/// row's email on success; `None` for any of: nothing matched, expired,
-/// already used, deleted. Callers must not distinguish — surface a single
-/// indistinguishable invalid-link page.
-///
-/// Lookup is bounded by the indexed `token_prefix` (96-bit prefix entropy).
-/// Mark-used happens in a follow-up UPDATE keyed by `id` with a `used_at IS
-/// NULL` guard so a concurrent verify of the same token loses the race.
-pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkRow>> {
+/// First live (unused, unexpired, hash-matching) row for `raw_token`, or
+/// `None`. Read-only: does NOT mark the row used. Lookup is bounded by the
+/// indexed `token_prefix` (96-bit prefix entropy), then argon2-verified.
+/// Shared by [`peek`] and [`consume`].
+async fn find_live_candidate(pool: &PgPool, raw_token: &str) -> Result<Option<RawRow>> {
     let prefix = slice_prefix(raw_token);
     let candidates: Vec<RawRow> = sqlx::query_as(
         "SELECT id, email::text AS email, token_hash, created_at, expires_at, \
@@ -101,33 +97,45 @@ pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkR
     .bind(prefix)
     .fetch_all(pool)
     .await
-    .context("magic_link::consume: select candidates")?;
+    .context("magic_link: select candidates")?;
+    Ok(candidates
+        .into_iter()
+        .find(|r| token_hash::verify(raw_token, &r.token_hash)))
+}
 
-    for r in candidates {
-        if token_hash::verify(raw_token, &r.token_hash) {
-            let updated = sqlx::query(
-                "UPDATE magic_link_tokens SET used_at = now() \
-                 WHERE id = $1 AND used_at IS NULL",
-            )
-            .bind(r.id)
-            .execute(pool)
-            .await
-            .context("magic_link::consume: mark used")?;
-            if updated.rows_affected() == 0 {
-                // Lost the mark-used race; treat as already consumed.
-                return Ok(None);
-            }
-            return Ok(Some(MagicLinkRow {
-                id: r.id,
-                email: r.email,
-                created_at: r.created_at,
-                expires_at: r.expires_at,
-                redirect_after: r.redirect_after,
-                invitation_id: r.invitation_id,
-            }));
-        }
+/// Read-only validity check for the GET confirmation page: is there an unused,
+/// unexpired token matching `raw_token`? Returns its row WITHOUT marking it
+/// used, so a mail link-scanner's prefetch of the confirm page cannot burn the
+/// token; authoritative single-use redemption is [`consume`], on the POST.
+pub async fn peek(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkRow>> {
+    Ok(find_live_candidate(pool, raw_token)
+        .await?
+        .map(RawRow::into_row))
+}
+
+/// Find and atomically mark-used the row matching `raw_token`. Returns the
+/// row on success; `None` for any of: nothing matched, expired, already used,
+/// deleted. Callers must not distinguish; surface a single indistinguishable
+/// invalid-link page.
+///
+/// Mark-used is a follow-up UPDATE keyed by `id` with a `used_at IS NULL`
+/// guard so a concurrent verify of the same token loses the race.
+pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkRow>> {
+    let Some(r) = find_live_candidate(pool, raw_token).await? else {
+        return Ok(None);
+    };
+    let updated = sqlx::query(
+        "UPDATE magic_link_tokens SET used_at = now() WHERE id = $1 AND used_at IS NULL",
+    )
+    .bind(r.id)
+    .execute(pool)
+    .await
+    .context("magic_link::consume: mark used")?;
+    if updated.rows_affected() == 0 {
+        // Lost the mark-used race; treat as already consumed.
+        return Ok(None);
     }
-    Ok(None)
+    Ok(Some(r.into_row()))
 }
 
 /// Earliest unused row id for `email` whose `created_at` falls inside the
@@ -184,4 +192,17 @@ struct RawRow {
     expires_at: DateTime<Utc>,
     redirect_after: Option<String>,
     invitation_id: Option<Uuid>,
+}
+
+impl RawRow {
+    fn into_row(self) -> MagicLinkRow {
+        MagicLinkRow {
+            id: self.id,
+            email: self.email,
+            created_at: self.created_at,
+            expires_at: self.expires_at,
+            redirect_after: self.redirect_after,
+            invitation_id: self.invitation_id,
+        }
+    }
 }

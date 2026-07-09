@@ -19,22 +19,32 @@ use anyhow::Context;
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::Json;
-use axum::extract::{Query, State};
-use axum::http::header::USER_AGENT;
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::{Form, Query, State};
+use axum::http::header::{CACHE_CONTROL, USER_AGENT};
+use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
-use tower_cookies::Cookies;
+use subtle::ConstantTimeEq;
+use tower_cookies::cookie::SameSite;
+use tower_cookies::cookie::time::Duration as CookieDuration;
+use tower_cookies::{Cookie, Cookies};
 
 use crate::app::AppState;
 use crate::auth::email_norm;
 use crate::auth::login_audit::{self, LoginAttempt, LoginMethod};
 use crate::auth::url::token_link;
-use crate::auth::{fingerprint, magic_link, session as session_store};
+use crate::auth::{fingerprint, magic_link, session as session_store, token_hash};
+use crate::config::SessionConfig;
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::Result;
 use crate::storage::orgs as orgs_store;
 use crate::web::filters;
+
+/// Name of the double-submit nonce cookie that ties the confirm-page GET to the
+/// sign-in POST. Set on the GET, echoed in a hidden form field, checked on the
+/// POST. A cross-site forged POST can neither read nor set it, so it can't
+/// forge a login. Path-scoped to the verify endpoint; nothing else needs it.
+const CONFIRM_NONCE_COOKIE: &str = "_sm_ml_confirm";
 
 #[derive(Debug, Deserialize)]
 pub struct RequestBody {
@@ -155,18 +165,41 @@ pub struct VerifyQuery {
     pub token: String,
 }
 
-/// /verify is a clicked-from-mail GET — failures get a page, not JSON.
+/// POST body of the confirmation form rendered by [`verify_landing`]. `token`
+/// is the raw magic-link token echoed from the GET; `csrf` is the double-submit
+/// nonce that must equal the [`CONFIRM_NONCE_COOKIE`] value.
+#[derive(Debug, Deserialize)]
+pub struct ConfirmForm {
+    pub token: String,
+    #[serde(default)]
+    pub csrf: String,
+}
+
+/// Verify responses that aren't a redirect render a page, not JSON.
 #[derive(Template, WebTemplate)]
 #[template(path = "auth/magic_link_invalid.html")]
 struct MagicLinkInvalidPage {
     expiry_minutes: u32,
 }
 
-/// 410, not 200 — failed redemptions must stay visible in status-code
-/// dashboards and never be cacheable as success.
-fn invalid_page(state: &AppState) -> Response {
+/// The one-click confirmation served on GET so a mail link-scanner's prefetch
+/// can't burn the token. The token round-trips through a hidden field; the
+/// human's button press is the POST that signs in.
+#[derive(Template, WebTemplate)]
+#[template(path = "auth/magic_link_confirm.html")]
+struct MagicLinkConfirmPage {
+    email: String,
+    token: String,
+    csrf: String,
+}
+
+/// Failed redemptions render the indistinguishable invalid page. Status is
+/// caller-chosen: `GONE` for a dead/used/expired token (never cacheable as
+/// success, stays visible in status-code dashboards), `FORBIDDEN` for a
+/// missing or mismatched confirmation nonce.
+fn invalid_page(state: &AppState, status: StatusCode) -> Response {
     (
-        StatusCode::GONE,
+        status,
         MagicLinkInvalidPage {
             expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
         },
@@ -174,15 +207,82 @@ fn invalid_page(state: &AppState) -> Response {
         .into_response()
 }
 
-/// `GET /auth/magic-link/verify`. Atomically consumes the token, destroys any
-/// pre-login session bound to the browser (fixation defence), creates a fresh
-/// session, and redirects to `/`.
-pub async fn verify(
+/// Set the double-submit nonce cookie. Path-scoped to the verify endpoint,
+/// HttpOnly (the hidden field is server-rendered, JS never reads it), and it
+/// outlives the token so a still-valid link always has a live cookie to match.
+fn set_confirm_nonce(cookies: &Cookies, cfg: &SessionConfig, nonce: &str, token_ttl_minutes: u32) {
+    let mut c = Cookie::new(CONFIRM_NONCE_COOKIE, nonce.to_string());
+    c.set_http_only(true);
+    c.set_secure(cfg.cookie_secure);
+    c.set_same_site(SameSite::Lax);
+    c.set_path("/auth/magic-link/verify");
+    if !cfg.cookie_domain.is_empty() {
+        c.set_domain(cfg.cookie_domain.clone());
+    }
+    c.set_max_age(CookieDuration::minutes(i64::from(token_ttl_minutes) + 5));
+    cookies.add(c);
+}
+
+/// Constant-time double-submit check: the posted `csrf` must be non-empty and
+/// equal the nonce cookie the GET set on this browser.
+fn confirm_nonce_ok(cookies: &Cookies, posted: &str) -> bool {
+    let Some(cookie) = cookies.get(CONFIRM_NONCE_COOKIE) else {
+        return false;
+    };
+    !posted.is_empty() && cookie.value().as_bytes().ct_eq(posted.as_bytes()).into()
+}
+
+/// Clear the nonce cookie once its confirmation has been spent.
+fn clear_confirm_nonce(cookies: &Cookies, cfg: &SessionConfig) {
+    let mut gone = Cookie::new(CONFIRM_NONCE_COOKIE, "");
+    gone.set_path("/auth/magic-link/verify");
+    if !cfg.cookie_domain.is_empty() {
+        gone.set_domain(cfg.cookie_domain.clone());
+    }
+    cookies.remove(gone);
+}
+
+/// `GET /auth/magic-link/verify`. Read-only: peeks the token without consuming
+/// it and, for a live token, renders a one-click confirmation page carrying a
+/// fresh double-submit nonce. A mail scanner's prefetch lands here, leaves the
+/// token intact, and the recipient's button press completes sign-in via POST.
+pub async fn verify_landing(
     State(state): State<AppState>,
     Query(q): Query<VerifyQuery>,
+    cookies: Cookies,
+) -> Result<Response> {
+    let pool = state.require_db()?;
+    let Some(row) = magic_link::peek(pool, q.token.trim()).await? else {
+        return Ok(invalid_page(&state, StatusCode::GONE));
+    };
+    let nonce = token_hash::generate_raw_token();
+    set_confirm_nonce(
+        &cookies,
+        &state.cfg.auth.session,
+        &nonce,
+        state.cfg.auth.magic_link.expiry_minutes,
+    );
+    let mut resp = MagicLinkConfirmPage {
+        email: row.email,
+        token: q.token.trim().to_string(),
+        csrf: nonce,
+    }
+    .into_response();
+    // Token-bearing page: never let an intermediary cache it.
+    resp.headers_mut()
+        .insert(CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    Ok(resp)
+}
+
+/// `POST /auth/magic-link/verify`. Validates the double-submit nonce, then
+/// atomically consumes the token, destroys any pre-login session bound to the
+/// browser (fixation defence), creates a fresh session, and redirects to `/`.
+pub async fn verify_confirm(
+    State(state): State<AppState>,
     crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
     headers: HeaderMap,
     cookies: Cookies,
+    Form(form): Form<ConfirmForm>,
 ) -> Result<Response> {
     let pool = state.require_db()?;
     let salt = state.cfg.auth.fingerprint_salt.as_str();
@@ -195,7 +295,19 @@ pub async fn verify(
             .unwrap_or_default(),
     );
 
-    let Some(row) = magic_link::consume(pool, q.token.trim()).await? else {
+    if !confirm_nonce_ok(&cookies, &form.csrf) {
+        login_audit::record_failure_anon(
+            pool,
+            LoginMethod::MagicLink,
+            ip_hash.as_deref(),
+            ua_hash.as_deref(),
+            "confirm_csrf",
+        )
+        .await;
+        return Ok(invalid_page(&state, StatusCode::FORBIDDEN));
+    }
+
+    let Some(row) = magic_link::consume(pool, form.token.trim()).await? else {
         login_audit::record_failure_anon(
             pool,
             LoginMethod::MagicLink,
@@ -204,8 +316,9 @@ pub async fn verify(
             "invalid_token",
         )
         .await;
-        return Ok(invalid_page(&state));
+        return Ok(invalid_page(&state, StatusCode::GONE));
     };
+    clear_confirm_nonce(&cookies, &state.cfg.auth.session);
 
     // Tombstone-inclusive: a verified link proves email ownership, so
     // re-auth restores a soft-deleted account like the OAuth callbacks do.
@@ -238,7 +351,7 @@ pub async fn verify(
                     "no_user_for_email",
                 )
                 .await;
-                return Ok(invalid_page(&state));
+                return Ok(invalid_page(&state, StatusCode::GONE));
             }
         },
     };
@@ -267,7 +380,7 @@ pub async fn verify(
             "invited_bootstrap_raced",
         )
         .await;
-        return Ok(invalid_page(&state));
+        return Ok(invalid_page(&state, StatusCode::GONE));
     }
     let active_org = match joined.as_ref().map(|j| j.org_id) {
         Some(org) => Some(org),

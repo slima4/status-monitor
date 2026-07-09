@@ -430,7 +430,11 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 "/auth/magic-link/request",
                 post(handlers::magic_link::request),
             )
-            .route("/auth/magic-link/verify", get(handlers::magic_link::verify));
+            .route(
+                "/auth/magic-link/verify",
+                get(handlers::magic_link::verify_landing)
+                    .post(handlers::magic_link::verify_confirm),
+            );
     }
 
     // Region-agent surface. Auth is the `AgentIdentity` extractor in each

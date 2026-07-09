@@ -1,0 +1,21 @@
+{% extends "chromeless_base.html" %}
+{% block title %}Confirm sign-in{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>confirm sign-in</h1>
+        <p class="text-sm text-muted">
+            Continue to finish signing in as
+            <span class="font-mono text-body">{{ email }}</span>. This link
+            works once.
+        </p>
+        <form method="post" action="/auth/magic-link/verify" class="space-y-0">
+            <input type="hidden" name="token" value="{{ token }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button type="submit"
+                    class="sticker-btn sticker-btn--accent inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
+                confirm sign-in
+            </button>
+        </form>
+        <p class="text-xs text-muted">Didn&rsquo;t request this? Ignore this page &mdash; nothing happens until you continue.</p>
+    </main>
+{% endblock %}

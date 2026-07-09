@@ -28,11 +28,17 @@ use crate::web::auth::bearer_from_headers;
 pub const CSRF_HEADER: HeaderName = HeaderName::from_static("x-requested-with");
 pub const CSRF_HEADER_VALUE: &str = "uptimepage";
 
-/// Public paths whose authority is a per-request HMAC token in the query, not
-/// the session cookie. A forged cross-site POST cannot carry a valid token, so
-/// the CSRF header check adds nothing and would only break the plain-HTML
-/// confirmation form these serve to a recipient who is also a signed-in user.
-const TOKEN_AUTHENTICATED_PATHS: &[&str] = &["/alert-channel/stop", "/subscribe/unsubscribe"];
+/// Public paths whose authority is a per-request token (in the query, or a
+/// double-submit confirmation form), not the session cookie. A forged cross-site
+/// POST cannot carry a valid token, so the CSRF header check adds nothing and
+/// would only break the plain-HTML confirmation form these serve to a recipient
+/// who is also a signed-in user. `/auth/magic-link/verify` carries its own
+/// double-submit nonce; the others authenticate via an HMAC query token.
+const TOKEN_AUTHENTICATED_PATHS: &[&str] = &[
+    "/alert-channel/stop",
+    "/subscribe/unsubscribe",
+    "/auth/magic-link/verify",
+];
 
 /// Tower middleware that enforces the rule documented at module level.
 pub async fn middleware(State(state): State<AppState>, req: Request<Body>, next: Next) -> Response {
@@ -126,6 +132,7 @@ mod tests {
     fn token_authenticated_paths_are_exempt() {
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/alert-channel/stop"));
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/subscribe/unsubscribe"));
+        assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/auth/magic-link/verify"));
         assert!(!TOKEN_AUTHENTICATED_PATHS.contains(&"/api/v1/notification-channels"));
     }
 
