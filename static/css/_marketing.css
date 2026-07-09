@@ -603,6 +603,17 @@ html:has(.marketing-shell) {
 .tool-rev__out { font-size: 1.125rem; color: var(--mk-ink-soft); margin-top: 1.25rem; }
 .tool-rev__out .mk-ok { font-weight: 600; font-variant-numeric: tabular-nums; }
 
+/* ── Free tools: cron generator ───────────────────────────────────── */
+.tool-cron__field { display: flex; justify-content: center; margin-top: 0.75rem; }
+.tool-cron-input { width: 100%; max-width: 22rem; text-align: center; font-size: 1.25rem; font-weight: 600; color: var(--mk-ink); background: var(--mk-bg-2); border: 1px solid var(--mk-rule); border-radius: 2px; padding: 0.6rem 0.75rem; }
+.tool-cron-input:focus { outline: none; border-color: var(--mk-ok); box-shadow: 0 0 0 2px var(--mk-ok-soft); }
+.tool-cron-input[aria-invalid="true"] { border-color: var(--mk-down); color: var(--mk-down); }
+.tool-cron__desc { margin-top: 1rem; text-align: center; font-size: 1.0625rem; color: var(--mk-ink-soft); min-height: 1.6em; text-wrap: pretty; }
+.tool-cron__desc--error { color: var(--mk-down); font-family: var(--mk-font-mono); font-size: 0.9375rem; }
+.tool-cron__next { margin-top: 1.5rem; }
+.tool-cron__runs { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.6rem; align-items: center; }
+.tool-cron__run { font-size: 0.8125rem; color: var(--mk-ink-soft); font-variant-numeric: tabular-nums; }
+
 /* ── Shared helpers (replace inline styles the marketing CSP blocks) ─ */
 .mk-panel { border: 1px solid var(--mk-rule); background: var(--mk-surface); }
 .mk-ink-soft { color: var(--mk-ink-soft); }

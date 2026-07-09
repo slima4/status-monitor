@@ -511,12 +511,15 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
     }
 
     s.push_str("## Tools\n");
-    s.push_str(&format!(
-        "- [{title}]({origin}{path}): {desc}\n\n",
-        title = tools::UPTIME_SLA_TITLE,
-        path = tools::UPTIME_SLA_PATH,
-        desc = tools::UPTIME_SLA_DESCRIPTION,
-    ));
+    for tool in tools::TOOLS {
+        s.push_str(&format!(
+            "- [{title}]({origin}{path}): {desc}\n",
+            title = tool.title,
+            path = tool.path,
+            desc = tool.description,
+        ));
+    }
+    s.push('\n');
 
     s.push_str("## Developers & automation\n");
     s.push_str(&format!(
@@ -618,7 +621,9 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
             Some(landing.lastmod.to_string()),
         ));
     }
-    urls.push((format!("{origin}{}", tools::UPTIME_SLA_PATH), None));
+    for tool in tools::TOOLS {
+        urls.push((format!("{origin}{}", tool.path), None));
+    }
     for route in legal::ROUTES {
         urls.push((format!("{origin}{}", route.path), None));
     }

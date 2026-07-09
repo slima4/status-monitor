@@ -259,13 +259,169 @@ async fn uptime_sla(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) ->
     serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
 }
 
-/// Router entries for every tool. Single source shared with sitemap + llms.
+// ── Cron expression generator ─────────────────────────────────────────
+// Client-side only (cron.js). The server default's authored description
+// must stay identical to the JS output, or it flickers on hydration.
+
+pub const CRON_PATH: &str = "/tools/cron-expression-generator";
+const CRON_CREATED: &str = "2026-07-09";
+const CRON_LASTMOD: &str = "2026-07-09";
+pub const CRON_TITLE: &str = "Cron Expression Generator & Parser";
+pub const CRON_DESCRIPTION: &str = "Build and read cron expressions in plain English, with the next run times and a reference table of the most common schedules. Free, no sign-up.";
+const CRON_DEFAULT_EXPR: &str = "*/15 9-17 * * 1-5";
+const CRON_DEFAULT_DESC: &str =
+    "At every 15th minute past every hour from 9 through 17, on Monday through Friday.";
+
+/// Common schedules for the reference table (expression, plain-English).
+const CRON_EXAMPLES: &[(&str, &str)] = &[
+    ("* * * * *", "Every minute"),
+    ("*/5 * * * *", "Every 5 minutes"),
+    ("0 * * * *", "Every hour, on the hour"),
+    (
+        "*/15 9-17 * * 1-5",
+        "Every 15 minutes, 9am to 5pm, on weekdays",
+    ),
+    ("0 0 * * *", "Every day at midnight"),
+    ("30 2 * * *", "Every day at 02:30"),
+    ("0 9 * * 1-5", "At 09:00, Monday to Friday"),
+    ("0 0 * * 0", "Every Sunday at midnight"),
+    ("0 0 1 * *", "Midnight on the 1st of each month"),
+    ("0 0 1 1 *", "Midnight on the 1st of January"),
+];
+
+/// One-click schedules on the interactive widget (expression, label).
+const CRON_PRESETS: &[(&str, &str)] = &[
+    ("*/5 * * * *", "every 5 min"),
+    ("0 * * * *", "hourly"),
+    ("0 0 * * *", "daily"),
+    ("0 9 * * 1-5", "weekdays 9am"),
+    ("0 0 * * 0", "weekly"),
+    ("0 0 1 * *", "monthly"),
+];
+
+const CRON_FAQS: &[(&str, &str)] = &[
+    (
+        "What is a cron expression?",
+        "Five fields that tell a scheduler when to run a job: minute, hour, \
+         day of the month, month, and day of the week. <code class=\"mk-chip\" \
+         translate=\"no\">0 9 * * 1-5</code> means 9am on weekdays.",
+    ),
+    (
+        "What does the slash mean, like */15?",
+        "A step. <code class=\"mk-chip\" translate=\"no\">*/15</code> in the minute \
+         field means every 15th minute (0, 15, 30, 45). <code class=\"mk-chip\" \
+         translate=\"no\">*/2</code> in the hour field means every other hour.",
+    ),
+    (
+        "Are the next run times UTC or local?",
+        "The times shown here are in your browser's timezone. On a server, cron \
+         uses that machine's timezone, which is usually UTC. Check the box's \
+         timezone before you trust a schedule in production.",
+    ),
+    (
+        "What happens when both day fields are set?",
+        "If you restrict both the day of the month and the day of the week, cron \
+         runs when EITHER matches, not both. So <code class=\"mk-chip\" \
+         translate=\"no\">0 0 1 * 1</code> fires on the 1st and every Monday.",
+    ),
+    (
+        "Do shortcuts like @daily work?",
+        "Yes. The parser accepts @hourly, @daily, @weekly, @monthly and @yearly \
+         and expands them to the equivalent five-field expression.",
+    ),
+];
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/tool_cron.html")]
+struct CronPage {
+    app_url: String,
+    canonical_url: String,
+    og: OpenGraph,
+    breadcrumb_json_ld: JsonLd,
+    web_application_json_ld: JsonLd,
+    webpage_json_ld: JsonLd,
+    faq_json_ld: JsonLd,
+    faqs: &'static [(&'static str, &'static str)],
+    examples: &'static [(&'static str, &'static str)],
+    presets: &'static [(&'static str, &'static str)],
+    default_expr: &'static str,
+    default_desc: &'static str,
+    version: &'static str,
+}
+
+static CRON_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_cron(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}{}", cfg.canonical_origin, CRON_PATH);
+    let mut og = OpenGraph::default_for(&format!("{CRON_TITLE} | {BRAND}"), &canonical_url);
+    og.description = CRON_DESCRIPTION.to_string();
+    let page = CronPage {
+        app_url: cfg.app_url.clone(),
+        breadcrumb_json_ld: json_ld_breadcrumb(&cfg.canonical_origin, CRON_TITLE, CRON_PATH),
+        web_application_json_ld: json_ld_web_application(
+            &cfg.canonical_origin,
+            CRON_TITLE,
+            CRON_PATH,
+            CRON_DESCRIPTION,
+        ),
+        webpage_json_ld: json_ld_webpage(
+            &cfg.canonical_origin,
+            CRON_PATH,
+            CRON_TITLE,
+            CRON_CREATED,
+            CRON_LASTMOD,
+        ),
+        faq_json_ld: json_ld_faqpage(CRON_FAQS),
+        faqs: CRON_FAQS,
+        examples: CRON_EXAMPLES,
+        presets: CRON_PRESETS,
+        default_expr: CRON_DEFAULT_EXPR,
+        default_desc: CRON_DEFAULT_DESC,
+        canonical_url,
+        og,
+        version: env!("CARGO_PKG_VERSION"),
+    };
+    let body = page
+        .render()
+        .unwrap_or_else(|e| format!("<!-- cron render failed: {e} -->"));
+    cached_render(body)
+}
+
+async fn cron(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = CRON_CACHED.get_or_init(|| render_cron(&cfg));
+    serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
+}
+
+/// Path + copy for each tool, so the sitemap and llms index iterate one list.
+pub struct ToolMeta {
+    pub path: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+}
+
+pub const TOOLS: &[ToolMeta] = &[
+    ToolMeta {
+        path: UPTIME_SLA_PATH,
+        title: UPTIME_SLA_TITLE,
+        description: UPTIME_SLA_DESCRIPTION,
+    },
+    ToolMeta {
+        path: CRON_PATH,
+        title: CRON_TITLE,
+        description: CRON_DESCRIPTION,
+    },
+];
+
+/// Mount every tool route.
 pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<MarketingCfg>> {
-    router.route(UPTIME_SLA_PATH, axum::routing::get(uptime_sla))
+    router
+        .route(UPTIME_SLA_PATH, axum::routing::get(uptime_sla))
+        .route(CRON_PATH, axum::routing::get(cron))
 }
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
     UPTIME_SLA_CACHED.get_or_init(|| render_uptime_sla(cfg));
+    CRON_CACHED.get_or_init(|| render_cron(cfg));
 }
 
 #[cfg(test)]
@@ -306,5 +462,31 @@ mod tests {
         assert_eq!(r.monthly, "43m 12s");
         // 2592s of monthly downtime is ~43 missed 60s checks.
         assert_eq!(r.checks_monthly, "43");
+    }
+
+    #[test]
+    fn tools_registry_is_seo_clean() {
+        let paths: Vec<_> = TOOLS.iter().map(|t| t.path).collect();
+        assert!(paths.contains(&UPTIME_SLA_PATH));
+        assert!(paths.contains(&CRON_PATH));
+        for t in TOOLS {
+            assert!(
+                t.path.starts_with("/tools/"),
+                "{} not under /tools/",
+                t.path
+            );
+            let rendered_title = t.title.len() + " | ".len() + BRAND.len();
+            assert!(
+                rendered_title <= 60,
+                "{} title {rendered_title} > 60",
+                t.path
+            );
+            assert!(
+                t.description.len() <= 160,
+                "{} description {} > 160",
+                t.path,
+                t.description.len()
+            );
+        }
     }
 }

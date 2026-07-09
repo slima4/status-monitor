@@ -218,12 +218,47 @@ async fn uptime_sla_tool_renders_without_db() {
 }
 
 #[tokio::test]
-async fn sitemap_lists_the_tool() {
+async fn cron_tool_renders_without_db() {
+    let (status, body, headers) = get("/tools/cron-expression-generator").await;
+    assert_eq!(status, StatusCode::OK);
+    // Default expression + its authored description render server-side.
+    assert!(
+        body.contains("*/15 9-17 * * 1-5"),
+        "must render the default expression"
+    );
+    assert!(
+        body.contains("Monday through Friday"),
+        "must render the default plain-English description server-side"
+    );
+    assert!(
+        body.contains("js/marketing/cron"),
+        "must load the cron script"
+    );
+    assert!(
+        body.contains("Every 5 minutes"),
+        "must render the reference table"
+    );
+    assert!(
+        body.contains("WebApplication") && body.contains("isAccessibleForFree"),
+        "must carry the free WebApplication schema"
+    );
+    assert!(
+        headers.contains_key(header::ETAG),
+        "tool page must set a strong ETag"
+    );
+}
+
+#[tokio::test]
+async fn sitemap_lists_the_tools() {
     let (status, body, _) = get("/sitemap.xml").await;
     assert_eq!(status, StatusCode::OK);
     assert!(
         body.contains("https://uptimepage.dev/tools/uptime-sla-calculator"),
         "sitemap must list the SLA tool"
+    );
+    assert!(
+        body.contains("https://uptimepage.dev/tools/cron-expression-generator"),
+        "sitemap must list the cron tool"
     );
 }
 
