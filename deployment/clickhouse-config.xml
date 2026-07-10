@@ -32,6 +32,19 @@
          collection is the main idle-CPU cost (ClickHouse#60016). -->
     <asynchronous_metrics_update_period_s>60</asynchronous_metrics_update_period_s>
 
+    <!-- Built-in Prometheus endpoint on the internal docker network, never
+         published to the host so no auth path is exposed. Serves live
+         system.metrics, asynchronous_metrics and events, so Grafana sees parts,
+         merges, async-insert flushes and memory without reading system.*_log. -->
+    <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <asynchronous_metrics>true</asynchronous_metrics>
+        <events>true</events>
+        <errors>true</errors>
+    </prometheus>
+
     <!-- Unbounded system logs filled the disk (12 GB of logs vs 20 MB of data)
          and their writes burn CPU at idle. We observe ClickHouse through Grafana,
          not these tables, so disable them all except query_log and part_log,

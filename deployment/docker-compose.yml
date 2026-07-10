@@ -265,6 +265,7 @@ services:
     expose:
       - "8123"   # HTTP
       - "9000"   # native protocol
+      - "9363"   # Prometheus metrics (internal scrape only)
     ulimits:
       nofile:
         soft: 262144

@@ -53,6 +53,18 @@ prometheus.scrape "node" {
   scrape_interval = "30s"
 }
 
+// ClickHouse's built-in Prometheus endpoint (enabled in clickhouse-config.xml).
+// Surfaces datastore internals the app can't see from outside: part counts,
+// merge activity, async-insert flushes, memory and background pool depth.
+prometheus.scrape "clickhouse" {
+  targets = [
+    { __address__ = "clickhouse:9363" },
+  ]
+  forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+  job_name        = "clickhouse"
+  scrape_interval = "30s"
+}
+
 // Remote-write to Grafana Cloud Prometheus. URL and credentials are
 // environment-specific and supplied via the container env:
 //   GRAFANA_CLOUD_PROM_URL   e.g. https://prometheus-prod-XX-<zone>.grafana.net/api/prom/push
