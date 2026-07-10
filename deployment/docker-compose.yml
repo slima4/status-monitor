@@ -334,8 +334,10 @@ services:
 
   # Host metrics for Grafana Cloud. A full disk once stalled ClickHouse writes
   # with no early signal; node_filesystem_avail_bytes feeds the disk-space
-  # alerts. Filesystem collector only, so ingest stays tiny. Reads the host
-  # rootfs read-only. Metrics profile, like alloy; internal port, not published.
+  # alerts. Filesystem, memory, and CPU collectors only (disable-defaults keeps
+  # the rest off) so ingest stays small; the filesystem collector also carries
+  # inode metrics. Reads the host rootfs read-only. Metrics profile, like alloy;
+  # internal port, not published.
   node-exporter:
     image: prom/node-exporter:v1.11.1
     restart: unless-stopped
@@ -345,6 +347,8 @@ services:
       - --path.rootfs=/rootfs
       - --collector.disable-defaults
       - --collector.filesystem
+      - --collector.meminfo
+      - --collector.cpu
     volumes:
       - /proc:/host/proc:ro
       - /:/rootfs:ro
