@@ -7,7 +7,8 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
 
 - `alerts.tf` — `uptimepage` folder; alert rules across two groups —
   `uptimepage-pipeline` (data-path health: `UptimepageResultsLost`,
-  `UptimepagePipelineStalled`, `UptimepageNotificationDeliveryFailing`,
+  `UptimepageStorageWriteFailing`, `UptimepagePipelineStalled`,
+  `UptimepageNotificationDeliveryFailing`,
   `UptimepageCircuitBreakersOpen`, `UptimepageResultQueueBacklog`,
   `UptimepageRegistryRefreshStuck`/`Slow`, `UptimepagePgPoolSaturating`,
   `UptimepageHttp5xxRateHigh`, `UptimepageHttpLatencyHigh`,

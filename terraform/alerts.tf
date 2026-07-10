@@ -24,14 +24,16 @@ resource "grafana_rule_group" "pipeline" {
   folder_uid       = grafana_folder.obs.uid
   interval_seconds = 60
 
-  # Checks run but results are not persisting (storage write failures
-  # or dropped results) — the silent data-loss class (e.g. ClickHouse
-  # auth/availability). no_data = OK: absence of the metric means no
-  # writes attempted, which PipelineStalled covers instead.
+  # Results permanently dropped: the batcher exhausted its retries and
+  # gave up, so this is confirmed, irreversible loss (e.g. ClickHouse
+  # unreachable long enough to drain the retry budget). Transient write
+  # failures that retries recover are only a warning (StorageWriteFailing
+  # below), so a critical here always means real data loss. no_data = OK:
+  # absence means no writes attempted, which PipelineStalled covers.
   rule {
     name           = "UptimepageResultsLost"
     condition      = "C"
-    for            = "5m"
+    for            = "2m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
@@ -39,8 +41,8 @@ resource "grafana_rule_group" "pipeline" {
       service  = "uptimepage"
     }
     annotations = {
-      summary     = "uptimepage: check results being dropped"
-      description = "storage write failures or dropped results > 0 for 5m — checks run but results are not persisting. Runbook: runbooks/grafana-cloud.md."
+      summary     = "uptimepage: check results permanently dropped"
+      description = "results permanently dropped after retries exhausted (rate > 0 for 2m); confirmed data loss. Runbook: runbooks/grafana-cloud.md."
     }
     data {
       ref_id         = "A"
@@ -49,16 +51,10 @@ resource "grafana_rule_group" "pipeline" {
         from = 600
         to   = 0
       }
-      # `or` (not `+`): the two counters are independent and each is
-      # absent until its first increment. `a + b` vector-matches and
-      # is empty unless BOTH exist — so a single-class failure (e.g.
-      # only writes{result="failure"} on a ClickHouse outage) would
-      # yield no data and silently stay OK. `> 0 or > 0` fires on
-      # either.
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "sum(rate(uptimepage_storage_dropped_results_total[5m])) > 0 or sum(rate(uptimepage_storage_writes_total{result=\"failure\"}[5m])) > 0"
+        expr    = "sum(rate(uptimepage_storage_dropped_results_total[5m])) > 0"
       })
     }
     data {
@@ -123,9 +119,10 @@ resource "grafana_rule_group" "pipeline" {
   # Outbound alert delivery is failing (notification dispatch errors or
   # alert signals dropped before the engine). Critical: this is the
   # path that tells users their own monitored sites are down — a silent
-  # failure here means incidents go unnoticed. `or` for the same reason
-  # as ResultsLost: the two counters are independent and each absent
-  # until first increment. no_data = OK: nothing dispatched means
+  # failure here means incidents go unnoticed. `or` (not `+`): the two
+  # counters are independent and each absent until first increment, so a
+  # bare `+` matches to empty and would silently stay OK. no_data = OK:
+  # nothing dispatched means
   # nothing to fail.
   rule {
     name           = "UptimepageNotificationDeliveryFailing"
@@ -683,6 +680,49 @@ resource "grafana_rule_group" "pipeline" {
         refId   = "A"
         instant = true
         expr    = "max(1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"}) > 0.90"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Storage writes are failing but retries still recover them, so nothing
+  # is permanently lost yet (that is ResultsLost, critical). A sustained
+  # failure rate is the early sign the write path is degrading. for=15m so
+  # one retried blip never pages; a slow disk-fill is caught sooner by the
+  # DiskSpaceLow / free-space alerts. no_data = OK: no writes attempted.
+  rule {
+    name           = "UptimepageStorageWriteFailing"
+    condition      = "C"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: storage writes failing (retried)"
+      description = "storage write failures recurring (rate > 0 for 15m) while retries still recover them; degrading write path, no confirmed loss. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "sum(rate(uptimepage_storage_writes_total{result=\"failure\"}[5m])) > 0"
       })
     }
     data {
