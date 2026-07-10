@@ -397,9 +397,9 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	log_skip @health
 	log {
 		output file /var/log/caddy/access-app.log {
-			roll_size 100MiB
-			roll_keep 7
-			roll_keep_for 720h
+			roll_size 20MiB
+			roll_keep 5
+			roll_keep_for 336h
 		}
 		format json
 	}
@@ -461,9 +461,9 @@ app.{$UPTIMEPAGE_DOMAIN} {
 
 	log {
 		output file /var/log/caddy/access-status.log {
-			roll_size 100MiB
-			roll_keep 7
-			roll_keep_for 720h
+			roll_size 20MiB
+			roll_keep 5
+			roll_keep_for 336h
 		}
 		format json
 	}
@@ -522,8 +522,9 @@ www.{$UPTIMEPAGE_DOMAIN} {
 
 	log {
 		output file /var/log/caddy/marketing.log {
-			roll_size 50mb
+			roll_size 20MiB
 			roll_keep 5
+			roll_keep_for 336h
 		}
 		format json
 	}
@@ -549,8 +550,9 @@ analytics.{$UPTIMEPAGE_DOMAIN} {
 
 	log {
 		output file /var/log/caddy/access-analytics.log {
-			roll_size 50mb
+			roll_size 20MiB
 			roll_keep 5
+			roll_keep_for 336h
 		}
 		format json
 	}
