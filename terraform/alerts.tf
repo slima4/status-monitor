@@ -694,14 +694,17 @@ resource "grafana_rule_group" "pipeline" {
   }
 
   # Storage writes are failing but retries still recover them, so nothing
-  # is permanently lost yet (that is ResultsLost, critical). A sustained
-  # failure rate is the early sign the write path is degrading. for=15m so
-  # one retried blip never pages; a slow disk-fill is caught sooner by the
-  # DiskSpaceLow / free-space alerts. no_data = OK: no writes attempted.
+  # is permanently lost yet (that is ResultsLost, critical). Count failures
+  # over the last hour instead of an instantaneous rate: sparse but
+  # recurring failures (a flush failing every few minutes) never hold a
+  # [5m] rate above zero, so a rate gate misses them. More than 3 in an
+  # hour trips on a real recurring problem while a lone transient blip
+  # stays quiet. A slow disk-fill is still caught sooner by the DiskSpaceLow
+  # alerts. no_data = OK: no writes attempted.
   rule {
     name           = "UptimepageStorageWriteFailing"
     condition      = "C"
-    for            = "15m"
+    for            = "5m"
     no_data_state  = "OK"
     exec_err_state = "Error"
     labels = {
@@ -710,19 +713,19 @@ resource "grafana_rule_group" "pipeline" {
     }
     annotations = {
       summary     = "uptimepage: storage writes failing (retried)"
-      description = "storage write failures recurring (rate > 0 for 15m) while retries still recover them; degrading write path, no confirmed loss. Runbook: runbooks/grafana-cloud.md."
+      description = "more than 3 storage write failures in the last hour while retries still recover them; degrading write path, no confirmed loss. Runbook: runbooks/grafana-cloud.md."
     }
     data {
       ref_id         = "A"
       datasource_uid = data.grafana_data_source.prometheus.uid
       relative_time_range {
-        from = 600
+        from = 7200
         to   = 0
       }
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "sum(rate(uptimepage_storage_writes_total{result=\"failure\"}[5m])) > 0"
+        expr    = "sum(increase(uptimepage_storage_writes_total{result=\"failure\"}[1h])) > 3"
       })
     }
     data {
