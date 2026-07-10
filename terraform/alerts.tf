@@ -738,6 +738,172 @@ resource "grafana_rule_group" "pipeline" {
       model = local.threshold_c
     }
   }
+
+  # Host memory nearly exhausted. MemAvailable is the kernel's own estimate of
+  # allocatable memory without swapping; under 15% and the OOM killer is near,
+  # which would take down Postgres or ClickHouse. Warning: the hard failure is
+  # the process death that follows, this is the lead time to act.
+  rule {
+    name           = "UptimepageHostMemoryLow"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: host memory low"
+      description = "less than 15% host memory available for 10m; the OOM killer is near and can kill Postgres or ClickHouse. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.85"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Sustained host CPU saturation. 1 minus the mean idle rate across cores is
+  # the busy fraction; above 90% for 15m the box is compute-bound and checks
+  # queue and latency climbs. Warning: rarely a page alone, but the context
+  # when a latency or queue alert fires with it.
+  rule {
+    name           = "UptimepageHostCpuHigh"
+    condition      = "C"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: host CPU high"
+      description = "host CPU above 90% busy for 15m; the box is compute-bound. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) > 0.90"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Root filesystem inodes running out. A filesystem can hit 100% inodes with
+  # bytes still free (many tiny files) and writes fail exactly like a full disk.
+  # Mirrors DiskSpaceLow at 80% used; same filesystem collector feeds both.
+  rule {
+    name           = "UptimepageInodesLow"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: root inodes over 80% used"
+      description = "less than 20% root-filesystem inodes free for 10m; writes fail on inode exhaustion even with bytes free. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(1 - node_filesystem_files_free{mountpoint=\"/\"} / node_filesystem_files{mountpoint=\"/\"}) > 0.80"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Root inodes nearly exhausted at 90% used. At 100% every create and write
+  # fails like a full disk, with bytes still free. Critical, mirrors
+  # DiskSpaceCritical.
+  rule {
+    name           = "UptimepageInodesCritical"
+    condition      = "C"
+    for            = "5m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "critical"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: root inodes over 90% used"
+      description = "less than 10% root-filesystem inodes free for 5m; approaching inode exhaustion, where writes fail with bytes still free. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(1 - node_filesystem_files_free{mountpoint=\"/\"} / node_filesystem_files{mountpoint=\"/\"}) > 0.90"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
 }
 
 # Availability / dead-man alerts. Every rule above assumes data is flowing

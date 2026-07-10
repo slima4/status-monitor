@@ -13,22 +13,25 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
   `UptimepageRegistryRefreshStuck`/`Slow`, `UptimepagePgPoolSaturating`,
   `UptimepageHttp5xxRateHigh`, `UptimepageHttpLatencyHigh`,
   `UptimepageStorageWriteLatencyHigh`, `UptimepageClickHousePartsHigh`,
-  `UptimepageIngestBufferOverflow`) and `uptimepage-availability`
+  `UptimepageIngestBufferOverflow`, `UptimepageDiskSpaceLow`/`Critical`,
+  `UptimepageHostMemoryLow`, `UptimepageHostCpuHigh`,
+  `UptimepageInodesLow`/`Critical`) and `uptimepage-availability`
   (`UptimepageMetricsPipelineDown`, `UptimepageControlPlaneDown`,
   `UptimepageRegionalAgentDown`); two
   contact points (email-only `uptimepage-default` for warnings,
   email+Telegram `uptimepage-critical` for criticals); the root
   notification policy with severity routing (critical pages fast to both
   channels, warning batches slow to email).
-- `dashboard.tf` — the operator overview dashboard, from
-  `terraform/dashboards/uptimepage-overview.json`. The
+- `dashboard.tf` — every board under `terraform/dashboards/*.json`
+  (`uptimepage-ops`, `uptimepage-business`, `uptimepage-host`), loaded via
+  `fileset` + `for_each` so adding a board is just a new file. The
   `${DS_PROMETHEUS}` template input is substituted with the real
   Prometheus datasource uid, and the export-only `__inputs`/`__requires`
   keys are stripped, before apply (the provider's POST path does no
-  `__inputs` resolution and Grafana drops those keys server-side — left
-  in, they cause perpetual plan drift). This JSON is the single source
-  — the metric-name drift gate
-  (`dashboards/grafana/check-metric-names.sh`) reads it from here.
+  `__inputs` resolution and Grafana drops those keys server-side; left
+  in, they cause perpetual plan drift). These JSON files are the single
+  source: the metric-name drift gate
+  (`dashboards/grafana/check-metric-names.sh`) reads them from here.
 
 Not yet in Terraform (still one-time UI / documented in
 `runbooks/grafana-cloud.md`): access policies/scopes, Synthetic
