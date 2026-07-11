@@ -887,6 +887,14 @@ html:has(.marketing-shell) {
 /* The last column carries prose ("what it is"), so let it wrap instead of
    forcing horizontal scroll. */
 .mk-article td:last-child { white-space: normal; }
+/* The tool round-up leads with our own row; tint it green so ours reads as
+   ours at a glance, the way the comparison matrices mark their column. */
+.mk-article--best-self-hosted-uptime-monitoring-tools tbody tr:first-child td {
+    color: var(--mk-ok);
+}
+.mk-article--best-self-hosted-uptime-monitoring-tools tbody tr:first-child td:first-child {
+    font-weight: 600;
+}
 
 /* ── Section orchestration: first-paint stagger ────────────────────
    Marketing pages are full reloads (no htmx swap) — unconditional

@@ -7,7 +7,7 @@ tags = ["rust", "clickhouse", "monitoring", "devops"]
 draft = false
 +++
 
-I spent the last few months building Uptimepage, an open-source uptime monitor and status page written in Rust. This is the build story: the decisions that shaped it, the parts I rewrote, and the numbers that came out the other side.
+I spent the last few months building Uptimepage, an [open-source uptime monitor](/open-source-uptime-monitoring) and status page written in Rust. This is the build story: the decisions that shaped it, the parts I rewrote, and the numbers that came out the other side.
 
 The whole thing ships as one self-contained binary of about 23 MB, plus Postgres and ClickHouse. You can `docker compose up` and self-host it, or use the hosted tier. Source is AGPL-3.0 on [GitHub](https://github.com/uptimepage/uptimepage).
 

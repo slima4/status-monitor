@@ -8,7 +8,7 @@
 {% if let Some(faq) = faq_json_ld %}<script type="application/ld+json">{{ faq.as_str()|safe }}</script>{% endif %}
 {% endblock %}
 {% block content %}
-<div class="space-y-20 sm:space-y-24">
+<div class="space-y-16 sm:space-y-20">
 
     <section class="mx-auto max-w-3xl text-center space-y-5">
         <p class="mk-eyebrow mk-eyebrow--ok">{{ eyebrow }}</p>
@@ -65,12 +65,14 @@
     </section>
     {% endif %}
 
-    {% for s in sections %}
-    <section class="mx-auto max-w-2xl space-y-3">
-        <h2 class="mk-h3">{{ s.heading }}</h2>
-        <p class="mk-body">{{ s.body }}</p>
+    <section class="mx-auto max-w-2xl space-y-8">
+        {% for s in sections %}
+        <div class="space-y-3">
+            <h2 class="mk-h3">{{ s.heading }}</h2>
+            <p class="mk-body">{{ s.body }}</p>
+        </div>
+        {% endfor %}
     </section>
-    {% endfor %}
 
     {% if let Some(c) = code %}
     <section class="mx-auto max-w-2xl space-y-3">

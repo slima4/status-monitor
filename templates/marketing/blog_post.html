@@ -4,6 +4,7 @@
 {% block head %}
 <script type="application/ld+json">{{ json_ld.as_str()|safe }}</script>
 {% if let Some(il) = item_list_ld %}<script type="application/ld+json">{{ il.as_str()|safe }}</script>{% endif %}
+{% if let Some(f) = faq_ld %}<script type="application/ld+json">{{ f.as_str()|safe }}</script>{% endif %}
 {% endblock %}
 {% block content %}
 <article class="mx-auto max-w-3xl space-y-10">
@@ -19,7 +20,7 @@
         </ul>
         {% endif %}
     </header>
-    <div class="mk-article">
+    <div class="mk-article mk-article--{{ slug }}">
         {{ body_html|safe }}
     </div>
     <footer class="mk-author">

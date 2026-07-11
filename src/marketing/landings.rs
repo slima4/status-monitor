@@ -307,6 +307,68 @@ pub const LANDINGS: &[Landing] = &[
         cta: "Start free",
     },
     Landing {
+        path: "/open-source-uptime-monitoring",
+        created: "2026-07-11",
+        lastmod: "2026-07-11",
+        title: "Open-Source Uptime Monitoring, Self-Hosted",
+        eyebrow: "open source",
+        h1: "An open-source uptime monitor you run yourself",
+        meta_description: "An open-source uptime monitor you can self-host: HTTP, TCP, DNS, TLS and ping checks from many regions, automatic incidents and a status page. AGPL, free.",
+        lede: "Uptimepage is an AGPL uptime monitor with incidents and a status page built in, written in Rust. Run the single static binary on your own servers, or start free on the hosted tier. HTTP, TCP, DNS, TLS, ping and cron-heartbeat checks from as many regions as you run.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "written in rust",
+                body: "The whole product is one statically linked Rust binary. That means a small memory footprint, no runtime or interpreter to install, and probes fast enough to check every 60 seconds from many regions without a heavy host. Memory safety without a garbage collector is why teams keep rewriting their infrastructure in Rust, and it is what keeps the monitor predictable under load.",
+            },
+            Section {
+                heading: "one binary, not a stack to babysit",
+                body: "That Rust binary needs only Postgres for config and ClickHouse for the time-series. docker compose up brings it up with migrations applied on boot. No Kubernetes, no queue, nothing else to operate.",
+            },
+            Section {
+                heading: "for developers",
+                body: "Declare monitors, status pages and channels in Terraform and review changes in a pull request. A full REST API and an MCP server mirror the dashboard, authenticated with scoped, org-bound tokens you can narrow to a single job.",
+            },
+            Section {
+                heading: "for devops and sre",
+                body: "Run regional probe agents on your own servers and fold their results into each monitor per region. Failing checks open incidents automatically and route to Slack, Telegram, PagerDuty or SMS, with dedupe and flap-suppression so a 60-second blip never pages at 3 a.m.",
+            },
+            Section {
+                heading: "for the company",
+                body: "A branded public status page with confirmed email and webhook subscribers comes in the same binary, so customers see the truth without a second tool. Self-host to keep every check result, incident and subscriber inside your own environment.",
+            },
+            Section {
+                heading: "open source, your way",
+                body: "The source is AGPL: read it, run it, modify it. Self-host on your own infrastructure, or start on the free hosted tier and keep the self-hosted exit. The API and Terraform provider are identical either way.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "Run it yourself",
+            body: r#"git clone https://github.com/uptimepage/uptimepage
+cd uptimepage
+docker compose up -d"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Self-hosted status page",
+                href: "/self-hosted-status-page",
+            },
+            ResourceLink {
+                label: "For developers",
+                href: "/uptime-monitoring-for-developers",
+            },
+            ResourceLink {
+                label: "vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
         path: "/self-hosted-status-page",
         created: "2026-06-20",
         lastmod: "2026-07-02",
@@ -1631,6 +1693,28 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
                 "Yes. The AGPL source ships a compose file: one command brings up the binary with Postgres and ClickHouse, migrations applied on boot.",
             ),
         ],
+        "/open-source-uptime-monitoring" => &[
+            (
+                "Is Uptimepage really open source?",
+                "Yes. The source is AGPL, so you can read it, run it, and modify it. If you would rather not host it, the hosted tier is free with no card.",
+            ),
+            (
+                "Can I self-host the uptime monitor?",
+                "Yes. Clone the repo and run `docker compose up`. That brings up the single binary with Postgres and ClickHouse and applies migrations on boot. No Kubernetes to operate.",
+            ),
+            (
+                "What can it monitor?",
+                "HTTP, TCP, DNS, TLS-certificate and domain expiry, ICMP ping, cron-job heartbeats and scripted browser login flows, every 60 seconds from as many regions as you run.",
+            ),
+            (
+                "Does it include a status page?",
+                "Yes. Incidents open automatically from failing checks and flow onto a branded public status page your customers can subscribe to, all from the same binary.",
+            ),
+            (
+                "Is it free?",
+                "Self-hosting under AGPL is free. The hosted tier is also $0 a month if you prefer not to run it yourself.",
+            ),
+        ],
         "/self-hosted-status-page" => &[
             (
                 "How do I deploy it?",
@@ -1927,6 +2011,100 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
     }
 }
 
+/// Decision matrix for `/open-source-uptime-monitoring`, verified July 2026
+/// against each project's repo and docs. Uptime Kuma is the search default,
+/// OpenStatus the nearest AGPL alternative, and Prometheus + Blackbox the
+/// build-it-yourself route. Tones reflect reality, not favour: Kuma runs in
+/// one container, which we do not.
+static OPEN_SOURCE_MONITOR_MATRIX: Matrix = Matrix {
+    heading: "open-source uptime monitors compared",
+    columns: &[
+        "Uptimepage",
+        "Uptime Kuma",
+        "OpenStatus",
+        "Prometheus + Blackbox",
+    ],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[
+                ("AGPL", "yes"),
+                ("MIT", "yes"),
+                ("AGPL", "yes"),
+                ("Apache 2.0", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "built with",
+            cells: &[
+                ("Rust", "yes"),
+                ("JavaScript / Node", ""),
+                ("TypeScript / Node", ""),
+                ("Go", ""),
+            ],
+        },
+        MatrixRow {
+            label: "what you run",
+            cells: &[
+                ("binary + Postgres + ClickHouse", "part"),
+                ("one container", "yes"),
+                ("~6 Docker services", "part"),
+                ("Prometheus + Alertmanager", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "customer status page",
+            cells: &[
+                ("branded, subscribers", "yes"),
+                ("basic, no subscribers", "part"),
+                ("yes", "yes"),
+                ("build it yourself", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "monitoring as code",
+            cells: &[
+                ("Terraform · REST · MCP", "yes"),
+                ("no REST API for monitors", "no"),
+                ("Terraform · REST · MCP", "yes"),
+                ("config files", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[
+                ("yes, agents you run", "yes"),
+                ("single instance", "no"),
+                ("28 regions on hosted", "part"),
+                ("federate it yourself", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "teams and roles",
+            cells: &[
+                ("orgs + roles", "yes"),
+                ("single shared login", "no"),
+                ("yes", "yes"),
+                ("external SSO / proxy", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "auto incidents from checks",
+            cells: &[
+                ("yes", "yes"),
+                ("basic", "part"),
+                ("yes", "yes"),
+                ("via Alertmanager", "part"),
+            ],
+        },
+    ],
+    notes: &[
+        "Uptime Kuma is MIT; OpenStatus and Uptimepage are AGPL-3.0; Prometheus and Blackbox exporter are Apache 2.0.",
+        "OpenStatus's 28-region checking is on its hosted tier; self-hosting runs several Docker services.",
+        "Verified July 2026 against each project's repository and docs.",
+    ],
+};
+
 /// Head-to-head facts for `/vs/self-hosted-status-pages`, verified in July
 /// 2026 against each project's repository and, for Cachet, its live v3 source
 /// (`cachethq/core`, whose docs lag the code). Cells are `(text, tone)`; the
@@ -2191,7 +2369,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
             cells: &[
                 ("Terraform · REST · MCP", "yes"),
                 ("socket API", "no"),
-                ("Terraform · CLI", ""),
+                ("Terraform · REST · MCP", "yes"),
                 ("Terraform · CLI", ""),
                 ("YAML", "part"),
                 ("REST API", "part"),
@@ -2677,6 +2855,7 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
         "/compare/openstatus-vs-uptime-kuma" => Some(&OPENSTATUS_KUMA_MATRIX),
         "/compare/uptime-kuma-vs-gatus" => Some(&KUMA_GATUS_MATRIX),
         "/compare/pingdom-vs-statuscake" => Some(&PINGDOM_STATUSCAKE_MATRIX),
+        "/open-source-uptime-monitoring" => Some(&OPEN_SOURCE_MONITOR_MATRIX),
         "/vs/self-hosted-status-pages" => Some(&SELF_HOSTED_MATRIX),
         "/vs/self-hosted-monitoring" => Some(&MONITORING_MATRIX),
         "/vs/uptime-kuma" => Some(&UPTIME_KUMA_MATRIX),
@@ -2751,7 +2930,7 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "config as code",
             cells: &[
-                ("Terraform · CLI · YAML · REST", "yes"),
+                ("Terraform · REST · CLI · MCP", "yes"),
                 ("UI only, no management API", "no"),
                 ("Terraform · REST · MCP", "yes"),
             ],

@@ -24,7 +24,8 @@ use serde::Deserialize;
 use super::config::{AUTHOR, Author, BRAND, MarketingCfg};
 use super::pages::{CachedRender, cached_render, not_found, serve_cached};
 use super::seo::{
-    JsonLd, OpenGraph, json_ld_blog, json_ld_blog_posting, json_ld_breadcrumb, json_ld_item_list,
+    JsonLd, OpenGraph, json_ld_blog, json_ld_blog_posting, json_ld_breadcrumb, json_ld_faqpage,
+    json_ld_item_list,
 };
 use crate::web::filters;
 
@@ -46,6 +47,9 @@ pub struct Post {
     pub draft: bool,
     /// Ranked item names for list-format posts; emits `ItemList` JSON-LD.
     pub list_items: Vec<String>,
+    /// Question/answer pairs mirroring the post's visible FAQ; emits
+    /// `FAQPage` JSON-LD.
+    pub faqs: Vec<(String, String)>,
     pub body_html: String,
     /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
     pub body_md: String,
@@ -65,6 +69,14 @@ struct FrontMatter {
     draft: bool,
     #[serde(default)]
     list_items: Vec<String>,
+    #[serde(default)]
+    faqs: Vec<FaqEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FaqEntry {
+    q: String,
+    a: String,
 }
 
 static POSTS: OnceLock<Vec<Post>> = OnceLock::new();
@@ -145,6 +157,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         tags: fm.tags,
         draft: fm.draft,
         list_items: fm.list_items,
+        faqs: fm.faqs.into_iter().map(|f| (f.q, f.a)).collect(),
         body_html: render(body),
         body_md: body.trim().to_string(),
     })
@@ -199,11 +212,13 @@ pub struct PostSummary {
 #[derive(Template, WebTemplate)]
 #[template(path = "marketing/blog_post.html")]
 struct BlogPostPage {
+    slug: String,
     canonical_url: String,
     app_url: String,
     og: OpenGraph,
     json_ld: JsonLd,
     item_list_ld: Option<JsonLd>,
+    faq_ld: Option<JsonLd>,
     title: String,
     date: String,
     updated: Option<String>,
@@ -277,12 +292,22 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
             &post.list_items,
         )
     });
+    let faq_ld = (!post.faqs.is_empty()).then(|| {
+        let pairs: Vec<(&str, &str)> = post
+            .faqs
+            .iter()
+            .map(|(q, a)| (q.as_str(), a.as_str()))
+            .collect();
+        json_ld_faqpage(&pairs)
+    });
     let body = BlogPostPage {
+        slug: post.slug.clone(),
         canonical_url,
         app_url: cfg.app_url.clone(),
         og,
         json_ld,
         item_list_ld,
+        faq_ld,
         title: post.title.clone(),
         date: post.date.clone(),
         updated: post.updated.clone().filter(|u| u != &post.date),
@@ -324,6 +349,25 @@ mod tests {
                 assert!(
                     post.body_md.contains(item.as_str()),
                     "{}: ItemList entry {item:?} not found in the article body",
+                    post.slug
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn faq_front_matter_mirrors_visible_answers() {
+        for post in load_posts() {
+            for (q, a) in &post.faqs {
+                assert!(!q.is_empty() && !a.is_empty(), "{}: empty FAQ", post.slug);
+                // Answers may flatten inline links, so match the opening
+                // sentence rather than the whole string: catches drift
+                // between schema and the visible copy without false negatives.
+                let lead = a.split(['.', '?', '!']).next().unwrap_or(a).trim();
+                assert!(
+                    post.body_md.contains(lead),
+                    "{}: FAQ answer {q:?} does not track the visible copy; \
+                     schema would mismatch the page",
                     post.slug
                 );
             }
