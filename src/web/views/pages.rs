@@ -188,6 +188,11 @@ pub struct PageEditorPage {
     /// Absolute base for the embeddable badge SVG. `None` only when no public
     /// base URL is configured.
     pub badge_url: Option<String>,
+    /// Status-page URL (with UTM) the badge anchor links to, so the embed is a
+    /// real backlink, not a bare hotlinked image.
+    pub badge_link: Option<String>,
+    /// Overall-badge alt text, safe to paste into an HTML `alt="…"`.
+    pub badge_alt: String,
     pub logo_url: String,
     /// Intrinsic logo dims for CLS-safe `<img width height>`; 0 = no logo.
     pub logo_w: i64,
@@ -297,6 +302,9 @@ pub async fn page_editor(
             badge_origin.trim_end_matches('/')
         )
     });
+    let badge_link = (!status_url.is_empty()).then(|| {
+        format!("{status_url}?utm_source=status-badge&utm_medium=badge&utm_campaign=embed")
+    });
     let logo_url = b
         .logo_hash
         .as_deref()
@@ -353,13 +361,16 @@ pub async fn page_editor(
         None => Vec::new(),
     };
 
+    let public_display_name = b.public_display_name.clone().unwrap_or_default();
+    let badge_alt = badge_alt_label(&public_display_name, &page.name);
+
     Ok(PageEditorPage {
         active_tab: TAB_PAGES,
         id: page.id.to_string(),
         slug: page.slug.clone(),
         name: page.name,
         enabled: page.enabled,
-        public_display_name: b.public_display_name.clone().unwrap_or_default(),
+        public_display_name,
         public_about: b.public_about.clone().unwrap_or_default(),
         brand_color_value: b
             .public_brand_color
@@ -370,6 +381,8 @@ pub async fn page_editor(
         host_suffix: public_host_suffix(&state.cfg),
         status_url,
         badge_url,
+        badge_link,
+        badge_alt,
         logo_url,
         logo_w,
         logo_h,
@@ -379,6 +392,17 @@ pub async fn page_editor(
         subscribers,
     }
     .into_response())
+}
+
+/// Overall-badge alt text: prefer the public display name, else the page name.
+/// Strips `"` so the value can't break out of the copied `alt="…"` attribute.
+fn badge_alt_label(display_name: &str, name: &str) -> String {
+    let label = if display_name.is_empty() {
+        name
+    } else {
+        display_name
+    };
+    label.replace('"', "")
 }
 
 #[cfg(test)]
@@ -413,6 +437,11 @@ mod tests {
             host_suffix: Some(".uptimepage.dev".into()),
             status_url: "https://acme.uptimepage.dev".into(),
             badge_url,
+            badge_link: Some(
+                "https://acme.uptimepage.dev?utm_source=status-badge&utm_medium=badge&utm_campaign=embed"
+                    .into(),
+            ),
+            badge_alt: "Acme".into(),
             logo_url: String::new(),
             logo_w: 0,
             logo_h: 0,
@@ -441,6 +470,19 @@ mod tests {
         assert!(html.contains("https://acme.uptimepage.dev/api/public/v1/badge.svg"));
         assert!(html.contains("?component=22222222-2222-2222-2222-222222222222"));
         assert!(html.contains("data-copy=\"#badge-md-overall\""));
+        // Embed is a real backlink: wrapped anchor + linked markdown + UTM.
+        assert!(html.contains("data-copy=\"#badge-html-overall\""));
+        assert!(html.contains("rel=\"noopener\""));
+        assert!(html.contains("utm_source=status-badge"));
+        assert!(html.contains("[!["));
+        assert!(html.contains("alt=\"Acme status\""));
+    }
+
+    #[test]
+    fn badge_alt_prefers_display_name_and_strips_quotes() {
+        assert_eq!(badge_alt_label("", "acme"), "acme");
+        assert_eq!(badge_alt_label("Acme Public", "acme"), "Acme Public");
+        assert_eq!(badge_alt_label("Acme \"Pro\"", "acme"), "Acme Pro");
     }
 
     #[test]

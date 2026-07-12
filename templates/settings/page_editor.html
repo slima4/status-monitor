@@ -225,21 +225,35 @@
     </header>
     <div class="space-y-3 p-4">
       <p class="text-pretty text-xs text-muted">
-        Embed a live status badge in a README or site. Markdown below;
-        the image updates on its own.{% if !enabled %} Goes live once the page is public.{% endif %}
+        Embed a live status badge that links back to your status page. Drop it in a
+        site footer or README. Grab HTML or Markdown; the image updates on its own.{% if !enabled %} Goes live once the page is public.{% endif %}
       </p>
 
+      {% if enabled %}<img src="{{ badge }}" height="20" alt="overall status badge" loading="lazy" decoding="async" class="block">{% endif %}
+
+      {% if let Some(link) = badge_link %}
       <div class="flex items-center gap-3">
-        {% if enabled %}<img src="{{ badge }}" height="20" alt="overall status badge" loading="lazy" decoding="async" class="block">{% endif %}
-        <code id="badge-md-overall" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if public_display_name != "" %}{{ public_display_name }}{% else %}{{ name }}{% endif %} status]({{ badge }})</code>
+        <span class="w-16 shrink-0 font-mono text-[10px] uppercase text-quiet">HTML</span>
+        <code id="badge-html-overall" class="flex-1 overflow-x-auto whitespace-nowrap rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">&lt;a href="{{ link }}" target="_blank" rel="noopener"&gt;&lt;img src="{{ badge }}" alt="{{ badge_alt }} status" height="20" loading="lazy" decoding="async"&gt;&lt;/a&gt;</code>
+        <button type="button" data-copy="#badge-html-overall" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="w-16 shrink-0 font-mono text-[10px] uppercase text-quiet">Markdown</span>
+        <code id="badge-md-overall" class="flex-1 overflow-x-auto whitespace-nowrap rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">[![{{ badge_alt }} status]({{ badge }})]({{ link }})</code>
         <button type="button" data-copy="#badge-md-overall" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
       </div>
+      {% else %}
+      <div class="flex items-center gap-3">
+        <code id="badge-md-overall" class="flex-1 overflow-x-auto whitespace-nowrap rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{{ badge_alt }} status]({{ badge }})</code>
+        <button type="button" data-copy="#badge-md-overall" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
+      </div>
+      {% endif %}
 
-      <div data-badge-list data-badge-base="{{ badge }}" class="space-y-2 border-[color:var(--theme-line)] border-t pt-3">
+      <div data-badge-list data-badge-base="{{ badge }}"{% if let Some(link) = badge_link %} data-badge-link="{{ link }}"{% endif %} class="space-y-2 border-[color:var(--theme-line)] border-t pt-3">
         {% for c in components %}{% if c.on_page %}
         <div class="flex items-center gap-2">
           <span class="w-28 shrink-0 truncate text-xs text-muted">{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %} <span class="font-mono text-[10px] uppercase text-quiet">{{ c.kind }}</span></span>
-          <code id="badge-md-{{ loop.index }}" class="flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">![{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}]({{ badge }}?component={{ c.target_id }})</code>
+          <code id="badge-md-{{ loop.index }}" class="flex-1 overflow-x-auto whitespace-nowrap rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body">{% if let Some(link) = badge_link %}[![{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}]({{ badge }}?component={{ c.target_id }})]({{ link }}){% else %}![{% if c.public_name != "" %}{{ c.public_name }}{% else %}{{ c.monitor_name }}{% endif %}]({{ badge }}?component={{ c.target_id }}){% endif %}</code>
           <button type="button" data-copy="#badge-md-{{ loop.index }}" class="sticker-btn shrink-0 px-2.5 py-1 text-xs"><span data-copy-label>copy</span></button>
         </div>
         {% endif %}{% endfor %}
@@ -369,6 +383,7 @@
       // or off the page, or renaming it, must add/drop/relabel its badge row.
       const badgeList = document.querySelector('[data-badge-list]');
       const badgeBase = badgeList && badgeList.dataset.badgeBase;
+      const badgeLink = badgeList && badgeList.dataset.badgeLink;
       function renderBadgeList() {
         if (!badgeList) return;
         badgeList.textContent = '';
@@ -392,8 +407,10 @@
           name.appendChild(kind);
           const code = document.createElement('code');
           code.id = cid;
-          code.className = 'flex-1 overflow-x-auto whitespace-nowrap rounded bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body';
-          code.textContent = '![' + label + '](' + url + ')';
+          code.className = 'flex-1 overflow-x-auto whitespace-nowrap rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1 font-mono text-xs text-body';
+          code.textContent = badgeLink
+            ? '[![' + label + '](' + url + ')](' + badgeLink + ')'
+            : '![' + label + '](' + url + ')';
           const btn = document.createElement('button');
           btn.type = 'button';
           btn.className = 'sticker-btn shrink-0 px-2.5 py-1 text-xs';
