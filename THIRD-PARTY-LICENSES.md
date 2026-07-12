@@ -1,6 +1,6 @@
 # Third-Party Licenses
 
-uptimepage itself is licensed under AGPL-3.0 (see [LICENSE](LICENSE)).
+uptimepage itself is licensed under AGPL-3.0 (see [LICENSE](https://github.com/uptimepage/uptimepage/blob/main/LICENSE)).
 The release binary additionally **embeds** the third-party assets listed
 below (vendored JavaScript under `static/js/`, and the Tailwind-generated
 `static/css/app.css`), all baked in via `rust-embed`. Their licenses and
@@ -26,7 +26,7 @@ licensed under AGPL-3.0 like the rest of the project.
 Rust crates are compiled into the binary rather than embedded as source.
 Their licenses are constrained to an AGPL-3.0-compatible allow-list that
 CI enforces on every push via `cargo-deny` (see
-[`deny.toml`](deny.toml)). The permitted set is:
+[`deny.toml`](https://github.com/uptimepage/uptimepage/blob/main/deny.toml)). The permitted set is:
 
 `MIT`, `Apache-2.0`, `Apache-2.0 WITH LLVM-exception`, `BSD-2-Clause`,
 `BSD-3-Clause`, `ISC`, `Unicode-3.0`, `Unicode-DFS-2016`, `Zlib`,

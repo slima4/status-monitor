@@ -381,12 +381,15 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	# public internet without adding your own gate.
 
 	# ─── Security headers ───────────────────────────────────────────────
+	# The operator app is a private surface: keep it out of search indexes so
+	# its login and legal pages don't duplicate the marketing site.
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+		X-Robots-Tag "noindex"
 		-Server
 		-X-Powered-By
 	}
@@ -455,6 +458,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 
 	# No identifiable headers.
 	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		-Server
 		-X-Powered-By
 	}
@@ -486,6 +490,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 # www serves only a redirect, but still needs its own cert to complete the
 # TLS handshake first; {uri} preserves the path and query to apex.
 www.{$UPTIMEPAGE_DOMAIN} {
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 	redir https://{$UPTIMEPAGE_DOMAIN}{uri} permanent
 }
 
