@@ -743,7 +743,7 @@ html:has(.marketing-shell) {
     display: block;
     color: var(--mk-ink-soft);
     font-size: 0.8125rem;
-    padding: 0.25rem 0;
+    padding: 0.4375rem 0;
     transition: color 140ms ease, padding-left 140ms ease;
     text-decoration: none;
     font-family: var(--mk-font-mono);
@@ -1103,6 +1103,9 @@ html:has(.marketing-shell) {
 .mk-gallery__card:focus-visible .mk-gallery__zoom {
     opacity: 1;
     transform: translateY(0);
+}
+@media (hover: none) {
+    .mk-gallery__zoom { opacity: 1; transform: none; }
 }
 
 /* Lightbox — CSS :target drives open/close/prev/next; arrow keys are a progressive JS enhancement */
