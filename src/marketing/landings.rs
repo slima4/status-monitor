@@ -25,10 +25,7 @@ use axum::routing::get;
 
 use super::config::{BRAND, MarketingCfg, TERRAFORM_URL};
 use super::pages::{CachedRender, cached_render, serve_cached};
-use super::seo::{
-    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_software_application,
-    json_ld_webpage,
-};
+use super::seo::{JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_webpage};
 use crate::web::filters;
 
 const LANDING_CACHE_CONTROL: HeaderValue =
@@ -1605,9 +1602,6 @@ struct LandingDoc {
     canonical_url: String,
     og: OpenGraph,
     breadcrumb_json_ld: JsonLd,
-    /// Absent on `/compare/` pages: their main entity is the rival pair,
-    /// and app markup there would misdescribe the page.
-    software_json_ld: Option<JsonLd>,
     webpage_json_ld: JsonLd,
     faq_json_ld: Option<JsonLd>,
     faqs: &'static [(&'static str, &'static str)],
@@ -3169,14 +3163,13 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 canonical_url,
                 og,
                 breadcrumb_json_ld: json_ld_breadcrumb(&cfg.canonical_origin, l.h1, l.path),
-                software_json_ld: (!l.path.starts_with("/compare/"))
-                    .then(|| json_ld_software_application(&cfg.canonical_origin)),
                 webpage_json_ld: json_ld_webpage(
                     &cfg.canonical_origin,
                     l.path,
                     l.h1,
                     l.created,
                     l.lastmod,
+                    !l.path.starts_with("/compare/"),
                 ),
                 faq_json_ld: (!faqs.is_empty()).then(|| json_ld_faqpage(faqs)),
                 faqs,

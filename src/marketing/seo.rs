@@ -172,21 +172,45 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
     JsonLd::from_value(payload)
 }
 
-/// `SoftwareApplication` with a free `Offer` so search and answer engines
-/// read a concrete `$0` price instead of guessing a tier from the category.
+/// Canonical product entity (`@id`), with a freemium `AggregateOffer` so
+/// search and answer engines read the real price range, not a guessed tier.
 pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "SoftwareApplication",
+        "@id": format!("{canonical_origin}/#software"),
         "name": BRAND,
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "Web, Docker, Linux",
         "url": canonical_origin,
+        "isAccessibleForFree": true,
         "offers": {
-            "@type": "Offer",
-            "price": "0",
+            "@type": "AggregateOffer",
+            "lowPrice": "0",
+            "highPrice": "19",
             "priceCurrency": "USD",
+            "offerCount": "3",
         },
+        "publisher": { "@id": format!("{canonical_origin}/#organization") },
+    });
+    JsonLd::from_value(payload)
+}
+
+/// `SoftwareSourceCode` for the AGPL, self-hostable side of the product. A
+/// rating-free entity that answers "open source / self-hosted" queries and
+/// links back to the product and organization entities.
+pub fn json_ld_software_source_code(canonical_origin: &str) -> JsonLd {
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "SoftwareSourceCode",
+        "name": BRAND,
+        "url": canonical_origin,
+        "codeRepository": "https://github.com/uptimepage/uptimepage",
+        "programmingLanguage": "Rust",
+        "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+        "runtimePlatform": "Docker",
+        "about": { "@id": format!("{canonical_origin}/#software") },
+        "author": { "@id": format!("{canonical_origin}/#organization") },
     });
     JsonLd::from_value(payload)
 }
@@ -255,15 +279,24 @@ pub fn json_ld_webpage(
     name: &str,
     created: &str,
     modified: &str,
+    about_product: bool,
 ) -> JsonLd {
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "WebPage",
+        "@id": format!("{canonical_origin}{path}#webpage"),
         "name": name,
         "url": format!("{canonical_origin}{path}"),
         "datePublished": created,
         "dateModified": modified,
+        "isPartOf": { "@id": format!("{canonical_origin}/#website") },
+        "publisher": { "@id": format!("{canonical_origin}/#organization") },
     });
+    // Only pages whose subject is the product link `about` to it; a rival-vs-rival
+    // comparison page would misdescribe itself by claiming to be about us.
+    if about_product {
+        payload["about"] = serde_json::json!({ "@id": format!("{canonical_origin}/#software") });
+    }
     JsonLd::from_value(payload)
 }
 
@@ -295,6 +328,7 @@ pub fn json_ld_item_list(
                 "@type": "ListItem",
                 "position": i + 1,
                 "name": item,
+                "item": { "@type": "Thing", "name": item },
             })
         })
         .collect();
@@ -722,8 +756,66 @@ mod tests {
         let jl = json_ld_software_application("https://uptimepage.dev");
         let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
         assert_eq!(v["@type"], "SoftwareApplication");
-        assert_eq!(v["offers"]["price"], "0");
+        assert_eq!(v["@id"], "https://uptimepage.dev/#software");
+        assert_eq!(v["isAccessibleForFree"], true);
+        assert_eq!(v["offers"]["@type"], "AggregateOffer");
+        assert_eq!(v["offers"]["lowPrice"], "0");
         assert_eq!(v["offers"]["priceCurrency"], "USD");
+        assert_eq!(
+            v["publisher"]["@id"],
+            "https://uptimepage.dev/#organization"
+        );
+    }
+
+    #[test]
+    fn json_ld_item_list_nests_item_for_carousel() {
+        let items = vec!["Uptime Kuma".to_string()];
+        let jl = json_ld_item_list("https://uptimepage.dev", "best-tools", "Best tools", &items);
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["itemListElement"][0]["item"]["@type"], "Thing");
+        assert_eq!(v["itemListElement"][0]["item"]["name"], "Uptime Kuma");
+    }
+
+    #[test]
+    fn json_ld_webpage_links_product_and_site() {
+        let jl = json_ld_webpage(
+            "https://uptimepage.dev",
+            "/pricing",
+            "Pricing",
+            "2026-01-01",
+            "2026-01-02",
+            true,
+        );
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["about"]["@id"], "https://uptimepage.dev/#software");
+        assert_eq!(v["isPartOf"]["@id"], "https://uptimepage.dev/#website");
+    }
+
+    #[test]
+    fn json_ld_webpage_omits_about_for_comparison() {
+        let jl = json_ld_webpage(
+            "https://uptimepage.dev",
+            "/compare/a-vs-b",
+            "A vs B",
+            "2026-01-01",
+            "2026-01-02",
+            false,
+        );
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert!(v["about"].is_null());
+        assert_eq!(v["isPartOf"]["@id"], "https://uptimepage.dev/#website");
+    }
+
+    #[test]
+    fn json_ld_source_code_is_agpl() {
+        let jl = json_ld_software_source_code("https://uptimepage.dev");
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["@type"], "SoftwareSourceCode");
+        assert_eq!(
+            v["codeRepository"],
+            "https://github.com/uptimepage/uptimepage"
+        );
+        assert_eq!(v["about"]["@id"], "https://uptimepage.dev/#software");
     }
 
     #[test]

@@ -3,7 +3,6 @@
 {% block description %}{{ og.description }}{% endblock %}
 {% block head %}
 <script type="application/ld+json">{{ breadcrumb_json_ld.as_str()|safe }}</script>
-{% if let Some(sw) = software_json_ld %}<script type="application/ld+json">{{ sw.as_str()|safe }}</script>{% endif %}
 <script type="application/ld+json">{{ webpage_json_ld.as_str()|safe }}</script>
 {% if let Some(faq) = faq_json_ld %}<script type="application/ld+json">{{ faq.as_str()|safe }}</script>{% endif %}
 {% endblock %}

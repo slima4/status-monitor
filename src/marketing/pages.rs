@@ -18,7 +18,7 @@ use bytes::Bytes;
 
 use crate::marketing::seo::{
     JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_howto, json_ld_organization,
-    json_ld_software_application, json_ld_webpage, json_ld_website,
+    json_ld_software_application, json_ld_software_source_code, json_ld_webpage, json_ld_website,
 };
 use crate::web::filters;
 
@@ -43,6 +43,7 @@ struct LandingPage {
     org_json_ld: JsonLd,
     website_json_ld: JsonLd,
     software_json_ld: JsonLd,
+    source_code_json_ld: JsonLd,
     faq_json_ld: JsonLd,
     howto_json_ld: JsonLd,
     version: &'static str,
@@ -138,6 +139,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         org_json_ld: json_ld_organization(&cfg.canonical_origin),
         website_json_ld: json_ld_website(&cfg.canonical_origin),
         software_json_ld: json_ld_software_application(&cfg.canonical_origin),
+        source_code_json_ld: json_ld_software_source_code(&cfg.canonical_origin),
         faq_json_ld: json_ld_faqpage(FAQS),
         howto_json_ld: json_ld_howto(HOWTO_NAME, HOWTO_STEPS),
         og,
@@ -260,6 +262,7 @@ fn render_pricing(cfg: &MarketingCfg) -> CachedRender {
             "Pricing",
             PRICING_CREATED,
             PRICING_LASTMOD,
+            true,
         ),
         faq_json_ld: json_ld_faqpage(PRICING_FAQS),
         faqs: PRICING_FAQS,
