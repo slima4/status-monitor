@@ -500,7 +500,7 @@ html:has(.marketing-shell) {
     color: var(--mk-ok); border: 1px solid var(--mk-ok);
     border-radius: 2px; padding: 0.1rem 0.35rem;
 }
-.mk-price__badge--pop { color: var(--mk-bg); background: var(--mk-ok); border-color: var(--mk-ok); font-weight: 600; }
+.mk-price__badge--pop { color: var(--mk-bg); background: color-mix(in oklch, var(--mk-ok) 80%, black); border-color: color-mix(in oklch, var(--mk-ok) 80%, black); font-weight: 600; }
 .mk-price__badge--quiet { color: var(--mk-quiet); border-color: var(--mk-rule); }
 .mk-price__name { font-family: var(--mk-font-mono); font-weight: 600; font-size: 1.0625rem; color: var(--mk-ink); }
 .mk-price__name::before { content: "// "; color: var(--mk-faint); font-weight: 500; }
@@ -585,11 +585,17 @@ html:has(.marketing-shell) {
 .fnd__count strong { color: var(--mk-ink); font-weight: 600; }
 
 /* ── Free-plan comparison table ───────────────────────────────────── */
-.cmp { width: 100%; border-collapse: collapse; font-family: var(--mk-font-mono); font-size: 0.8125rem; border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; font-variant-numeric: tabular-nums; }
+.cmp { width: 100%; border-collapse: collapse; font-family: var(--mk-font-mono); font-size: 0.8125rem; border: 1px solid var(--mk-rule); border-radius: 2px; font-variant-numeric: tabular-nums; }
 .cmp th, .cmp td { text-align: left; padding: 0.75rem 0.9rem; border-top: 1px solid var(--mk-rule); border-left: 1px solid var(--mk-rule); transition: background-color 120ms ease; }
 .cmp thead th { background: var(--mk-bg-2); color: var(--mk-quiet); font-weight: 500; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; border-top: 0; }
 .cmp tbody th { color: var(--mk-ink-soft); font-weight: 500; }
-.cmp th:first-child, .cmp td:first-child { border-left: 0; }
+.cmp th:first-child, .cmp td:first-child {
+    border-left: 0;
+    position: sticky; left: 0; z-index: 1;
+    background: var(--mk-bg);
+    box-shadow: 1px 0 0 var(--mk-rule);
+}
+.cmp thead th:first-child { background: var(--mk-bg-2); }
 .cmp .us { color: var(--mk-ink); font-weight: 600; }
 .cmp .col-us { background: var(--mk-ok-soft); }
 .cmp thead th.col-us { background: var(--mk-ok-soft); color: var(--mk-ink); }

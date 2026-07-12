@@ -31,7 +31,7 @@
                     <span class="fnd__gauge-label">founding cohort</span>
                     <span class="fnd__gauge-pct">{{ founding_pct_exact }}<span>%</span></span>
                 </div>
-                <div class="fnd-meter"><div class="fnd-meter__fill fnd-meter__fill--w{{ founding_pct }}"></div></div>
+                <div class="fnd-meter" role="progressbar" aria-valuenow="{{ founding_pct_exact }}" aria-valuemin="0" aria-valuemax="100" aria-label="Founding spots claimed"><div class="fnd-meter__fill fnd-meter__fill--w{{ founding_pct }}"></div></div>
                 <div class="fnd__count"><span><strong>{{ founding_claimed|thousands }}</strong> / {{ founding_total|thousands }} claimed</span><span>{{ founding_left|thousands }} left</span></div>
             </div>
         </div>
