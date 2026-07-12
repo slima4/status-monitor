@@ -776,6 +776,70 @@ html:has(.marketing-shell) {
 .mk-integration:hover { color: var(--mk-ink); }
 .mk-integration svg { width: 1rem; height: 1rem; fill: currentColor; }
 
+/* ── Customer quote ──────────────────────────────────────────────── */
+.mk-quote {
+    margin-inline: auto;
+    max-width: 42rem;
+    padding: 1.75rem 1.5rem;
+    text-align: left;
+    background: var(--mk-surface);
+    border: 1px solid var(--mk-rule);
+    border-left: 2px solid var(--mk-ok);
+    border-radius: 2px;
+    box-shadow: var(--mk-shadow-card);
+}
+.mk-quote__body {
+    margin: 0 0 1.25rem;
+    font-size: 1.0625rem;
+    line-height: 1.6;
+    color: var(--mk-ink);
+    text-wrap: pretty;
+}
+.mk-quote__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+}
+.mk-quote__cite {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    text-decoration: none;
+    transition: opacity 160ms ease;
+}
+.mk-quote__cite:hover { opacity: 0.82; }
+.mk-quote__status {
+    font-family: var(--mk-font-mono);
+    font-size: 0.75rem;
+    color: var(--mk-ok);
+    white-space: nowrap;
+    text-decoration: none;
+    transition: opacity 160ms ease;
+}
+.mk-quote__status:hover { opacity: 0.82; }
+.mk-quote__logo {
+    flex: none;
+    width: 2.5rem;
+    height: 2.5rem;
+    border-radius: 9px;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
+}
+.mk-quote__name {
+    display: block;
+    font-family: var(--mk-font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--mk-ink);
+}
+.mk-quote__org {
+    display: block;
+    font-family: var(--mk-font-mono);
+    font-size: 0.75rem;
+    color: var(--mk-quiet);
+}
+
 /* ── Blog primitives ─────────────────────────────────────────────── */
 .mk-blog-row {
     display: block;
