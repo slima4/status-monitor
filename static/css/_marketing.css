@@ -169,6 +169,59 @@ html:has(.marketing-shell) {
 }
 .mk-nav-link:hover { color: var(--mk-ok); }
 
+/* GitHub label stays icon-only in the desktop bar until there's room; the
+   mobile menu panel always shows the word. */
+.mk-nav-desk .gh-label { display: none; }
+@media (min-width: 64rem) { .mk-nav-desk .gh-label { display: inline; } }
+
+/* ── Mobile menu — native <details> disclosure, JS-enhanced close ───── */
+.mk-menu { position: relative; }
+.mk-menu > summary {
+    list-style: none;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 2.5rem; height: 2.5rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-surface);
+    color: var(--mk-ink);
+    cursor: pointer;
+    transition: border-color 140ms ease, background-color 140ms ease;
+}
+.mk-menu > summary::-webkit-details-marker { display: none; }
+.mk-menu > summary:hover { border-color: var(--mk-ink); background: var(--mk-bg-2); }
+.mk-menu__bars, .mk-menu__bars::before, .mk-menu__bars::after {
+    display: block; width: 1.125rem; height: 2px; background: currentColor; border-radius: 2px;
+}
+.mk-menu__bars { position: relative; transition: background-color 160ms ease; }
+.mk-menu__bars::before, .mk-menu__bars::after {
+    content: ""; position: absolute; left: 0;
+    transition: transform 160ms ease, top 160ms ease;
+}
+.mk-menu__bars::before { top: -0.375rem; }
+.mk-menu__bars::after  { top: 0.375rem; }
+.mk-menu[open] > summary .mk-menu__bars { background: transparent; }
+.mk-menu[open] > summary .mk-menu__bars::before { top: 0; transform: rotate(45deg); }
+.mk-menu[open] > summary .mk-menu__bars::after  { top: 0; transform: rotate(-45deg); }
+.mk-menu__panel {
+    position: absolute; top: calc(100% + 0.5rem); right: 0;
+    min-width: 12rem; max-width: calc(100vw - 1.5rem);
+    display: flex; flex-direction: column; gap: 0.125rem;
+    padding: 0.5rem;
+    background: var(--mk-surface);
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    box-shadow: var(--mk-shadow-frame);
+    z-index: 40;
+}
+.mk-menu__panel .mk-nav-link {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.625rem 0.75rem;
+    min-height: 2.5rem;
+    border-radius: 2px;
+    transition: background-color 140ms ease, color 140ms ease;
+}
+.mk-menu__panel .mk-nav-link:hover { background: var(--mk-bg-2); }
+
 .mk-brand {
     display: inline-flex;
     align-items: baseline;
@@ -962,6 +1015,9 @@ html:has(.marketing-shell) {
     .mk-faq__body { animation: none; }
     .mk-cta,
     .mk-cta__arrow,
+    .mk-menu__bars,
+    .mk-menu__bars::before,
+    .mk-menu__bars::after,
     .mk-card,
     .mk-step,
     .mk-blog-row,
