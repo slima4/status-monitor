@@ -185,7 +185,7 @@ const PRICING_LASTMOD: &str = "2026-06-23";
 
 // Founding-claim figures shown on the pricing scarcity meter.
 const FOUNDING_TOTAL: u32 = 1000;
-const FOUNDING_CLAIMED: u32 = 153;
+const FOUNDING_CLAIMED: u32 = 713;
 
 const PRICING_FAQS: &[(&str, &str)] = &[
     (
@@ -233,6 +233,7 @@ struct PricingPage {
     founding_total: u32,
     founding_left: u32,
     founding_pct: u32,
+    founding_pct_exact: u32,
     version: &'static str,
 }
 
@@ -275,6 +276,11 @@ fn render_pricing(cfg: &MarketingCfg) -> CachedRender {
                 .unwrap_or(0);
             ((raw + 2) / 5 * 5).min(100)
         },
+        // Shown as the gauge readout, so it must match the exact claimed/total.
+        founding_pct_exact: (FOUNDING_CLAIMED * 100 + FOUNDING_TOTAL / 2)
+            .checked_div(FOUNDING_TOTAL)
+            .unwrap_or(0)
+            .min(100),
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page

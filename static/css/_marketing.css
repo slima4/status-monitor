@@ -233,6 +233,8 @@ html:has(.marketing-shell) {
 }
 .mk-cta__arrow { transition: transform 200ms ease; }
 .mk-cta:hover .mk-cta__arrow { transform: translateX(3px); }
+.mk-cta:active { transform: scale(0.96); }
+.mk-cta--primary:active { transform: translateY(-1px) scale(0.96); }
 
 /* ── Live pill — bracket-wrapped status indicator ─────────────────── */
 .mk-livepill {
@@ -479,9 +481,18 @@ html:has(.marketing-shell) {
 }
 .mk-price > * { position: relative; }
 .mk-price--stack { display: flex; flex-direction: column; gap: 1rem; }
-.mk-price--feature { border-color: var(--mk-ink); }
+.mk-price--feature {
+    border-color: var(--mk-ok);
+    background: color-mix(in oklch, var(--mk-ok) 5%, var(--mk-surface));
+    box-shadow: var(--mk-shadow-card);
+}
 .mk-price--feature::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--mk-ok); }
-.mk-price--soon { opacity: 0.96; }
+.mk-price--feature .mk-price__amt b { color: var(--mk-ok); }
+@media (min-width: 768px) {
+    .mk-price--feature { transform: translateY(-0.5rem); box-shadow: var(--mk-shadow-card-hover); }
+}
+.mk-price--soon { opacity: 0.9; background: var(--mk-bg); }
+.mk-price--soon .mk-price__name { color: var(--mk-ink-soft); }
 .mk-price__badge {
     position: absolute; top: 0.9rem; right: 1rem;
     font-family: var(--mk-font-mono); font-size: 0.625rem;
@@ -489,6 +500,7 @@ html:has(.marketing-shell) {
     color: var(--mk-ok); border: 1px solid var(--mk-ok);
     border-radius: 2px; padding: 0.1rem 0.35rem;
 }
+.mk-price__badge--pop { color: var(--mk-bg); background: var(--mk-ok); border-color: var(--mk-ok); font-weight: 600; }
 .mk-price__badge--quiet { color: var(--mk-quiet); border-color: var(--mk-rule); }
 .mk-price__name { font-family: var(--mk-font-mono); font-weight: 600; font-size: 1.0625rem; color: var(--mk-ink); }
 .mk-price__name::before { content: "// "; color: var(--mk-faint); font-weight: 500; }
@@ -520,15 +532,34 @@ html:has(.marketing-shell) {
 .mk-price__line::before { content: "+"; color: var(--mk-ok); font-weight: 600; flex: none; }
 .mk-price__line b { color: var(--mk-ink); font-weight: 600; }
 
-.mk-cta--block { width: 100%; justify-content: center; }
+.mk-cta--block { width: 100%; justify-content: center; min-height: 2.5rem; }
 
 /* ── Founding cohort meter ────────────────────────────────────────── */
-.fnd { position: relative; border: 1px solid var(--mk-ok); border-radius: 2px; background: var(--mk-surface); padding: 1.125rem 1.25rem; display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.5rem; overflow: hidden; }
-.fnd::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--mk-ok); }
+.fnd { border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); padding: 1.25rem 1.5rem; display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 2rem; }
 .fnd__text { flex: 1 1 22rem; min-width: 0; }
-.fnd__meterwrap { flex: 1 1 16rem; min-width: 0; }
-.fnd-meter { height: 0.5rem; background: var(--mk-bg-2); border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; }
-.fnd-meter__fill { width: 0; height: 100%; background: var(--mk-ok); }
+.fnd__meterwrap { flex: 1 1 18rem; min-width: 0; }
+.fnd__gauge { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.45rem; font-family: var(--mk-font-mono); }
+.fnd__gauge-label { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mk-quiet); }
+.fnd__gauge-pct { font-size: 1.375rem; font-weight: 600; color: var(--mk-ink); letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
+.fnd__gauge-pct span { font-size: 0.8125rem; color: var(--mk-quiet); margin-left: 0.1em; }
+.fnd-meter {
+    position: relative;
+    height: 0.625rem;
+    background: var(--mk-bg-2);
+    background-image: repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), var(--mk-rule-soft) calc(10% - 1px), var(--mk-rule-soft) 10%);
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.08);
+}
+.fnd-meter__fill {
+    width: 0; height: 100%;
+    background: linear-gradient(90deg, color-mix(in oklch, var(--mk-ok) 82%, black) 0%, var(--mk-ok) 100%);
+    box-shadow: 0 0 8px -1px color-mix(in oklch, var(--mk-ok) 70%, transparent);
+    transform-origin: left center;
+    animation: fnd-fill 900ms cubic-bezier(0.2, 0.65, 0.3, 1) backwards;
+}
+@keyframes fnd-fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 .fnd-meter__fill--w0 { width: 0; }
 .fnd-meter__fill--w5 { width: 5%; }
 .fnd-meter__fill--w10 { width: 10%; }
@@ -550,17 +581,20 @@ html:has(.marketing-shell) {
 .fnd-meter__fill--w90 { width: 90%; }
 .fnd-meter__fill--w95 { width: 95%; }
 .fnd-meter__fill--w100 { width: 100%; }
-.fnd__count { font-family: var(--mk-font-mono); font-size: 0.75rem; color: var(--mk-quiet); margin-top: 0.5rem; display: flex; justify-content: space-between; }
+.fnd__count { font-family: var(--mk-font-mono); font-size: 0.75rem; color: var(--mk-quiet); margin-top: 0.5rem; display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
 .fnd__count strong { color: var(--mk-ink); font-weight: 600; }
 
 /* ── Free-plan comparison table ───────────────────────────────────── */
-.cmp { width: 100%; border-collapse: collapse; font-family: var(--mk-font-mono); font-size: 0.8125rem; border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; }
-.cmp th, .cmp td { text-align: left; padding: 0.75rem 0.9rem; border-top: 1px solid var(--mk-rule); border-left: 1px solid var(--mk-rule); }
+.cmp { width: 100%; border-collapse: collapse; font-family: var(--mk-font-mono); font-size: 0.8125rem; border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; font-variant-numeric: tabular-nums; }
+.cmp th, .cmp td { text-align: left; padding: 0.75rem 0.9rem; border-top: 1px solid var(--mk-rule); border-left: 1px solid var(--mk-rule); transition: background-color 120ms ease; }
 .cmp thead th { background: var(--mk-bg-2); color: var(--mk-quiet); font-weight: 500; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; border-top: 0; }
 .cmp tbody th { color: var(--mk-ink-soft); font-weight: 500; }
 .cmp th:first-child, .cmp td:first-child { border-left: 0; }
 .cmp .us { color: var(--mk-ink); font-weight: 600; }
 .cmp .col-us { background: var(--mk-ok-soft); }
+.cmp thead th.col-us { background: var(--mk-ok-soft); color: var(--mk-ink); }
+.cmp tbody tr:hover > *:not(.col-us) { background: var(--mk-bg-2); }
+.cmp tbody tr:hover .col-us { background: color-mix(in oklch, var(--mk-ok-soft) 82%, var(--mk-ok)); }
 .cmp .yes { color: var(--mk-ok); }
 .cmp .no { color: var(--mk-quiet); }
 .cmp .part { color: oklch(0.62 0.13 66); }
@@ -918,6 +952,7 @@ html:has(.marketing-shell) {
     .mk-livepill__dot::after,
     .mk-ticker__track,
     .mk-terminal__cursor,
+    .fnd-meter__fill,
     .mk-faq__body { animation: none; }
     .mk-cta,
     .mk-cta__arrow,

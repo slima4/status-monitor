@@ -10,7 +10,6 @@
 <div class="mx-auto max-w-5xl space-y-16 sm:space-y-20">
 
     <section class="space-y-5 text-center">
-        <p class="mk-eyebrow mk-eyebrow--ok">pricing</p>
         <h1 class="mk-display">Monitoring you can <em class="mk-display-em">self-host</em>, or leave to us.</h1>
         <p class="mk-lede mx-auto">The whole codebase is on GitHub under AGPL. Run it on your own box with no limits and no account. Want to skip the ops? Our hosted plans start at zero.</p>
         <div class="flex flex-wrap items-center justify-center gap-2 pt-1">
@@ -28,8 +27,12 @@
                 <p class="mk-body mt-2">The first <strong class="mk-ink">{{ founding_total|thousands }}</strong> hosted accounts get the founding plan and keep it at these limits, even after we close it. <span class="mk-mark">No catch, no expiry</span>.</p>
             </div>
             <div class="fnd__meterwrap">
+                <div class="fnd__gauge">
+                    <span class="fnd__gauge-label">founding cohort</span>
+                    <span class="fnd__gauge-pct">{{ founding_pct_exact }}<span>%</span></span>
+                </div>
                 <div class="fnd-meter"><div class="fnd-meter__fill fnd-meter__fill--w{{ founding_pct }}"></div></div>
-                <div class="fnd__count"><span><strong>{{ founding_claimed|thousands }}</strong> claimed</span><span>{{ founding_left|thousands }} left</span></div>
+                <div class="fnd__count"><span><strong>{{ founding_claimed|thousands }}</strong> / {{ founding_total|thousands }} claimed</span><span>{{ founding_left|thousands }} left</span></div>
             </div>
         </div>
     </section>
@@ -57,12 +60,12 @@
             </div>
 
             <div class="mk-price mk-price--feature mk-price--stack">
-                <span class="mk-price__badge">first {{ founding_total|thousands }}</span>
+                <span class="mk-price__badge mk-price__badge--pop">first {{ founding_total|thousands }}</span>
                 <div class="mk-price__name">founding</div>
                 <p class="mk-price__tag">For early users who back the project before it is obvious.</p>
                 <div class="mk-price__amt"><b>$0</b><span>/ while spots last</span></div>
                 <p class="mk-price__note">grandfathered · yours to keep</p>
-                <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary mk-cta--block">claim a founding spot</a>
+                <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary mk-cta--block">claim a founding spot <span class="mk-cta__arrow">→</span></a>
                 <p class="mk-price__head">everything in standard, plus</p>
                 <ul class="mk-price__list">
                     <li class="mk-price__line"><span><b>50</b> monitors</span></li>
