@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0v32" fill="none" stroke="#dde2e8" stroke-width="0.5"/>
+    </pattern>
+  </defs>
+
+  <rect width="1200" height="630" fill="#f7f9fa"/>
+  <rect width="1200" height="630" fill="url(#grid)" opacity="0.55"/>
+  <rect x="0" y="0" width="1200" height="1" fill="#d0d6df"/>
+  <rect x="0" y="629" width="1200" height="1" fill="#d0d6df"/>
+
+  <g font-family="Menlo, 'Courier New', monospace">
+
+    <g transform="translate(96 92)" font-size="30" font-weight="600">
+      <text x="0" y="0" fill="#7c8493">[</text>
+      <text x="29" y="2" text-anchor="middle" font-size="42" fill="#0d9a5b">↑</text>
+      <text x="40" y="0" fill="#7c8493">]</text>
+      <text x="74" y="0" fill="#1a212c">Uptime</text>
+      <text x="188" y="0" fill="#0d9a5b">page</text>
+    </g>
+
+    <g transform="translate(96 236)" font-size="72" font-weight="600" fill="#1a212c">
+      <text x="0" y="0" letter-spacing="-2">Error budget &amp;</text>
+      <text x="0" y="88" letter-spacing="-2">burn rate.</text>
+    </g>
+
+    <text x="96" y="432" font-family="Menlo, 'Courier New', monospace"
+          font-size="40" font-weight="600" fill="#0d9a5b" letter-spacing="-1">
+      budget = window × (1 - SLO)
+    </text>
+
+    <text x="96" y="486" font-family="Menlo, 'Courier New', monospace"
+          font-size="22" font-weight="500" fill="#4b5564">
+      budget spent, budget left, burn rate, and the alert thresholds SREs use.
+    </text>
+
+    <g transform="translate(96 528)" font-size="24" font-weight="700">
+      <rect x="0" y="0" width="348" height="58" rx="2" fill="#1a212c"/>
+      <text x="24" y="38" fill="#ffffff">uptimepage.dev</text>
+      <text x="230" y="38" fill="#0d9a5b">/tools</text>
+    </g>
+
+  </g>
+
+  <g transform="translate(812 150)">
+    <rect x="-24" y="-24" width="316" height="248" rx="4" fill="#ffffff" stroke="#e2e7ec" stroke-width="1"/>
+    <line x1="0" y1="0" x2="0" y2="176" stroke="#d0d6df" stroke-width="1"/>
+    <line x1="0" y1="176" x2="268" y2="176" stroke="#d0d6df" stroke-width="1"/>
+    <polyline points="0,0 268,176" fill="none" stroke="#9aa3af" stroke-width="1.5" stroke-dasharray="5 5"/>
+    <polyline points="0,0 150,176 268,176" fill="none" stroke="#0d9a5b" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="150" cy="176" r="6" fill="#0d9a5b" stroke="#ffffff" stroke-width="2.5"/>
+    <text x="0" y="204" font-family="Menlo, 'Courier New', monospace" font-size="15" fill="#7c8493">budget left</text>
+    <text x="268" y="204" text-anchor="end" font-family="Menlo, 'Courier New', monospace" font-size="15" fill="#0d9a5b" font-weight="600">gone early</text>
+  </g>
+</svg>

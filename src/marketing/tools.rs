@@ -397,6 +397,342 @@ fn render_cron(cfg: &MarketingCfg) -> CachedRender {
     cached_render(body)
 }
 
+// ── Error budget & burn rate calculator ───────────────────────────────
+// Client-side only (error_budget.js). The server default must equal the JS
+// output, or the numbers flicker on hydration.
+
+const QUARTER: f64 = 7_776_000.0; // 90 days
+
+pub const ERROR_BUDGET_PATH: &str = "/tools/error-budget-calculator";
+const ERROR_BUDGET_CREATED: &str = "2026-07-13";
+const ERROR_BUDGET_LASTMOD: &str = "2026-07-13";
+pub const ERROR_BUDGET_TITLE: &str = "Error Budget & Burn Rate Calculator";
+pub const ERROR_BUDGET_DESCRIPTION: &str = "Turn an SLO target and your measured availability into error budget spent, budget left and burn rate, with a burn-rate reference table. Free, no sign-up.";
+
+/// One-click SLO targets on the interactive widget.
+const ERROR_BUDGET_SLOS: &[f64] = &[99.0, 99.5, 99.9, 99.95, 99.99];
+/// Window options (label, seconds). Month is 30 days, quarter 90, year 365.
+const ERROR_BUDGET_WINDOWS: &[(&str, f64)] = &[
+    ("week", WEEK),
+    ("month", MONTH),
+    ("quarter", QUARTER),
+    ("year", YEAR),
+];
+/// Burn-rate rows for the reference table. Each maps a sustained rate to the
+/// share of a 30-day budget spent per hour and how long the budget lasts.
+const BURN_RATES: &[f64] = &[1.0, 2.0, 3.0, 6.0, 10.0, 14.4];
+
+const DEFAULT_SLO: f64 = 99.9;
+const DEFAULT_MEASURED: f64 = 99.95;
+const DEFAULT_WINDOW: f64 = MONTH;
+const DEFAULT_WINDOW_LABEL: &str = "month";
+
+const ERROR_BUDGET_FAQS: &[(&str, &str)] = &[
+    (
+        "What is an error budget?",
+        "The amount of unreliability a service is allowed before it misses its \
+         SLO. It is the length of the window times one minus the SLO. A 99.9% SLO \
+         over a 30-day month gives 43 minutes 12 seconds of budget.",
+    ),
+    (
+        "What is a burn rate?",
+        "How fast you are spending the budget, relative to the pace that would \
+         use it up exactly over the window. A burn rate of 1x is on budget, 2x \
+         spends it in half the window, and anything under 1x means you finish \
+         with budget to spare.",
+    ),
+    (
+        "How do you calculate burn rate?",
+        "Divide your actual failure rate by the allowed one: (100% minus measured \
+         availability) divided by (100% minus the SLO). At a 99.9% SLO, measured \
+         99.8% availability is a 2x burn rate.",
+    ),
+    (
+        "What is the difference between an SLO, an SLA and an SLI?",
+        "An SLI is the measurement, such as the share of successful requests. An \
+         SLO is the internal target for that measurement, like 99.9%. An SLA is the \
+         contract with a customer, usually looser, with a penalty if you miss it. \
+         The error budget is built from the SLO.",
+    ),
+    (
+        "What window should I measure over?",
+        "A rolling 30-day window is the common default for alerting. Quarterly and \
+         yearly windows suit planning and reliability reviews. Change the window \
+         above and the budget recomputes.",
+    ),
+    (
+        "What burn rate should trigger an alert?",
+        "Fast-burn alerts commonly fire around 14.4x, which spends 2% of a 30-day \
+         budget in an hour. Slower multi-window alerts catch a sustained 3x to 6x \
+         that would quietly exhaust the budget over days.",
+    ),
+];
+
+/// Interactive-widget result, rendered server-side so the page shows real
+/// numbers before any JavaScript runs.
+pub struct BudgetResult {
+    pub total: String,
+    pub used: String,
+    pub remaining: String,
+    pub burn: String,
+    pub verdict: String,
+    pub verdict_state: &'static str,
+}
+
+/// One burn-rate reference row: a sustained rate, the share of a 30-day budget
+/// it spends per hour, and how long that budget lasts at the rate.
+pub struct BurnRow {
+    pub rate: String,
+    pub per_hour: String,
+    pub lasts: String,
+}
+
+/// Burn rate: actual failure rate over allowed failure rate. A perfect SLO
+/// (100%) has no budget, so any downtime burns infinitely fast; report that as
+/// zero rather than dividing by zero.
+fn burn_rate(measured_pct: f64, slo_pct: f64) -> f64 {
+    let allowed = 1.0 - slo_pct / 100.0;
+    if allowed <= 0.0 {
+        return if measured_pct >= 100.0 {
+            0.0
+        } else {
+            f64::INFINITY
+        };
+    }
+    ((1.0 - measured_pct / 100.0) / allowed).max(0.0)
+}
+
+/// Format a burn-rate multiple with up to two decimals, trailing zeros trimmed.
+fn format_multiple(rate: f64) -> String {
+    if !rate.is_finite() {
+        return "∞×".to_string();
+    }
+    let s = format!("{rate:.2}");
+    let trimmed = s.trim_end_matches('0').trim_end_matches('.');
+    format!("{trimmed}×")
+}
+
+fn budget_result(slo: f64, measured: f64, window_secs: f64) -> BudgetResult {
+    let total = downtime(slo, window_secs);
+    let used = downtime(measured, window_secs);
+    let remaining = (total - used).max(0.0);
+    let rate = burn_rate(measured, slo);
+    let (verdict, verdict_state) = if measured >= 100.0 {
+        (
+            "on track, no downtime and full budget intact".to_string(),
+            "ok",
+        )
+    } else if !rate.is_finite() {
+        (
+            "over budget, a 100% SLO leaves no room for any downtime".to_string(),
+            "warn",
+        )
+    } else if rate < 1.0 {
+        (
+            format!(
+                "under budget, spending at {} the allowed rate",
+                format_multiple(rate)
+            ),
+            "ok",
+        )
+    } else if (rate - 1.0).abs() < 0.001 {
+        (
+            "on budget, spends the window's allowance exactly".to_string(),
+            "on",
+        )
+    } else {
+        (
+            format!(
+                "over budget, the allowance runs out in {}",
+                human_duration(window_secs / rate)
+            ),
+            "warn",
+        )
+    };
+    BudgetResult {
+        total: human_duration(total),
+        used: human_duration(used),
+        remaining: human_duration(remaining),
+        burn: format_multiple(rate),
+        verdict,
+        verdict_state,
+    }
+}
+
+fn burn_rows() -> Vec<BurnRow> {
+    BURN_RATES
+        .iter()
+        .map(|&rate| BurnRow {
+            rate: format_multiple(rate),
+            per_hour: format_pct(rate * 3_600.0 / MONTH * 100.0),
+            lasts: human_duration(MONTH / rate),
+        })
+        .collect()
+}
+
+// Burn-down chart geometry. The SVG viewBox and plot rectangle are shared,
+// byte-for-byte, with error_budget.js so the server render and the first
+// client redraw land on the same pixels.
+const CHART_X0: f64 = 40.0;
+const CHART_X1: f64 = 568.0;
+const CHART_Y0: f64 = 16.0;
+const CHART_Y1: f64 = 190.0;
+
+fn chart_x(t: f64) -> f64 {
+    CHART_X0 + t * (CHART_X1 - CHART_X0)
+}
+
+fn chart_y(frac: f64) -> f64 {
+    CHART_Y0 + (1.0 - frac) * (CHART_Y1 - CHART_Y0)
+}
+
+/// The burn-down line, its end marker and its one direct label, all as ready
+/// SVG coordinate strings. Budget remaining falls from 100% at a slope equal
+/// to the burn rate, so a 1x line lands on zero exactly at the window's end
+/// and anything steeper crosses zero early.
+pub struct BurnChart {
+    pub line_points: String,
+    pub dot_x: String,
+    pub dot_y: String,
+    pub label_x: String,
+    pub label_y: String,
+    pub label_anchor: &'static str,
+    pub label_text: String,
+    pub state: &'static str,
+}
+
+fn point(x: f64, y: f64) -> String {
+    format!("{x:.1},{y:.1}")
+}
+
+fn burn_chart(slo: f64, measured: f64, window_secs: f64) -> BurnChart {
+    let rate = burn_rate(measured, slo);
+    let over = !rate.is_finite() || rate > 1.0;
+    if over {
+        let t_star = if rate.is_finite() { 1.0 / rate } else { 0.0 };
+        let cross_x = chart_x(t_star);
+        let label_text = if rate.is_finite() {
+            format!("gone in {}", human_duration(window_secs / rate))
+        } else {
+            "no budget".to_string()
+        };
+        BurnChart {
+            line_points: format!(
+                "{} {} {}",
+                point(chart_x(0.0), chart_y(1.0)),
+                point(cross_x, chart_y(0.0)),
+                point(chart_x(1.0), chart_y(0.0)),
+            ),
+            dot_x: format!("{cross_x:.1}"),
+            dot_y: format!("{:.1}", chart_y(0.0)),
+            label_x: format!("{cross_x:.1}"),
+            label_y: format!("{:.1}", chart_y(0.0) - 8.0),
+            label_anchor: "middle",
+            label_text,
+            state: "warn",
+        }
+    } else {
+        let end_frac = 1.0 - rate;
+        let end_y = chart_y(end_frac);
+        BurnChart {
+            line_points: format!(
+                "{} {}",
+                point(chart_x(0.0), chart_y(1.0)),
+                point(chart_x(1.0), end_y),
+            ),
+            dot_x: format!("{CHART_X1:.1}"),
+            dot_y: format!("{end_y:.1}"),
+            label_x: format!("{:.1}", CHART_X1 + 6.0),
+            label_y: format!("{end_y:.1}"),
+            label_anchor: "start",
+            label_text: format!("{}% left", (end_frac * 100.0).round() as i64),
+            state: "ok",
+        }
+    }
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/tool_error_budget.html")]
+struct ErrorBudgetPage {
+    app_url: String,
+    canonical_url: String,
+    og: OpenGraph,
+    breadcrumb_json_ld: JsonLd,
+    web_application_json_ld: JsonLd,
+    webpage_json_ld: JsonLd,
+    faq_json_ld: JsonLd,
+    faqs: &'static [(&'static str, &'static str)],
+    rows: Vec<BurnRow>,
+    default: BudgetResult,
+    chart: BurnChart,
+    default_slo: String,
+    default_measured: String,
+    default_window: &'static str,
+    slos: &'static [f64],
+    windows: &'static [(&'static str, f64)],
+    version: &'static str,
+}
+
+static ERROR_BUDGET_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_error_budget(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}{}", cfg.canonical_origin, ERROR_BUDGET_PATH);
+    let mut og = OpenGraph::default_for(
+        &format!("{ERROR_BUDGET_TITLE} | {BRAND}"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
+    og.description = ERROR_BUDGET_DESCRIPTION.to_string();
+    og.image = format!(
+        "{}/static/marketing/og-error-budget.png",
+        cfg.canonical_origin
+    );
+    let page = ErrorBudgetPage {
+        app_url: cfg.app_url.clone(),
+        breadcrumb_json_ld: json_ld_breadcrumb(
+            &cfg.canonical_origin,
+            ERROR_BUDGET_TITLE,
+            ERROR_BUDGET_PATH,
+        ),
+        web_application_json_ld: json_ld_web_application(
+            &cfg.canonical_origin,
+            ERROR_BUDGET_TITLE,
+            ERROR_BUDGET_PATH,
+            ERROR_BUDGET_DESCRIPTION,
+        ),
+        webpage_json_ld: json_ld_webpage(
+            &cfg.canonical_origin,
+            ERROR_BUDGET_PATH,
+            ERROR_BUDGET_TITLE,
+            ERROR_BUDGET_CREATED,
+            ERROR_BUDGET_LASTMOD,
+            true,
+        ),
+        faq_json_ld: json_ld_faqpage(ERROR_BUDGET_FAQS),
+        faqs: ERROR_BUDGET_FAQS,
+        rows: burn_rows(),
+        default: budget_result(DEFAULT_SLO, DEFAULT_MEASURED, DEFAULT_WINDOW),
+        chart: burn_chart(DEFAULT_SLO, DEFAULT_MEASURED, DEFAULT_WINDOW),
+        default_slo: format!("{DEFAULT_SLO}"),
+        default_measured: format!("{DEFAULT_MEASURED}"),
+        default_window: DEFAULT_WINDOW_LABEL,
+        slos: ERROR_BUDGET_SLOS,
+        windows: ERROR_BUDGET_WINDOWS,
+        canonical_url,
+        og,
+        version: env!("CARGO_PKG_VERSION"),
+    };
+    let body = page
+        .render()
+        .unwrap_or_else(|e| format!("<!-- error-budget render failed: {e} -->"));
+    cached_render(body)
+}
+
+async fn error_budget(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = ERROR_BUDGET_CACHED.get_or_init(|| render_error_budget(&cfg));
+    serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
+}
+
 async fn cron(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
     let cached = CRON_CACHED.get_or_init(|| render_cron(&cfg));
     serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
@@ -420,6 +756,11 @@ pub const TOOLS: &[ToolMeta] = &[
         title: CRON_TITLE,
         description: CRON_DESCRIPTION,
     },
+    ToolMeta {
+        path: ERROR_BUDGET_PATH,
+        title: ERROR_BUDGET_TITLE,
+        description: ERROR_BUDGET_DESCRIPTION,
+    },
 ];
 
 /// Mount every tool route.
@@ -427,11 +768,13 @@ pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<Market
     router
         .route(UPTIME_SLA_PATH, axum::routing::get(uptime_sla))
         .route(CRON_PATH, axum::routing::get(cron))
+        .route(ERROR_BUDGET_PATH, axum::routing::get(error_budget))
 }
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
     UPTIME_SLA_CACHED.get_or_init(|| render_uptime_sla(cfg));
     CRON_CACHED.get_or_init(|| render_cron(cfg));
+    ERROR_BUDGET_CACHED.get_or_init(|| render_error_budget(cfg));
 }
 
 #[cfg(test)]
@@ -479,6 +822,7 @@ mod tests {
         let paths: Vec<_> = TOOLS.iter().map(|t| t.path).collect();
         assert!(paths.contains(&UPTIME_SLA_PATH));
         assert!(paths.contains(&CRON_PATH));
+        assert!(paths.contains(&ERROR_BUDGET_PATH));
         for t in TOOLS {
             assert!(
                 t.path.starts_with("/tools/"),
@@ -498,5 +842,74 @@ mod tests {
                 t.description.len()
             );
         }
+    }
+
+    #[test]
+    fn burn_rate_compares_actual_to_allowed() {
+        // Measured equal to the SLO spends the budget exactly: 1x.
+        assert!((burn_rate(99.9, 99.9) - 1.0).abs() < 1e-9);
+        // Twice the allowed failure rate is 2x.
+        assert!((burn_rate(99.8, 99.9) - 2.0).abs() < 1e-9);
+        // Perfect availability burns nothing.
+        assert_eq!(burn_rate(100.0, 99.9), 0.0);
+        // Better than target stays under 1x.
+        assert!(burn_rate(99.95, 99.9) < 1.0);
+    }
+
+    #[test]
+    fn burn_rate_handles_perfect_slo_without_dividing_by_zero() {
+        // A 100% SLO leaves no budget: any downtime burns infinitely fast.
+        assert!(burn_rate(99.9, 100.0).is_infinite());
+        // No downtime against a 100% SLO is still zero, not NaN.
+        assert_eq!(burn_rate(100.0, 100.0), 0.0);
+    }
+
+    #[test]
+    fn budget_result_splits_used_and_remaining() {
+        // 99.95% measured against a 99.9% SLO over a month: half the 43m12s
+        // budget spent, half left, 0.5x burn, on track.
+        let r = budget_result(99.9, 99.95, MONTH);
+        assert_eq!(r.total, "43m 12s");
+        assert_eq!(r.used, "21m 36s");
+        assert_eq!(r.remaining, "21m 36s");
+        assert_eq!(r.burn, "0.5×");
+        assert_eq!(r.verdict_state, "ok");
+    }
+
+    #[test]
+    fn budget_result_over_budget_clamps_remaining_and_warns() {
+        // Worse than the SLO: no budget left, over-budget verdict.
+        let r = budget_result(99.9, 99.0, MONTH);
+        assert_eq!(r.remaining, "0s");
+        assert_eq!(r.burn, "10×");
+        assert_eq!(r.verdict_state, "warn");
+    }
+
+    #[test]
+    fn burn_table_maps_rate_to_lifetime() {
+        let rows = burn_rows();
+        assert_eq!(rows.len(), BURN_RATES.len());
+        // 1x lasts the whole 30-day window.
+        assert_eq!(rows[0].rate, "1×");
+        assert_eq!(rows[0].lasts, "30d");
+        // 14.4x spends 2% of a 30-day budget per hour and lasts ~2 days.
+        let fast = rows.last().unwrap();
+        assert_eq!(fast.rate, "14.4×");
+        assert_eq!(fast.per_hour, "2%");
+        assert_eq!(fast.lasts, "2d 2h");
+    }
+
+    #[test]
+    fn burn_chart_plots_slope_and_crossing() {
+        // Default 0.5x: line from full budget to the half mark, green.
+        let c = burn_chart(99.9, 99.95, MONTH);
+        assert_eq!(c.line_points, "40.0,16.0 568.0,103.0");
+        assert_eq!(c.state, "ok");
+        assert_eq!(c.label_text, "50% left");
+        // 10x crosses zero a tenth of the way in; dot sits on the zero axis.
+        let o = burn_chart(99.9, 99.0, MONTH);
+        assert_eq!(o.state, "warn");
+        assert_eq!(o.dot_y, format!("{CHART_Y1:.1}"));
+        assert_eq!(o.label_text, "gone in 3d");
     }
 }
