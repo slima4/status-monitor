@@ -256,6 +256,7 @@ pub struct RegionBreakdownRow {
     pub uptime_label: String,
     pub p50_label: String,
     pub p95_label: String,
+    pub p99_label: String,
     /// "" when the region has no samples in the range.
     pub last_status: String,
     /// Marks the row matching the active region filter.
@@ -288,6 +289,7 @@ impl RegionBreakdownRow {
             uptime_label,
             p50_label: format!("{} ms", r.p50_ms),
             p95_label: format!("{} ms", r.p95_ms),
+            p99_label: format!("{} ms", r.p99_ms),
             last_status,
             region_label,
         }
@@ -1339,6 +1341,7 @@ mod tests {
             up: 10,
             p50_ms: 100,
             p95_ms: 200,
+            p99_ms: 300,
             last_status: last.into(),
         };
         let live: std::collections::HashSet<String> = ["eu-west".to_string()].into_iter().collect();
@@ -1639,6 +1642,65 @@ mod tests {
         let ribbon_pos = html.find(r#"id="detail-ribbon""#).expect("ribbon present");
         assert!(kpi_pos < chart_pos, "KPI renders before charts");
         assert!(chart_pos < ribbon_pos, "ribbon renders after charts");
+    }
+
+    fn breakdown_row(label: &str) -> RegionBreakdownRow {
+        RegionBreakdownRow {
+            region_label: label.into(),
+            uptime_label: "100.00".into(),
+            p50_label: "100 ms".into(),
+            p95_label: "200 ms".into(),
+            p99_label: "300 ms".into(),
+            last_status: "up".into(),
+            selected: false,
+        }
+    }
+
+    fn multi_region_page() -> DetailPage {
+        let mut p = sample_page();
+        p.regions = vec![
+            crate::web::views::region_display::LabeledRegion {
+                id: "eu-helsinki".into(),
+                label: "EU North".into(),
+            },
+            crate::web::views::region_display::LabeledRegion {
+                id: "us-east".into(),
+                label: "US East".into(),
+            },
+        ];
+        p
+    }
+
+    #[test]
+    fn multi_region_latency_chart_plots_median_and_says_so() {
+        let mut p = multi_region_page();
+        p.region_breakdown = vec![breakdown_row("EU North"), breakdown_row("US East")];
+        let html = p.render().unwrap();
+        assert!(html.contains("latency by region (median)"));
+        assert!(!html.contains("latency (p50/p95/p99)"));
+        assert!(html.contains("data-overlay-endpoint"));
+        // Tail quantiles move to the by-region table.
+        assert!(html.contains("300 ms"));
+    }
+
+    #[test]
+    fn single_reporting_region_keeps_quantile_chart() {
+        let mut p = multi_region_page();
+        p.region_breakdown = vec![breakdown_row("EU North")];
+        let html = p.render().unwrap();
+        // Nothing to compare across, so the overlay would drop the tail for nothing.
+        assert!(html.contains("latency (p50/p95/p99)"));
+        assert!(!html.contains("data-overlay-endpoint"));
+    }
+
+    #[test]
+    fn selecting_a_region_restores_the_quantile_chart() {
+        let mut p = multi_region_page();
+        p.region_breakdown = vec![breakdown_row("EU North"), breakdown_row("US East")];
+        p.selected_region = Some("us-east".into());
+        let html = p.render().unwrap();
+        assert!(html.contains("latency (p50/p95/p99)"));
+        assert!(!html.contains("data-overlay-endpoint"));
     }
 
     fn kpi_ranges() -> (ClampedRange, ClampedRange) {

@@ -1,6 +1,6 @@
 // Monitor-detail charts. The latency chart draws p50/p95/p99 for the selected
 // region, OR — when the org spans regions and no single region is filtered — a
-// per-region p95 overlay (the `data-overlay-endpoint`). The breakdown chart is
+// per-region median overlay (the `data-overlay-endpoint`). The breakdown chart is
 // always the merged phase view (region-filtered server-side when one is picked).
 // Both refresh when the live KPI region settles so they track new checks.
 

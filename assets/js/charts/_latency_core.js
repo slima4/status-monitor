@@ -31,9 +31,9 @@ const REGION_TOKENS = [
     "--color-chart-5", "--color-chart-6", "--color-chart-7", "--color-chart-8",
 ];
 
-// Multi-region overlay: one p95 line per region so regions compare directly.
-// `regions` is `[{ region, label, buckets }]`; p50/p99 are dropped — comparing one
-// metric across regions is the whole point, three quantiles × N regions is noise.
+// Multi-region overlay: one median line per region. `regions` is
+// `[{ region, label, buckets }]`; a bucket holds too few probes for its tail
+// quantiles to be stable, so the tail stays on the single-region chart.
 export function buildLatencyOverlayOption(regions, from, to) {
     const series = regions.map((r, i) => {
         const color = resolveTokenCached(REGION_TOKENS[i % REGION_TOKENS.length]);
@@ -44,7 +44,7 @@ export function buildLatencyOverlayOption(regions, from, to) {
             showSymbol: false,
             itemStyle: { color },
             lineStyle: { color, width: 2 },
-            data: (r.buckets ?? []).map(b => [b.t, b.p95]),
+            data: (r.buckets ?? []).map(b => [b.t, b.p50]),
         };
     });
     return { ...msChartBase(), xAxis: timeXAxis(from, to), series };

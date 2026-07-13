@@ -68,14 +68,17 @@
   {% if kind != "HEARTBEAT" %}
   {# Flow runs a browser journey with no per-phase network timing, so the
      breakdown would be one meaningless band; show latency full-width instead. #}
+  {# Overlay only when there are two regions to actually compare: gating on the
+     catalog would hide the tail quantiles for a monitor only one region reported. #}
+  {% let by_region = region_breakdown.len() > 1 && selected_region.is_none() %}
   <section class="grid gap-4{% if kind != "FLOW" %} lg:grid-cols-2{% endif %}">
     <div class="sticker-card p-5">
-      <h2 class="panel-label">latency (p50/p95/p99)</h2>
+      <h2 class="panel-label">{% if by_region %}latency by region (median){% else %}latency (p50/p95/p99){% endif %}</h2>
       <div id="latency-chart"
            class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
-           {% if regions.len() > 1 && selected_region.is_none() %}data-overlay-endpoint="/api/v1/targets/{{ id }}/latency/by-region?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"{% endif %}
-           aria-label="Latency p50/p95/p99 over time"></div>
+           {% if by_region %}data-overlay-endpoint="/api/v1/targets/{{ id }}/latency/by-region?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"{% endif %}
+           aria-label="{% if by_region %}Median latency per region over time{% else %}Latency p50/p95/p99 over time{% endif %}"></div>
     </div>
     {% if kind != "FLOW" %}
     <div class="sticker-card p-5">
@@ -92,13 +95,15 @@
   {% if region_breakdown.len() > 1 %}
   <section class="sticker-card p-5">
     <h2 class="panel-label">by region · {{ range }}</h2>
-    <table class="mt-4 min-w-full text-sm">
+    <div class="mt-4 overflow-x-auto">
+    <table class="min-w-full text-sm">
       <thead class="table-head">
         <tr>
           <th scope="col" class="py-2 pr-4">region</th>
           <th scope="col" class="py-2 pr-4">uptime</th>
           <th scope="col" class="py-2 pr-4 text-right">p50</th>
           <th scope="col" class="py-2 pr-4 text-right">p95</th>
+          <th scope="col" class="py-2 pr-4 text-right">p99</th>
           <th scope="col" class="py-2 text-right">status</th>
         </tr>
       </thead>
@@ -109,6 +114,7 @@
           <td class="py-1.5 pr-4">{{ row.uptime_label }}</td>
           <td class="py-1.5 pr-4 text-right font-mono">{{ row.p50_label }}</td>
           <td class="py-1.5 pr-4 text-right font-mono">{{ row.p95_label }}</td>
+          <td class="py-1.5 pr-4 text-right font-mono">{{ row.p99_label }}</td>
           <td class="py-1.5 text-right">
             <span class="dashboard-dot{% if !row.last_status.is_empty() %} dashboard-dot--{{ row.last_status }}{% endif %}"></span>
           </td>
@@ -116,6 +122,7 @@
         {% endfor %}
       </tbody>
     </table>
+    </div>
   </section>
   {% endif %}
 

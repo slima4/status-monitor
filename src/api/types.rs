@@ -219,6 +219,7 @@ pub struct RegionRollup {
     pub up: u64,
     pub p50_ms: u32,
     pub p95_ms: u32,
+    pub p99_ms: u32,
     pub last_status: String,
 }
 

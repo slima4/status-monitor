@@ -1288,7 +1288,7 @@ impl ResultsStore for ClickhouseResultsStore {
                 "SELECT region, \
                    countMerge(total_checks) AS samples, \
                    countIfMerge(up_checks) AS up, \
-                   quantilesMerge(0.5, 0.95)(duration_quantiles) AS quantiles, \
+                   quantilesMerge(0.5, 0.95, 0.99)(duration_quantiles) AS quantiles, \
                    argMaxMerge(last_status_state) AS last_status \
                  FROM check_results_1m \
                  WHERE org_id = ? AND target_id = ? AND {MINUTE_WINDOW} \
@@ -1309,6 +1309,7 @@ impl ResultsStore for ClickhouseResultsStore {
                 up: r.up,
                 p50_ms: ms(r.quantiles.first().copied().unwrap_or(0.0)),
                 p95_ms: ms(r.quantiles.get(1).copied().unwrap_or(0.0)),
+                p99_ms: ms(r.quantiles.get(2).copied().unwrap_or(0.0)),
                 last_status: CheckStatus::from_enum8(r.last_status).as_str().to_string(),
             })
             .collect())
