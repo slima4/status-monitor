@@ -9,11 +9,6 @@ const PHASES = [
     { key: "app", name: "processing", token: "--color-chart-phase-app" },
 ];
 
-// Adjacent phase hues are only ~ΔE 10 apart under deuteranopia; the seam separates
-// them where the colour can't.
-const SEAM = 1;
-const seamColor = () => resolveTokenCached("--theme-surface-elev");
-
 // Server-aggregated buckets carry mean per-phase timings plus the mean total
 // (`avg`). Processing = total − measured phases (≥ 0); for check kinds without
 // phase timing (tcp/dns) the phases are 0 so the whole band is "Processing".
@@ -22,18 +17,20 @@ function appPhase(b) {
 }
 
 export function buildBreakdownOption(buckets, from, to) {
-    const seam = seamColor();
-    const series = PHASES.map(({ key, name, token }) => ({
-        name,
-        type: "line",
-        stack: "lat",
-        areaStyle: { opacity: 0.85 },
-        showSymbol: false,
-        lineStyle: { width: SEAM, color: seam },
-        itemStyle: { color: resolveTokenCached(token) },
-        // [timestamp, value] pairs; `t` is unix-millis.
-        data: buckets.map(b => [b.t, key === "app" ? appPhase(b) : b[key]]),
-    }));
+    const series = PHASES.map(({ key, name, token }) => {
+        const color = resolveTokenCached(token);
+        return {
+            name,
+            type: "line",
+            stack: "lat",
+            areaStyle: { color },
+            showSymbol: false,
+            lineStyle: { width: 0 },
+            itemStyle: { color },
+            // [timestamp, value] pairs; `t` is unix-millis.
+            data: buckets.map(b => [b.t, key === "app" ? appPhase(b) : b[key]]),
+        };
+    });
     return { ...msChartBase(), xAxis: { ...timeXAxis(from, to), boundaryGap: false }, series };
 }
 
@@ -62,18 +59,12 @@ export function buildBreakdownByRegionOption(regions) {
     // A category axis draws index 0 at the bottom, so ascending puts the slowest on top.
     rows.sort((a, b) => a.total - b.total);
 
-    const seam = seamColor();
     const series = PHASES.map(({ key, name, token }) => ({
         name,
         type: "bar",
         stack: "lat",
-        itemStyle: { color: resolveTokenCached(token), borderColor: seam },
-        // The seam is inset, so a phase too thin to spare it goes without.
-        data: rows.map(r => ({
-            value: r.means[key],
-            regionId: r.id,
-            itemStyle: { borderWidth: r.total > 0 && r.means[key] / r.total > 0.01 ? SEAM : 0 },
-        })),
+        itemStyle: { color: resolveTokenCached(token) },
+        data: rows.map(r => ({ value: r.means[key], regionId: r.id })),
     }));
     const base = msChartBase();
     // Not `containLabel`: in ECharts 6 it fits the label into `grid.left` rather
