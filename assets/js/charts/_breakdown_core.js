@@ -1,11 +1,12 @@
 import { timeXAxis, msChartBase, resolveTokenCached } from "./_init.js";
 
+// Legend rides on one row at any width, so the names stay short.
 const PHASES = [
-    { key: "dns", name: "DNS lookup", token: "--color-chart-phase-dns" },
-    { key: "connect", name: "Connect", token: "--color-chart-phase-connect" },
-    { key: "tls", name: "TLS handshake", token: "--color-chart-phase-tls" },
-    { key: "ttfb", name: "Server response", token: "--color-chart-phase-ttfb" },
-    { key: "app", name: "Processing", token: "--color-chart-phase-app" },
+    { key: "dns", name: "DNS", token: "--color-chart-phase-dns" },
+    { key: "connect", name: "connect", token: "--color-chart-phase-connect" },
+    { key: "tls", name: "TLS", token: "--color-chart-phase-tls" },
+    { key: "ttfb", name: "TTFB", token: "--color-chart-phase-ttfb" },
+    { key: "app", name: "processing", token: "--color-chart-phase-app" },
 ];
 
 // Hairline in the surface colour between stacked bands: the hues are ~ΔE 10 apart
