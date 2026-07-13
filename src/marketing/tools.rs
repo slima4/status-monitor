@@ -14,8 +14,8 @@ use axum::http::HeaderValue;
 use axum::response::Response;
 
 use crate::marketing::seo::{
-    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_web_application,
-    json_ld_webpage,
+    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_item_list_links,
+    json_ld_web_application, json_ld_webpage,
 };
 use crate::web::filters;
 
@@ -763,15 +763,86 @@ pub const TOOLS: &[ToolMeta] = &[
     },
 ];
 
+// ── Tools index ───────────────────────────────────────────────────────
+
+pub const TOOLS_INDEX_PATH: &str = "/tools";
+const TOOLS_INDEX_CREATED: &str = "2026-07-09";
+const TOOLS_INDEX_LASTMOD: &str = "2026-07-13";
+const TOOLS_INDEX_TITLE: &str = "Free Tools for Developers & SREs";
+const TOOLS_INDEX_DESCRIPTION: &str = "Free, no sign-up calculators and generators for uptime, reliability and scheduling. Built for our own work and kept open for yours.";
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/tools_index.html")]
+struct ToolsIndexPage {
+    app_url: String,
+    canonical_url: String,
+    og: OpenGraph,
+    breadcrumb_json_ld: JsonLd,
+    webpage_json_ld: JsonLd,
+    item_list_json_ld: JsonLd,
+    tools: &'static [ToolMeta],
+    version: &'static str,
+}
+
+static TOOLS_INDEX_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_tools_index(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}{}", cfg.canonical_origin, TOOLS_INDEX_PATH);
+    let mut og = OpenGraph::default_for(
+        &format!("{TOOLS_INDEX_TITLE} | {BRAND}"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
+    og.description = TOOLS_INDEX_DESCRIPTION.to_string();
+    let items: Vec<(&str, &str)> = TOOLS.iter().map(|t| (t.title, t.path)).collect();
+    let page = ToolsIndexPage {
+        app_url: cfg.app_url.clone(),
+        breadcrumb_json_ld: json_ld_breadcrumb(
+            &cfg.canonical_origin,
+            TOOLS_INDEX_TITLE,
+            TOOLS_INDEX_PATH,
+        ),
+        webpage_json_ld: json_ld_webpage(
+            &cfg.canonical_origin,
+            TOOLS_INDEX_PATH,
+            TOOLS_INDEX_TITLE,
+            TOOLS_INDEX_CREATED,
+            TOOLS_INDEX_LASTMOD,
+            true,
+        ),
+        item_list_json_ld: json_ld_item_list_links(
+            &cfg.canonical_origin,
+            TOOLS_INDEX_PATH,
+            TOOLS_INDEX_TITLE,
+            &items,
+        ),
+        tools: TOOLS,
+        canonical_url,
+        og,
+        version: env!("CARGO_PKG_VERSION"),
+    };
+    let body = page
+        .render()
+        .unwrap_or_else(|e| format!("<!-- tools-index render failed: {e} -->"));
+    cached_render(body)
+}
+
+async fn tools_index(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = TOOLS_INDEX_CACHED.get_or_init(|| render_tools_index(&cfg));
+    serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
+}
+
 /// Mount every tool route.
 pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<MarketingCfg>> {
     router
+        .route(TOOLS_INDEX_PATH, axum::routing::get(tools_index))
         .route(UPTIME_SLA_PATH, axum::routing::get(uptime_sla))
         .route(CRON_PATH, axum::routing::get(cron))
         .route(ERROR_BUDGET_PATH, axum::routing::get(error_budget))
 }
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
+    TOOLS_INDEX_CACHED.get_or_init(|| render_tools_index(cfg));
     UPTIME_SLA_CACHED.get_or_init(|| render_uptime_sla(cfg));
     CRON_CACHED.get_or_init(|| render_cron(cfg));
     ERROR_BUDGET_CACHED.get_or_init(|| render_error_budget(cfg));

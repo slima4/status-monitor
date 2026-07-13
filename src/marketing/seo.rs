@@ -342,6 +342,37 @@ pub fn json_ld_item_list(
     JsonLd::from_value(payload)
 }
 
+/// ItemList whose entries link to real pages, for a hub that lists other
+/// pages (the tools index). Each item carries its own URL so search and LLM
+/// consumers can follow it, unlike [`json_ld_item_list`] which lists bare names.
+pub fn json_ld_item_list_links(
+    canonical_origin: &str,
+    page_path: &str,
+    name: &str,
+    items: &[(&str, &str)],
+) -> JsonLd {
+    let entries: Vec<_> = items
+        .iter()
+        .enumerate()
+        .map(|(i, (item_name, item_path))| {
+            serde_json::json!({
+                "@type": "ListItem",
+                "position": i + 1,
+                "name": item_name,
+                "url": format!("{canonical_origin}{item_path}"),
+            })
+        })
+        .collect();
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": name,
+        "url": format!("{canonical_origin}{page_path}"),
+        "itemListElement": entries,
+    });
+    JsonLd::from_value(payload)
+}
+
 pub fn json_ld_blog_posting(
     canonical_origin: &str,
     title: &str,
@@ -545,6 +576,10 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
     }
 
     s.push_str("## Tools\n");
+    s.push_str(&format!(
+        "All free tools: {origin}{}\n",
+        tools::TOOLS_INDEX_PATH
+    ));
     for tool in tools::TOOLS {
         s.push_str(&format!(
             "- [{title}]({origin}{path}): {desc}\n",
@@ -655,6 +690,7 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
             Some(landing.lastmod.to_string()),
         ));
     }
+    urls.push((format!("{origin}{}", tools::TOOLS_INDEX_PATH), None));
     for tool in tools::TOOLS {
         urls.push((format!("{origin}{}", tool.path), None));
     }
