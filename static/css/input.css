@@ -194,6 +194,15 @@
     --color-chart-7: #0891b2;
     --color-chart-8: #db2777;
 
+    /* Request phases, stacked. Terminal-ANSI hues (Solarized), holding clear of
+       the ok/warn/bad status hues; the unattributed remainder reads neutral.
+       Calibrated for light surfaces — dark themes restate them below. */
+    --color-chart-phase-dns:     #268bd2;
+    --color-chart-phase-connect: #c42d74;
+    --color-chart-phase-tls:     #1d8f86;
+    --color-chart-phase-ttfb:    #6c71c4;
+    --color-chart-phase-app:     #5f7480;
+
     /* Public-status state palette. One source for the 6 day-states; the
        day strip, legend dots, and popover badge all derive from these.
        Retune a hue here — every surface follows in lockstep. */
@@ -1095,6 +1104,18 @@
         --theme-state-warn-fg:       oklch(0.88 0.16 75);   --theme-state-warn-fg-strong: oklch(0.95 0.18 75);
         --theme-state-warn-fg-onsoft: oklch(0.90 0.17 75);  --theme-state-warn-strong:   oklch(0.82 0.18 75);
     }
+    /* Phase hues on a dark surface: same ANSI hues, brightened. A palette that
+       clears 3:1 on white sinks into a dark card, so each family is calibrated
+       against its own surface rather than flipped. */
+    .theme-terminal, .theme-dark, .theme-night,
+    .theme-dim, .theme-dracula, .theme-synthwave {
+        --color-chart-phase-dns:     #268bd2;
+        --color-chart-phase-connect: #d33682;
+        --color-chart-phase-tls:     #2aa198;
+        --color-chart-phase-ttfb:    #6c71c4;
+        --color-chart-phase-app:     #657b83;
+    }
+
     /* Theme atmosphere overrides. Theme class is on `<html>` for the org
        app (body has .app-shell) and on `<body>` for the public page (body
        also has .public-shell) — both selector forms needed per family. */
