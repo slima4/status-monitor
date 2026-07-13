@@ -1,6 +1,6 @@
 import { timeXAxis, msChartBase, resolveTokenCached } from "./_init.js";
 
-// Legend rides on one row at any width, so the names stay short.
+// Names stay short so the legend never needs a second row.
 const PHASES = [
     { key: "dns", name: "DNS", token: "--color-chart-phase-dns" },
     { key: "connect", name: "connect", token: "--color-chart-phase-connect" },
@@ -9,8 +9,8 @@ const PHASES = [
     { key: "app", name: "processing", token: "--color-chart-phase-app" },
 ];
 
-// Hairline in the surface colour between stacked bands: the hues are ~ΔE 10 apart
-// under deuteranopia, so the edge carries separation the colour alone can't.
+// Adjacent phase hues are only ~ΔE 10 apart under deuteranopia; the seam separates
+// them where the colour can't.
 const SEAM = 1;
 const seamColor = () => resolveTokenCached("--theme-surface-elev");
 
@@ -54,15 +54,12 @@ function phaseMeans(buckets) {
     return Object.fromEntries(PHASES.map(({ key }) => [key, Math.round(totals[key] / n)]));
 }
 
-// Multi-region breakdown: one stacked bar per region. Regions with no samples in
-// the range carry no phases to draw, so they get no bar.
 export function buildBreakdownByRegionOption(regions) {
     const rows = regions
         .map(r => ({ id: r.region, label: r.label || r.region, means: phaseMeans(r.buckets ?? []) }))
         .filter(r => r.means)
         .map(r => ({ ...r, total: PHASES.reduce((sum, { key }) => sum + r.means[key], 0) }));
-    // Ascending: a category axis draws index 0 at the bottom, so the slowest
-    // region ends up the top bar.
+    // A category axis draws index 0 at the bottom, so ascending puts the slowest on top.
     rows.sort((a, b) => a.total - b.total);
 
     const seam = seamColor();
@@ -71,9 +68,7 @@ export function buildBreakdownByRegionOption(regions) {
         type: "bar",
         stack: "lat",
         itemStyle: { color: resolveTokenCached(token), borderColor: seam },
-        // `regionId` rides along so a click resolves to a region without
-        // reversing the sort or matching on the display label. The border is
-        // inset, so a phase too thin to spare it renders without one.
+        // The seam is inset, so a phase too thin to spare it goes without.
         data: rows.map(r => ({
             value: r.means[key],
             regionId: r.id,
@@ -81,10 +76,8 @@ export function buildBreakdownByRegionOption(regions) {
         })),
     }));
     const base = msChartBase();
-    // `containLabel` is ECharts-6 shorthand for `outerBoundsMode: "same"`, which
-    // fits the label inside `grid.left` instead of growing it — a long region
-    // clips. Reserve the widest label up front, and let the axis grow past that
-    // if it measures wider (an emoji outruns a monospace advance).
+    // Not `containLabel`: in ECharts 6 it fits the label into `grid.left` rather
+    // than growing it, and long region names clip.
     const widest = rows.reduce((w, r) => Math.max(w, r.label.length), 0);
     return {
         ...base,

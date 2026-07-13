@@ -110,8 +110,8 @@ export function msChartBase() {
             valueFormatter: v => v == null ? "—" : `${v} ms`,
             textStyle: { fontFamily },
         },
-        // `grid.bottom` reserves one legend row. A wrapped second row would grow up
-        // into the axis labels, so the legend pages sideways instead of wrapping.
+        // Scroll, not wrap: `grid.bottom` reserves one row, and a second would
+        // overlap the axis labels.
         legend: { type: "scroll", bottom: 0, textStyle: { fontFamily } },
         grid: { left: 60, right: 20, top: 20, bottom: 40 },
         yAxis: { type: "value", axisLabel: { formatter: "{value} ms" } },
