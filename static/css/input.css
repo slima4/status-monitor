@@ -1850,6 +1850,16 @@
         color: var(--theme-text-muted);
     }
 
+    /* Region-breakdown rows: the accent gutter marks the region in the filter. */
+    .region-row { cursor: pointer; }
+    .region-row__link { color: inherit; text-decoration: none; }
+    .region-row:hover .region-row__link { text-decoration: underline; }
+    .region-row:hover > td { background: var(--sm-dashboard-row-hover-bg); }
+    .region-row--on > td { background: var(--sm-dashboard-row-hover-bg); }
+    .region-row--on > td:first-child {
+        box-shadow: inset 2px 0 0 var(--theme-accent);
+    }
+
     /* Big single-number KPI value (Monitors, Uptime, …). Plex Serif 500
        with tabular + lining figures — editorial weight, columns stay
        aligned. tnum locks digit width, lnum forces baseline numerals

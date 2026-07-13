@@ -93,30 +93,36 @@
   {% endif %}
 
   {% if region_breakdown.len() > 1 %}
-  <section class="sticker-card p-5">
-    <h2 class="panel-label">by region · {{ range }}</h2>
-    <div class="mt-4 overflow-x-auto">
-    <table class="min-w-full text-sm">
-      <thead class="table-head">
+  <section class="sticker-card overflow-hidden">
+    <div class="flex items-baseline justify-between px-5 pt-5 pb-3">
+      <h2 class="panel-label">by region</h2>
+      <span class="cli-brackets font-mono text-xs text-quiet">{{ range }}</span>
+    </div>
+    <div class="overflow-x-auto">
+    <table class="w-full text-left text-sm">
+      <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
         <tr>
-          <th scope="col" class="py-2 pr-4">region</th>
-          <th scope="col" class="py-2 pr-4">uptime</th>
-          <th scope="col" class="py-2 pr-4 text-right">p50</th>
-          <th scope="col" class="py-2 pr-4 text-right">p95</th>
-          <th scope="col" class="py-2 pr-4 text-right">p99</th>
-          <th scope="col" class="py-2 text-right">status</th>
+          <th scope="col" class="px-5 py-2">region</th>
+          <th scope="col" class="px-5 py-2 text-right">uptime</th>
+          <th scope="col" class="px-5 py-2 text-right">p50</th>
+          <th scope="col" class="px-5 py-2 text-right">p95</th>
+          <th scope="col" class="px-5 py-2 text-right">p99</th>
+          <th scope="col" class="px-5 py-2 text-right">status</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody class="divide-y divide-[color:var(--theme-line)]">
         {% for row in region_breakdown %}
-        <tr{% if row.selected %} class="font-medium text-body"{% endif %}>
-          <td class="py-1.5 pr-4">{{ row.region_label }}</td>
-          <td class="py-1.5 pr-4">{{ row.uptime_label }}</td>
-          <td class="py-1.5 pr-4 text-right font-mono">{{ row.p50_label }}</td>
-          <td class="py-1.5 pr-4 text-right font-mono">{{ row.p95_label }}</td>
-          <td class="py-1.5 pr-4 text-right font-mono">{{ row.p99_label }}</td>
-          <td class="py-1.5 text-right">
+        <tr class="region-row{% if row.selected %} region-row--on{% endif %}" data-region-row>
+          <td class="px-5 py-2 whitespace-nowrap text-body">
+            <a class="region-row__link" href="{{ row.filter_href }}"{% if row.selected %} aria-current="page"{% endif %}>{{ row.region_label }}</a>
+          </td>
+          <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.uptime_label }}</td>
+          <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.p50_label }}</td>
+          <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.p95_label }}</td>
+          <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.p99_label }}</td>
+          <td class="px-5 py-2 text-right">
             <span class="dashboard-dot{% if !row.last_status.is_empty() %} dashboard-dot--{{ row.last_status }}{% endif %}"></span>
+            <span class="sr-only">{% if row.last_status.is_empty() || row.last_status == "no_data" %}no data{% else %}{{ row.last_status }}{% endif %}</span>
           </td>
         </tr>
         {% endfor %}

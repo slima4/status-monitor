@@ -252,6 +252,8 @@ pub struct DetailPage {
 
 /// One row of the per-region breakdown table on the monitor detail page.
 pub struct RegionBreakdownRow {
+    /// Applies this region's filter; on the row already filtered to, clears it.
+    pub filter_href: String,
     pub region_label: String,
     pub uptime_label: String,
     pub p50_label: String,
@@ -269,9 +271,18 @@ impl RegionBreakdownRow {
         selected_region: Option<&str>,
         catalog: &[crate::storage::RegionOption],
         live_regions: Option<&std::collections::HashSet<String>>,
+        base_path: &str,
+        range: &str,
     ) -> Self {
         let uptime_label = super::dashboard::pct_label(r.samples, r.up);
         let selected = selected_region == Some(r.region.as_str());
+        let filter_href = if selected {
+            format!("{base_path}?range={range}")
+        } else {
+            let region: String =
+                url::form_urlencoded::byte_serialize(r.region.as_bytes()).collect();
+            format!("{base_path}?range={range}&region={region}")
+        };
         let region_label = catalog
             .iter()
             .find(|c| c.id == r.region)
@@ -292,6 +303,7 @@ impl RegionBreakdownRow {
             p99_label: format!("{} ms", r.p99_ms),
             last_status,
             region_label,
+            filter_href,
         }
     }
 }
@@ -864,6 +876,7 @@ pub async fn index(
         selected_region.as_deref(),
     )
     .await?;
+    let base_path = format!("/targets/{}", target.id);
     let region_breakdown = if region_ids.len() > 1 && !target.check.is_passive() {
         let live: Option<std::collections::HashSet<String>> = state
             .silence_store
@@ -882,6 +895,8 @@ pub async fn index(
                     selected_region.as_deref(),
                     &catalog,
                     live.as_ref(),
+                    &base_path,
+                    range_key,
                 )
             })
             .collect()
@@ -934,7 +949,7 @@ pub async fn index(
         config_json,
         range: range_key,
         range_options: build_range_options(range_key, &RANGE_KEYS),
-        range_base_path: format!("/targets/{}", target.id),
+        range_base_path: base_path,
         from_iso: labels.from_iso,
         to_iso: labels.to_iso,
         from_human: labels.from_human,
@@ -1346,16 +1361,54 @@ mod tests {
         };
         let live: std::collections::HashSet<String> = ["eu-west".to_string()].into_iter().collect();
 
-        let alive =
-            RegionBreakdownRow::from_rollup(rollup("eu-west", "up"), None, &[], Some(&live));
-        assert_eq!(alive.last_status, "up");
+        let row = |region: &str, live: Option<&std::collections::HashSet<String>>| {
+            RegionBreakdownRow::from_rollup(
+                rollup(region, "up"),
+                None,
+                &[],
+                live,
+                "/targets/x",
+                "24h",
+            )
+        };
 
-        let dead = RegionBreakdownRow::from_rollup(rollup("apac-sg", "up"), None, &[], Some(&live));
-        assert_eq!(dead.last_status, "no_data");
-
+        assert_eq!(row("eu-west", Some(&live)).last_status, "up");
+        assert_eq!(row("apac-sg", Some(&live)).last_status, "no_data");
         // Liveness unknown (query failed) leaves the status untouched.
-        let unknown = RegionBreakdownRow::from_rollup(rollup("apac-sg", "up"), None, &[], None);
-        assert_eq!(unknown.last_status, "up");
+        assert_eq!(row("apac-sg", None).last_status, "up");
+    }
+
+    #[test]
+    fn region_row_href_applies_the_filter_and_the_selected_row_clears_it() {
+        let rollup = |region: &str| crate::api::types::RegionRollup {
+            region: region.into(),
+            samples: 10,
+            up: 10,
+            p50_ms: 100,
+            p95_ms: 200,
+            p99_ms: 300,
+            last_status: "up".into(),
+        };
+        let row = |region: &str, selected: Option<&str>| {
+            RegionBreakdownRow::from_rollup(
+                rollup(region),
+                selected,
+                &[],
+                None,
+                "/targets/x",
+                "24h",
+            )
+        };
+
+        assert_eq!(
+            row("apac-sg", None).filter_href,
+            "/targets/x?range=24h&region=apac-sg"
+        );
+        // Clicking the row already filtered to returns to all regions.
+        assert_eq!(
+            row("apac-sg", Some("apac-sg")).filter_href,
+            "/targets/x?range=24h"
+        );
     }
 
     fn sample_page() -> DetailPage {
@@ -1646,6 +1699,7 @@ mod tests {
 
     fn breakdown_row(label: &str) -> RegionBreakdownRow {
         RegionBreakdownRow {
+            filter_href: "/targets/x?range=24h&region=eu-helsinki".into(),
             region_label: label.into(),
             uptime_label: "100.00".into(),
             p50_label: "100 ms".into(),
@@ -1681,6 +1735,11 @@ mod tests {
         assert!(html.contains("data-overlay-endpoint"));
         // Tail quantiles move to the by-region table.
         assert!(html.contains("300 ms"));
+        // Each row filters via a real link, so the row click has something to drive.
+        let pos = html.find("region-row__link").expect("region link present");
+        let anchor = &html[pos..pos + html[pos..].find("</a>").expect("anchor terminator")];
+        assert!(anchor.contains("href=\"/targets/x?range=24h"));
+        assert!(anchor.contains("region=eu-helsinki"));
     }
 
     #[test]

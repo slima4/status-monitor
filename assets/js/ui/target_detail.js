@@ -77,6 +77,16 @@
         });
     }
 
+    // Widens the region link's hit target to its whole row; the anchor stays the
+    // only source of the URL. Modified clicks and text selection fall through.
+    for (const row of document.querySelectorAll("[data-region-row]")) {
+        row.addEventListener("click", (e) => {
+            if (e.target.closest("a") || e.metaKey || e.ctrlKey || e.shiftKey) return;
+            if (window.getSelection()?.toString()) return;
+            row.querySelector("a")?.click();
+        });
+    }
+
     // Enable/Disable toggle.
     const toggleBtn = document.querySelector('[data-action="toggle-enabled"]');
     const toggleErr = document.querySelector("[data-detail-toggle-error]");
