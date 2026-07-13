@@ -252,6 +252,8 @@ pub struct DetailPage {
 
 /// One row of the per-region breakdown table on the monitor detail page.
 pub struct RegionBreakdownRow {
+    /// Lets a click on the region's bar in the breakdown chart find this row.
+    pub region: String,
     /// Applies this region's filter; on the row already filtered to, clears it.
     pub filter_href: String,
     pub region_label: String,
@@ -304,6 +306,7 @@ impl RegionBreakdownRow {
             last_status,
             region_label,
             filter_href,
+            region: r.region,
         }
     }
 }
@@ -1699,6 +1702,7 @@ mod tests {
 
     fn breakdown_row(label: &str) -> RegionBreakdownRow {
         RegionBreakdownRow {
+            region: "eu-helsinki".into(),
             filter_href: "/targets/x?range=24h&region=eu-helsinki".into(),
             region_label: label.into(),
             uptime_label: "100.00".into(),
@@ -1732,7 +1736,11 @@ mod tests {
         let html = p.render().unwrap();
         assert!(html.contains("latency by region (median)"));
         assert!(!html.contains("latency (p50/p95/p99)"));
-        assert!(html.contains("data-overlay-endpoint"));
+        // Both charts go cross-region: median per region, phase bar per region.
+        assert_eq!(html.matches("data-overlay-endpoint").count(), 2);
+        assert!(html.contains("latency breakdown by region"));
+        // A bar click resolves to a region by finding its row, so the id must be on it.
+        assert!(html.contains(r#"data-region="eu-helsinki""#));
         // Tail quantiles move to the by-region table.
         assert!(html.contains("300 ms"));
         // Each row filters via a real link, so the row click has something to drive.
@@ -1750,6 +1758,8 @@ mod tests {
         // Nothing to compare across, so the overlay would drop the tail for nothing.
         assert!(html.contains("latency (p50/p95/p99)"));
         assert!(!html.contains("data-overlay-endpoint"));
+        // The breakdown stays a time series, scoped to the one region reporting.
+        assert!(!html.contains("latency breakdown by region"));
     }
 
     #[test]
@@ -1760,6 +1770,13 @@ mod tests {
         let html = p.render().unwrap();
         assert!(html.contains("latency (p50/p95/p99)"));
         assert!(!html.contains("data-overlay-endpoint"));
+        // Both charts scope to the picked region, server-side.
+        assert!(!html.contains("latency breakdown by region"));
+        let pos = html
+            .find(r#"id="breakdown-chart""#)
+            .expect("breakdown chart");
+        let el = &html[pos..pos + html[pos..].find("></div>").expect("chart terminator")];
+        assert!(el.contains("region=us-east"));
     }
 
     fn kpi_ranges() -> (ClampedRange, ClampedRange) {

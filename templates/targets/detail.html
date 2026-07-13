@@ -82,11 +82,12 @@
     </div>
     {% if kind != "FLOW" %}
     <div class="sticker-card p-5">
-      <h2 class="panel-label">latency breakdown</h2>
+      <h2 class="panel-label">{% if by_region %}latency breakdown by region{% else %}latency breakdown{% endif %}</h2>
       <div id="breakdown-chart"
            class="mt-4 h-64 w-full"
            data-endpoint="/api/v1/targets/{{ id }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
-           aria-label="Mean latency phase breakdown over time"></div>
+           {% if by_region %}data-overlay-endpoint="/api/v1/targets/{{ id }}/latency/by-region?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"{% endif %}
+           aria-label="{% if by_region %}Mean latency phase breakdown per region{% else %}Mean latency phase breakdown over time{% endif %}"></div>
     </div>
     {% endif %}
   </section>
@@ -112,7 +113,7 @@
       </thead>
       <tbody class="divide-y divide-[color:var(--theme-line)]">
         {% for row in region_breakdown %}
-        <tr class="region-row{% if row.selected %} region-row--on{% endif %}" data-region-row>
+        <tr class="region-row{% if row.selected %} region-row--on{% endif %}" data-region-row data-region="{{ row.region }}">
           <td class="px-5 py-2 whitespace-nowrap text-body">
             <a class="region-row__link" href="{{ row.filter_href }}"{% if row.selected %} aria-current="page"{% endif %}>{{ row.region_label }}</a>
           </td>
