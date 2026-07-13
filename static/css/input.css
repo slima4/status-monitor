@@ -3041,7 +3041,7 @@
         color: var(--sm-dashboard-label-fg);
     }
     .dashboard-kpi-card__row {
-        @apply flex items-end justify-between gap-3;
+        @apply flex items-end justify-between gap-6;
     }
     .dashboard-kpi-card__value {
         @apply text-3xl tabular-nums;
@@ -3072,10 +3072,12 @@
     .metric-delta--down { color: var(--theme-state-bad-fg); }
     .metric-delta--flat { color: var(--theme-text-quiet);  }
     .dashboard-kpi-card__spark {
-        width: 140px;
+        /* Absorbs the row's slack — a fixed width leaves a dead gap after the
+           value on a wide card. */
+        flex: 1 1 auto;
+        min-width: 96px;
         height: 36px;
         display: block;
-        flex: none;
     }
     .dashboard-kpi-card__spark--ok   .dashboard-spark__line { stroke: var(--sm-spark-stroke-up); }
     .dashboard-kpi-card__spark--ok   .dashboard-spark__fill { fill: var(--sm-spark-stroke-up); }

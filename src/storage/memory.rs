@@ -270,24 +270,31 @@ impl ResultsStore for InMemorySink {
         _region: Option<&str>,
     ) -> Result<Vec<DashboardSparkBucket>> {
         let guard = self.results.lock();
-        let mut buckets: std::collections::BTreeMap<(Uuid, i64), (u64, u64)> =
+        let mut buckets: std::collections::BTreeMap<(Uuid, i64), (u64, u64, u64)> =
             std::collections::BTreeMap::new();
         for r in guard.iter() {
             if r.timestamp < from || r.timestamp >= to {
                 continue;
             }
             let minute_ts = (r.timestamp.timestamp() / 60) * 60;
-            let slot = buckets.entry((r.target_id, minute_ts)).or_insert((0, 0));
+            let slot = buckets.entry((r.target_id, minute_ts)).or_insert((0, 0, 0));
             slot.0 += r.duration_ms as u64;
             slot.1 += 1;
+            if r.status == CheckStatus::Up {
+                slot.2 += 1;
+            }
         }
         Ok(buckets
             .into_iter()
-            .map(|((target_id, bucket_ts), (sum, n))| DashboardSparkBucket {
-                target_id,
-                bucket_ts,
-                avg_ms: (sum as f32) / (n.max(1) as f32),
-            })
+            .map(
+                |((target_id, bucket_ts), (sum, n, up))| DashboardSparkBucket {
+                    target_id,
+                    bucket_ts,
+                    avg_ms: (sum as f32) / (n.max(1) as f32),
+                    checks: n,
+                    up,
+                },
+            )
             .collect())
     }
 

@@ -1111,12 +1111,16 @@ impl ResultsStore for ClickhouseResultsStore {
             target_id: Uuid,
             bucket_ts: u32,
             avg_ms: f64,
+            checks: u64,
+            up: u64,
         }
         let query = format!(
             "SELECT \
                target_id, \
                toUInt32(minute) AS bucket_ts, \
-               avgMerge(avg_duration_ms) AS avg_ms \
+               avgMerge(avg_duration_ms) AS avg_ms, \
+               countMerge(total_checks) AS checks, \
+               countIfMerge(up_checks) AS up \
              FROM check_results_1m \
              WHERE org_id = ? {region_pred} AND {MINUTE_WINDOW} \
              GROUP BY target_id, minute \
@@ -1137,6 +1141,8 @@ impl ResultsStore for ClickhouseResultsStore {
                 target_id: r.target_id,
                 bucket_ts: r.bucket_ts as i64,
                 avg_ms: r.avg_ms as f32,
+                checks: r.checks,
+                up: r.up,
             })
             .collect())
     }

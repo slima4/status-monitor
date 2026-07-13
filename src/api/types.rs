@@ -156,6 +156,10 @@ pub struct DashboardSparkBucket {
     /// Unix-seconds for the bucket's `toStartOfMinute(timestamp)`.
     pub bucket_ts: i64,
     pub avg_ms: f32,
+    /// Checks behind `avg_ms`, and how many passed — the weights the fleet
+    /// sparklines aggregate by.
+    pub checks: u64,
+    pub up: u64,
 }
 
 /// One time-bucket of a single monitor's latency, merged from the

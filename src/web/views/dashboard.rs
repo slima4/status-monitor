@@ -141,7 +141,6 @@ pub struct DashboardRow {
 #[derive(Clone)]
 pub struct DashboardSnapshot {
     pub rows: Arc<[DashboardRow]>,
-    pub kpis: DashboardKpis,
     pub kpi_cards: Arc<[KpiCardSpec]>,
     pub matches: usize,
     pub truncated: bool,
@@ -158,9 +157,6 @@ pub struct DashboardKpis {
     pub checks_label: String,
     pub checks_successful_label: String,
     pub incidents: u64,
-    /// Fleet-aggregate sparkline shared by all three KPI cards.
-    pub spark_path: String,
-    pub spark_fill: String,
 }
 
 /// Per-card config passed to the KPI partial — kills the 3-way copy that
@@ -173,6 +169,9 @@ pub struct KpiCardSpec {
     /// `None` when there is no prior data — template skips the line.
     pub delta: Option<KpiDelta>,
     pub spark_tint: &'static str,
+    /// The card's own metric over time. Each card plots what it counts.
+    pub spark_path: String,
+    pub spark_fill: String,
 }
 
 /// Renderable Δ-vs-prior chip: `<span class="{class}">{arrow} {body} vs
@@ -246,7 +245,6 @@ pub struct DashboardPage {
     pub active_tab: &'static str,
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
-    pub kpis: DashboardKpis,
     pub kpi_cards: Arc<[KpiCardSpec]>,
     pub rows: Arc<[DashboardRow]>,
     pub matches: usize,
@@ -272,7 +270,6 @@ pub struct DashboardPage {
 pub struct DashboardTablePartial {
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
-    pub kpis: DashboardKpis,
     pub kpi_cards: Arc<[KpiCardSpec]>,
     pub rows: Arc<[DashboardRow]>,
     pub matches: usize,
@@ -363,7 +360,6 @@ pub async fn index(
         active_tab: "dashboard",
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
-        kpis: snapshot.kpis.clone(),
         kpi_cards: Arc::clone(&snapshot.kpi_cards),
         rows,
         matches,
@@ -532,7 +528,6 @@ pub async fn table_partial(
     let partial = DashboardTablePartial {
         range,
         range_options: build_range_options(range, &RANGE_KEYS),
-        kpis: snapshot.kpis.clone(),
         kpi_cards: Arc::clone(&snapshot.kpi_cards),
         rows,
         matches,
@@ -670,7 +665,6 @@ async fn build_snapshot(
 
     let mut status_counts = StatusCounts::default();
     let mut type_acc: [u32; TYPE_CHIP_ORDER.len()] = [0; TYPE_CHIP_ORDER.len()];
-    let mut spark_agg: [(f64, u32); SPARK_BUCKETS] = [(0.0, 0); SPARK_BUCKETS];
     let rows: Vec<DashboardRow> = targets
         .into_iter()
         .map(|t| {
@@ -680,12 +674,6 @@ async fn build_snapshot(
                 .get(&t.id)
                 .cloned()
                 .unwrap_or_else(|| vec![None; SPARK_BUCKETS]);
-            for (i, slot) in spark.iter().enumerate().take(SPARK_BUCKETS) {
-                if let Some(v) = slot.filter(|v| v.is_finite()) {
-                    spark_agg[i].0 += v as f64;
-                    spark_agg[i].1 += 1;
-                }
-            }
             let dt = confirmed.then(|| downtime_by_target.get(&t.id).copied().unwrap_or(0));
             let mut row = DashboardRow::build(
                 t.id,
@@ -710,7 +698,7 @@ async fn build_snapshot(
         })
         .collect();
 
-    let (spark_path, spark_fill, _) = render_kpi_spark(&spark_agg);
+    let fleet_sparks = fleet_sparks(&spark_rows, spark_from);
     let checks_successful_label = format!("{} successful", format_count(checks_up));
     let current = PriorPeriodSummary {
         checks_total,
@@ -744,10 +732,15 @@ async fn build_snapshot(
         checks_label: format_count(checks_total),
         checks_successful_label: checks_successful_label.clone(),
         incidents,
-        spark_path,
-        spark_fill,
     };
-    let kpi_cards = build_kpi_cards(&kpis, range, checks_successful_label, &current, &prior);
+    let kpi_cards = build_kpi_cards(
+        &kpis,
+        range,
+        checks_successful_label,
+        &current,
+        &prior,
+        &fleet_sparks,
+    );
 
     let now = Utc::now();
     let active_incidents: Vec<DashboardActiveIncident> = active_raw
@@ -759,7 +752,6 @@ async fn build_snapshot(
     let ribbon = build_fleet_ribbon(&ribbon_rows, ribbon_from, &target_names);
     Ok(DashboardSnapshot {
         rows: Arc::from(rows.into_boxed_slice()),
-        kpis,
         kpi_cards: Arc::from(kpi_cards.into_boxed_slice()),
         matches,
         truncated,
@@ -818,12 +810,55 @@ fn build_type_counts(acc: [u32; TYPE_CHIP_ORDER.len()]) -> Vec<TypeCount> {
     out
 }
 
+/// Fleet metrics over the sparkline window — one series per KPI card, so each
+/// card plots the metric it names.
+#[derive(Default)]
+struct FleetSparks {
+    uptime: Vec<Option<f32>>,
+    avg_ms: Vec<Option<f32>>,
+    checks: Vec<Option<f32>>,
+}
+
+#[derive(Clone, Copy, Default)]
+struct FleetSlot {
+    latency_ms: f64,
+    checks: u64,
+    up: u64,
+}
+
+/// Every monitor's rollup, not just the rows the table shows — the KPI values
+/// beside these lines are org-wide too.
+fn fleet_sparks(rows: &[DashboardSparkBucket], from: DateTime<Utc>) -> FleetSparks {
+    let from_ts = from.timestamp();
+    let mut agg = [FleetSlot::default(); SPARK_BUCKETS];
+    for r in rows {
+        if !r.avg_ms.is_finite() {
+            continue;
+        }
+        let slot = ((r.bucket_ts - from_ts) / 60).clamp(0, SPARK_BUCKETS as i64 - 1) as usize;
+        // Weighted by check count: a monitor probed once in a minute must not
+        // outvote one probed sixty times.
+        agg[slot].latency_ms += f64::from(r.avg_ms) * r.checks as f64;
+        agg[slot].checks += r.checks;
+        agg[slot].up += r.up;
+    }
+    let series = |f: fn(&FleetSlot) -> f32| -> Vec<Option<f32>> {
+        agg.iter().map(|s| (s.checks > 0).then(|| f(s))).collect()
+    };
+    FleetSparks {
+        uptime: series(|s| (s.up as f64 / s.checks as f64 * 100.0) as f32),
+        avg_ms: series(|s| (s.latency_ms / s.checks as f64) as f32),
+        checks: series(|s| s.checks as f32),
+    }
+}
+
 fn build_kpi_cards(
     kpis: &DashboardKpis,
     range: &'static str,
     checks_successful_label: String,
     current: &PriorPeriodSummary,
     prior: &PriorPeriodSummary,
+    sparks: &FleetSparks,
 ) -> Vec<KpiCardSpec> {
     let incidents_html = format!(
         r#"Incidents (24h): <span class="{cls}">{n}</span>"#,
@@ -834,6 +869,15 @@ fn build_kpi_cards(
         },
         n = kpis.incidents,
     );
+    let spark = |series: &[Option<f32>]| {
+        let (path, fill, _) = render_spark_path(series);
+        (path, fill)
+    };
+    // Percentages get the full 0..100 scale — autoscaled, a 99.99 → 100 wiggle
+    // would draw the same cliff as an outage.
+    let (uptime_path, uptime_fill, _) = render_spark_path_domain(&sparks.uptime, 0.0, 100.0);
+    let (avg_path, avg_fill) = spark(&sparks.avg_ms);
+    let (checks_path, checks_fill) = spark(&sparks.checks);
     vec![
         KpiCardSpec {
             label: format!("Uptime · {range}"),
@@ -841,6 +885,8 @@ fn build_kpi_cards(
             hint_html: incidents_html,
             delta: uptime_delta(current, prior),
             spark_tint: "ok",
+            spark_path: uptime_path,
+            spark_fill: uptime_fill,
         },
         KpiCardSpec {
             label: format!("Avg response · {range}"),
@@ -848,6 +894,8 @@ fn build_kpi_cards(
             hint_html: "across all monitors".into(),
             delta: avg_delta(current, prior),
             spark_tint: "ink",
+            spark_path: avg_path,
+            spark_fill: avg_fill,
         },
         KpiCardSpec {
             label: format!("Checks · {range}"),
@@ -855,6 +903,8 @@ fn build_kpi_cards(
             hint_html: checks_successful_label,
             delta: checks_delta(current, prior),
             spark_tint: "info",
+            spark_path: checks_path,
+            spark_fill: checks_fill,
         },
     ]
 }
@@ -1036,20 +1086,6 @@ pub(crate) fn ribbon_class(pct: f64) -> &'static str {
     } else {
         "maj"
     }
-}
-
-fn render_kpi_spark(agg: &[(f64, u32); SPARK_BUCKETS]) -> (String, String, u32) {
-    let series: Vec<Option<f32>> = agg
-        .iter()
-        .map(|(sum, n)| {
-            if *n == 0 {
-                None
-            } else {
-                Some((sum / *n as f64) as f32)
-            }
-        })
-        .collect();
-    render_spark_path(&series)
 }
 
 fn range_span(key: &'static str) -> Duration {
@@ -1319,8 +1355,6 @@ mod tests {
             checks_label: "17.3k".into(),
             checks_successful_label: "17.0k successful".into(),
             incidents: 3,
-            spark_path: String::new(),
-            spark_fill: String::new(),
         }
     }
 
@@ -1332,6 +1366,7 @@ mod tests {
             "17.0k successful".into(),
             &zero,
             &zero,
+            &FleetSparks::default(),
         )
     }
 
@@ -1367,7 +1402,6 @@ mod tests {
             active_tab: "dashboard",
             range: "24h",
             range_options: build_range_options("24h", &RANGE_KEYS),
-            kpis: sample_kpis(),
             kpi_cards: Arc::from(sample_kpi_cards().into_boxed_slice()),
             rows: Arc::from(rows.into_boxed_slice()),
             matches: 2,
@@ -1425,7 +1459,6 @@ mod tests {
         let partial = DashboardTablePartial {
             range: "7d",
             range_options: build_range_options("7d", &RANGE_KEYS),
-            kpis: sample_kpis(),
             kpi_cards: Arc::from(sample_kpi_cards().into_boxed_slice()),
             rows: Arc::from(vec![sample_row("api", "up")].into_boxed_slice()),
             matches: 1,
@@ -1466,8 +1499,6 @@ mod tests {
             checks_label: "0".into(),
             checks_successful_label: "0 successful".into(),
             incidents: 0,
-            spark_path: String::new(),
-            spark_fill: String::new(),
         };
         let page = DashboardPage {
             active_tab: "dashboard",
@@ -1475,10 +1506,16 @@ mod tests {
             range_options: build_range_options("24h", &RANGE_KEYS),
             kpi_cards: Arc::from({
                 let zero = PriorPeriodSummary::default();
-                build_kpi_cards(&kpis, "24h", "0 successful".into(), &zero, &zero)
-                    .into_boxed_slice()
+                build_kpi_cards(
+                    &kpis,
+                    "24h",
+                    "0 successful".into(),
+                    &zero,
+                    &zero,
+                    &FleetSparks::default(),
+                )
+                .into_boxed_slice()
             }),
-            kpis,
             rows: Arc::from(Vec::<DashboardRow>::new().into_boxed_slice()),
             matches: 0,
             truncated: false,
@@ -1515,6 +1552,66 @@ mod tests {
     fn pct_label_handles_empty_window() {
         assert_eq!(pct_label(0, 0), "—");
         assert_eq!(pct_label(1_000, 999), "99.90%");
+    }
+
+    fn spark_bucket(
+        from: DateTime<Utc>,
+        minute: i64,
+        avg_ms: f32,
+        checks: u64,
+        up: u64,
+    ) -> DashboardSparkBucket {
+        DashboardSparkBucket {
+            target_id: Uuid::nil(),
+            bucket_ts: from.timestamp() + minute * 60,
+            avg_ms,
+            checks,
+            up,
+        }
+    }
+
+    #[test]
+    fn fleet_sparks_weight_by_check_count() {
+        let from = Utc::now() - Duration::minutes(SPARK_MINUTES);
+        let sparks = fleet_sparks(
+            &[
+                spark_bucket(from, 0, 100.0, 1, 1),
+                spark_bucket(from, 0, 200.0, 59, 30),
+            ],
+            from,
+        );
+        // A mean of the two means would say 150 ms and 75 % uptime.
+        assert_eq!(sparks.avg_ms[0].unwrap().round(), 198.0);
+        assert_eq!(sparks.uptime[0].unwrap().round(), 52.0);
+        assert_eq!(sparks.checks[0].unwrap(), 60.0);
+        assert!(sparks.avg_ms[1].is_none());
+    }
+
+    #[test]
+    fn each_kpi_card_plots_its_own_metric() {
+        let from = Utc::now() - Duration::minutes(SPARK_MINUTES);
+        // Latency climbs while checks and uptime fall — three shapes, not one.
+        let sparks = fleet_sparks(
+            &[
+                spark_bucket(from, 0, 100.0, 40, 40),
+                spark_bucket(from, 1, 400.0, 10, 5),
+            ],
+            from,
+        );
+        let zero = PriorPeriodSummary::default();
+        let cards = build_kpi_cards(
+            &sample_kpis(),
+            "24h",
+            "17.0k successful".into(),
+            &zero,
+            &zero,
+            &sparks,
+        );
+        let paths: Vec<&str> = cards.iter().map(|c| c.spark_path.as_str()).collect();
+        assert!(paths.iter().all(|p| !p.is_empty()));
+        assert_ne!(paths[0], paths[1]);
+        assert_ne!(paths[1], paths[2]);
+        assert_ne!(paths[0], paths[2]);
     }
 
     #[test]
@@ -1635,7 +1732,6 @@ mod tests {
         let n = rows.len();
         DashboardSnapshot {
             rows: Arc::from(rows.into_boxed_slice()),
-            kpis: sample_kpis(),
             kpi_cards: Arc::from(sample_kpi_cards().into_boxed_slice()),
             matches: n,
             truncated: false,
