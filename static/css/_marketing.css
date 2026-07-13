@@ -680,6 +680,31 @@ html:has(.marketing-shell) {
 @media (prefers-reduced-motion: reduce) { .tool-preset:active { transform: none; } }
 @media (pointer: coarse) { .tool-preset { min-height: 44px; } }
 
+/* Value wheel: the centre is a typeable input; the curved neighbours fade at
+   both ends and are clickable to snap the value to them. */
+.wheel { display: flex; justify-content: center; width: 100%; }
+.wheel__viewport { position: relative; width: min(42rem, 100%); height: 3.5rem; overflow: hidden; perspective: 760px;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+          mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent); }
+.wheel__ghosts { position: absolute; inset: 0; transform-style: preserve-3d; pointer-events: none; }
+.wheel__cell { position: absolute; top: 50%; left: 50%; margin: 0; padding: 0.35rem 0.55rem; white-space: nowrap;
+  appearance: none; border: 0; background: transparent; cursor: pointer; pointer-events: auto;
+  font-size: 1.35rem; font-weight: 600; color: var(--mk-quiet); font-variant-numeric: tabular-nums; border-radius: 3px;
+  transition: color 140ms ease, opacity 260ms cubic-bezier(0.2, 0, 0, 1); }
+.wheel__cell--l1 { transform: translate(-50%, -50%) translateX(-9.5rem) rotateY(32deg) scale(0.9); opacity: 0.8; }
+.wheel__cell--r1 { transform: translate(-50%, -50%) translateX(9.5rem) rotateY(-32deg) scale(0.9); opacity: 0.8; }
+.wheel__cell--l2 { transform: translate(-50%, -50%) translateX(-16.5rem) rotateY(50deg) scale(0.58); opacity: 0.32; filter: blur(0.5px); }
+.wheel__cell--r2 { transform: translate(-50%, -50%) translateX(16.5rem) rotateY(-50deg) scale(0.58); opacity: 0.32; filter: blur(0.5px); }
+.wheel__cell:hover:not(:disabled) { color: var(--mk-ink); opacity: 1; }
+.wheel__cell:focus-visible { outline: 2px solid var(--mk-ok); outline-offset: 1px; }
+.wheel__cell.is-empty { opacity: 0; }
+.wheel__cell:disabled { pointer-events: none; cursor: default; }
+.wheel__center { position: absolute; inset: 0; display: flex; align-items: baseline; justify-content: center; gap: 0.15rem; pointer-events: none; }
+.wheel__center .tool-input, .wheel__center .tool-input__suffix { pointer-events: auto; }
+.tool-input--wheel { width: 5ch; text-align: center; }
+@media (prefers-reduced-motion: reduce) { .wheel__cell { transition: color 140ms ease; } }
+@media (pointer: coarse) { .wheel__cell { padding: 0.8rem 0.95rem; } }
+
 .tool-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; margin-top: 1.5rem; background: var(--mk-rule); border: 1px solid var(--mk-rule); border-radius: 2px; overflow: hidden; }
 @media (min-width: 640px) { .tool-grid { grid-template-columns: repeat(4, 1fr); } }
 .tool-metric { display: flex; flex-direction: column; gap: 0.3rem; padding: 1rem 1.1rem; background: var(--mk-surface); }

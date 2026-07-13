@@ -668,7 +668,7 @@ struct ErrorBudgetPage {
     default_slo: String,
     default_measured: String,
     default_window: &'static str,
-    slos: &'static [f64],
+    slo_values: String,
     windows: &'static [(&'static str, f64)],
     version: &'static str,
 }
@@ -716,7 +716,11 @@ fn render_error_budget(cfg: &MarketingCfg) -> CachedRender {
         default_slo: format!("{DEFAULT_SLO}"),
         default_measured: format!("{DEFAULT_MEASURED}"),
         default_window: DEFAULT_WINDOW_LABEL,
-        slos: ERROR_BUDGET_SLOS,
+        slo_values: ERROR_BUDGET_SLOS
+            .iter()
+            .map(|v| format!("{v}"))
+            .collect::<Vec<_>>()
+            .join(","),
         windows: ERROR_BUDGET_WINDOWS,
         canonical_url,
         og,

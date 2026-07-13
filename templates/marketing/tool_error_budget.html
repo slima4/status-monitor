@@ -24,27 +24,41 @@
         <div class="tool-calc mk-panel rounded-sm">
             <div class="tool-calc__head">
                 <label for="slo-input" class="tool-calc__label">SLO target</label>
-                <div class="tool-calc__field">
-                    <input id="slo-input" class="tool-input mk-mono" type="number"
-                           inputmode="decimal" min="0" max="100" step="0.001"
-                           value="{{ default_slo }}">
-                    <span class="tool-input__suffix mk-mono" aria-hidden="true">%</span>
+                <div class="wheel" data-values="{{ slo_values }}">
+                    <div class="wheel__viewport">
+                        <div class="wheel__ghosts">
+                            <button type="button" class="wheel__cell wheel__cell--l2 mk-mono is-empty" data-slot="-2" disabled></button>
+                            <button type="button" class="wheel__cell wheel__cell--l1 mk-mono is-empty" data-slot="-1" disabled></button>
+                            <button type="button" class="wheel__cell wheel__cell--r1 mk-mono is-empty" data-slot="1" disabled></button>
+                            <button type="button" class="wheel__cell wheel__cell--r2 mk-mono is-empty" data-slot="2" disabled></button>
+                        </div>
+                        <div class="wheel__center">
+                            <input id="slo-input" class="tool-input tool-input--wheel mk-mono" type="number"
+                                   inputmode="decimal" min="0" max="100" step="0.001"
+                                   value="{{ default_slo }}">
+                            <span class="tool-input__suffix mk-mono" aria-hidden="true">%</span>
+                        </div>
+                    </div>
                 </div>
-            </div>
-
-            <div class="tool-presets" role="group" aria-label="Common SLO targets">
-                {% for s in slos %}
-                <button type="button" class="tool-preset mk-mono" data-slo="{{ s }}" aria-pressed="false">{{ s }}%</button>
-                {% endfor %}
             </div>
 
             <div class="tool-calc__head tool-calc__head--split">
                 <label for="measured-input" class="tool-calc__label">measured availability</label>
-                <div class="tool-calc__field">
-                    <input id="measured-input" class="tool-input mk-mono" type="number"
-                           inputmode="decimal" min="0" max="100" step="0.001"
-                           value="{{ default_measured }}">
-                    <span class="tool-input__suffix mk-mono" aria-hidden="true">%</span>
+                <div class="wheel" data-step="0.05">
+                    <div class="wheel__viewport">
+                        <div class="wheel__ghosts">
+                            <button type="button" class="wheel__cell wheel__cell--l2 mk-mono is-empty" data-slot="-2" disabled></button>
+                            <button type="button" class="wheel__cell wheel__cell--l1 mk-mono is-empty" data-slot="-1" disabled></button>
+                            <button type="button" class="wheel__cell wheel__cell--r1 mk-mono is-empty" data-slot="1" disabled></button>
+                            <button type="button" class="wheel__cell wheel__cell--r2 mk-mono is-empty" data-slot="2" disabled></button>
+                        </div>
+                        <div class="wheel__center">
+                            <input id="measured-input" class="tool-input tool-input--wheel mk-mono" type="number"
+                                   inputmode="decimal" min="0" max="100" step="0.001"
+                                   value="{{ default_measured }}">
+                            <span class="tool-input__suffix mk-mono" aria-hidden="true">%</span>
+                        </div>
+                    </div>
                 </div>
             </div>
 
@@ -152,6 +166,23 @@
             promise you sign with a customer, usually a looser number with money
             attached if you miss it. You run to the SLO so you never get near the
             SLA.
+        </p>
+    </section>
+
+    <section class="mx-auto max-w-3xl space-y-4">
+        <h2 class="mk-h2">what are "the nines"?</h2>
+        <p class="mk-body">
+            You will hear SRE teams talk in "nines". It is shorthand for a
+            reliability target, named by how many nines lead the percentage: 99%
+            is "two nines", 99.9% is "three nines", 99.99% is "four nines". Each
+            extra nine cuts the downtime you allow by about ten times, and usually
+            costs about ten times more engineering to reach. So instead of quoting
+            an exact number, people say "we run three nines" or "are we going for
+            four nines?". The half steps, like 99.5% and 99.95%, fill the big gap
+            between full nines, which is where a lot of real targets sit. Below two
+            nines is rare for anything people pay for. The numbers on this page, 43
+            minutes a month at three nines and about four at four, are just those
+            nines turned into time.
         </p>
     </section>
 

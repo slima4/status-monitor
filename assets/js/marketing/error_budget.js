@@ -149,12 +149,6 @@ function recompute(sloInput, measuredInput, windowGroup, ctx) {
   sloInput.setAttribute("aria-invalid", sloValid ? "false" : "true");
   measuredInput.setAttribute("aria-invalid", measuredValid ? "false" : "true");
 
-  for (const chip of ctx.sloPresets) {
-    const on = parseFloat(chip.dataset.slo) === slo;
-    chip.classList.toggle("is-active", on);
-    chip.setAttribute("aria-pressed", on);
-  }
-
   if (!sloValid || !measuredValid) {
     for (const node of ctx.budgetNodes) node.textContent = "—";
     ctx.burnNode.textContent = "—";
@@ -205,6 +199,118 @@ function wireCrosshair(svg, ctx) {
   hit.addEventListener("mouseleave", () => group.classList.remove("is-on"));
 }
 
+// Value wheel: click a neighbour to snap the input to it and roll the ghosts.
+// SLO snaps through its preset list (data-values); measured steps by a fixed
+// amount (data-step). The centre stays a plain, typeable input.
+function round2(v) {
+  return Math.round(v * 100) / 100;
+}
+
+function fmt(v) {
+  return `${parseFloat(v.toFixed(2))}`;
+}
+
+function setupWheel(wheel, run) {
+  const input = wheel.querySelector("input");
+  const ghosts = wheel.querySelector(".wheel__ghosts");
+  if (!input || !ghosts) return;
+
+  const values = wheel.dataset.values
+    ? wheel.dataset.values.split(",").map(Number)
+    : null;
+  const step = wheel.dataset.step ? parseFloat(wheel.dataset.step) : null;
+  const cells = [-2, -1, 1, 2].map((off) => [
+    off,
+    ghosts.querySelector(`[data-slot="${off}"]`),
+  ]);
+  const canAnimate =
+    typeof input.animate === "function" &&
+    !(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+
+  const nearest = (v) =>
+    values.reduce(
+      (best, p, i) => (Math.abs(p - v) < Math.abs(values[best] - v) ? i : best),
+      0,
+    );
+
+  function neighbour(v, off) {
+    if (values) {
+      const j = nearest(v) + off;
+      return j >= 0 && j < values.length ? values[j] : null;
+    }
+    const nv = round2(v + off * step);
+    return nv >= 0 && nv <= 100 ? nv : null;
+  }
+
+  function render() {
+    const v = parseFloat(input.value);
+    for (const [off, cell] of cells) {
+      const nv = Number.isFinite(v) ? neighbour(v, off) : null;
+      cell.classList.toggle("is-empty", nv === null);
+      cell.disabled = nv === null;
+      cell.textContent = nv === null ? "" : fmt(nv);
+      cell.setAttribute("aria-label", nv === null ? "" : `Set to ${fmt(nv)}%`);
+    }
+  }
+
+  let ghostAnim = null;
+  let centerAnim = null;
+  function roll(dir) {
+    if (!canAnimate) return;
+    if (ghostAnim) ghostAnim.cancel();
+    if (centerAnim) centerAnim.cancel();
+    ghostAnim = ghosts.animate(
+      [{ transform: `translateX(${dir * 60}px)` }, { transform: "translateX(0)" }],
+      { duration: 300, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+    );
+    centerAnim = input.animate(
+      [{ transform: "scale(0.95)" }, { transform: "scale(1)" }],
+      { duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+    );
+  }
+
+  for (const [off, cell] of cells) {
+    cell.addEventListener("click", () => {
+      const v = parseFloat(input.value);
+      if (!Number.isFinite(v)) return;
+      const nv = neighbour(v, off);
+      if (nv === null) return;
+      input.value = fmt(nv);
+      render();
+      roll(off > 0 ? 1 : -1);
+      run();
+    });
+  }
+
+  // Scroll the number strip to step one value per notch (throttled), using
+  // whichever scroll axis dominates so a plain wheel or a trackpad both work.
+  const viewport = wheel.querySelector(".wheel__viewport");
+  let lastStep = 0;
+  viewport.addEventListener(
+    "wheel",
+    (e) => {
+      const v = parseFloat(input.value);
+      if (!Number.isFinite(v)) return;
+      const d = Math.abs(e.deltaX) >= Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (d === 0) return;
+      e.preventDefault();
+      if (e.timeStamp - lastStep < 80) return;
+      const dir = d > 0 ? 1 : -1;
+      const nv = neighbour(v, dir);
+      if (nv === null) return;
+      lastStep = e.timeStamp;
+      input.value = fmt(nv);
+      render();
+      roll(dir);
+      run();
+    },
+    { passive: false },
+  );
+
+  input.addEventListener("input", render);
+  render();
+}
+
 function init() {
   const sloInput = document.getElementById("slo-input");
   const measuredInput = document.getElementById("measured-input");
@@ -212,7 +318,6 @@ function init() {
   if (!sloInput || !measuredInput || !windowGroup) return;
 
   const ctx = {
-    sloPresets: document.querySelectorAll(".tool-presets .tool-preset"),
     budgetNodes: document.querySelectorAll("[data-budget]"),
     burnNode: document.getElementById("burn-rate"),
     verdictNode: document.getElementById("verdict"),
@@ -239,12 +344,7 @@ function init() {
   sloInput.addEventListener("input", run);
   measuredInput.addEventListener("input", run);
 
-  for (const chip of ctx.sloPresets) {
-    chip.addEventListener("click", () => {
-      sloInput.value = chip.dataset.slo;
-      run();
-    });
-  }
+  for (const wheel of document.querySelectorAll(".wheel")) setupWheel(wheel, run);
 
   for (const btn of windowGroup.querySelectorAll(".tool-preset")) {
     btn.addEventListener("click", () => {
