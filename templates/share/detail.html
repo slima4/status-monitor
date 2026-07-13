@@ -22,18 +22,18 @@
 
   <section class="grid gap-4 lg:grid-cols-2">
     <div class="sticker-card p-5">
-      <h2 class="panel-label">latency (p50/p95/p99)</h2>
+      <h2 class="panel-label">latency (p50/p95/p99){% if all_regions %} · all regions{% endif %}</h2>
       <div id="latency-chart"
            class="mt-4 h-64 w-full"
            data-endpoint="/m/{{ token }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
-           aria-label="Latency p50/p95/p99 over time"></div>
+           aria-label="Latency p50/p95/p99 over time{% if all_regions %}, merged across every region{% endif %}"></div>
     </div>
     <div class="sticker-card p-5">
-      <h2 class="panel-label">latency breakdown</h2>
+      <h2 class="panel-label">latency breakdown{% if all_regions %} · all regions{% endif %}</h2>
       <div id="breakdown-chart"
            class="mt-4 h-64 w-full"
            data-endpoint="/m/{{ token }}/latency?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}"
-           aria-label="Mean latency phase breakdown over time"></div>
+           aria-label="Mean latency phase breakdown over time{% if all_regions %}, averaged across every region{% endif %}"></div>
     </div>
   </section>
 

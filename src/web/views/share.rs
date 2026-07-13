@@ -124,6 +124,8 @@ pub struct ShareDetailPage {
     pub selected_region: Option<String>,
     /// The public results table hides the region column (matches the owner view).
     pub show_region: bool,
+    /// Monitor runs from more than one region; the charts merge them.
+    pub all_regions: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -205,6 +207,11 @@ pub async fn detail(
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
     let (kind, address) = describe_check(&target.check);
     let range_base_path = format!("/m/{token}");
+    let all_regions = state
+        .target_store
+        .regions_for_target(resolved.org, resolved.target_id)
+        .await?
+        .is_some_and(|r| r.len() > 1);
 
     Ok(ShareDetailPage {
         token,
@@ -232,6 +239,7 @@ pub async fn detail(
         to_human: labels.to_human,
         selected_region: None,
         show_region: false,
+        all_regions,
     })
 }
 
@@ -430,9 +438,64 @@ pub async fn results(
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_SHARE_WINDOW_DAYS, clamp_window};
+    use super::*;
     use crate::web::views::targets_detail::DetailParams;
     use chrono::{Duration, Utc};
+
+    fn share_page(all_regions: bool) -> ShareDetailPage {
+        ShareDetailPage {
+            token: "tok".into(),
+            subtab: SUBTAB_MONITOR,
+            ongoing_count: 0,
+            name: "api".into(),
+            kind: "HTTP",
+            address: "https://example.com".into(),
+            interval_s: 60,
+            enabled: true,
+            tags: vec![],
+            last_status: "up",
+            last_at_iso: Arc::from("2026-07-13T12:00:00Z"),
+            uptime: Arc::new(UptimeStatsView {
+                total: 100,
+                up: 100,
+                down: 0,
+                degraded: 0,
+                error: 0,
+                uptime_pct: "100.00".into(),
+            }),
+            kpi: Arc::new(Default::default()),
+            results: Arc::from(vec![]),
+            results_has_more: false,
+            config_json: "{}".into(),
+            range: "24h",
+            range_options: build_range_options("24h", &RANGE_KEYS),
+            range_base_path: "/m/tok".into(),
+            from_iso: "2026-07-12T12:00:00Z".into(),
+            to_iso: "2026-07-13T12:00:00Z".into(),
+            from_human: "2026-07-12 12:00 UTC".into(),
+            to_human: "2026-07-13 12:00 UTC".into(),
+            selected_region: None,
+            show_region: false,
+            all_regions,
+        }
+    }
+
+    #[test]
+    fn multi_region_share_charts_say_they_merge_regions() {
+        let html = share_page(true).render().unwrap();
+        assert!(html.contains("latency breakdown · all regions"));
+        assert!(html.contains("latency (p50/p95/p99) · all regions"));
+        // The public surface stays region-blind: no per-region series, no region names.
+        assert!(!html.contains("data-overlay-endpoint"));
+        assert!(!html.contains("by-region"));
+    }
+
+    #[test]
+    fn single_region_share_charts_claim_nothing() {
+        let html = share_page(false).render().unwrap();
+        assert!(html.contains("latency breakdown"));
+        assert!(!html.contains("all regions"));
+    }
 
     #[test]
     fn clamp_window_caps_an_oversized_lookback() {
