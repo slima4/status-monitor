@@ -78,8 +78,8 @@ pub struct IncidentArchivePage {
 }
 
 /// OG/Twitter card metadata for the public status surface. Empty `url` /
-/// `image` mean "skip that tag" — fine for self-hosted setups where the
-/// marketing origin isn't configured.
+/// `image` / `site_name` mean "skip that tag" — fine for self-hosted setups
+/// where the marketing origin isn't configured.
 #[derive(Default)]
 pub struct OgMeta {
     pub title: String,
@@ -87,6 +87,8 @@ pub struct OgMeta {
     pub og_type: &'static str,
     pub url: String,
     pub image: String,
+    /// The tenant's brand, never ours.
+    pub site_name: String,
 }
 
 pub struct MonthBucket {
@@ -140,6 +142,7 @@ pub async fn index(
                 branding.display_name
             ),
             "website",
+            &branding,
         );
         StatusFullPage { view, branding, og }.into_response()
     }
@@ -209,6 +212,7 @@ pub async fn incident(
         format!("{} · {} Status", inc.title, branding.display_name),
         format!("Incident report for {}: {}.", inc.component_name, inc.title),
         "article",
+        &branding,
     );
     IncidentDetailPage {
         branding,
@@ -269,6 +273,7 @@ pub async fn archive(
         format!("Incident history · {} Status", branding.display_name),
         format!("Historical incidents for {}.", branding.display_name),
         "website",
+        &branding,
     );
     IncidentArchivePage {
         branding,
@@ -666,6 +671,7 @@ fn build_og_meta(
     title: String,
     description: String,
     og_type: &'static str,
+    branding: &BrandingView,
 ) -> OgMeta {
     let scheme = headers
         .get("x-forwarded-proto")
@@ -676,32 +682,39 @@ fn build_og_meta(
         .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
-    let url = match parse_host_shape(host, &state.cfg.public_status.base_domain) {
+    let canonical = match parse_host_shape(host, &state.cfg.public_status.base_domain) {
         HostShape::Apex | HostShape::Subdomain(_) => {
             // Strip port + trailing dot the same way `parse_host_shape` does
             // so the URL canonicalises to RFC-1034 form.
-            let canonical = host
-                .split(':')
-                .next()
-                .unwrap_or(host)
-                .strip_suffix('.')
-                .unwrap_or_else(|| host.split(':').next().unwrap_or(host));
-            format!("{scheme}://{canonical}{path}")
+            let stripped = host.split(':').next().unwrap_or(host);
+            Some(stripped.strip_suffix('.').unwrap_or(stripped).to_string())
         }
-        HostShape::Other => String::new(),
+        HostShape::Other => None,
     };
-    let origin = &state.cfg.marketing.canonical_origin;
-    let image = if origin.is_empty() {
-        String::new()
-    } else {
-        format!("{origin}/static/marketing/og.png")
-    };
+    let url = canonical
+        .as_ref()
+        .map(|h| format!("{scheme}://{h}{path}"))
+        .unwrap_or_default();
+
+    let image = og_image(&state.cfg.marketing.canonical_origin);
+
     OgMeta {
         title,
         description,
         og_type,
         url,
         image,
+        site_name: branding.display_name.clone(),
+    }
+}
+
+/// Never the marketing card: it carries a sign-up CTA, and this page is the
+/// tenant's.
+fn og_image(marketing_origin: &str) -> String {
+    if marketing_origin.is_empty() {
+        String::new()
+    } else {
+        format!("{marketing_origin}/static/marketing/og-status.png")
     }
 }
 
@@ -1628,24 +1641,40 @@ mod tests {
                 description: "Live operational status for Acme.".into(),
                 og_type: "website",
                 url: "https://acme.uptimepage.dev/status".into(),
-                image: "https://uptimepage.dev/static/marketing/og.png".into(),
+                image: "https://uptimepage.dev/static/marketing/og-status.png".into(),
+                site_name: "Acme".into(),
             },
         }
         .render()
         .unwrap();
         assert!(html.contains(r#"<meta property="og:title" content="Acme Status">"#));
+        assert!(html.contains(r#"<meta property="og:site_name" content="Acme">"#));
         assert!(
             html.contains(
                 r#"<meta property="og:url" content="https://acme.uptimepage.dev/status">"#
             )
         );
         assert!(html.contains(
-            r#"<meta property="og:image" content="https://uptimepage.dev/static/marketing/og.png">"#
+            r#"<meta property="og:image" content="https://uptimepage.dev/static/marketing/og-status.png">"#
         ));
         assert!(html.contains(r#"<meta name="twitter:card" content="summary_large_image">"#));
         assert!(html.contains(
-            r#"<meta name="twitter:image" content="https://uptimepage.dev/static/marketing/og.png">"#
+            r#"<meta name="twitter:image" content="https://uptimepage.dev/static/marketing/og-status.png">"#
         ));
+    }
+
+    #[test]
+    fn og_image_is_never_the_marketing_card() {
+        let image = og_image("https://uptimepage.dev");
+        assert_eq!(
+            image,
+            "https://uptimepage.dev/static/marketing/og-status.png"
+        );
+    }
+
+    #[test]
+    fn og_image_is_empty_without_marketing_origin() {
+        assert!(og_image("").is_empty());
     }
 
     #[test]
@@ -1660,12 +1689,14 @@ mod tests {
                 og_type: "website",
                 url: String::new(),
                 image: String::new(),
+                site_name: String::new(),
             },
         }
         .render()
         .unwrap();
         assert!(html.contains(r#"<meta name="twitter:card" content="summary">"#));
         assert!(!html.contains("og:image"));
+        assert!(!html.contains("og:site_name"));
         assert!(!html.contains("og:url"));
         assert!(!html.contains("twitter:image"));
     }

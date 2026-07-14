@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#f7f9fa"/>
+  <rect x="0" y="0" width="1200" height="1" fill="#d0d6df"/>
+  <rect x="0" y="629" width="1200" height="1" fill="#d0d6df"/>
+
+  <g font-family="Menlo, 'Courier New', monospace">
+
+    <text x="96" y="232" font-size="72" font-weight="600" fill="#1a212c" letter-spacing="-2.2">Service status</text>
+    <text x="96" y="284" font-size="24" font-weight="500" fill="#4b5564">Live uptime, incidents and scheduled maintenance.</text>
+
+    <g transform="translate(96 350)">
+      <rect x="0.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="11.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="22.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="33.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="44.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="56.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="67.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="78.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="89.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="100.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="112.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="123.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="134.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="145.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="156.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="168.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="179.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="190.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="201.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="212.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="224.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="235.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="246.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="257.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="268.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="280.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="291.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="302.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="313.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="324.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="336.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="347.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="358.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="369.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="380.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="392.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="403.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="414.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="425.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="436.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="448.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="459.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="470.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="481.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="492.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="504.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="515.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="526.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="537.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="548.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="560.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="571.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="582.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="593.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="604.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="616.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="627.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="638.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="649.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="660.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="672.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="683.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="694.4" y="0" width="7.2" height="64" rx="2" fill="#d97706"/>
+      <rect x="705.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="716.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="728.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="739.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="750.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="761.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="772.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="784.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="795.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="806.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="817.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="828.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="840.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="851.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="862.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="873.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="884.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="896.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="907.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="918.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="929.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="940.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="952.0" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="963.2" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="974.4" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="985.6" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+      <rect x="996.8" y="0" width="7.2" height="64" rx="2" fill="#0d9a5b"/>
+    </g>
+
+    <text x="96" y="446" font-size="16" font-weight="500" fill="#7c8493">90 days ago</text>
+    <text x="1104" y="446" text-anchor="end" font-size="16" font-weight="500" fill="#7c8493">today</text>
+
+    <line x1="96" y1="512" x2="1104" y2="512" stroke="#d0d6df" stroke-width="1"/>
+
+    <g font-size="22" font-weight="600" fill="#4b5564">
+      <circle cx="103" cy="560" r="7" fill="#0d9a5b"/>
+      <text x="124" y="567">operational</text>
+
+      <circle cx="355" cy="560" r="7" fill="#d97706"/>
+      <text x="376" y="567">degraded</text>
+
+      <circle cx="607" cy="560" r="7" fill="#c2333c"/>
+      <text x="628" y="567">outage</text>
+
+      <circle cx="859" cy="560" r="7" fill="#7c8493"/>
+      <text x="880" y="567">maintenance</text>
+    </g>
+
+  </g>
+</svg>
