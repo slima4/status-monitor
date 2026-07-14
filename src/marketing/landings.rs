@@ -1050,7 +1050,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Cachet: a status page catching up on monitoring",
-                body: "Cachet began as a pure communication tool: you set components up or down by hand or over its API. Its actively developed v3, in the cachethq/core repo, is moving fast and, as of mid-2026, added basic HTTP component checks and subscriber management. The checks are real but young: HTTP GET only, no TCP, DNS or TLS, and you schedule the check command yourself rather than getting a built-in interval. It is still 3.x-dev with no stable release, incident email to subscribers is not wired up yet, it is a PHP and Laravel app with a database, queue and cron to operate, and it ships under a custom source-available license rather than an OSI open-source one. Uptimepage runs HTTP, TCP, DNS, TLS and ping checks every 60 seconds from multiple regions by default, opens incidents automatically, and is one binary to run.",
+                body: "Cachet began as a pure communication tool: you set components up or down by hand or over its API. Its actively developed v3, in the cachethq/core repo, is moving fast and, as of mid-2026, added basic HTTP component checks and confirmed email subscribers. The checks are real but young: HTTP GET only, no TCP, DNS or TLS, you schedule the check command yourself rather than getting a built-in interval, and a failing check colours a component rather than opening an incident or paging anyone. It is still 3.x-dev with no stable release, it is a PHP and Laravel app with a database, queue and cron to operate, and it ships under a custom source-available license rather than an OSI open-source one. Uptimepage runs HTTP, TCP, DNS, TLS and ping checks every 60 seconds from multiple regions by default, opens incidents automatically, and is one binary to run.",
             },
             Section {
                 heading: "Statping: close in shape, but barely maintained",
@@ -1120,7 +1120,7 @@ docker compose up -d"#,
         sections: &[
             Section {
                 heading: "Uptime Kuma: the broadest checks, the lightest footprint",
-                body: "Uptime Kuma is the community favourite for good reason: around forty monitor types (databases, gRPC, MQTT, SNMP, Steam, real-browser, push heartbeats), roughly ninety-five alert integrations, 20-second intervals, and a single container to run. Its weak side is teams and status pages. It is single-user with no roles, it is driven entirely over a socket API with no REST or Terraform, its status pages take an RSS feed rather than email or webhook subscribers, and incidents are posted by hand, not opened from a failing check. Uptimepage trades some of that protocol breadth for a subscriber status page, organizations with roles, auto-opened incidents and config-as-code.",
+                body: "Uptime Kuma is the community favourite for good reason: 31 monitor types in the 2.x line (databases, gRPC, MQTT, SNMP, Steam, real-browser, push heartbeats), 94 alert integrations, intervals as tight as one second, and a single container to run. Its weak side is teams and status pages. It is single-user with no roles, it is driven entirely over a socket API with no REST or Terraform, its status pages take an RSS feed rather than email or webhook subscribers, and incidents are posted by hand, not opened from a failing check. Uptimepage trades some of that protocol breadth for a subscriber status page, organizations with roles, auto-opened incidents and config-as-code.",
             },
             Section {
                 heading: "OpenStatus and OneUptime: the dev-first platforms",
@@ -1128,7 +1128,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Gatus: the protocol-rich checker",
-                body: "Gatus is a joy if you want declarative checks in version control. Eleven endpoint protocols including gRPC, SSH, WebSocket, STARTTLS and UDP, a rich condition language with JSONPath body assertions and certificate-expiry checks, multi-step suites, and a tiny static binary with an optional zero-database mode. What it is not is a status page. It ships a health dashboard with badges, not a branded page with subscribers, it has no incident timeline, and it is single-tenant behind one basic-auth or OIDC boundary. Uptimepage covers the everyday HTTP, TCP, DNS, TLS and ping checks and pairs them with the public status page, subscribers and multi-tenant teams Gatus leaves out.",
+                body: "Gatus is a joy if you want declarative checks in version control. Eleven endpoint protocols including gRPC, SSH, WebSocket, STARTTLS and UDP, a rich condition language with JSONPath body assertions and certificate-expiry checks, alpha support for multi-step suites, and a tiny static binary with an optional zero-database mode. What it is not is a status page. It ships a health dashboard with badges, not a branded page with subscribers, it has no incident timeline, and it is single-tenant behind one basic-auth or OIDC boundary. Uptimepage covers the everyday HTTP, TCP, DNS, TLS and ping checks and pairs them with the public status page, subscribers and multi-tenant teams Gatus leaves out.",
             },
             Section {
                 heading: "Kener: the polished status page",
@@ -1185,11 +1185,11 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Where Uptime Kuma is ahead",
-                body: "Breadth and community. Kuma speaks around forty monitor types by default, including databases, MQTT, SNMP and a real Chromium browser check, and it can notify roughly ninety-five services. It installs in one container in five minutes, checks as often as every 20 seconds, and has by far the largest community of any tool in this space, which means answers exist for almost any problem you hit.",
+                body: "Breadth and community. Kuma speaks 31 monitor types by default, including databases, MQTT, SNMP and a real Chromium browser check, and it can notify 94 services. It installs in one container in five minutes, the 2.x line dropped its minimum interval to one second, and it has by far the largest community of any tool in this space, which means answers exist for almost any problem you hit.",
             },
             Section {
                 heading: "Where OpenStatus is ahead",
-                body: "Teams and vantage points. OpenStatus runs a hosted probe fleet across twenty-eight regions on three cloud providers, so you see your service the way users on other continents do, without running agents yourself. It has organizations with unlimited members on paid tiers, email and RSS subscribers on its status pages, and auto-resolving incident handling. Kuma is single-login with no roles, checks from wherever you installed it, and its status pages have no subscriber notifications.",
+                body: "Teams and vantage points. OpenStatus runs a hosted probe fleet across twenty-eight regions on three cloud providers, so you see your service the way users on other continents do, without running agents yourself. It has organizations with unlimited members on paid tiers, status pages that take email, webhook and Slack subscribers on top of RSS, and auto-resolving incident handling. Kuma is single-login with no roles, checks from wherever you installed it unless you reach for its Globalping monitor type, and its status pages offer an RSS feed rather than subscriber notifications.",
             },
             Section {
                 heading: "The honest caveats on both",
@@ -1234,7 +1234,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "What each does well",
-                body: "Kuma wins on reach: around forty monitor types including databases, MQTT, SNMP and a real browser check, roughly ninety-five notification services, 20-second intervals, and the biggest community in the category. Gatus wins on discipline: eleven endpoint protocols including gRPC, SSH, WebSocket and UDP, a condition language that asserts on status, response time, JSON body paths and certificate expiry, multi-step suites, and a tiny static Go binary that can even run without a database.",
+                body: "Kuma wins on reach: 31 monitor types including databases, MQTT, SNMP and a real browser check, 94 notification services, one-second intervals since the 2.x line, and the biggest community in the category. Gatus wins on discipline: eleven endpoint protocols including gRPC, SSH, WebSocket and UDP, a condition language that asserts on status, response time, JSON body paths, certificate expiry and domain expiry, and a tiny static Go binary that can even run without a database.",
             },
             Section {
                 heading: "What neither gives you",
@@ -1307,6 +1307,218 @@ docker compose up -d"#,
             ResourceLink {
                 label: "The self-hosted field, compared",
                 href: "/vs/self-hosted-monitoring",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/uptime-kuma-vs-healthchecks",
+        created: "2026-07-14",
+        lastmod: "2026-07-14",
+        title: "Uptime Kuma vs Healthchecks",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptime Kuma vs Healthchecks: they don't do the same job",
+        meta_description: "Uptime Kuma probes your service; Healthchecks waits for your job to ping it. Active checks against a dead-man's-switch, and which one you need. July 2026.",
+        lede: "These two get compared constantly, and the comparison usually starts from a wrong assumption. Uptime Kuma calls your service to see if it answers. Healthchecks never calls anything: it sits and waits for your cron job to call it, and complains when the call does not arrive. Everything else follows from that direction.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "One calls you, the other waits for your call",
+                body: "Uptime Kuma is an active prober. It sends the request, reads the answer, and decides. Healthchecks is a dead man's switch: your backup script, your cron job, your nightly report pings a URL when it finishes, and Healthchecks alerts when a ping is late or missing. That means Healthchecks cannot tell you your website is down, ever, and that is by design rather than an omission. If your cron job keeps pinging happily while your site returns 500s, Healthchecks stays green.",
+            },
+            Section {
+                heading: "What Healthchecks is genuinely best at",
+                body: "Knowing whether a scheduled job ran, and ran correctly. It takes cron expressions and systemd OnCalendar schedules with timezones, so it alerts when a job did not run at the right time rather than merely when an interval elapsed. Signal a start and a finish and you get duration; ping the failure endpoint and you get the exit code; send a body and it keeps the job's output next to the ping. Nothing in the uptime-monitoring category does that properly. It is BSD-licensed, runs as one container on SQLite, and its free hosted tier is 20 checks forever.",
+            },
+            Section {
+                heading: "What Uptime Kuma is genuinely best at",
+                body: "Reach and immediacy. The 2.x line covers 31 monitor types including databases, MQTT, SNMP, gRPC and a real Chromium browser check, notifies 94 different services, and drops its minimum interval to one second. It is one container and a five-minute install. It also has a push monitor, which is a simple dead man's switch, and that overlap is the reason people ask this question at all.",
+            },
+            Section {
+                heading: "The overlap, and where it breaks",
+                body: "Kuma's push monitor handles the easy case: something should check in every N minutes, tell me when it stops. Reach for Healthchecks when the schedule itself is the thing you care about, because a push monitor understands an interval and nothing else. It does not know that your job is supposed to run at 03:00 in Europe/Helsinki, it will not tell you the run took nine minutes when it usually takes two, and it will not keep the failing job's stack trace for you. Going the other way, Healthchecks will never watch a URL. Plenty of teams run both, and that is a reasonable answer rather than a cop-out.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage is on Kuma's side of the line and does not pretend otherwise: HTTP, TCP, DNS, TLS, ping and domain checks that go out and ask. If cron correctness is your actual problem, use Healthchecks; it is better at that than we are. What Uptimepage adds over both is the part neither one covers, which is the customers. A branded status page on your own subdomain, confirmed email and webhook subscribers, incidents opened automatically from failing checks, organizations with roles instead of one shared login, and a Terraform provider, REST API and MCP server. Hosted free with no card, or self-host under AGPL.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Uptime Kuma vs Gatus",
+                href: "/compare/uptime-kuma-vs-gatus",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/uptime-kuma-vs-cachet",
+        created: "2026-07-14",
+        lastmod: "2026-07-14",
+        title: "Uptime Kuma vs Cachet",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptime Kuma vs Cachet: monitor or status page?",
+        meta_description: "Uptime Kuma runs the checks, Cachet publishes the page. What Cachet v3 added, what it still will not do, and which one you actually need. July 2026.",
+        lede: "This is not really a head-to-head. Uptime Kuma watches your services and tells you. Cachet tells your customers. Teams end up comparing them because they want both jobs done and have not yet noticed that each tool does only one of them.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "One watches, the other announces",
+                body: "Uptime Kuma is a monitor with a status page bolted on: real checks, 31 monitor types, 94 notification integrations, and a status page that is fine for a homelab but takes an RSS feed rather than subscribers, with incidents you post by hand. Cachet is the opposite: a purpose-built communication tool with components, component groups, incidents, incident updates and templates, scheduled maintenance and metrics. Its status-page domain model is the most complete of any open project in this list. It simply does not know whether anything is up.",
+            },
+            Section {
+                heading: "Where Cachet stops: monitoring",
+                body: "Cachet v3 did add a component check in mid-2026, and it is easy to overrate. It is an HTTP GET with a three-second timeout, nothing schedules it out of the box (you add your own cron entry for the check command), it is absent from the components guide in their docs, it runs from one location, and a failure colours a component rather than opening an incident, emailing a subscriber or paging anyone. There is no on-call and no escalation anywhere in the codebase. The intended model is still bring your own monitoring, which is why Cachet ships a first-class integration for importing components and incidents from an external monitoring service.",
+            },
+            Section {
+                heading: "The release state, before you commit",
+                body: "Read this part carefully, because the project's own sources disagree with each other. Cachet's newest tagged release is v2.4.1 from November 2023. The v3 rewrite has never been tagged: it ships from the dev branch, and its own README says it is not yet completely ready for production use. The official Docker image repository is v2-only and last saw a commit in 2021, so self-hosting v3 means a hand-rolled PHP and Laravel deployment with a database, a queue worker and cron. Development is genuinely busy, effectively by one maintainer. And where 2.x was BSD-3-Clause, the v3 branch carries a custom source-available license and declares itself proprietary in composer.json, while its README still says MIT. Check the license yourself before you build on it.",
+            },
+            Section {
+                heading: "The two-system setup people actually build",
+                body: "The classic pairing is Kuma (or anything else) doing the checking, pushing component states and incidents into Cachet over its API, which is genuinely good: scoped bearer tokens, an OpenAPI spec, sensible resources. It works. It is also two deployments, two upgrade paths, two sets of credentials, and a piece of glue code you now own, so that a failing check in one system becomes an incident in the other.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage is that pairing collapsed into one binary. Checks over HTTP, TCP, DNS, TLS, ping and domain expiry run every 60 seconds from multiple regions, a failing check opens an incident by itself, and the incident lands on a branded status page where visitors have subscribed with confirmed email or a signed webhook. No glue code, one deployment, one set of roles. Hosted free with no card, or self-host under AGPL with docker compose.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "vs Upptime, Cachet, Statping",
+                href: "/vs/self-hosted-status-pages",
+            },
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Open-source status page",
+                href: "/open-source-status-page",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/openstatus-vs-gatus",
+        created: "2026-07-14",
+        lastmod: "2026-07-14",
+        title: "OpenStatus vs Gatus",
+        eyebrow: "comparing self-hosted",
+        h1: "OpenStatus vs Gatus: hosted probes or your own YAML?",
+        meta_description: "OpenStatus brings 28 hosted regions and a Terraform provider; Gatus brings one YAML file and a tiny binary. Where each one fits. July 2026.",
+        lede: "Both of these put monitoring in version control, so the config-as-code argument does not separate them. What separates them is everything around the check: who runs the probes, who can see the page, and how much you are willing to operate.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "Both are monitoring as code. Only one hands you a fleet.",
+                body: "Gatus gives you a YAML file and a binary, and the vantage point is wherever you put that binary. OpenStatus gives you a YAML file, a CLI, a GitHub Action and an official Terraform provider, and runs the probes for you across 28 regions on three cloud providers. If seeing your service from Singapore matters, one of these solves it with a config line and the other solves it by making you deploy in Singapore.",
+            },
+            Section {
+                heading: "Where Gatus is ahead",
+                body: "Precision and weight. Eleven endpoint protocols including gRPC, SSH, WebSocket, UDP and STARTTLS, plus domain-expiry monitoring, and a condition language that asserts on status, response time, JSON body paths, certificate expiry and domain expiry rather than just on a status code. It is a tiny static Go binary that runs on an in-memory store with no database at all if you want. It is Apache-2.0, free forever, and you never make an account.",
+            },
+            Section {
+                heading: "Where OpenStatus is ahead",
+                body: "Everything customer-facing and everything team-shaped. Status pages on custom domains that take email, webhook and Slack subscribers on top of RSS, Atom and JSON feeds, organizations with unlimited members on paid tiers, auto-resolving incidents, and in 2026 it added private locations so you can run probes inside your own network alongside its hosted fleet. Its Terraform provider is official and actively maintained, which is still rare in this category.",
+            },
+            Section {
+                heading: "The honest caveats on both",
+                body: "Gatus is explicitly a side project: its maintainer has said so in release notes, and reviews and merges have slowed. Its multi-step suites are labelled alpha and its remote-instance federation is labelled experimental, so treat both as such. It has no subscribers, no incident timeline and one basic-auth or OIDC gate for the whole app. OpenStatus's cost is operational: self-hosting it is a multi-service TypeScript stack of about eleven apps with external database dependencies, its hosted free tier is one monitor at ten-minute intervals, and its open-source checker implements HTTP, TCP and DNS even though ICMP, UDP and TLS-certificate types appear in its API schema. It also ships continuously with no tagged releases, so there is no version to pin.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage takes OpenStatus's shape (teams, subscribers, Terraform, multi-region) and Gatus's operational weight (one binary you can actually run). Checks over HTTP, TCP, DNS, TLS, ping and domain expiry, configured in the UI or declared with the Terraform provider, REST API and MCP server. Probes are multi-region and you can run your own. Incidents open themselves and land on a branded status page with confirmed email and webhook subscribers. Hosted free with no card, or self-host under AGPL with docker compose and no external services to rent.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "OpenStatus vs Uptime Kuma",
+                href: "/compare/openstatus-vs-uptime-kuma",
+            },
+            ResourceLink {
+                label: "Uptime Kuma vs Gatus",
+                href: "/compare/uptime-kuma-vs-gatus",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/blog/monitoring-as-code",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/blackbox-exporter-vs-uptime-kuma",
+        created: "2026-07-14",
+        lastmod: "2026-07-14",
+        title: "Blackbox exporter vs Uptime Kuma",
+        eyebrow: "comparing self-hosted",
+        h1: "Blackbox exporter vs Uptime Kuma: a part or a product?",
+        meta_description: "The Blackbox exporter is a probe with no scheduler, no alerts and no dashboard. Uptime Kuma is a finished product. What each really costs. July 2026.",
+        lede: "These are not two versions of the same thing. Uptime Kuma is a product you install and use. The Prometheus Blackbox exporter is one component of a monitoring system you assemble yourself, and on its own it does almost nothing.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "The exporter does not monitor anything by itself",
+                body: "This is the part people discover late. The Blackbox exporter has no scheduler: it exposes a probe endpoint, and a probe runs only when something asks for it. That something is Prometheus, which decides how often to ask, stores the result and evaluates your alerting rules. Alertmanager then does the actual notifying, and Grafana draws the dashboard. So a working uptime setup is four moving parts you install, configure, secure, upgrade and keep alive, not one. Check frequency is not even an exporter setting; it is Prometheus's scrape interval, which defaults to one minute.",
+            },
+            Section {
+                heading: "Where the exporter genuinely wins",
+                body: "Precision, and fitting an estate you already run. It probes over HTTP, TCP, DNS, ICMP, gRPC and unix sockets, and it asserts on things most tools cannot express: regexes against DNS answer sections, TCP send-and-expect scripts with STARTTLS upgrades, byte-exact matches, CEL expressions over JSON bodies, response-header regexes, even pinning a maximum TLS version to prove an insecure one is not offered. If you already run Prometheus, probe data lands in the same store as your application metrics at no marginal cost, and it reaches things a hosted checker structurally cannot: internal VIPs, private DNS resolvers, sockets on the host.",
+            },
+            Section {
+                heading: "Where Uptime Kuma wins",
+                body: "It is finished. One container, five minutes, and you have 31 monitor types, 94 notification integrations, a dashboard, a status page and intervals down to one second. Someone who is not an engineer can add a check. With the exporter, adding a check is a YAML edit plus a Prometheus relabel rule plus a config reload, and turning certificate expiry into an alert means writing PromQL against a gauge yourself, because expiry is exposed as a metric rather than asserted by the probe.",
+            },
+            Section {
+                heading: "The blind spot they share",
+                body: "Neither watches itself. If your Prometheus is down, nothing probes and nobody is told. If your single Kuma container is on the host that just died, the same. Self-hosted monitoring that lives next to the thing it monitors will always miss the outage that takes both down, which is the whole argument for a probe that runs somewhere else.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage is a finished product like Kuma, but it checks from outside your infrastructure by default, from multiple regions, and you can still run your own probe agent inside the network for the private targets that only the exporter could reach before. On top of the checks: a branded status page with confirmed email and webhook subscribers, incidents opened automatically, organizations with roles, and a Terraform provider, REST API and MCP server, so the config stays in Git the way a Prometheus setup does. Hosted free with no card, or self-host under AGPL.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/blog/monitoring-as-code",
+            },
+            ResourceLink {
+                label: "Best self-hosted monitors",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
         cta: "Start free",
@@ -1633,6 +1845,24 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
                 "Yes, and it is probably the best pick there. The comparison only gets interesting once a second person needs access, customers need a status page, or you want config in version control.",
             ),
         ],
+        "/compare/blackbox-exporter-vs-uptime-kuma" => &[
+            (
+                "Does the Blackbox exporter monitor on its own?",
+                "No. It has no scheduler: a probe runs only when Prometheus asks for it. Prometheus decides the frequency and stores the result, Alertmanager sends the notifications, and Grafana draws the dashboard. The exporter is one part of a four-part system you assemble and operate.",
+            ),
+            (
+                "How often does the Blackbox exporter check?",
+                "As often as Prometheus scrapes it, which defaults to once a minute. Check frequency is not an exporter setting at all. Uptime Kuma's 2.x line goes down to one second, and Uptimepage runs at 60 seconds on the free tier and 10 seconds self-hosted.",
+            ),
+            (
+                "Can the Blackbox exporter alert me before a certificate expires?",
+                "Indirectly. It exposes certificate expiry as a metric rather than asserting on it, so you write a PromQL rule against probe_ssl_earliest_cert_expiry and route it through Alertmanager yourself. Kuma and Uptimepage both treat certificate expiry as a check with an alert attached.",
+            ),
+            (
+                "Does either give me a status page?",
+                "No. The exporter serves a small in-memory debug page, not a status page, and Kuma's status pages take an RSS feed rather than subscribers. A customer-facing page with confirmed subscribers and auto-opened incidents is what Uptimepage adds.",
+            ),
+        ],
         "/compare/pingdom-vs-statuscake" => &[
             (
                 "Does Pingdom have a free plan?",
@@ -1649,6 +1879,60 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Can I self-host either of them?",
                 "No, both are closed SaaS. If owning the stack matters, that is a different category; Uptimepage is AGPL open source, so the hosted tier has a self-hosted exit.",
+            ),
+        ],
+        "/compare/uptime-kuma-vs-healthchecks" => &[
+            (
+                "Can Healthchecks tell me my website is down?",
+                "No, and it never will. Healthchecks never makes a request to your service; your service must make a request to it. If your cron job keeps pinging while your site returns 500s, Healthchecks stays green. Uptime Kuma and Uptimepage both probe outward and would catch it.",
+            ),
+            (
+                "Does Uptime Kuma's push monitor replace Healthchecks?",
+                "For the simplest case, yes: something checks in every N minutes, tell me when it stops. It does not understand cron or systemd OnCalendar schedules with timezones, job duration, exit codes or captured job output, which is most of why people run Healthchecks.",
+            ),
+            (
+                "Which is easier to self-host?",
+                "Both are genuinely easy. Uptime Kuma is one Node container. Healthchecks is a Django app that defaults to SQLite and runs its alert daemons inside the same container, so it needs no Redis, broker or worker service.",
+            ),
+            (
+                "What if my customers need a status page?",
+                "Neither one gives you that. Kuma's status pages take an RSS feed rather than subscribers and its incidents are posted by hand; Healthchecks has badges and no status page at all. Uptimepage opens incidents from failing checks onto a branded page with confirmed email and webhook subscribers.",
+            ),
+        ],
+        "/compare/uptime-kuma-vs-cachet" => &[
+            (
+                "Does Cachet monitor my site?",
+                "Barely, and not in a way you should lean on. Cachet v3 added an HTTP GET component check in mid-2026, but nothing schedules it out of the box, it is undocumented in the components guide, it runs from one location, and a failure colours a component rather than opening an incident or notifying anyone.",
+            ),
+            (
+                "Is Cachet still maintained?",
+                "Yes, actively, effectively by one maintainer. But the newest tagged release is still v2.4.1 from November 2023: v3 ships from the dev branch and its own README says it is not yet completely ready for production use.",
+            ),
+            (
+                "Is Cachet open source?",
+                "Cachet 2.x was BSD-3-Clause. The v3 branch ships a custom source-available license and declares itself proprietary in composer.json, while its README still calls it MIT. The project's own sources contradict each other, so read the license before you build on it.",
+            ),
+            (
+                "Do I need both Uptime Kuma and Cachet?",
+                "That is the classic pairing: Kuma checks, and pushes states and incidents into Cachet over its API. It works, at the cost of two deployments, two upgrade paths and the glue code between them. Uptimepage does both jobs in one binary, with incidents opened automatically from its own checks.",
+            ),
+        ],
+        "/compare/openstatus-vs-gatus" => &[
+            (
+                "Which one should I self-host?",
+                "Gatus, comfortably. It is a tiny static Go binary that can run with no database at all. Self-hosting OpenStatus means a multi-service TypeScript stack of about eleven apps with external database dependencies, which is why its hosted tier exists.",
+            ),
+            (
+                "Can Gatus check from multiple regions?",
+                "Not really. It has an experimental remote-instance feature that aggregates several Gatus installs into one dashboard, but the probes still run wherever you deployed them. OpenStatus runs a hosted fleet across 28 regions, and Uptimepage is multi-region with probe agents you can run yourself.",
+            ),
+            (
+                "Can my customers subscribe to either status page?",
+                "Only OpenStatus. Its pages take email, webhook and Slack subscribers on top of RSS, Atom and JSON feeds. Gatus's dashboard doubles as its status page and has no subscribers and no incident timeline, which is fine for an internal wall and not for customers.",
+            ),
+            (
+                "Do both have a Terraform provider?",
+                "OpenStatus does, official and actively maintained. Gatus does not need one in the same sense: its config is a YAML file you already keep in Git. Uptimepage has an official provider too, alongside a REST API and an MCP server.",
             ),
         ],
         "/compare/uptime-kuma-vs-gatus" => &[
@@ -2157,7 +2441,7 @@ static SELF_HOSTED_MATRIX: Matrix = Matrix {
             cells: &[
                 ("email + webhook", "yes"),
                 ("no", "no"),
-                ("webhook, email wip", "part"),
+                ("email + webhook", "yes"),
                 ("no", "no"),
             ],
         },
@@ -2228,7 +2512,7 @@ static SELF_HOSTED_MATRIX: Matrix = Matrix {
     notes: &[
         "Statping here is the maintained community fork, statping-ng; the original Statping has not shipped a release since 2020.",
         "Upptime runs checks as GitHub Actions cron jobs, which cannot fire more than once every five minutes and can drift later under load. Reaching other regions needs the third-party Globalping add-on.",
-        "Cachet's actively developed v3 (the cachethq/core source) added basic HTTP component checks and subscriber management in mid-2026, but it is still 3.x-dev with no stable release: checks are HTTP GET only on a cron you add yourself, incident email to subscribers is not wired up yet, and the code ships under a custom source-available license.",
+        "Cachet's actively developed v3 (the cachethq/core source) added basic HTTP component checks in mid-2026 and now sends confirmed email to subscribers, but it is still 3.x-dev with no stable release: checks are HTTP GET only on a cron you add yourself, a failed check colours a component rather than opening an incident, subscriptions are global rather than per-component, and the code ships under a custom source-available license.",
         "Competitor facts were verified against each project's repository and docs in July 2026. Open-source projects move quickly, so check their current docs before you decide.",
     ],
 };
@@ -2252,7 +2536,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
             label: "fastest check interval",
             cells: &[
                 ("10s", "yes"),
-                ("20s", "yes"),
+                ("1s", "yes"),
                 ("30s", ""),
                 ("60s", ""),
                 ("seconds", "yes"),
@@ -2263,7 +2547,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
             label: "check breadth",
             cells: &[
                 ("HTTP·TCP·DNS·TLS·ping", ""),
-                ("40+ types", "yes"),
+                ("31 types", "yes"),
                 ("HTTP·TCP·DNS", ""),
                 ("25+ types", "yes"),
                 ("11 protocols", "yes"),
@@ -2329,7 +2613,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
             label: "alert channels",
             cells: &[
                 ("14", ""),
-                ("~95", "yes"),
+                ("94", "yes"),
                 ("13", ""),
                 ("9", ""),
                 ("41", "yes"),
@@ -2428,7 +2712,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
     notes: &[
         "Fastest interval each tool can reach; hosted free tiers are usually slower. Uptimepage's self-hosted floor is 10s, and hosted plans run at 60s on the free founding plan (with 50 monitors) or 30s on Pro.",
         "OpenStatus lists ICMP, UDP and SSL-certificate monitors in its config, but its open-source Go checker implements only HTTP, TCP and DNS.",
-        "Uptime Kuma has around forty monitor types and about ninety-five alert integrations, but it is single-user, is configured over a socket API rather than REST or Terraform, and its status pages offer RSS, not email or webhook subscribers.",
+        "Uptime Kuma has 31 monitor types and 94 alert integrations, but it is single-user, is configured over a socket API rather than REST or Terraform, and its status pages offer RSS, not email or webhook subscribers.",
         "Gatus is a health dashboard with badges rather than a subscriber status page, and its multi-region support is an experimental status-federation feature, not distributed probes.",
         "Alert-channel counts mix first-class and niche providers: Uptime Kuma's total includes the Apprise meta-provider and dozens of SMS gateways, and Gatus's includes automation bridges like Zapier, IFTTT and n8n. Uptimepage's fourteen are native integrations.",
         "Facts verified against each project's source in July 2026 (Uptime Kuma 2.4.0, OpenStatus, OneUptime 11.0.12, Gatus 5.36.0, Kener 4.1.1). Open-source projects move quickly, so check their current source before you decide.",
@@ -2443,11 +2727,11 @@ static UPTIME_KUMA_MATRIX: Matrix = Matrix {
     rows: &[
         MatrixRow {
             label: "fastest check interval",
-            cells: &[("60s hosted · 10s self", "yes"), ("20s", "yes")],
+            cells: &[("60s hosted · 10s self", ""), ("1s", "yes")],
         },
         MatrixRow {
             label: "check types",
-            cells: &[("HTTP · TCP · DNS · TLS · ping", ""), ("40+ types", "yes")],
+            cells: &[("HTTP · TCP · DNS · TLS · ping", ""), ("31 types", "yes")],
         },
         MatrixRow {
             label: "ping / ICMP",
@@ -2479,7 +2763,7 @@ static UPTIME_KUMA_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "alert channels",
-            cells: &[("14 native", ""), ("~95", "yes")],
+            cells: &[("14 native", ""), ("94", "yes")],
         },
         MatrixRow {
             label: "config-as-code",
@@ -2500,7 +2784,7 @@ static UPTIME_KUMA_MATRIX: Matrix = Matrix {
     ],
     notes: &[
         "Uptime Kuma is single-user with one shared login and is driven over an internal socket API rather than a REST or Terraform surface; its status pages offer an RSS feed, not email or webhook subscribers.",
-        "Its ~95 integrations include the Apprise meta-provider and many SMS gateways; Uptimepage's 14 are native. Uptimepage has no passive heartbeat monitor yet.",
+        "Its 94 integrations include the Apprise meta-provider and many SMS gateways; Uptimepage's 14 are native. Kuma's 2.x line checks as often as every second, faster than Uptimepage's floor; Uptimepage has no passive heartbeat monitor in the UI.",
         "Verified against Uptime Kuma 2.4.0 source in July 2026. Open-source projects move quickly, so check the current source before you decide.",
     ],
 };
@@ -2849,6 +3133,10 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
         "/compare/openstatus-vs-uptime-kuma" => Some(&OPENSTATUS_KUMA_MATRIX),
         "/compare/uptime-kuma-vs-gatus" => Some(&KUMA_GATUS_MATRIX),
         "/compare/pingdom-vs-statuscake" => Some(&PINGDOM_STATUSCAKE_MATRIX),
+        "/compare/uptime-kuma-vs-healthchecks" => Some(&KUMA_HEALTHCHECKS_MATRIX),
+        "/compare/uptime-kuma-vs-cachet" => Some(&KUMA_CACHET_MATRIX),
+        "/compare/openstatus-vs-gatus" => Some(&OPENSTATUS_GATUS_MATRIX),
+        "/compare/blackbox-exporter-vs-uptime-kuma" => Some(&BLACKBOX_KUMA_MATRIX),
         "/open-source-uptime-monitoring" => Some(&OPEN_SOURCE_MONITOR_MATRIX),
         "/vs/self-hosted-status-pages" => Some(&SELF_HOSTED_MATRIX),
         "/vs/self-hosted-monitoring" => Some(&MONITORING_MATRIX),
@@ -2893,7 +3181,7 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
             label: "check types",
             cells: &[
                 ("HTTP · TCP · DNS, more in schema", ""),
-                ("~40 incl. DBs · MQTT · browser", ""),
+                ("31 incl. DBs · MQTT · browser", ""),
                 ("HTTP · TCP · DNS · TLS · ping · domain", ""),
             ],
         },
@@ -2901,7 +3189,7 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
             label: "fastest interval",
             cells: &[
                 ("30s on hosted paid tiers", ""),
-                ("20s", ""),
+                ("1s", ""),
                 ("60s free · 30s Pro · 10s self-hosted", ""),
             ],
         },
@@ -2909,15 +3197,15 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
             label: "multi-region probes",
             cells: &[
                 ("28 hosted regions", "yes"),
-                ("single instance", "no"),
+                ("via Globalping add-on", "part"),
                 ("multi-region, run your own", "yes"),
             ],
         },
         MatrixRow {
             label: "status page subscribers",
             cells: &[
-                ("email · RSS", "yes"),
-                ("none", "no"),
+                ("email · webhook · Slack", "yes"),
+                ("RSS only", "part"),
                 ("email · webhook", "yes"),
             ],
         },
@@ -2939,11 +3227,12 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "community (GitHub stars)",
-            cells: &[("~8.8k", ""), ("~89k", ""), ("young", "")],
+            cells: &[("~8.9k", ""), ("~89k", ""), ("young", "")],
         },
     ],
     notes: &[
         "OpenStatus's open-source checker implements HTTP, TCP and DNS; ICMP, UDP and TLS-certificate monitor types exist in its API schema.",
+        "Uptime Kuma's 2.x line added a Globalping monitor type, so checks can run from other locations without a second instance; it is still not a probe fleet you control.",
         "Star counts rounded from GitHub, July 2026.",
         "Verified July 2026 against each project's repository, documentation and plan pages. Refresh when a project ships.",
     ],
@@ -2986,7 +3275,7 @@ static KUMA_GATUS_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "check types",
             cells: &[
-                ("~40 incl. DBs · MQTT · browser", ""),
+                ("31 incl. DBs · MQTT · browser", ""),
                 ("11 protocols incl. gRPC · SSH · WebSocket", ""),
                 ("HTTP · TCP · DNS · TLS · ping · domain", ""),
             ],
@@ -2994,7 +3283,7 @@ static KUMA_GATUS_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "fastest interval",
             cells: &[
-                ("20s", ""),
+                ("1s", ""),
                 ("no documented floor, default 60s", ""),
                 ("60s free · 30s Pro · 10s self-hosted", ""),
             ],
@@ -3009,7 +3298,11 @@ static KUMA_GATUS_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "page subscribers",
-            cells: &[("none", "no"), ("none", "no"), ("email · webhook", "yes")],
+            cells: &[
+                ("RSS only", "part"),
+                ("none", "no"),
+                ("email · webhook", "yes"),
+            ],
         },
         MatrixRow {
             label: "incidents",
@@ -3030,7 +3323,7 @@ static KUMA_GATUS_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "alert channels",
             cells: &[
-                ("~95 services", ""),
+                ("94 services", ""),
                 ("41 providers", ""),
                 ("Slack · Telegram · PagerDuty · SMS + more", ""),
             ],
@@ -3135,6 +3428,448 @@ static PINGDOM_STATUSCAKE_MATRIX: Matrix = Matrix {
         "Pingdom check types from its public API spec; StatusCake types from its features pages.",
         "Both vendors geo-localize prices, so tiers are described by shape rather than numbers.",
         "Verified July 2026 against both vendors' public pages. Refresh when either changes plans.",
+    ],
+};
+
+/// Third-party face-off for `/compare/uptime-kuma-vs-healthchecks`, verified
+/// July 2026 against Uptime Kuma 2.4.0 and Healthchecks v4.2 source.
+static KUMA_HEALTHCHECKS_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Uptime Kuma", "Healthchecks", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("MIT", ""), ("BSD-3-Clause", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "how a check works",
+            cells: &[
+                ("it calls your service", ""),
+                ("your job calls it", ""),
+                ("it calls your service", ""),
+            ],
+        },
+        MatrixRow {
+            label: "watches a URL",
+            cells: &[("yes", "yes"), ("never", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("31 incl. DBs · MQTT · browser", ""),
+                ("inbound pings only", "no"),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "cron & scheduled jobs",
+            cells: &[
+                ("push monitor, interval only", "part"),
+                ("cron + systemd OnCalendar, timezones", "yes"),
+                ("heartbeat over the API, not in the UI", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "job duration, exit code, output",
+            cells: &[("no", "no"), ("yes", "yes"), ("no", "no")],
+        },
+        MatrixRow {
+            label: "fastest granularity",
+            cells: &[
+                ("1s", "yes"),
+                ("60s ping period", ""),
+                ("60s free · 30s Pro · 10s self-hosted", ""),
+            ],
+        },
+        MatrixRow {
+            label: "status page",
+            cells: &[
+                ("basic", "part"),
+                ("badges only", "no"),
+                ("branded, own subdomain", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "page subscribers",
+            cells: &[
+                ("RSS only", "part"),
+                ("none", "no"),
+                ("email · webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "alert integrations",
+            cells: &[
+                ("94 services", "yes"),
+                ("~28 incl. Signal · Apprise", ""),
+                ("14 native", ""),
+            ],
+        },
+        MatrixRow {
+            label: "config as code",
+            cells: &[
+                ("socket API, no REST", "no"),
+                ("REST API, community Terraform", "part"),
+                ("Terraform · REST · MCP", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("single login", "no"),
+                ("projects + 4 roles", "yes"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "run it yourself",
+            cells: &[
+                ("one container (Node)", "yes"),
+                ("one container (Django, SQLite)", "yes"),
+                ("one binary + compose", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted option",
+            cells: &[
+                ("no", "no"),
+                ("yes, 20 checks free", "yes"),
+                ("yes, free tier", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~89k", ""), ("~10k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "Healthchecks never makes a request to your service; your service must make a request to it. It cannot tell you a website is down, by design.",
+        "Uptime Kuma's push monitor covers the simple dead-man's-switch case. Healthchecks adds cron and systemd OnCalendar schedules with timezones, job duration, exit codes and captured job output.",
+        "Healthchecks' Terraform provider is community-maintained, not official.",
+        "Verified July 2026 against Uptime Kuma 2.4.0 and Healthchecks v4.2. Both projects move quickly, so check their current source before you decide.",
+    ],
+};
+
+/// Third-party face-off for `/compare/uptime-kuma-vs-cachet`, verified July
+/// 2026 against Uptime Kuma 2.4.0 and Cachet's live v3 source (`cachethq/core`,
+/// whose docs lag the code).
+static KUMA_CACHET_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Uptime Kuma", "Cachet", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[
+                ("MIT", ""),
+                ("v2 BSD-3 · v3 source-available", "part"),
+                ("AGPL-3.0", ""),
+            ],
+        },
+        MatrixRow {
+            label: "newest tagged release",
+            cells: &[
+                ("2.4.0, May 2026", "yes"),
+                ("v2.4.1, Nov 2023 · v3 untagged", "part"),
+                (env!("CARGO_PKG_VERSION"), ""),
+            ],
+        },
+        MatrixRow {
+            label: "runs its own checks",
+            cells: &[
+                ("yes, 31 types", "yes"),
+                ("basic HTTP GET", "part"),
+                ("yes, 6 types", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "who schedules the check",
+            cells: &[
+                ("built in, down to 1s", "yes"),
+                ("a cron entry you add", "no"),
+                ("built in, from 60s", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "failed check opens an incident",
+            cells: &[
+                ("no, posted by hand", "no"),
+                ("no, colours a component", "no"),
+                ("yes, automatic", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "status page depth",
+            cells: &[
+                ("basic", "part"),
+                ("components · incidents · maintenance · metrics", "yes"),
+                ("branded, own subdomain", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "page subscribers",
+            cells: &[
+                ("RSS only", "part"),
+                ("email + webhook, global scope", "yes"),
+                ("email + webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("single login", "no"),
+                ("admin + user, no granularity", "part"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "config as code",
+            cells: &[
+                ("socket API, no REST", "no"),
+                ("REST, scoped tokens, OpenAPI", "part"),
+                ("Terraform · REST · MCP", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "run it yourself",
+            cells: &[
+                ("one container (Node)", "yes"),
+                ("PHP + DB + queue + cron, no v3 image", "no"),
+                ("one binary + compose", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted option",
+            cells: &[("no", "no"), ("no", "no"), ("yes, free tier", "yes")],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~89k", ""), ("~15k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "Cachet's newest tagged release is v2.4.1 from November 2023. The v3 rewrite ships from the dev branch, has never been tagged, and its own README says it is not yet completely ready for production use.",
+        "Cachet v3 added an HTTP GET component check in mid-2026, but nothing schedules it out of the box, it is absent from the components guide, it runs from one location, and a failure colours a component rather than opening an incident or notifying a subscriber.",
+        "Cachet's official Docker image repository covers v2 only and last saw a commit in 2021, so self-hosting v3 means a hand-rolled PHP and Laravel deployment with a database, a queue worker and cron.",
+        "Cachet 2.x was BSD-3-Clause; the v3 branch carries a custom source-available license and declares itself proprietary in composer.json, while its README still says MIT. Read the license before you build on it.",
+        "Verified July 2026 against Uptime Kuma 2.4.0 and the cachethq/core source. Both projects move quickly, so check their current source before you decide.",
+    ],
+};
+
+/// Third-party face-off for `/compare/openstatus-vs-gatus`, verified July 2026
+/// against Gatus 5.36.0 and the OpenStatus source (which ships untagged).
+static OPENSTATUS_GATUS_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["OpenStatus", "Gatus", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("AGPL-3.0", ""), ("Apache-2.0", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "configuration",
+            cells: &[
+                ("YAML · CLI · Terraform · REST", "yes"),
+                ("YAML only, read-only UI", ""),
+                ("UI + Terraform + REST + MCP", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "run it yourself",
+            cells: &[
+                ("~11-app TypeScript stack", "no"),
+                ("tiny static binary, no DB needed", "yes"),
+                ("one binary + compose", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("HTTP · TCP · DNS in the OSS checker", "part"),
+                ("11 protocols + domain expiry", "yes"),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "assertions",
+            cells: &[
+                ("status · body · headers", ""),
+                (
+                    "status · body JSONPath · latency · cert + domain expiry",
+                    "yes",
+                ),
+                ("status · body · cert + domain expiry", ""),
+            ],
+        },
+        MatrixRow {
+            label: "fastest interval",
+            cells: &[
+                ("30s on paid tiers", ""),
+                ("no documented floor, default 60s", ""),
+                ("60s free · 30s Pro · 10s self-hosted", ""),
+            ],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[
+                ("28 hosted regions + private locations", "yes"),
+                ("experimental federation only", "no"),
+                ("multi-region, run your own", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "status page",
+            cells: &[
+                ("yes, custom domains", "yes"),
+                ("dashboard doubles as page", "part"),
+                ("branded, own subdomain", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "page subscribers",
+            cells: &[
+                ("email · webhook · Slack · RSS", "yes"),
+                ("none", "no"),
+                ("email · webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("orgs, members on paid tiers", "yes"),
+                ("one basic-auth or OIDC gate", "no"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted free tier",
+            cells: &[
+                ("1 monitor, 10-min interval", "part"),
+                ("paid only, at gatus.io", "part"),
+                ("free, no card", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~8.9k", ""), ("~11.5k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "OpenStatus ships continuously with no tagged releases, so there is no version to pin.",
+        "OpenStatus's open-source checker implements HTTP, TCP and DNS; ICMP, UDP and TLS-certificate monitor types appear in its API schema.",
+        "Gatus's multi-step suites are labelled alpha and its remote-instance federation is labelled experimental by the project. Its maintainer has said in release notes that Gatus is a side project and that reviews and merges have slowed.",
+        "Verified July 2026 against Gatus 5.36.0 and the OpenStatus source. Both projects move quickly, so check their current source before you decide.",
+    ],
+};
+
+/// Third-party face-off for `/compare/blackbox-exporter-vs-uptime-kuma`,
+/// verified July 2026 against Blackbox exporter v0.28.0 and Uptime Kuma 2.4.0.
+static BLACKBOX_KUMA_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Blackbox exporter", "Uptime Kuma", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("Apache-2.0", ""), ("MIT", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "works on its own",
+            cells: &[
+                ("no, it is a component", "no"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "what you operate",
+            cells: &[
+                ("exporter + Prometheus + Alertmanager + Grafana", "no"),
+                ("one container", "yes"),
+                ("hosted, or one binary", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "probe types",
+            cells: &[
+                ("http · tcp · dns · icmp · grpc · unix", "yes"),
+                ("31 types", "yes"),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "who schedules the check",
+            cells: &[
+                ("Prometheus, default 60s", "part"),
+                ("built in, down to 1s", "yes"),
+                ("built in, from 60s", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "alerting",
+            cells: &[
+                ("PromQL rules you write + Alertmanager", "no"),
+                ("94 integrations", "yes"),
+                ("14 native integrations", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "certificate expiry",
+            cells: &[
+                ("a metric, alert it yourself", "part"),
+                ("a check with an alert", "yes"),
+                ("a check with an alert", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "dashboard",
+            cells: &[
+                ("debug page only", "no"),
+                ("built in", "yes"),
+                ("built in", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "status page",
+            cells: &[
+                ("none", "no"),
+                ("basic, RSS only", "part"),
+                ("branded, with subscribers", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "reaches private targets",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes, with your own agent", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[
+                ("deploy N exporters yourself", "no"),
+                ("via Globalping add-on", "part"),
+                ("multi-region, run your own", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("one basic-auth password", "no"),
+                ("single login", "no"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~5.8k", ""), ("~89k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "The Blackbox exporter has no scheduler. A probe runs only when Prometheus requests it, so check frequency is Prometheus's scrape interval, which defaults to one minute.",
+        "Certificate expiry is exposed as the probe_ssl_earliest_cert_expiry metric rather than asserted by the probe; turning it into an alert is a PromQL rule you write.",
+        "The exporter serves a small in-memory debug page listing recent probes, not a status page. Its history is lost on restart.",
+        "Probers listed are those in the current release, v0.28.0. A websocket prober exists on master but is not in any released version.",
+        "Verified July 2026 against Blackbox exporter v0.28.0 and Uptime Kuma 2.4.0. Both projects move quickly, so check their current source before you decide.",
     ],
 };
 

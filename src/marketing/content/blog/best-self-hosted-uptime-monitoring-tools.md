@@ -1,7 +1,7 @@
 +++
 title = "Best open-source, self-hosted uptime monitors (2026)"
 date = "2026-06-20"
-updated = "2026-07-11"
+updated = "2026-07-14"
 slug = "best-self-hosted-uptime-monitoring-tools"
 excerpt = "A fair look at the open-source, self-hostable tools for watching sites and APIs in 2026: what each is good at, where it stops, and how to pick one."
 tags = ["open-source", "self-hosted", "monitoring", "status-page"]
@@ -42,7 +42,7 @@ We build one of the tools on this list, Uptimepage, so keep that in mind. We hav
 
 > **Key takeaways**
 >
-> - Uptime Kuma is the homelab default: one container, around forty monitor types and roughly ninety-five notification integrations, but a single shared login, no official REST API for managing monitors, and basic status pages.
+> - Uptime Kuma is the homelab default: one container, 31 monitor types and 94 notification integrations, but a single shared login, no official REST API for managing monitors, and basic status pages.
 > - Gatus is the pick when monitoring should live in Git as YAML for your own team.
 > - Checkmate is the freshest Kuma-style option, with a modern UI and themed status pages, if you can run a Node and MongoDB stack.
 > - OneUptime and Apache HertzBeat are full platforms for the whole incident lifecycle, or for databases and network gear, when you can carry the weight.
@@ -67,7 +67,7 @@ Hold those three in mind and the choices get obvious. Here is the whole list aga
 | OneUptime | Yes | Yes, API | Docker or Kubernetes |
 | OpenStatus | Yes | Yes, Terraform + REST + MCP | ~6 Docker services |
 | Apache HertzBeat | Yes | Yes, YAML templates | Java + database + time-series |
-| Cachet | Page only, no checks | API, feed it | PHP app |
+| Cachet | Yes, with subscribers | API, feed it | PHP app + DB + queue + cron |
 | Statping-ng | Yes | No | One Go binary |
 | Blackbox exporter | No, build it yourself | Yes, config | Prometheus + Alertmanager |
 
@@ -105,7 +105,7 @@ The cost is complexity. A production deployment is a Java application plus a rel
 
 ## Cachet and Statping-ng
 
-These two cover the status-page corner. Cachet is a long-running, PHP-based status page that is going through a rebuild. It is a status page first, which means it does not monitor anything on its own; you feed it from elsewhere. Statping-ng is a community-kept fork of the older Statping, a single Go binary that does both monitoring and a status page, with a smaller community behind it.
+These two cover the status-page corner. Cachet is a long-running, PHP-based status page going through a rebuild, and the rebuild is where the caveats live: v3 is still in development with no stable release, the newest tagged release remains v2.4.1 from 2023, and the v3 branch ships under a custom source-available license rather than the BSD one 2.x carried. What it does well is the status-page job itself, now including confirmed email subscribers. It is a page first: v3 added a basic HTTP check, but you schedule it yourself and a failure colours a component rather than opening an incident, so in practice you still feed it from elsewhere. Statping-ng is a community-kept fork of the older Statping, a single Go binary that does both monitoring and a status page, with a smaller community behind it.
 
 Pick these if a status page is the actual product you need and the monitoring is secondary or already handled.
 
