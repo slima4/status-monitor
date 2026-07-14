@@ -1438,7 +1438,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Where OpenStatus is ahead",
-                body: "Everything customer-facing and everything team-shaped. Status pages on custom domains that take email, webhook and Slack subscribers on top of RSS, Atom and JSON feeds, organizations with unlimited members on paid tiers, auto-resolving incidents, and in 2026 it added private locations so you can run probes inside your own network alongside its hosted fleet. Its Terraform provider is official and actively maintained, which is still rare in this category.",
+                body: "Everything customer-facing and everything team-shaped. Status pages on custom domains that take email, webhook and Slack subscribers on top of RSS, Atom and JSON feeds, organizations with unlimited members on paid tiers, auto-resolving incidents, and in 2026 it added private locations so you can run probes inside your own network alongside its hosted fleet. Its Terraform provider is vendor-maintained and shipping, which puts it in the same bracket as Uptimepage, Better Stack and Checkly rather than the abandoned community forks some incumbents leave you with.",
             },
             Section {
                 heading: "The honest caveats on both",
@@ -1519,6 +1519,235 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Best self-hosted monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/terraform-providers",
+        created: "2026-07-14",
+        lastmod: "2026-07-14",
+        title: "Terraform Providers for Uptime Monitoring",
+        eyebrow: "comparing monitoring as code",
+        h1: "Which uptime monitors have a Terraform provider?",
+        meta_description: "Which uptime and status-page vendors ship a Terraform provider, who maintains it, and whether it can manage a status page. Verified July 2026.",
+        lede: "Plenty of monitoring vendors will tell you they support Terraform. Fewer will tell you the provider is a community fork that was archived in 2023, or that it manages checks but cannot touch the status page you are paying them for. Here is the state of it, checked against the Terraform Registry rather than against marketing pages.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "Read the registry tier carefully",
+                body: "The Terraform Registry has three tiers: official means HashiCorp built it, partner means the vendor is verified, and community means everything else. Community does not mean third-party. UptimeRobot and OneUptime both publish providers from their own verified GitHub organizations that still carry a community badge, and UptimeRobot's README calls its provider official. So the badge alone will not tell you whether a vendor stands behind the thing. Who owns the repository, and when it last shipped, will.",
+            },
+            Section {
+                heading: "The gap nobody advertises: status pages",
+                body: "This is the one that catches teams out. A provider that manages checks is common. A provider that also manages the status page, its components and its incidents is not. Pingdom sells status pages, and not one of its community providers can manage them. StatusCake sells status pages, and its own partner-tier provider has no status-page resource at all. Grafana and Datadog manage synthetic checks and nothing resembling a status page, though in fairness neither sells one. If your goal is the whole thing in code, checks and the public page together, that shortlist collapses fast.",
+            },
+            Section {
+                heading: "Where the incumbents actually stand",
+                body: "Pingdom has no provider in any SolarWinds- or Pingdom-owned namespace. What exists is thirty-odd community forks, and the most-downloaded of them, russellcardullo/pingdom, is archived: its own description reads no longer maintained, its last release was in 2020 and its last commit in 2023. Living forks are kept by an unrelated media company and by individuals. Atlassian publishes nothing for Statuspage either; the two community providers manage components and incidents on a page you created by hand, and cannot create the page itself. StatusCake is the honest middle: a real partner-tier provider from the verified StatusCake organization, repository still active, but no new release since v2.2.2 in October 2023.",
+            },
+            Section {
+                heading: "Who does this well, including our rivals",
+                body: "Credit where it is due, because a comparison page that only flatters its author is worthless. Better Stack, Checkly, Uptime.com, UptimeRobot and OneUptime all ship vendor-maintained providers that manage monitors and status pages, and most of them shipped a release this month. Better Stack's covers on-call policies too. Uptimepage is not alone here and does not claim to be. The gap is specific and it is with the incumbents above, the ones most teams are actually migrating away from.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "The Uptimepage provider covers the three things together: monitors, status pages and alert channels, against the same REST API the dashboard uses, with scoped tokens so a Terraform run gets a write-scoped credential rather than an all-or-nothing key. Declare a check, the page it appears on and the channel that gets paged, review it in a pull request, and apply. There is an MCP server on the same API if you would rather ask an assistant what is broken. Hosted free with no card, or self-host the whole thing under AGPL.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "the monitor, the page, and the component that links them",
+            body: r#"resource "uptimepage_target" "api" {
+  name     = "api"
+  interval = 60
+  check = {
+    type = "http"
+    http = {
+      url             = "https://example.com/healthz"
+      expected_status = { kind = "exact", exact = 200 }
+    }
+  }
+}
+
+resource "uptimepage_status_page" "public" {
+  slug = "acme"
+  name = "Acme Status"
+}
+
+resource "uptimepage_status_page_component" "api" {
+  status_page_id = uptimepage_status_page.public.id
+  target_id      = uptimepage_target.api.id
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Terraform uptime monitoring",
+                href: "/terraform-uptime-monitoring",
+            },
+            ResourceLink {
+                label: "Terraform status page",
+                href: "/terraform-status-page",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/blog/monitoring-as-code",
+            },
+            ResourceLink {
+                label: "MCP servers, compared",
+                href: "/compare/mcp-servers",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/terraform-status-page",
+        created: "2026-07-14",
+        lastmod: "2026-07-14",
+        title: "Terraform Status Page",
+        eyebrow: "for developers & devops",
+        h1: "Declare your status page in Terraform",
+        meta_description: "Create a status page, its components and its subscribers in Terraform, not by clicking. Official provider, monitors and page in one apply. Free to start.",
+        lede: "Most monitoring vendors let you declare checks in Terraform and then make you click the status page together by hand. Uptimepage treats the page as a resource like any other: it lives in the repo, it changes in a pull request, and it comes up with the monitors that feed it.",
+        features: &[
+            Feature {
+                label: "Provider",
+                value: "uptimepage/uptimepage, we build it",
+            },
+            Feature {
+                label: "Page resources",
+                value: "status pages, components, monitors",
+            },
+            Feature {
+                label: "Also in code",
+                value: "alert channels, subscribers",
+            },
+            Feature {
+                label: "Auth",
+                value: "scoped, expiring API tokens",
+            },
+            Feature {
+                label: "Same API",
+                value: "REST + MCP, no separate surface",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "Why this is harder than it sounds elsewhere",
+                body: "Check the registry before you commit to a vendor. Pingdom sells status pages and has no provider that manages them, plus no provider in a SolarWinds-owned namespace at all. StatusCake sells status pages and its own partner-tier provider has no status-page resource. Atlassian publishes no Statuspage provider; the community ones can manage components on a page you already created by hand, but not the page itself. So monitors as code with a status page clicked together in a browser is the normal state of this industry, not the exception.",
+            },
+            Section {
+                heading: "The page is a resource, not an afterthought",
+                body: "In Uptimepage the status page, the components on it and the monitors behind it are all resources in the same provider, so one apply stands up the whole thing and one pull request changes it. Point a monitor at a new endpoint and the page it publishes to updates with it. Tear down a staging environment and its page goes with it, instead of lingering as an orphan somebody has to remember to delete.",
+            },
+            Section {
+                heading: "Incidents stay automatic",
+                body: "Declaring the page in code does not mean writing incidents in code. Checks open incidents by themselves when they fail, the incident appears on the page, and confirmed email and webhook subscribers hear about it, with signed payloads they can verify. What you keep in Terraform is the shape of the system, not the events that happen to it.",
+            },
+            Section {
+                heading: "Tokens that fit a CI pipeline",
+                body: "A Terraform run should not carry a credential that can do everything. Uptimepage tokens are scoped to a resource and an action, bound to one organization and given an enforced expiry, so the token in your pipeline can create monitors and pages without also being able to delete your org.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "the page and the checks behind it, in one file",
+            body: r##"resource "uptimepage_target" "web" {
+  name     = "marketing site"
+  interval = 60
+  check = {
+    type = "http"
+    http = {
+      url             = "https://example.com"
+      expected_status = { kind = "exact", exact = 200 }
+    }
+  }
+}
+
+resource "uptimepage_status_page" "public" {
+  slug         = "acme"
+  name         = "Acme Status"
+  enabled      = true
+  display_name = "Acme Status"
+  brand_color  = "#0a7cff"
+}
+
+resource "uptimepage_status_page_component" "web" {
+  status_page_id = uptimepage_status_page.public.id
+  target_id      = uptimepage_target.web.id
+}"##,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Terraform providers, compared",
+                href: "/compare/terraform-providers",
+            },
+            ResourceLink {
+                label: "Terraform uptime monitoring",
+                href: "/terraform-uptime-monitoring",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/blog/monitoring-as-code",
+            },
+            ResourceLink {
+                label: "Status page for SaaS",
+                href: "/status-page-for-saas",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/mcp-servers",
+        created: "2026-07-14",
+        lastmod: "2026-07-14",
+        title: "MCP Servers for Uptime Monitoring",
+        eyebrow: "comparing monitoring as code",
+        h1: "Which uptime monitors ship an MCP server?",
+        meta_description: "Which uptime and status-page vendors ship an MCP server, whether it is hosted, whether it uses OAuth, and what it lets an assistant change. July 2026.",
+        lede: "An MCP server lets an assistant read your monitoring and, sometimes, change it. A year ago almost nobody in this category had one. That is no longer the story, so here is the actual state of it, checked against vendor docs rather than announcements.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "This is table stakes now, not a differentiator",
+                body: "We would rather say this plainly than have you find out. Hosted, OAuth-authenticated MCP servers with write actions are shipping across the category: Better Stack, UptimeRobot and Checkly all have one, and Checkly's arrived in June 2026. Datadog, Grafana Cloud, Sentry and PagerDuty have them in the wider observability space. OpenStatus and OneUptime ship servers too, though both stop at API-key auth rather than OAuth. If a vendor tells you their MCP server makes them unique, check the others.",
+            },
+            Section {
+                heading: "The interesting fact is who is missing",
+                body: "As of July 2026, StatusCake ships no MCP server. Pingdom ships no MCP server, and nothing customer-connectable appears anywhere in SolarWinds' product documentation. Atlassian has an official MCP server, and it covers Jira, Confluence, Bitbucket and Compass while explicitly not covering Statuspage. Uptime Kuma has no official server either; what exists is a dozen community wrappers, all local, pointed at your own instance. If an assistant reading your monitoring matters to you, that shortlist matters more than any feature table.",
+            },
+            Section {
+                heading: "Hosted or local, and why it matters",
+                body: "A hosted server is a URL you point a client at, with the vendor handling auth and updates. A local one is a process you run, holding a key, usually over stdio. Local is fine for a workstation and awkward for a team, because every person who wants it has to install and credential it themselves. The self-hosted tools land on the local side by nature, which is not a criticism so much as a consequence of where they run.",
+            },
+            Section {
+                heading: "Ask what it can change, not just what it can read",
+                body: "Reading is the easy half. The question worth asking a vendor is what an assistant is allowed to do, and what stands between a confused model and your production monitoring. The emerging norm is a fence of some kind: PagerDuty ships read-only until you pass a flag, Grafana Cloud makes you consent to writes at authorization time, OpenStatus filters mutating tools out for read-only keys and forces an explicit notify flag, OneUptime annotates its destructive tools. Uptimepage takes the same line: reads are open, and every write asks you first and is audited afterwards.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage's MCP server runs in-process at mcp.uptimepage.dev, with one-click OAuth, the same tenant isolation, scopes and rate limits as the dashboard, and writes fenced behind your approval. It covers monitors, incidents and status pages, so an assistant can tell you what is broken, how long it has been broken and what you told customers about it. That combination is good, and it is not rare, and both of those things are true. Hosted free with no card, or self-host it under AGPL.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "MCP server",
+                href: "/mcp-server",
+            },
+            ResourceLink {
+                label: "Terraform providers, compared",
+                href: "/compare/terraform-providers",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/automation",
+            },
+            ResourceLink {
+                label: "Ask, don't click",
+                href: "/blog/ask-dont-click",
             },
         ],
         cta: "Start free",
@@ -1843,6 +2072,42 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Is Uptime Kuma still fine for a homelab?",
                 "Yes, and it is probably the best pick there. The comparison only gets interesting once a second person needs access, customers need a status page, or you want config in version control.",
+            ),
+        ],
+        "/compare/terraform-providers" => &[
+            (
+                "Does Pingdom have a Terraform provider?",
+                "Not from Pingdom. No provider exists in a SolarWinds- or Pingdom-owned namespace on the Terraform Registry. The most-downloaded community one, russellcardullo/pingdom, is archived and describes itself as no longer maintained; its last release was in 2020. Living forks are kept by unrelated parties, and none of them manages status pages.",
+            ),
+            (
+                "Does StatusCake have a Terraform provider?",
+                "Yes, a real one: partner tier, from the verified StatusCake organization, and the repository is still active. Two caveats. It has shipped no new release since v2.2.2 in October 2023, and it has no status-page resource, even though StatusCake sells status pages as a product.",
+            ),
+            (
+                "Can I manage Atlassian Statuspage with Terraform?",
+                "Not with anything Atlassian publishes. Two community providers exist, both maintained by individuals, and they manage components and incidents on a page you already created by hand. Neither creates the page itself.",
+            ),
+            (
+                "Which providers manage both monitors and status pages?",
+                "Better Stack, Checkly, Uptime.com, UptimeRobot, OneUptime and Uptimepage. That is the honest list; we are not alone. The vendors that cannot are Pingdom, StatusCake and Atlassian Statuspage, plus Grafana and Datadog, which have no status-page product to manage.",
+            ),
+        ],
+        "/compare/mcp-servers" => &[
+            (
+                "Which uptime monitoring vendors ship an MCP server?",
+                "As of July 2026: Better Stack, UptimeRobot, Checkly, OpenStatus, OneUptime and Uptimepage. Better Stack, UptimeRobot and Checkly authenticate with OAuth like Uptimepage does; OpenStatus and OneUptime use API keys.",
+            ),
+            (
+                "Does Pingdom or StatusCake have an MCP server?",
+                "Neither does. Nothing customer-connectable appears in StatusCake's docs or in SolarWinds' product documentation for Pingdom. Atlassian's official MCP server covers Jira, Confluence, Bitbucket and Compass, and explicitly does not cover Statuspage.",
+            ),
+            (
+                "Does Uptime Kuma have an MCP server?",
+                "No official one. A dozen or so community wrappers exist, all local and pointed at your own instance, with the most active being a TypeScript server that speaks to Kuma over its socket API. There is no hosted endpoint, which follows from Kuma being self-hosted by nature.",
+            ),
+            (
+                "Can an assistant change my monitoring over MCP?",
+                "It depends on the vendor, and it is the question worth asking. Uptimepage fences every write behind your explicit approval and audits it. Others take similar lines: PagerDuty ships read-only until you enable writes, Grafana Cloud asks for write consent during authorization, and OpenStatus hides mutating tools from read-only keys.",
             ),
         ],
         "/compare/blackbox-exporter-vs-uptime-kuma" => &[
@@ -3134,6 +3399,8 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
         "/compare/uptime-kuma-vs-gatus" => Some(&KUMA_GATUS_MATRIX),
         "/compare/pingdom-vs-statuscake" => Some(&PINGDOM_STATUSCAKE_MATRIX),
         "/compare/uptime-kuma-vs-healthchecks" => Some(&KUMA_HEALTHCHECKS_MATRIX),
+        "/compare/terraform-providers" => Some(&TERRAFORM_PROVIDER_MATRIX),
+        "/compare/mcp-servers" => Some(&MCP_SERVER_MATRIX),
         "/compare/uptime-kuma-vs-cachet" => Some(&KUMA_CACHET_MATRIX),
         "/compare/openstatus-vs-gatus" => Some(&OPENSTATUS_GATUS_MATRIX),
         "/compare/blackbox-exporter-vs-uptime-kuma" => Some(&BLACKBOX_KUMA_MATRIX),
@@ -3870,6 +4137,188 @@ static BLACKBOX_KUMA_MATRIX: Matrix = Matrix {
         "The exporter serves a small in-memory debug page listing recent probes, not a status page. Its history is lost on restart.",
         "Probers listed are those in the current release, v0.28.0. A websocket prober exists on master but is not in any released version.",
         "Verified July 2026 against Blackbox exporter v0.28.0 and Uptime Kuma 2.4.0. Both projects move quickly, so check their current source before you decide.",
+    ],
+};
+
+/// Terraform Registry landscape for `/compare/terraform-providers`, verified
+/// 14 July 2026 against the registry API and each provider's repository.
+/// Registry `community` tier does not mean third-party: UptimeRobot and
+/// OneUptime publish from their own verified orgs under a community badge.
+static TERRAFORM_PROVIDER_MATRIX: Matrix = Matrix {
+    heading: "the registry, not the marketing page",
+    columns: &[
+        "Uptimepage",
+        "Pingdom",
+        "StatusCake",
+        "Statuspage",
+        "UptimeRobot",
+        "OneUptime",
+    ],
+    rows: &[
+        MatrixRow {
+            label: "provider from the vendor",
+            cells: &[
+                ("yes", "yes"),
+                ("none", "no"),
+                ("yes", "yes"),
+                ("none", "no"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "who maintains it",
+            cells: &[
+                ("Uptimepage", ""),
+                ("community forks", "no"),
+                ("StatusCake", ""),
+                ("individuals", "no"),
+                ("UptimeRobot", ""),
+                ("OneUptime", ""),
+            ],
+        },
+        MatrixRow {
+            label: "registry tier",
+            cells: &[
+                ("community", ""),
+                ("community", ""),
+                ("partner", "yes"),
+                ("community", ""),
+                ("community", ""),
+                ("community", ""),
+            ],
+        },
+        MatrixRow {
+            label: "newest release",
+            cells: &[
+                ("Jul 2026", "yes"),
+                ("2020, archived", "no"),
+                ("Oct 2023", "part"),
+                ("2022 · 2024", "no"),
+                ("Jul 2026", "yes"),
+                ("Jul 2026", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "manages monitors",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("no product", "no"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "manages status pages",
+            cells: &[
+                ("yes", "yes"),
+                ("no", "no"),
+                ("no", "no"),
+                ("objects only", "part"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "manages alert channels",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("no", "no"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+            ],
+        },
+    ],
+    notes: &[
+        "Registry tiers are official (HashiCorp-built), partner (vendor-verified) and community (everything else). Community does not mean third-party: UptimeRobot and OneUptime both publish from their own verified GitHub organizations under a community badge, and so does Uptimepage. Ours carries the same community badge as theirs, which is exactly why we are telling you to read the repository rather than the badge.",
+        "No provider exists in a SolarWinds- or Pingdom-owned namespace on the Terraform Registry. The most-downloaded community provider, russellcardullo/pingdom, is archived and self-describes as no longer maintained; last release 2020, last commit 2023. Living forks are maintained by an unrelated media company and by individuals, and none manages status pages.",
+        "StatusCake's provider is partner tier and its repository is active, but it has shipped no new release since v2.2.2 in October 2023 and it carries no status-page resource, though StatusCake sells status pages.",
+        "Atlassian publishes no Statuspage provider. The two community options manage components and incidents on a page you created by hand; neither creates the page itself.",
+        "Better Stack, Checkly, Uptime.com, UptimeRobot and OneUptime all manage monitors and status pages in Terraform, as Uptimepage does. Grafana and Datadog manage synthetic checks and no status page, because neither sells one.",
+        "Verified against the Terraform Registry and each provider's repository on 14 July 2026. Providers ship often, so check the registry before you decide.",
+    ],
+};
+
+/// MCP landscape for `/compare/mcp-servers`, verified 14 July 2026 against each
+/// vendor's documentation. Hosted OAuth servers are common here now; the page
+/// says so rather than implying ours is rare.
+static MCP_SERVER_MATRIX: Matrix = Matrix {
+    heading: "who actually ships one",
+    columns: &[
+        "Uptimepage",
+        "Better Stack",
+        "UptimeRobot",
+        "Checkly",
+        "OpenStatus",
+        "Pingdom",
+    ],
+    rows: &[
+        MatrixRow {
+            label: "official MCP server",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("none", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted endpoint",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("--", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "OAuth sign-in",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("API key only", "part"),
+                ("--", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "writes",
+            cells: &[
+                ("fenced, you approve", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("scoped by key", "part"),
+                ("--", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "covers status pages",
+            cells: &[
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("yes", "yes"),
+                ("--", "no"),
+            ],
+        },
+    ],
+    notes: &[
+        "Hosted, OAuth-authenticated MCP servers are common in this category as of July 2026, not a differentiator. Better Stack, UptimeRobot and Checkly all ship one, as do Datadog, Grafana Cloud, Sentry and PagerDuty in the wider observability space.",
+        "StatusCake and Pingdom ship no MCP server. Atlassian's official server covers Jira, Confluence, Bitbucket and Compass, and explicitly does not cover Statuspage.",
+        "OneUptime ships a hosted server with roughly 155 tools, authenticated with a project-scoped API key rather than OAuth.",
+        "Uptime Kuma has no official MCP server. A dozen or so community wrappers exist, all local and pointed at an instance you run.",
+        "Verified against each vendor's documentation on 14 July 2026.",
     ],
 };
 
