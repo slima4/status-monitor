@@ -16,7 +16,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `checker` | `default_timeout_ms`, `connect_timeout_ms` | client-side timeouts applied to outbound checks |
 | `checker` | `default_check_interval_secs` | fallback interval when target spec omits it |
 | `checker` | `per_host_max_inflight`, `rdap_max_inflight` | per-(org, host, port) and per-TLD RDAP concurrency caps. Fail-fast bulkhead — over-cap checks return a `degraded` result instead of queueing |
-| `http_client` | `tcp_keepalive_secs`, `user_agent` | per-check connection keep-alive (one request's lifetime — checks connect fresh, no pool) and the outbound `User-Agent` |
+| `http_client` | `tcp_keepalive_secs`, `user_agent` | per-check connection keep-alive (one request's lifetime — checks connect fresh, no pool) and the outbound `User-Agent`, which defaults to the crate version and only needs setting to override it |
 | `dns` | `cache_size`, `positive_ttl_secs`, `negative_ttl_secs`, `servers` | hickory resolver — point at internal resolvers when needed |
 | `security` | `allow_private_targets` | SSRF guard: when `false` (default) any target resolving to loopback / private / link-local / reserved IPs is rejected |
 | `security` | `credentials_kek_base64` | 32-byte base64 key encrypting `basic_auth` / `bearer_token` at rest. Empty (default) stores plaintext — dev only |

@@ -967,7 +967,18 @@ pub struct HttpClientConfig {
     /// TCP keep-alive for the in-flight connection. Checks connect fresh each
     /// run (no pool), so this only spans one request's body read.
     pub tcp_keepalive_secs: u64,
+    /// Identifiable so site owners allowlist our probes instead of blocking them.
+    #[serde(default = "default_user_agent")]
     pub user_agent: String,
+}
+
+fn default_user_agent() -> String {
+    concat!(
+        "uptimepage/",
+        env!("CARGO_PKG_VERSION"),
+        " (+https://uptimepage.dev)"
+    )
+    .to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -22,7 +22,7 @@ rdap_max_inflight = 1
 
 [http_client]
 tcp_keepalive_secs = 60
-user_agent = "uptimepage/0.1 (+https://uptimepage.dev)"
+# user_agent defaults to the crate version; set it only to override.
 
 [dns]
 cache_size = 50000
