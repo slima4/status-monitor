@@ -24,7 +24,7 @@ It is not the typing. Declaring a monitor in HCL is more keystrokes than clickin
 
 The point is the pull request. When a monitor lives in a repo, changing it becomes a thing a second person looks at *before* it's real. "Why are we dropping the interval to ten seconds on the payments check?" is a much better conversation to have in a PR than in a postmortem. You get a diff and you get history. You get to stand up a brand-new region and reproduce forty monitors in one `apply` instead of forty afternoons of clicking. And when the person who set the threshold leaves, the threshold and the reason for it stay behind in the file.
 
-Here's the smallest thing that works, with the [Uptimepage Terraform provider](/automation):
+Here's the smallest thing that works, with the [Uptimepage Terraform provider](/terraform-uptime-monitoring):
 
 ```terraform
 terraform {

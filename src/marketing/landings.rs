@@ -427,7 +427,7 @@ docker compose up -d"#,
             },
             ResourceLink {
                 label: "Monitoring as code",
-                href: "/automation",
+                href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
                 label: "Best self-hosted monitors",
@@ -576,7 +576,7 @@ docker compose up -d"#,
         resources: &[
             ResourceLink {
                 label: "Monitoring as code",
-                href: "/automation",
+                href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
                 label: "Terraform provider",
@@ -778,7 +778,7 @@ docker compose up -d"#,
         resources: &[
             ResourceLink {
                 label: "Monitoring as code",
-                href: "/automation",
+                href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
                 label: "vs OneUptime",
@@ -839,7 +839,7 @@ docker compose up -d"#,
         code: None,
         resources: &[ResourceLink {
             label: "Monitoring as code",
-            href: "/automation",
+            href: "/terraform-uptime-monitoring",
         }],
         cta: "Start free",
     },
@@ -917,7 +917,7 @@ docker compose up -d"#,
         resources: &[
             ResourceLink {
                 label: "Monitoring as code",
-                href: "/automation",
+                href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
                 label: "Best self-hosted monitors",
@@ -1703,7 +1703,7 @@ resource "uptimepage_status_page_component" "web" {
         path: "/compare/mcp-servers",
         created: "2026-07-14",
         lastmod: "2026-07-14",
-        title: "MCP Servers for Uptime Monitoring",
+        title: "Which Monitors Ship an MCP Server",
         eyebrow: "comparing monitoring as code",
         h1: "Which uptime monitors ship an MCP server?",
         meta_description: "Which uptime and status-page vendors ship an MCP server, whether it is hosted, whether it uses OAuth, and what it lets an assistant change. July 2026.",
@@ -1743,7 +1743,7 @@ resource "uptimepage_status_page_component" "web" {
             },
             ResourceLink {
                 label: "Monitoring as code",
-                href: "/automation",
+                href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
                 label: "Ask, don't click",
@@ -1753,113 +1753,14 @@ resource "uptimepage_status_page_component" "web" {
         cta: "Start free",
     },
     Landing {
-        path: "/automation",
-        created: "2026-06-16",
-        lastmod: "2026-06-21",
-        title: "Monitoring as Code: Terraform & MCP",
-        eyebrow: "for developers & devops",
-        h1: "Run your monitoring from code, not clicks",
-        meta_description: "Manage Uptimepage monitors, status pages and alerts as code with the Terraform provider, and connect any LLM over MCP. Free to start, no card.",
-        lede: "Everything you can click in Uptimepage you can declare in code. Provision monitors and status pages with the Terraform provider, and let an AI assistant read your monitoring over MCP, with the same tenant isolation, scopes and rate limits as the dashboard.",
-        features: &[
-            Feature {
-                label: "Terraform provider",
-                value: "uptimepage/uptimepage",
-            },
-            Feature {
-                label: "Terraform resources",
-                value: "monitors, status pages, channels",
-            },
-            Feature {
-                label: "MCP endpoint",
-                value: "mcp.uptimepage.dev/mcp",
-            },
-            Feature {
-                label: "MCP access",
-                value: "OAuth one-click, read + fenced writes",
-            },
-            Feature {
-                label: "API tokens",
-                value: "scoped, least-privilege, expiring",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
-        sections: &[
-            Section {
-                heading: "config-as-code with Terraform",
-                body: "Declare monitors, status pages, components and notification channels in HCL with the official provider (source uptimepage/uptimepage). Review changes in a pull request, roll them out across orgs, and keep your monitoring reproducible instead of hand-clicked.",
-            },
-            Section {
-                heading: "ask an assistant what’s broken",
-                body: "The MCP server lets an LLM client (Claude, an IDE, anything that speaks MCP) read your monitors and incidents and take tightly-fenced actions. It runs inside the same app, so the scope checks and rate limits that guard your data guard the assistant’s access too.",
-            },
-            Section {
-                heading: "tokens that do one job",
-                body: "Automation authenticates with scoped API tokens: resource-and-action permissions, bound to one org, with an enforced expiry. Mint a read-only token for a dashboard or a write-scoped one for Terraform, never an all-or-nothing key.",
-            },
-        ],
-        code: Some(CodeSample {
-            caption: "Declare a monitor in Terraform",
-            body: r#"terraform {
-  required_providers {
-    uptimepage = {
-      source = "uptimepage/uptimepage"
-    }
-  }
-}
-
-resource "uptimepage_target" "api" {
-  name     = "api prod"
-  interval = 60
-
-  check = {
-    type = "http"
-    http = {
-      url = "https://example.com/healthz"
-      expected_status = {
-        kind  = "exact"
-        exact = 200
-      }
-    }
-  }
-}"#,
-        }),
-        resources: &[
-            ResourceLink {
-                label: "Terraform Registry",
-                href: TERRAFORM_URL,
-            },
-            ResourceLink {
-                label: "Terraform uptime monitoring",
-                href: "/terraform-uptime-monitoring",
-            },
-            ResourceLink {
-                label: "MCP server",
-                href: "/mcp-server",
-            },
-            ResourceLink {
-                label: "How the MCP server works",
-                href: "/blog/mcp-server",
-            },
-            ResourceLink {
-                label: "For developers",
-                href: "/uptime-monitoring-for-developers",
-            },
-        ],
-        cta: "Start free",
-    },
-    Landing {
         path: "/terraform-uptime-monitoring",
         created: "2026-06-25",
-        lastmod: "2026-06-25",
-        title: "Terraform Uptime Monitoring with Status Pages",
+        lastmod: "2026-07-14",
+        title: "Terraform Uptime Monitoring",
         eyebrow: "infrastructure as code",
         h1: "Uptime monitoring you declare in Terraform",
-        meta_description: "Declare uptime monitors, status pages and alerts in Terraform with the official Uptimepage provider. HTTP, TCP, DNS, TLS checks. Free to start.",
-        lede: "Provision a monitor the same way you provision the service it watches. The official Uptimepage provider manages monitors, status pages, components and notification channels in HCL, so every new service ships with monitoring instead of a follow-up ticket.",
+        meta_description: "Declare uptime monitors and alert channels in Terraform with the Uptimepage provider. HTTP, TCP, DNS, TLS and ping checks. Free to start, no card.",
+        lede: "Provision a monitor the same way you provision the service it watches. The Uptimepage provider manages monitors, status pages, components and notification channels in HCL, so every new service ships with monitoring instead of a follow-up ticket.",
         features: &[
             Feature {
                 label: "Terraform provider",
@@ -1871,7 +1772,7 @@ resource "uptimepage_target" "api" {
             },
             Feature {
                 label: "Check types",
-                value: "HTTP, TCP, DNS, TLS",
+                value: "HTTP, TCP, DNS, TLS, ping",
             },
             Feature {
                 label: "Check interval",
@@ -1893,11 +1794,15 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "review it like any other change",
-                body: "Monitors, status pages and alert channels live in HCL, so a change is a pull request with a plan and an apply. Roll the same config across orgs and keep your monitoring reproducible instead of hand-clicked.",
+                body: "Monitors and alert channels live in HCL, so a change is a pull request with a plan and an apply. Roll the same config across orgs and keep your monitoring reproducible instead of hand-clicked.",
             },
             Section {
-                heading: "more than Terraform",
-                body: "The same data model answers a full REST API and an MCP server, so an assistant can read your monitors while Terraform owns their shape. Everything you can click, you can declare.",
+                heading: "tokens that do one job",
+                body: "A Terraform run should not carry a credential that can do everything. Tokens are scoped to a resource and an action, bound to one organization and given an enforced expiry, so the token in your pipeline can create monitors without also being able to delete your org.",
+            },
+            Section {
+                heading: "the status page too, and an assistant on top",
+                body: "The same provider declares the public status page and the components on it, which is covered on the Terraform status page. The same data model answers a REST API and an MCP server, so an assistant can read your monitors and act with your approval while Terraform owns their shape. Everything you can click, you can declare.",
             },
         ],
         code: Some(CodeSample {
@@ -1933,7 +1838,7 @@ resource "uptimepage_target" "api" {
             },
             ResourceLink {
                 label: "Monitoring as code",
-                href: "/automation",
+                href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
                 label: "MCP server",
@@ -2020,7 +1925,7 @@ resource "uptimepage_target" "api" {
             },
             ResourceLink {
                 label: "Monitoring as code",
-                href: "/automation",
+                href: "/terraform-uptime-monitoring",
             },
         ],
         cta: "Start free",
@@ -2476,24 +2381,6 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Is it free to start?",
                 "Yes. The hosted tier is $0 a month with no credit card, and the AGPL source is free to self-host.",
-            ),
-        ],
-        "/automation" => &[
-            (
-                "How do I manage monitors as code?",
-                "Use the official Terraform provider to declare monitors, status pages and notification channels in HCL, then review changes in a pull request.",
-            ),
-            (
-                "Is there a REST API?",
-                "Yes. A full REST API backs everything, with scoped, org-bound tokens you can set to expire.",
-            ),
-            (
-                "What can the MCP server do?",
-                "An LLM client can read monitors and incidents and take fenced, approval-gated actions over MCP, with one-click OAuth.",
-            ),
-            (
-                "Do hosted and self-hosted share the same API?",
-                "Yes. The data model, REST API and Terraform provider are identical whether you run the hosted tier or self-host.",
             ),
         ],
         "/mcp-server" => &[
@@ -4395,9 +4282,15 @@ pub fn mount(router: Router<Arc<MarketingCfg>>) -> Router<Arc<MarketingCfg>> {
         );
     }
     // Old name for Better Stack; searchers still use it, alias 301s to the one page.
-    r.route(
+    r = r.route(
         "/vs/better-uptime",
         get(|| async { Redirect::permanent("/vs/better-stack") }),
+    );
+    // /automation split the same Terraform intent as the page below and the same
+    // MCP intent as /mcp-server, so it competed with both. Folded into the one page.
+    r.route(
+        "/automation",
+        get(|| async { Redirect::permanent("/terraform-uptime-monitoring") }),
     )
 }
 
@@ -4411,6 +4304,28 @@ mod tests {
         for l in LANDINGS {
             assert!(l.path.starts_with('/'), "{} must be absolute", l.path);
             assert!(seen.insert(l.path), "duplicate path {}", l.path);
+        }
+    }
+
+    /// Two pages chasing one query split its impressions and Google picks a
+    /// winner for you. Distinct titles and h1s are the cheapest guard.
+    #[test]
+    fn titles_and_headings_are_distinct() {
+        let mut titles = std::collections::HashMap::new();
+        let mut h1s = std::collections::HashMap::new();
+        for l in LANDINGS {
+            if let Some(other) = titles.insert(l.title, l.path) {
+                panic!(
+                    "{} and {} share the title {:?}: they will cannibalize each other",
+                    other, l.path, l.title
+                );
+            }
+            if let Some(other) = h1s.insert(l.h1, l.path) {
+                panic!(
+                    "{} and {} share the h1 {:?}: they will cannibalize each other",
+                    other, l.path, l.h1
+                );
+            }
         }
     }
 

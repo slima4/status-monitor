@@ -75,7 +75,7 @@ Opening or resolving fires a non-blocking signal to the escalation engine, which
 
 ## Automation as a first-class surface
 
-Because the API is the single source of truth, the rest came almost for free: a self-describing OpenAPI spec with Swagger UI, an [official Terraform provider](/automation) so you can manage [monitors as code](/blog/monitoring-as-code), and an [MCP server](/blog/mcp-server) so an LLM client can query your monitors and incidents over OAuth, scope-gated and audited, with per-action confirmation on the few write tools.
+Because the API is the single source of truth, the rest came almost for free: a self-describing OpenAPI spec with Swagger UI, an [official Terraform provider](/terraform-uptime-monitoring) so you can manage [monitors as code](/blog/monitoring-as-code), and an [MCP server](/blog/mcp-server) so an LLM client can query your monitors and incidents over OAuth, scope-gated and audited, with per-action confirmation on the few write tools.
 
 ## Where it is
 
