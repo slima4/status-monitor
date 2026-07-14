@@ -1,10 +1,27 @@
 +++
 title = "ClickHouse system tables ate my disk (and the fix)"
 date = "2026-07-09"
+updated = "2026-07-14"
 slug = "clickhouse-system-tables-filled-disk"
 excerpt = "My disk filled and I started dropping writes. Real data: 20 MB; ClickHouse had logged 12 GB about itself and burned idle CPU doing it. The config that fixes both."
-tags = ["clickhouse", "postmortem", "observability", "performance", "ops"]
+tags = ["clickhouse", "postgres", "postmortem", "observability", "performance", "ops"]
 draft = false
+
+[[faqs]]
+q = 'How do I fix Postgres "could not write lock file postmaster.pid: No space left on device"?'
+a = "That error is not a Postgres bug and not corruption. Postgres writes its lock file into the data directory at startup, and on a full filesystem that write fails, so the server refuses to start. Free space on the volume that holds the data directory, then start Postgres again and let it replay its WAL."
+
+[[faqs]]
+q = "Can I just delete postmaster.pid to get Postgres started?"
+a = "Only if no Postgres process is running. On a full disk the file is a symptom, not the cause: deleting it while the server is alive risks two postmasters on one data directory, which is how you corrupt a database. Check for a running process first, fix the disk, and leave the data directory alone."
+
+[[faqs]]
+q = "What fills a disk when the database itself is small?"
+a = "ClickHouse system log tables are unbounded by default and can dwarf your real data. Mine were 11.8 GB against 20 MB of actual data, with old Docker images taking most of the rest."
+
+[[faqs]]
+q = "Is it safe to truncate the ClickHouse system log tables?"
+a = "The system log tables are throwaway diagnostics, not real data. Truncating them reclaims the space immediately, and a config cap stops them growing back."
 +++
 
 > **TL;DR**
@@ -131,6 +148,22 @@ That gave back 12 GB at once and took the disk from 74% down to 41%.
 > **Bonus: lower CPU, not just disk**
 >
 > Those log tables are written constantly, and on a small server that steady write load shows up as CPU. A long-running ClickHouse issue tracks the server using noticeable CPU at zero load, [#60016](https://github.com/ClickHouse/ClickHouse/issues/60016). People there report dropping from 40 to 70% CPU down to about 1.5% after disabling the logs and slowing the async-metrics collector. So those two settings, the `asynchronous_metrics_update_period_s` line and the `remove="1"` block, pay off twice: less disk and less CPU.
+
+## Postgres won't start: could not write lock file "postmaster.pid": No space left on device
+
+Some of you are here for that one line, not for my ClickHouse story. Here is the short version, because the fix is the same fix.
+
+That error is not a Postgres bug and not corruption. Postgres writes its lock file into the data directory at startup, and on a full filesystem that write fails, so the server refuses to start. The database is fine. The disk is not.
+
+Work in this order:
+
+1. **Confirm it is really space.** `df -h` on the volume holding your data directory. If that looks healthy, check `df -i`: a full inode table produces the same "no space left on device" with gigabytes free.
+2. **Free space outside the data directory.** Never hand-delete anything under `PGDATA`, and never clear `pg_wal` yourself; that turns a full disk into an unrecoverable database. Look at what is actually hoarding: old container images, unrotated logs, build caches, a database logging about itself. `docker system df` and a per-table size query are where I found mine.
+3. **Start Postgres and let it recover.** It replays its WAL and comes back on its own. Mine crashed and self-recovered before I ever touched it.
+
+Can you just delete the lock file? Only if no Postgres process is running. On a full disk the file is a symptom, not the cause, and removing it while the server is alive risks two postmasters on one data directory, which is how you corrupt a database. Check for a live process first.
+
+Then fix the reason the disk filled, which is the rest of this post, and add the alert that would have told you days earlier.
 
 ## The real lesson: alert on the cause, not the effect
 
