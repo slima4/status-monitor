@@ -1619,7 +1619,7 @@ resource "uptimepage_status_page_component" "api" {
             },
             Feature {
                 label: "Also in code",
-                value: "alert channels, subscribers",
+                value: "alert channels, components",
             },
             Feature {
                 label: "Auth",
@@ -4276,7 +4276,7 @@ static MCP_SERVER_MATRIX: Matrix = Matrix {
                 ("yes", "yes"),
                 ("yes", "yes"),
                 ("yes", "yes"),
-                ("--", "no"),
+                ("none", "no"),
             ],
         },
         MatrixRow {
@@ -4287,7 +4287,7 @@ static MCP_SERVER_MATRIX: Matrix = Matrix {
                 ("yes", "yes"),
                 ("yes", "yes"),
                 ("API key only", "part"),
-                ("--", "no"),
+                ("none", "no"),
             ],
         },
         MatrixRow {
@@ -4298,7 +4298,7 @@ static MCP_SERVER_MATRIX: Matrix = Matrix {
                 ("yes", "yes"),
                 ("yes", "yes"),
                 ("scoped by key", "part"),
-                ("--", "no"),
+                ("none", "no"),
             ],
         },
         MatrixRow {
@@ -4309,7 +4309,7 @@ static MCP_SERVER_MATRIX: Matrix = Matrix {
                 ("yes", "yes"),
                 ("yes", "yes"),
                 ("yes", "yes"),
-                ("--", "no"),
+                ("none", "no"),
             ],
         },
     ],
