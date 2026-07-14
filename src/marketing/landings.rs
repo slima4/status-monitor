@@ -575,12 +575,12 @@ docker compose up -d"#,
         }),
         resources: &[
             ResourceLink {
-                label: "Monitoring as code",
+                label: "Terraform provider",
                 href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
-                label: "Terraform provider",
-                href: "/terraform-uptime-monitoring",
+                label: "MCP server",
+                href: "/mcp-server",
             },
             ResourceLink {
                 label: "Uptime SLA calculator",
@@ -1837,8 +1837,8 @@ resource "uptimepage_target" "api" {
                 href: TERRAFORM_URL,
             },
             ResourceLink {
-                label: "Monitoring as code",
-                href: "/terraform-uptime-monitoring",
+                label: "Terraform status page",
+                href: "/terraform-status-page",
             },
             ResourceLink {
                 label: "MCP server",
@@ -4324,6 +4324,24 @@ mod tests {
                 panic!(
                     "{} and {} share the h1 {:?}: they will cannibalize each other",
                     other, l.path, l.h1
+                );
+            }
+        }
+    }
+
+    /// Retiring a path means rewriting every href that pointed at it, and a
+    /// blind rewrite lands a page on itself or twice in one list.
+    #[test]
+    fn resource_links_are_distinct_and_outbound() {
+        for l in LANDINGS {
+            let mut seen = std::collections::HashSet::new();
+            for r in l.resources {
+                assert_ne!(r.href, l.path, "{} links to itself", l.path);
+                assert!(
+                    seen.insert(r.href),
+                    "{} lists {} twice in its resources",
+                    l.path,
+                    r.href
                 );
             }
         }

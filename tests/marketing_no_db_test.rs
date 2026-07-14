@@ -8,7 +8,7 @@ use axum::body::Body;
 use axum::http::{Request, StatusCode, header};
 use tower::util::ServiceExt;
 
-use uptimepage::marketing::{self, MarketingCfg};
+use uptimepage::marketing::{self, MarketingCfg, landings};
 
 fn router() -> axum::Router {
     marketing::router(MarketingCfg {
@@ -280,18 +280,49 @@ async fn sitemap_lists_the_tools() {
     );
 }
 
+/// Spot-checking landings by hand-typed path lets a retired page rot a test
+/// instead of failing it. Drive the render off the table that mounts them.
 #[tokio::test]
-async fn automation_landing_renders() {
-    let (status, body, _) = get("/automation").await;
+async fn every_landing_renders_and_its_links_resolve() {
+    for l in landings::LANDINGS {
+        let (status, _, _) = get(l.path).await;
+        assert_eq!(status, StatusCode::OK, "{}", l.path);
+
+        for r in l.resources {
+            if !r.href.starts_with('/') {
+                continue;
+            }
+            let (status, _, _) = get(r.href).await;
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "{} links to {}, which does not resolve",
+                l.path,
+                r.href
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn retired_automation_path_redirects_to_terraform() {
+    let (status, _, headers) = get("/automation").await;
+    assert_eq!(status, StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        headers.get(header::LOCATION).and_then(|h| h.to_str().ok()),
+        Some("/terraform-uptime-monitoring"),
+        "the retired path must keep its equity on the page that absorbed it"
+    );
+}
+
+#[tokio::test]
+async fn terraform_landing_renders() {
+    let (status, body, _) = get("/terraform-uptime-monitoring").await;
     assert_eq!(status, StatusCode::OK);
-    assert!(body.contains("Run your monitoring from code"));
+    assert!(body.contains("Uptime monitoring you declare in Terraform"));
     assert!(
         body.contains("uptimepage/uptimepage"),
         "must name the provider"
-    );
-    assert!(
-        body.contains("mcp.uptimepage.dev/mcp"),
-        "must name the MCP endpoint"
     );
     assert!(
         body.contains("uptimepage_target") && body.contains("expected_status"),
