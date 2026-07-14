@@ -62,6 +62,8 @@ static ABUSE: LazyLock<String> =
 static SECURITY: LazyLock<String> = LazyLock::new(|| {
     render_trusted_unsanitised(include_str!("../../docs/legal/security-policy.md"))
 });
+static BOT: LazyLock<String> =
+    LazyLock::new(|| render_trusted_unsanitised(include_str!("../../docs/legal/bot.md")));
 
 pub struct LegalRoute {
     pub path: &'static str,
@@ -70,7 +72,7 @@ pub struct LegalRoute {
 }
 
 /// Single source of truth for legal pages: router mount, renderer, and
-/// sitemap all iterate this slice. Add a 7th page → one entry.
+/// sitemap all iterate this slice. Add a page → one entry.
 pub const ROUTES: &[LegalRoute] = &[
     LegalRoute {
         path: "/terms",
@@ -101,6 +103,11 @@ pub const ROUTES: &[LegalRoute] = &[
         path: "/security-policy",
         title: "Security Policy",
         body: &SECURITY,
+    },
+    LegalRoute {
+        path: "/bot",
+        title: "Uptimepage Bot",
+        body: &BOT,
     },
 ];
 

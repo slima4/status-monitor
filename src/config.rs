@@ -976,7 +976,7 @@ fn default_user_agent() -> String {
     concat!(
         "uptimepage/",
         env!("CARGO_PKG_VERSION"),
-        " (+https://uptimepage.dev)"
+        " (+https://uptimepage.dev/bot)"
     )
     .to_string()
 }

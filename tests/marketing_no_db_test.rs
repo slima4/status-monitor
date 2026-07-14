@@ -364,23 +364,19 @@ async fn marketing_serves_fingerprinted_assets() {
 
 #[tokio::test]
 async fn legal_pages_render_without_db() {
-    for (path, expected_heading) in [
-        ("/terms", "Terms of Service"),
-        ("/privacy", "Privacy Policy"),
-        ("/cookies", "Cookie Policy"),
-        ("/impressum", "Impressum"),
-        ("/abuse-policy", "Abuse Policy"),
-        ("/security-policy", "Security Policy"),
-    ] {
-        let (status, body, headers) = get(path).await;
-        assert_eq!(status, StatusCode::OK, "{path}");
+    for route in uptimepage::marketing::legal::ROUTES {
+        let (status, body, headers) = get(route.path).await;
+        assert_eq!(status, StatusCode::OK, "{}", route.path);
+        let heading = format!("<h1>{}</h1>", route.title);
         assert!(
-            body.contains(expected_heading),
-            "{path} missing heading {expected_heading:?}"
+            body.contains(&heading),
+            "{} body missing rendered heading {heading:?}",
+            route.path
         );
         assert!(
             headers.contains_key(header::ETAG),
-            "{path} must set a strong ETag"
+            "{} must set a strong ETag",
+            route.path
         );
     }
 }
@@ -389,15 +385,8 @@ async fn legal_pages_render_without_db() {
 async fn sitemap_lists_legal_routes() {
     let (status, body, _) = get("/sitemap.xml").await;
     assert_eq!(status, StatusCode::OK);
-    for path in [
-        "/terms",
-        "/privacy",
-        "/cookies",
-        "/impressum",
-        "/abuse-policy",
-        "/security-policy",
-    ] {
-        let loc = format!("<loc>https://uptimepage.dev{path}</loc>");
+    for route in uptimepage::marketing::legal::ROUTES {
+        let loc = format!("<loc>https://uptimepage.dev{}</loc>", route.path);
         assert!(body.contains(&loc), "sitemap missing {loc}");
     }
 }
