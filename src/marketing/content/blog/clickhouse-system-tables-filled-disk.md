@@ -1,9 +1,9 @@
 +++
-title = "ClickHouse system tables ate my disk (and the fix)"
+title = "ClickHouse disk full: system tables ate 12 GB (the fix)"
 date = "2026-07-09"
 updated = "2026-07-14"
 slug = "clickhouse-system-tables-filled-disk"
-excerpt = "My disk filled and I started dropping writes. Real data: 20 MB; ClickHouse had logged 12 GB about itself and burned idle CPU doing it. The config that fixes both."
+excerpt = "Disk at 100%, Postgres down with 'no space left on device'. Real data: 20 MB; ClickHouse had logged 12 GB about itself. The config that fixes it, for good."
 tags = ["clickhouse", "postgres", "postmortem", "observability", "performance", "ops"]
 draft = false
 

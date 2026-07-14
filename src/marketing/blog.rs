@@ -420,6 +420,24 @@ mod tests {
     }
 
     #[test]
+    fn posts_fit_serp_limits() {
+        for p in all() {
+            assert!(
+                p.title.len() <= 65,
+                "{}: title {} chars > 65",
+                p.slug,
+                p.title.len()
+            );
+            assert!(
+                p.excerpt.len() <= 160,
+                "{}: excerpt {} chars > 160",
+                p.slug,
+                p.excerpt.len()
+            );
+        }
+    }
+
+    #[test]
     fn posts_load_and_sort_by_date_desc() {
         let posts = all();
         if posts.is_empty() {

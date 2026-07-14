@@ -126,6 +126,17 @@
         </div>
     </section>
 
+    <section class="mx-auto max-w-2xl space-y-8">
+        <h2 class="mk-h2 text-center">downtime by SLA level</h2>
+        {% for lvl in levels %}
+        <div id="{{ lvl.anchor }}" class="space-y-2">
+            <h3 class="mk-h3">{{ lvl.heading }}</h3>
+            <p class="mk-body">{{ lvl.lede }}</p>
+            <p class="mk-body mk-quiet">{{ lvl.note }}</p>
+        </div>
+        {% endfor %}
+    </section>
+
     <section class="mx-auto max-w-2xl space-y-3">
         <h2 class="mk-h2">what uptime percentage really means</h2>
         <p class="mk-body">

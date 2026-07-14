@@ -1,8 +1,9 @@
 +++
-title = "Why I dropped reqwest for my uptime monitor"
+title = "Why I dropped reqwest for hyper in my Rust uptime prober"
 date = "2026-07-07"
+updated = "2026-07-14"
 slug = "http-prober-in-rust-no-reqwest"
-excerpt = "Four things building an uptime prober in Rust taught me, each one a habit a normal HTTP client actively hides from you."
+excerpt = "I swapped reqwest for raw hyper to probe uptime in Rust. Four things it taught me, each one a detail a normal HTTP client hides from you."
 tags = ["rust", "hyper", "monitoring", "devops"]
 draft = false
 +++

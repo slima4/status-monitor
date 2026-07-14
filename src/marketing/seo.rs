@@ -648,6 +648,9 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
             s.push_str(&format!("---\n\n## Blog: {}\n", p.title));
             s.push_str(&format!("URL: {origin}/blog/{}\n", p.slug));
             s.push_str(&format!("Date: {}\n", p.date));
+            if let Some(updated) = &p.updated {
+                s.push_str(&format!("Updated: {updated}\n"));
+            }
             if !p.tags.is_empty() {
                 s.push_str(&format!("Tags: {}\n", p.tags.join(", ")));
             }
@@ -661,8 +664,8 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
 fn build_sitemap(cfg: &MarketingCfg) -> String {
     let origin = &cfg.canonical_origin;
     // Only the blog index borrows a date (it changes on publish); the home page
-    // and landings have no per-page change tracking, so they omit lastmod rather
-    // than borrow an unrelated blog date.
+    // and legal pages have no per-page change tracking, so they omit lastmod
+    // rather than borrow an unrelated blog date.
     let blog_lastmod: Option<String> = if cfg.blog_enabled {
         list_published()
             .iter()
@@ -690,9 +693,15 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
             Some(landing.lastmod.to_string()),
         ));
     }
-    urls.push((format!("{origin}{}", tools::TOOLS_INDEX_PATH), None));
+    urls.push((
+        format!("{origin}{}", tools::TOOLS_INDEX_PATH),
+        Some(tools::TOOLS_INDEX_LASTMOD.to_string()),
+    ));
     for tool in tools::TOOLS {
-        urls.push((format!("{origin}{}", tool.path), None));
+        urls.push((
+            format!("{origin}{}", tool.path),
+            Some(tool.lastmod.to_string()),
+        ));
     }
     for route in legal::ROUTES {
         urls.push((format!("{origin}{}", route.path), None));

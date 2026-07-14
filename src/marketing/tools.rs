@@ -27,7 +27,7 @@ const TOOL_CACHE_CONTROL: HeaderValue =
 
 pub const UPTIME_SLA_PATH: &str = "/tools/uptime-sla-calculator";
 const UPTIME_SLA_CREATED: &str = "2026-07-09";
-const UPTIME_SLA_LASTMOD: &str = "2026-07-09";
+const UPTIME_SLA_LASTMOD: &str = "2026-07-14";
 pub const UPTIME_SLA_TITLE: &str = "Uptime SLA & Downtime Calculator";
 pub const UPTIME_SLA_DESCRIPTION: &str = "Turn an uptime percentage into allowed downtime per day, week, month and year. A free SLA and SLO calculator with the full nines reference table.";
 
@@ -38,7 +38,7 @@ const YEAR: f64 = 31_536_000.0; // 365 days
 const CHECK_INTERVAL: f64 = 60.0;
 
 /// Uptime targets shown in the server-rendered reference table.
-const REFERENCE_NINES: &[f64] = &[90.0, 95.0, 99.0, 99.5, 99.9, 99.95, 99.99, 99.999];
+const REFERENCE_NINES: &[f64] = &[90.0, 95.0, 98.0, 99.0, 99.5, 99.9, 99.95, 99.99, 99.999];
 /// One-click targets on the interactive widget.
 const PRESETS: &[f64] = &[99.0, 99.5, 99.9, 99.95, 99.99, 99.999];
 /// The state the page renders with before any JS runs.
@@ -82,6 +82,55 @@ const UPTIME_SLA_FAQS: &[(&str, &str)] = &[
     ),
 ];
 
+/// Per-level prose sections, one per SLA target people actually search for.
+/// The numbers come from the same math as the table so copy never drifts;
+/// only the context line is hand-written.
+const SLA_LEVELS: &[(f64, &str)] = &[
+    (
+        98.0,
+        "Fine for an internal tool or a staging box. In a contract it reads as \
+         more than fourteen hours of monthly downtime, which is a hard sell.",
+    ),
+    (
+        99.0,
+        "Two nines. Almost a full working day of downtime every month, and \
+         most of it tends to arrive in business hours.",
+    ),
+    (
+        99.5,
+        "Where single-server setups without failover usually land. A weekly \
+         maintenance window still fits, barely.",
+    ),
+    (
+        99.9,
+        "Three nines, the most common SaaS commitment. One bad deploy a month \
+         can eat the whole budget.",
+    ),
+    (
+        99.95,
+        "The usual internal target behind a 99.9% contract. It leaves room for \
+         one short incident a month, not two.",
+    ),
+    (
+        99.99,
+        "Four nines. No human pages fast enough for this; recovery has to be \
+         automatic before anyone reads the alert.",
+    ),
+    (
+        99.999,
+        "Five nines is telecom territory. Five minutes a year needs redundant \
+         everything, and few web products earn back what that costs.",
+    ),
+];
+
+/// One rendered "how much downtime is X%" section.
+pub struct SlaLevelSection {
+    pub anchor: String,
+    pub heading: String,
+    pub lede: String,
+    pub note: &'static str,
+}
+
 /// One reference-table row: an uptime target and its allowed downtime per period.
 pub struct SlaRow {
     pub label: String,
@@ -118,6 +167,7 @@ struct UptimeSlaPage {
     faq_json_ld: JsonLd,
     faqs: &'static [(&'static str, &'static str)],
     rows: Vec<SlaRow>,
+    levels: Vec<SlaLevelSection>,
     default: SlaResult,
     default_uptime: String,
     presets: &'static [f64],
@@ -210,6 +260,25 @@ fn reference_rows() -> Vec<SlaRow> {
         .collect()
 }
 
+fn sla_level_sections() -> Vec<SlaLevelSection> {
+    SLA_LEVELS
+        .iter()
+        .map(|&(pct, note)| {
+            let d = sla_result(pct);
+            SlaLevelSection {
+                anchor: format!("sla-{pct}").replace('.', "-"),
+                heading: format!("How much downtime is {pct}% uptime?"),
+                lede: format!(
+                    "A {pct}% SLA allows {} of downtime per day, {} per week, \
+                     {} per month and {} per year.",
+                    d.daily, d.weekly, d.monthly, d.yearly,
+                ),
+                note,
+            }
+        })
+        .collect()
+}
+
 static UPTIME_SLA_CACHED: OnceLock<CachedRender> = OnceLock::new();
 
 fn render_uptime_sla(cfg: &MarketingCfg) -> CachedRender {
@@ -244,6 +313,7 @@ fn render_uptime_sla(cfg: &MarketingCfg) -> CachedRender {
         faq_json_ld: json_ld_faqpage(UPTIME_SLA_FAQS),
         faqs: UPTIME_SLA_FAQS,
         rows: reference_rows(),
+        levels: sla_level_sections(),
         default: sla_result(DEFAULT_UPTIME),
         default_uptime: format!("{DEFAULT_UPTIME}"),
         presets: PRESETS,
@@ -747,6 +817,7 @@ pub struct ToolMeta {
     pub path: &'static str,
     pub title: &'static str,
     pub description: &'static str,
+    pub lastmod: &'static str,
 }
 
 pub const TOOLS: &[ToolMeta] = &[
@@ -754,16 +825,19 @@ pub const TOOLS: &[ToolMeta] = &[
         path: UPTIME_SLA_PATH,
         title: UPTIME_SLA_TITLE,
         description: UPTIME_SLA_DESCRIPTION,
+        lastmod: UPTIME_SLA_LASTMOD,
     },
     ToolMeta {
         path: CRON_PATH,
         title: CRON_TITLE,
         description: CRON_DESCRIPTION,
+        lastmod: CRON_LASTMOD,
     },
     ToolMeta {
         path: ERROR_BUDGET_PATH,
         title: ERROR_BUDGET_TITLE,
         description: ERROR_BUDGET_DESCRIPTION,
+        lastmod: ERROR_BUDGET_LASTMOD,
     },
 ];
 
@@ -771,7 +845,7 @@ pub const TOOLS: &[ToolMeta] = &[
 
 pub const TOOLS_INDEX_PATH: &str = "/tools";
 const TOOLS_INDEX_CREATED: &str = "2026-07-09";
-const TOOLS_INDEX_LASTMOD: &str = "2026-07-13";
+pub const TOOLS_INDEX_LASTMOD: &str = "2026-07-13";
 const TOOLS_INDEX_TITLE: &str = "Free Tools for Developers & SREs";
 const TOOLS_INDEX_DESCRIPTION: &str = "Free, no sign-up calculators and generators for uptime, reliability and scheduling. Built for our own work and kept open for yours.";
 
@@ -872,6 +946,35 @@ mod tests {
         assert_eq!(rows.len(), REFERENCE_NINES.len());
         assert_eq!(rows[0].label, "90%");
         assert!(rows.iter().all(|r| !r.yearly.is_empty()));
+    }
+
+    #[test]
+    fn level_targets_stay_subsets_of_the_table_and_presets() {
+        for (pct, _) in SLA_LEVELS {
+            assert!(
+                REFERENCE_NINES.contains(pct),
+                "{pct}% has a prose section but no table row"
+            );
+        }
+        for pct in PRESETS {
+            let covered = SLA_LEVELS.iter().any(|(p, _)| p == pct);
+            assert!(covered, "preset {pct}% has no prose section");
+        }
+    }
+
+    #[test]
+    fn level_sections_carry_anchors_and_numbers() {
+        let levels = sla_level_sections();
+        assert_eq!(levels.len(), SLA_LEVELS.len());
+        let mut anchors: Vec<_> = levels.iter().map(|l| l.anchor.as_str()).collect();
+        anchors.sort_unstable();
+        anchors.dedup();
+        assert_eq!(anchors.len(), levels.len(), "anchor collision");
+        let three_nines = levels.iter().find(|l| l.anchor == "sla-99-9").unwrap();
+        assert_eq!(three_nines.heading, "How much downtime is 99.9% uptime?");
+        assert!(three_nines.lede.contains("43m 12s"));
+        let half = levels.iter().find(|l| l.anchor == "sla-99-5").unwrap();
+        assert!(half.lede.contains("3h 36m"));
     }
 
     #[test]
