@@ -49,7 +49,7 @@ Full disclosure before anything else: we build Uptimepage, the last tool on this
 
 ## What are you actually replacing?
 
-Pingdom bundles three jobs. First, uptime checks from around a hundred probe locations. Second, a digital-experience layer: scripted browser transactions and real user monitoring with 13-month retention. Third, public status pages, which are included in its plans. Most teams pay for all three and use one and a half.
+Pingdom bundles three jobs. First, uptime checks from around a hundred probe locations. Second, a digital-experience layer: scripted browser transactions and real user monitoring with 13-month retention. Third, public status pages, which are included in its plans. Most teams pay for all three and use one and a half. Whichever replacement you pick, it is worth checking that its status page shows uptime it actually measured, not just the incidents someone published, which is [a status page you cannot fake](/blog/status-page-you-cant-fake).
 
 That is why "the best Pingdom alternative" has no single answer. Pingdom's competitors split into three camps: budget uptime services, developer synthetics platforms, and tools you host yourself. If you only ever looked at the uptime dashboard, almost everything below is cheaper and simpler. If your team lives in the RUM waterfall charts, only one tool here genuinely replaces that, and it is not ours. We compared the pricing models in detail in [Pingdom vs StatusCake](/compare/pingdom-vs-statuscake), and put our own cards on the table in [Uptimepage vs Pingdom](/vs/pingdom).
 

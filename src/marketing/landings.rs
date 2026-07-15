@@ -368,12 +368,12 @@ docker compose up -d"#,
     Landing {
         path: "/self-hosted-status-page",
         created: "2026-06-20",
-        lastmod: "2026-07-02",
+        lastmod: "2026-07-15",
         title: "Self-Hosted Status Page & Uptime Monitoring",
         eyebrow: "run it yourself",
         h1: "A self-hosted status page and uptime monitor",
-        meta_description: "Self-hosted uptime monitoring and status pages in one AGPL binary. docker compose up with Postgres and ClickHouse. Multi-region, free, your data on your boxes.",
-        lede: "Run the whole thing yourself: monitoring, incidents and a public status page in one self-contained binary. docker compose up and you are live, with your data on your own infrastructure.",
+        meta_description: "Self-hosted uptime monitoring and status pages in one AGPL binary. docker compose up with Postgres and ClickHouse. Multi-region probes, an uptime bar measured from real checks, your data on your own infrastructure.",
+        lede: "Run the whole thing yourself: uptime monitoring, incidents and a public status page in one self-contained binary. docker compose up and you are live, with every check and subscriber on your own infrastructure and an uptime bar measured from real checks, not from what someone chose to publish.",
         features: &[
             Feature {
                 label: "License",
@@ -396,22 +396,34 @@ docker compose up -d"#,
                 value: "Terraform + REST + MCP",
             },
             Feature {
-                label: "Price to start",
-                value: "free, AGPL",
+                label: "Uptime bar",
+                value: "measured, not published",
             },
         ],
         sections: &[
             Section {
                 heading: "up with one command",
-                body: "One self-contained binary, Postgres for config and ClickHouse for the time-series. docker compose up brings the whole stack up with migrations applied on boot. Nothing else to operate, no Kubernetes.",
+                body: "One self-contained binary, Postgres for config and ClickHouse for the check history. docker compose up brings the whole stack up and applies migrations on boot. There is no queue to run, no Kubernetes, and no second service to keep in sync.",
             },
             Section {
-                heading: "your data on your boxes",
-                body: "Run it on your own infrastructure, in your own region, behind your own network. Nothing leaves your environment, and the public status page serves straight from it.",
+                heading: "your data stays on your infrastructure",
+                body: "Every check result, incident, subscriber and status page lives in your own environment, in the region you choose, behind your own network. The public page serves straight from your instance, so nothing about your uptime leaves your control.",
             },
             Section {
-                heading: "probes you own",
-                body: "Run regional probe agents wherever your users are and fold their results into each monitor per region. The same Terraform config and API calls run against hosted and self-hosted alike.",
+                heading: "an uptime bar you cannot fake",
+                body: "The 90-day history comes from real checks, measured across regions with a confirmation rule, not from which incidents someone chose to publish. A short blip in one region does not burn a day, and a real outage always shows, even one you never wrote an incident for.",
+            },
+            Section {
+                heading: "incidents and postmortems on your terms",
+                body: "A failing monitor opens an incident automatically and posts it to the status page. You add the human notes and the postmortem when you are ready. Email and webhook subscribers get the updates, and scheduled maintenance windows keep planned work from paging anyone.",
+            },
+            Section {
+                heading: "probes you run, in the regions you need",
+                body: "Run regional probe agents wherever your users are and fold their results into each monitor per region. HTTP, TCP, DNS, TLS and ping checks, each with its own expectations and its own alert channels.",
+            },
+            Section {
+                heading: "one config for hosted and self-hosted",
+                body: "The same Terraform provider, REST API and MCP server drive a self-hosted instance and the hosted tier alike. Move between them without rewriting anything, and there is no vendor lock-in to leave behind.",
             },
         ],
         code: Some(CodeSample {
@@ -422,16 +434,20 @@ docker compose up -d"#,
         }),
         resources: &[
             ResourceLink {
+                label: "An uptime bar you cannot fake",
+                href: "/blog/status-page-you-cant-fake",
+            },
+            ResourceLink {
+                label: "How the monitor is built",
+                href: "/blog/building-an-uptime-monitor-in-rust",
+            },
+            ResourceLink {
                 label: "vs Uptime Kuma",
                 href: "/vs/uptime-kuma",
             },
             ResourceLink {
                 label: "Monitoring as code",
                 href: "/terraform-uptime-monitoring",
-            },
-            ResourceLink {
-                label: "Best self-hosted monitors",
-                href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
             ResourceLink {
                 label: "vs Upptime, Cachet, Statping",
@@ -2183,6 +2199,10 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Can I monitor from more than one region?",
                 "Yes. Run regional probe agents on your own servers and Uptimepage folds their results into each monitor per region.",
+            ),
+            (
+                "Can I trust the uptime numbers?",
+                "Yes. The uptime bar is measured from your own checks with a confirmation rule, not set by hand and not built from published incidents. A real outage shows even if you never wrote an incident for it.",
             ),
             (
                 "Is it free?",

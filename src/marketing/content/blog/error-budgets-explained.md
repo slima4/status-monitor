@@ -73,7 +73,7 @@ One more rule keeps it fair. If you never spend your budget, your SLO is too str
 
 ## Where monitoring fits
 
-All of this needs one thing you have to measure: your real availability. The formula is easy once you have that number. Getting the number is the hard part. That is the job of [external monitoring](/uptime-monitoring-for-developers). It checks your service the way a user reaches it, and it records every failure, so the budget matches reality.
+All of this needs one thing you have to measure: your real availability. The formula is easy once you have that number. Getting the number is the hard part. That is the job of [external monitoring](/uptime-monitoring-for-developers). It checks your service the way a user reaches it, and it records every failure, so the budget matches reality. That number only stays honest if your status page reports what the checks measured, not what someone chose to publish, which is [a status page you cannot fake](/blog/status-page-you-cant-fake).
 
 Run the numbers for your own SLO in the [error budget calculator](/tools/error-budget-calculator). Then decide your rule before you need it.
 

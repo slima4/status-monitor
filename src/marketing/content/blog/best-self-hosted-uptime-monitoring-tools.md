@@ -54,7 +54,7 @@ We build one of the tools on this list, Uptimepage, so keep that in mind. We hav
 
 Three questions sort this category faster than any feature table.
 
-First, do you want a status page your customers see, or just internal alerts? Some tools do one well and bolt on the other. Second, do you configure by clicking, or do you want the config in Git? That single preference rules out half the list for most people. Third, how much do you want to operate? A single binary on a small VPS is a different commitment from a platform that expects Kubernetes.
+First, do you want a status page your customers see, or just internal alerts? Some tools do one well and bolt on the other. Second, do you configure by clicking, or do you want the config in Git? That single preference rules out half the list for most people. Third, how much do you want to operate? A single binary on a small VPS is a different commitment from a platform that expects Kubernetes. And whichever you pick, check that its status page shows uptime it measured, not just the incidents you published, which is [a status page you cannot fake](/blog/status-page-you-cant-fake).
 
 Hold those three in mind and the choices get obvious. Here is the whole list against them at a glance, before the detail on each.
 
