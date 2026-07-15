@@ -1125,6 +1125,13 @@ html:has(.marketing-shell) {
 .mk-article--best-self-hosted-uptime-monitoring-tools tbody tr:first-child td:first-child {
     font-weight: 600;
 }
+/* Same our-row tint, but this round-up closes on our row instead of leading with it. */
+.mk-article--pingdom-alternatives tbody tr:last-child td {
+    color: var(--mk-ok);
+}
+.mk-article--pingdom-alternatives tbody tr:last-child td:first-child {
+    font-weight: 600;
+}
 
 /* ── Section orchestration: first-paint stagger ────────────────────
    Marketing pages are full reloads (no htmx swap) — unconditional

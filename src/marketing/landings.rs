@@ -600,7 +600,7 @@ docker compose up -d"#,
     Landing {
         path: "/vs/uptimerobot",
         created: "2026-06-16",
-        lastmod: "2026-07-02",
+        lastmod: "2026-07-14",
         title: "An UptimeRobot Alternative with Status Pages",
         eyebrow: "switching monitors",
         h1: "Looking for an UptimeRobot alternative?",
@@ -941,10 +941,10 @@ docker compose up -d"#,
     Landing {
         path: "/vs/pingdom",
         created: "2026-06-25",
-        lastmod: "2026-07-02",
-        title: "Pingdom Alternative with Status Pages Built In",
+        lastmod: "2026-07-14",
+        title: "Uptimepage vs Pingdom: Status Pages Built In",
         eyebrow: "switching monitors",
-        h1: "A Pingdom alternative with status pages built in",
+        h1: "Uptimepage vs Pingdom: status pages built in",
         meta_description: "Uptimepage pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Open source, free to start.",
         lede: "If you are comparing monitor prices, here is what Uptimepage gives you by default: the checks and a public status page are the same product, the source is open, and you can start free with no card.",
         features: &[
@@ -989,6 +989,10 @@ docker compose up -d"#,
         ],
         code: None,
         resources: &[
+            ResourceLink {
+                label: "8 Pingdom alternatives, compared",
+                href: "/blog/pingdom-alternatives",
+            },
             ResourceLink {
                 label: "Free pricing",
                 href: "/pricing",
@@ -1269,7 +1273,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/pingdom-vs-statuscake",
         created: "2026-07-05",
-        lastmod: "2026-07-05",
+        lastmod: "2026-07-14",
         title: "Pingdom vs StatusCake",
         eyebrow: "comparing hosted monitors",
         h1: "Pingdom vs StatusCake: what you actually get",
@@ -1299,6 +1303,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Uptimepage vs Pingdom",
                 href: "/vs/pingdom",
+            },
+            ResourceLink {
+                label: "8 Pingdom alternatives, compared",
+                href: "/blog/pingdom-alternatives",
             },
             ResourceLink {
                 label: "Uptimepage vs UptimeRobot",
@@ -3057,7 +3065,10 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "config-as-code",
-            cells: &[("Terraform · REST · MCP", "yes"), ("REST API", "part")],
+            cells: &[
+                ("Terraform · REST · MCP", "yes"),
+                ("REST · Terraform · MCP", "part"),
+            ],
         },
         MatrixRow {
             label: "self-host (open source)",
@@ -3074,7 +3085,7 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
     ],
     notes: &[
         "UptimeRobot's free plan allows 50 monitors but at a 5-minute interval with no login seats for teammates; 60-second checks, more status pages and team seats start on paid plans.",
-        "UptimeRobot is a hosted service, not open-source or self-hostable, and exposes a REST API but no Terraform provider. Uptimepage adds a Terraform provider and MCP server but has no heartbeat monitor yet.",
+        "UptimeRobot is a hosted service, not open-source or self-hostable. Its Terraform provider ships from its own GitHub organization though it carries the registry's community badge, and it added a hosted MCP server. Uptimepage has no heartbeat monitor yet.",
         "Verified against uptimerobot.com/pricing in July 2026. SaaS plans change, so check their current pricing before you decide.",
     ],
 };
