@@ -464,10 +464,13 @@ impl OrgAggregator {
         Ok(rows)
     }
 
-    /// Uncapped confirmed public incident windows feeding the open-incident
-    /// component states and the day-strip paint. Unlike the popover markers,
-    /// the paint must be complete or the strip renders green over a real
-    /// outage; rows are slim (no titles) and bounded by the span window.
+    /// Uncapped confirmed incident windows feeding the open-incident component
+    /// states and the day-strip paint. Auto incidents carry the writer's
+    /// quorum-gated downtime, so they paint regardless of the visibility stamp;
+    /// manual incidents paint only once published. Visibility still gates the
+    /// curated cards, recent list, and popover markers. Paint must be complete
+    /// or the strip renders green over a real outage; rows are slim (no titles)
+    /// and bounded by the span window.
     async fn load_paint_windows(
         &self,
         org: OrgId,
@@ -487,7 +490,7 @@ impl OrgAggregator {
                WHERE i.org_id = $2
                  AND (i.ended_at IS NULL OR i.ended_at >= $1)
                  AND i.target_id = ANY($3)
-                 AND i.visibility = 'public'"#,
+                 AND (i.origin = 'monitor' OR i.visibility = 'public')"#,
         )
         .bind(since)
         .bind(org.0)

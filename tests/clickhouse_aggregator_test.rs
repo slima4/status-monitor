@@ -537,6 +537,141 @@ async fn build_component_state_follows_confirmed_incidents() {
     }
 }
 
+/// An auto (monitor) incident is the writer's quorum-gated outage, so it paints
+/// the strip and drives the component dot even while `internal`; the operator
+/// can keep it out of the incident narrative but not off the uptime bar. An
+/// `internal` manual incident stays hidden from both surfaces.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL + CLICKHOUSE_URL"]
+async fn internal_auto_incident_paints_strip_manual_stays_hidden() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    purge_prefix(&pool, "agg-auto-").await;
+
+    let org_id = seed_org(&pool, "agg-auto").await;
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let mk_target = |role: &str| public_target(&format!("agg-auto-{role}-{}", Uuid::now_v7()));
+    let auto_target = store
+        .create(
+            org_id,
+            mk_target("auto"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create auto target");
+    let manual_target = store
+        .create(
+            org_id,
+            mk_target("manual"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create manual target");
+    let auto_id = auto_target.id;
+    let manual_id = manual_target.id;
+    let pool_for_cleanup = pool.clone();
+
+    let body = async move {
+        let now = Utc::now();
+        let mk = |tid: Uuid, origin: &str| {
+            sqlx::query(
+                "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, origin, visibility) \
+                 VALUES ($1, $2, $3, 'down', $4, 'internal')",
+            )
+            .bind(org_id.0)
+            .bind(tid)
+            .bind(now - chrono::Duration::minutes(5))
+            .bind(origin.to_string())
+        };
+        mk(auto_id, "monitor")
+            .execute(&pool)
+            .await
+            .expect("insert internal auto incident");
+        mk(manual_id, "manual")
+            .execute(&pool)
+            .await
+            .expect("insert internal manual incident");
+
+        let page_id = seed_page_with_target(&pool, org_id, auto_id).await;
+        PgStatusPageStore::new(pool.clone())
+            .add_component(
+                org_id,
+                page_id,
+                NewStatusPageComponent {
+                    target_id: manual_id,
+                    public_name: None,
+                    public_description: None,
+                    public_group: None,
+                    sort_order: 1,
+                },
+                i64::MAX,
+                None,
+            )
+            .await
+            .expect("add manual component");
+
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let (page, markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
+
+        let component = |id: Uuid| {
+            page.groups
+                .iter()
+                .flat_map(|g| &g.components)
+                .find(|c| c.id == id)
+                .expect("component present")
+        };
+        let auto = component(auto_id);
+        let manual = component(manual_id);
+
+        assert_eq!(
+            auto.current_status,
+            PublicComponentStatus::MajorOutage,
+            "internal auto incident drives the component dot"
+        );
+        assert_eq!(
+            auto.history.last().copied(),
+            Some(DayState::MajorOutage),
+            "internal auto incident paints the strip"
+        );
+        assert_eq!(page.overall.state, OverallState::MajorOutage);
+
+        assert_eq!(
+            manual.current_status,
+            PublicComponentStatus::Operational,
+            "internal manual incident does not touch the dot"
+        );
+        assert!(
+            matches!(
+                manual.history.last().copied(),
+                Some(DayState::Operational | DayState::NoData)
+            ),
+            "internal manual incident does not paint the strip"
+        );
+
+        // Neither internal incident enters the curated narrative surfaces.
+        assert!(
+            page.active_incidents.is_empty(),
+            "no internal incident is active"
+        );
+        assert!(markers.is_empty(), "no internal incident is marked");
+    };
+
+    let result = AssertUnwindSafe(body).catch_unwind().await;
+    delete_target(&pool_for_cleanup, auto_id).await;
+    delete_target(&pool_for_cleanup, manual_id).await;
+    if let Err(p) = result {
+        std::panic::resume_unwind(p);
+    }
+}
+
 /// End-to-end: a PUBLISHED postmortem surfaces on the public incident detail via
 /// `OrgPublicSource::incident_by_id`; a DRAFT one (published_at NULL) does not.
 /// Guards the publish → public-page wiring.
