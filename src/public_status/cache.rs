@@ -461,9 +461,19 @@ mod tests {
         );
 
         tokio::time::sleep(Duration::from_millis(120)).await;
-        assert_eq!(
-            cache.last_good_len(),
-            0,
+        // moka evicts on its own coarse clock, processed lazily by the
+        // run_pending_tasks() inside last_good_len(). Poll past the window
+        // instead of reading once, so a loaded runner can't lose the race.
+        let mut evicted = false;
+        for _ in 0..100 {
+            if cache.last_good_len() == 0 {
+                evicted = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert!(
+            evicted,
             "idle snapshot must be evicted past last_good idle window"
         );
     }
