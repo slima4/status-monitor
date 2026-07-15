@@ -1,6 +1,7 @@
 +++
 title = "Error budgets, explained: SLOs, burn rate, when to stop shipping"
 date = "2026-07-13"
+updated = "2026-07-15"
 slug = "error-budgets-explained"
 excerpt = "What an error budget is, the simple formula, how burn rate becomes an alert, and the rule that makes it work. With a free calculator."
 tags = ["sre", "slo", "reliability", "monitoring", "on-call"]

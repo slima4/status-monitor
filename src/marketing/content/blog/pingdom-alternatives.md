@@ -1,6 +1,7 @@
 +++
 title = "8 best Pingdom alternatives in 2026, free and paid"
 date = "2026-07-14"
+updated = "2026-07-15"
 slug = "pingdom-alternatives"
 excerpt = "Eight real Pingdom alternatives compared honestly: which replaces uptime checks, which replaces synthetics and RUM, and which ends usage-based pricing."
 tags = ["monitoring", "status-page", "alternatives"]

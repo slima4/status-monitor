@@ -1,7 +1,7 @@
 +++
 title = "Best open-source, self-hosted uptime monitors (2026)"
 date = "2026-06-20"
-updated = "2026-07-14"
+updated = "2026-07-15"
 slug = "best-self-hosted-uptime-monitoring-tools"
 excerpt = "A fair look at the open-source, self-hostable tools for watching sites and APIs in 2026: what each is good at, where it stops, and how to pick one."
 tags = ["open-source", "self-hosted", "monitoring", "status-page"]
