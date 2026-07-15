@@ -3225,16 +3225,19 @@
         box-shadow: 0 0 0 2px var(--theme-surface-elev), 0 0 0 3px var(--theme-ink);
         z-index: 3;
     }
-    /* Ribbon-cell tooltip. Matches the console's floating panel
-       (.sm-combobox__panel): flat, hairline border, mono, no shadow. */
+    /* Ribbon-cell tooltip: a console status card. Flat like every panel in
+       the CLI register (hairline border, no offset shadow); a 2px inset
+       gutter carries the hovered cell's severity colour — the same
+       left-edge register as .result-row--bad and .flow-step--*. */
     .sm-ribbon-tip {
+        --tip-accent: var(--theme-text-quiet);
         position: fixed;
         top: 0;
         left: 0;
         z-index: 60;
-        min-width: 9rem;
+        min-width: 11rem;
         max-width: min(20rem, calc(100vw - 1.5rem));
-        padding: 0.55rem 0.7rem;
+        padding: 0.55rem 0.8rem 0.6rem 0.9rem;
         font-family: var(--font-mono);
         font-size: 0.75rem;
         line-height: 1.4;
@@ -3243,17 +3246,46 @@
         background: var(--theme-surface-elev);
         border: 1px solid var(--theme-line);
         border-radius: 2px;
+        box-shadow: inset 2px 0 0 var(--tip-accent);
         pointer-events: none;
     }
+    .sm-ribbon-tip--ok   { --tip-accent: var(--theme-state-ok-strong); }
+    .sm-ribbon-tip--warn { --tip-accent: var(--theme-state-warn-strong); }
+    .sm-ribbon-tip--bad  { --tip-accent: var(--theme-state-bad-strong); }
     .sm-ribbon-tip[hidden] { display: none; }
     .sm-ribbon-tip__head {
         display: flex;
         justify-content: space-between;
+        align-items: baseline;
         gap: 1.5rem;
         font-variant-numeric: tabular-nums;
     }
     .sm-ribbon-tip__time { color: var(--theme-ink); font-weight: 600; }
-    .sm-ribbon-tip__stat { color: var(--theme-text-muted); }
+    .sm-ribbon-tip__stat { color: var(--theme-text-muted); font-weight: 600; }
+    .sm-ribbon-tip__stat--ok   { color: var(--theme-state-ok-fg); }
+    .sm-ribbon-tip__stat--warn { color: var(--theme-state-warn-fg); }
+    .sm-ribbon-tip__stat--bad  { color: var(--theme-state-bad-fg); }
+    .sm-ribbon-tip__stat--none { color: var(--theme-text-muted); }
+    /* Per-bucket meta under a hairline: a dim-key / ink-value grid, the
+       shape of CLI status output (`systemctl status`, `top`). */
+    .sm-ribbon-tip__body {
+        margin-top: 0.45rem;
+        padding-top: 0.45rem;
+        border-top: 1px solid var(--theme-line);
+        display: grid;
+        grid-template-columns: auto 1fr;
+        column-gap: 0.9rem;
+        row-gap: 2px;
+        font-variant-numeric: tabular-nums;
+    }
+    .sm-ribbon-tip__key { color: var(--theme-text-quiet); }
+    .sm-ribbon-tip__val { color: var(--theme-text); }
+    .sm-ribbon-tip__val--bad { color: var(--theme-state-bad-fg); }
+    .sm-ribbon-tip__hint {
+        grid-column: 1 / -1;
+        margin-top: 0.35rem;
+        color: var(--theme-text-muted);
+    }
     .sm-ribbon-tip__count {
         margin-top: 0.4rem;
         color: var(--theme-state-bad-fg);

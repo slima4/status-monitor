@@ -27,7 +27,7 @@
         return undefined;
     }
 
-    var timeFmt, dateFmt, dateYearFmt, exactFmt, fullFmt;
+    var timeFmt, dateFmt, dateYearFmt, dayTimeFmt, exactFmt, fullFmt;
     try {
         // hourCycle is one of the few component options allowed alongside
         // timeStyle; undefined leaves the locale default untouched.
@@ -35,9 +35,19 @@
         timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hourCycle: hc });
         dateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
         dateYearFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
+        dayTimeFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hourCycle: hc });
         exactFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium", hourCycle: hc });
         fullFmt = new Intl.DateTimeFormat(undefined, { dateStyle: "full", timeStyle: "long", hourCycle: hc });
     } catch (_) { /* Intl unavailable: leave server text untouched */ }
+
+    // Shared local-timezone formatters (honouring the user's 12h/24h pref)
+    // for scripts that build text outside <time data-tz> elements — e.g. the
+    // ribbon tooltip. Null when Intl is unavailable; callers keep their
+    // server-rendered fallback.
+    window.smLocalFmt = fullFmt ? {
+        time: function (d) { return timeFmt.format(d); },
+        dayTime: function (d) { return dayTimeFmt.format(d); },
+    } : null;
 
     function sameDay(a, b) {
         return a.getFullYear() === b.getFullYear()

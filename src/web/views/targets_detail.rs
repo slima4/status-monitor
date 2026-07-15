@@ -808,6 +808,10 @@ fn status_segments(
     let bucket = i64::from(rollup_bucket_secs(bucket_seconds));
     let from_grid = range.from.timestamp().div_euclid(bucket) * bucket;
     let to_ts = range.to.timestamp();
+    // Multi-day ranges label buckets with the date — ten identical "12:00"
+    // tooltips across a 30d strip are indistinguishable. UTC fallback only;
+    // the tooltip JS re-renders it in the visitor's timezone.
+    let multi_day = range.to - range.from > chrono::Duration::hours(24);
     counts
         .iter()
         .enumerate()
@@ -816,7 +820,11 @@ fn status_segments(
             let end_ts = (start_ts + bucket).min(to_ts).max(start_ts);
             let start = DateTime::from_timestamp(start_ts, 0).unwrap_or(range.from);
             let end = DateTime::from_timestamp(end_ts, 0).unwrap_or(range.to);
-            let time = start.format("%H:%M").to_string();
+            let time = if multi_day {
+                start.format("%b %d %H:%M").to_string()
+            } else {
+                start.format("%H:%M").to_string()
+            };
             // The first cell's grid start precedes range.from; drill from range.from
             // so the drawer never lists rows the cell's counts never included.
             let drill_from = DateTime::from_timestamp(start_ts.max(range.from.timestamp()), 0)
@@ -1412,6 +1420,28 @@ mod tests {
             row("apac-sg", Some("apac-sg")).filter_href,
             "/targets/x?range=24h"
         );
+    }
+
+    #[test]
+    fn status_segment_labels_carry_date_only_on_multi_day_ranges() {
+        use crate::storage::TimeRange;
+        use chrono::TimeZone;
+        let day = |d: u32| chrono::Utc.with_ymd_and_hms(2026, 5, d, 12, 0, 0).unwrap();
+        let counts = [(10u64, 10u64)];
+
+        let week = ClampedRange::unclamped(TimeRange {
+            from: day(6),
+            to: day(13),
+        });
+        let seg = &status_segments(&counts, week, 6 * 3600)[0];
+        assert!(seg.time.contains("May"), "multi-day label: {}", seg.time);
+
+        let daylong = ClampedRange::unclamped(TimeRange {
+            from: day(12),
+            to: day(13),
+        });
+        let seg = &status_segments(&counts, daylong, 1800)[0];
+        assert!(!seg.time.contains("May"), "24h label: {}", seg.time);
     }
 
     fn sample_page() -> DetailPage {

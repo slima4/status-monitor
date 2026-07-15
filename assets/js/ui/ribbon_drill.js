@@ -103,7 +103,12 @@
 
         const title = d.querySelector("[data-ribbon-drawer-title]");
         const scale = d.querySelector("[data-ribbon-drawer-scale]");
-        if (title) title.textContent = `${cell.dataset.tipTime} · ${cell.dataset.tipStat}`;
+        if (title) {
+            const label = window.smRibbonTipLabel
+                ? window.smRibbonTipLabel(cell)
+                : cell.dataset.tipTime;
+            title.textContent = `${label} · ${cell.dataset.tipStat}`;
+        }
         if (scale) {
             const total = parseInt(cell.dataset.total, 10) || 0;
             const bad = parseInt(cell.dataset.bad, 10) || 0;

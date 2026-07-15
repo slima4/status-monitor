@@ -4,7 +4,11 @@
    open inspection survives the swap. #}
 <div id="detail-ribbon"{% if ribbon_oob %} hx-swap-oob="true"{% endif %}>
   {% if !segments.is_empty() %}
-  <div class="dashboard-ribbon dashboard-ribbon--bare" role="group" aria-label="Uptime over the selected range">
+  {# data-tip-date flags multi-day ranges so the tooltip JS renders the
+     bucket's local date alongside the time; data-tip-ts carries the bucket
+     start for that browser-timezone rendering (seg.time stays the UTC
+     fallback). #}
+  <div class="dashboard-ribbon dashboard-ribbon--bare" role="group" aria-label="Uptime over the selected range"{% if range != "1h" && range != "24h" %} data-tip-date="1"{% endif %}>
     {% for seg in segments %}
     {% if seg.class == "deg" || seg.class == "maj" %}
     <button type="button"
@@ -15,10 +19,12 @@
             data-total="{{ seg.total }}"
             data-bad="{{ seg.bad }}"
             data-tip-time="{{ seg.time }}"
+            data-tip-ts="{{ seg.from_iso }}"
+            data-tip-to="{{ seg.to_iso }}"
             data-tip-stat="{{ seg.stat }}"
             aria-label="{{ seg.time }} · {{ seg.stat }} — show checks in this window"></button>
     {% else %}
-    <span class="dashboard-ribbon__seg dashboard-ribbon__seg--{{ seg.class }}" data-tip-time="{{ seg.time }}" data-tip-stat="{{ seg.stat }}" aria-hidden="true"></span>
+    <span class="dashboard-ribbon__seg dashboard-ribbon__seg--{{ seg.class }}" data-tip-time="{{ seg.time }}" data-tip-ts="{{ seg.from_iso }}" data-tip-to="{{ seg.to_iso }}" data-tip-stat="{{ seg.stat }}" data-total="{{ seg.total }}" data-bad="{{ seg.bad }}" aria-hidden="true"></span>
     {% endif %}
     {% endfor %}
   </div>
