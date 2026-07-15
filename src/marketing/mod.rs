@@ -50,7 +50,11 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .route("/robots.txt", get(seo::robots_txt))
         .route("/sitemap.xml", get(seo::sitemap_xml))
         .route("/llms.txt", get(seo::llms_txt))
-        .route("/llms-full.txt", get(seo::llms_full_txt));
+        .route("/llms-full.txt", get(seo::llms_full_txt))
+        .route(
+            "/startupranking1371476620941810.html",
+            get(seo::startupranking_verification),
+        );
     r = legal::mount(r);
     r = landings::mount(r);
     r = tools::mount(r);

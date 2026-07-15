@@ -23,7 +23,7 @@ use super::config::{
 };
 use super::landings;
 use super::legal;
-use super::pages::{APPLICATION_XML, TEXT_PLAIN};
+use super::pages::{APPLICATION_XML, HTML_CONTENT_TYPE, TEXT_PLAIN};
 use super::tools;
 
 const STATIC_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=86400");
@@ -495,6 +495,16 @@ pub async fn llms_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
 pub async fn llms_full_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
     let body = LLMS_FULL_CACHED.get_or_init(|| build_llms_full(&cfg));
     plain_text(body.clone(), TEXT_PLAIN)
+}
+
+const STARTUPRANKING_VERIFICATION: &[u8] =
+    b"startupranking-site-verification: startupranking1371476620941810.html";
+
+pub async fn startupranking_verification() -> Response {
+    plain_text(
+        Bytes::from_static(STARTUPRANKING_VERIFICATION),
+        HTML_CONTENT_TYPE,
+    )
 }
 
 /// Warm the static text caches at boot. Sitemap is the only non-trivial
