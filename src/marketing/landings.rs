@@ -372,7 +372,7 @@ docker compose up -d"#,
         title: "Self-Hosted Status Page & Uptime Monitoring",
         eyebrow: "run it yourself",
         h1: "A self-hosted status page and uptime monitor",
-        meta_description: "Self-hosted uptime monitoring and status pages in one AGPL binary. docker compose up with Postgres and ClickHouse. Multi-region probes, an uptime bar measured from real checks, your data on your own infrastructure.",
+        meta_description: "Self-hosted uptime monitoring and status pages in one AGPL binary. docker compose up with Postgres and ClickHouse. Your data on your own infrastructure.",
         lede: "Run the whole thing yourself: uptime monitoring, incidents and a public status page in one self-contained binary. docker compose up and you are live, with every check and subscriber on your own infrastructure and an uptime bar measured from real checks, not from what someone chose to publish.",
         features: &[
             Feature {

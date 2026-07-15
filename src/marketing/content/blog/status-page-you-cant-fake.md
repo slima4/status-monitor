@@ -1,8 +1,8 @@
 +++
-title = "The status page you can't fake: measured uptime, not published incidents"
+title = "The status page you can't fake: measured uptime, not published"
 date = "2026-07-15"
 slug = "status-page-you-cant-fake"
-excerpt = "A status page reports on a company's own service, so the company has a reason to look good. Here is why the uptime bar must come from real checks, not from what someone chose to publish, and how to test your own page in a few minutes."
+excerpt = "Why a status page's uptime bar must come from real checks, not the incidents you chose to publish, and a quick test for any page."
 tags = ["status-page", "monitoring", "trust", "uptime", "postmortem", "sre", "devops"]
 draft = false
 faqs = [
@@ -57,3 +57,15 @@ A page you can trust shows the outage in the first test, keeps the red in the se
 This is how Uptimepage works. The 90-day bar and each status light come from confirmed downtime, measured across regions with a confirmation rule, not from what someone chose to publish. Incidents are the notes you write by hand. Some status page tools also let a person set a component to green by hand. We do not. If you are comparing tools, we keep an honest [comparison with Statuspage](/vs/statuspage). We hold our own pages to the same rule and keep improving it. Most recently we made sure that a monitor added to a page after an outage still shows that outage on the bar, so the history stays complete no matter when the monitor was added.
 
 You should not be able to fake your uptime. You should not be able to fake it by accident either. The bar is a measurement. Keep it that way.
+
+## Common questions
+
+**Can you fake a status page?** You can write anything you want in the incident notes. But a good status page does not let you fake the uptime bar. The bar comes from real checks and one confirmation rule, not from what a person chooses to publish.
+
+**Should people be able to set uptime by hand?** No. People should control the incident notes, not the measured timeline. If a person can turn a red day green by hand, the uptime number stops meaning anything.
+
+**What is the difference between an incident and downtime?** Downtime is what the checks measured. An incident is what the team writes about it. The timeline should come from the checks, and the story from the notes.
+
+**Why does my status page show 100% uptime after an outage?** Usually because the bar is built from published incidents, not from real checks. If no public incident covers the outage, the bar stays green. A bar built from checks would show the red day.
+
+**How is uptime measured on a status page?** A good status page counts downtime from its own checks, using a confirmation rule so one short blip does not count. The same rule should feed both the alerts and the bar, so they always agree.
