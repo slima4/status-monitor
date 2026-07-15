@@ -27,7 +27,4 @@ pub use incident_writer::{
     OpenIncident, PgIncidentStore,
 };
 pub use logo_storage::LogoMime;
-pub use overall_status::{
-    Counters, component_status, day_state, overall_label, overall_state, overall_status,
-};
 pub use source::{IncidentListQuery, NoopPublicSource, OrgPublicSource, PublicSource};

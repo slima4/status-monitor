@@ -14,15 +14,20 @@
 # "Partial regional outage" rows mark one region down with the rest up; the rest
 # read as full all-region outages.
 #
-# Coverage matrix on the public page:
-#   fix-api    Operational   (mostly-up recent + open incident churn)
-#   fix-web    Degraded      (recent writes all 'degraded', no hard fails)
-#   fix-cdn    PartialOutage (~30% recent 'down')
+# Coverage matrix on the public page — states derive from CONFIRMED open
+# public incidents (+ maintenance), never from raw check rows:
+#   fix-api    Operational   (raw error blips in the drawer, NO incident —
+#                             the page must stay green; plus a resolved
+#                             incident ending exactly at last midnight, so
+#                             yesterday's strip cell paints and today's not)
+#   fix-web    Degraded      (open incident, status_at_start='degraded')
+#   fix-cdn    PartialOutage (open incident, one region down, rest up)
 #   fix-db     Maintenance   (bound to the active maintenance window)
-#   fix-auth   MajorOutage   (>=50% recent 'down')
+#   fix-auth   MajorOutage   (open incident, every region down)
 #   fix-email  Operational + NoData history-gap days (skipped writes)
 #   fix-search Operational, no group (renders ungrouped path)
-#   fix-paused public + enabled=false (disabled-target render edge case)
+#   fix-paused Degraded via a PUBLISHED MANUAL minor incident (severity →
+#              impact mapping) + disabled-target render edge case
 # Operator-only:
 #   fix-payment http internal, fix-admin http internal,
 #   fix-tcp tcp, fix-dns dns, fix-tls tls_cert, fix-domain domain_expiry.
@@ -178,11 +183,11 @@ WITH org AS (SELECT id FROM organizations WHERE slug='${SLUG}'),
    '{"type":"http","url":"https://api.github.com/","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
   ('fix-web',     false, true,  'Website',         'Core Services',   1,  'API & Web',     true,
    '{"type":"http","url":"https://www.google.com/","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-cdn',     true,  true,  'CDN',             'Core Services',   2,  'CDN',           true,
+  ('fix-cdn',     false, true,  'CDN',             'Core Services',   2,  'CDN',           true,
    '{"type":"http","url":"https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
   ('fix-db',      true,  true,  'Database',        'Infrastructure',  0,  'Infrastructure',true,
    '{"type":"http","url":"https://www.cloudflare.com/cdn-cgi/trace","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
-  ('fix-auth',    true,  true,  'Auth Service',    'Infrastructure',  1,  'Infrastructure',false,
+  ('fix-auth',    false, true,  'Auth Service',    'Infrastructure',  1,  'Infrastructure',false,
    '{"type":"http","url":"https://login.microsoftonline.com/common/discovery/v2.0/keys","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
   ('fix-email',   false, true,  'Email Delivery',  'Notifications',   0,  'Notifications', true,
    '{"type":"http","url":"https://en.wikipedia.org/wiki/Main_Page","method":"GET","timeout":5000,"follow_redirects":true,"max_redirects":3,"expected_status":{"kind":"exact","value":200},"headers":{},"verify_tls":true}'),
@@ -429,23 +434,24 @@ SELECT '${ORG}'::uuid, ins.id, '${T_DB}'::uuid
 FROM ins WHERE ins.title = 'Fixture rolling database patch';
 SQL
 
-echo "==> Postgres: 4 active incidents (one per frozen public monitor; all phases + states)"
+echo "==> Postgres: 3 active incidents (Degraded / Partial / Major; all phases)"
 # One OPEN incident per target — mirrors the writer's single-open-per-target
 # invariant (insert_open guards NOT EXISTS open), so the public active banner
-# never lists the same component twice. Seeded only on enabled=false public
-# monitors: the live writer never checks disabled targets, so it can't
-# auto-resolve these mid-demo. Excludes fix-db (Maintenance-bound) and the
-# enabled=true fix-cdn / fix-auth, whose incidents the live writer owns.
+# never lists the same component twice. These drive the component states:
+# status_at_start='degraded' → Degraded regardless of regions; otherwise a
+# non-empty regions_up → PartialOutage, empty → MajorOutage. Seeded only on
+# enabled=false public monitors: the live writer never checks disabled
+# targets, so it can't auto-resolve these mid-demo. Excludes fix-db
+# (Maintenance binding overrides incident impacts).
 pg <<SQL
 WITH s AS (
-  SELECT target_id, phase, sev,
+  SELECT target_id, phase, sev, sas, err,
          now() - (ord * interval '13 minute') AS started_at
   FROM (VALUES
-    ('${T_API}'::uuid,    'investigating', 'major',    1),
-    ('${T_WEB}'::uuid,    'identified',    'critical', 2),
-    ('${T_EMAIL}'::uuid,  'monitoring',    'major',    3),
-    ('${T_SEARCH}'::uuid, 'investigating', 'minor',    4)
-  ) AS v(target_id, phase, sev, ord)
+    ('${T_WEB}'::uuid,  'investigating', 'major',    'degraded', 'rate-limited 503 (Retry-After: 30)', 1),
+    ('${T_CDN}'::uuid,  'identified',    'major',    'down',     'connection refused',                 2),
+    ('${T_AUTH}'::uuid, 'monitoring',    'critical', 'down',     'connect timeout',                    3)
+  ) AS v(target_id, phase, sev, sas, err, ord)
 ),
 ins AS (
   INSERT INTO incidents
@@ -454,7 +460,7 @@ ins AS (
      state, visibility, origin, acknowledged_at, acknowledged_by,
      regions_down, regions_up)
   SELECT '${ORG}'::uuid, s.target_id, s.started_at, NULL,
-         s.sev, 'down', 3, 'connection refused',
+         s.sev, s.sas, 3, s.err,
          'Ongoing — ' || initcap(s.phase) || ' (' || s.phase || ' phase)',
          'Live fixture incident still in ' || s.phase || ' phase.',
          NULL,
@@ -466,10 +472,10 @@ ins AS (
               THEN s.started_at + interval '4 minute' ELSE NULL END,
          CASE WHEN s.phase <> 'investigating' AND '${OWNER_USER_ID}' <> ''
               THEN '${OWNER_USER_ID}'::uuid ELSE NULL END,
-         -- fix-search is a live partial outage (one region down); the rest are
+         -- fix-cdn is a live partial outage (one region down); the rest are
          -- full all-region outages.
-         CASE WHEN s.target_id = '${T_SEARCH}'::uuid THEN ${REGS_DOWN_ONE} ELSE ${REGS_ALL} END,
-         CASE WHEN s.target_id = '${T_SEARCH}'::uuid THEN ${REGS_UP_REST} ELSE ARRAY[]::text[] END
+         CASE WHEN s.target_id = '${T_CDN}'::uuid THEN ${REGS_DOWN_ONE} ELSE ${REGS_ALL} END,
+         CASE WHEN s.target_id = '${T_CDN}'::uuid THEN ${REGS_UP_REST} ELSE ARRAY[]::text[] END
   FROM s
   RETURNING id, started_at
 )
@@ -491,6 +497,47 @@ CROSS JOIN LATERAL (
          'Mitigation applied; monitoring recovery.'
   WHERE s.phase = 'monitoring'
 ) AS p;
+SQL
+
+echo "==> Postgres: published manual minor on fix-paused + midnight-boundary resolved on fix-api"
+# Two targeted scenarios for the incident-driven page:
+#  * fix-paused: a manually declared minor incident, published to the page —
+#    severity maps to impact (minor → Degraded), so the component shows
+#    Degraded while its incident card shows the Minor chip.
+#  * fix-api: a resolved incident that ended EXACTLY at last UTC midnight —
+#    yesterday's strip cell paints, today's stays clean (half-open boundary).
+pg <<SQL
+INSERT INTO incidents
+  (org_id, target_id, started_at, ended_at, severity, status_at_start,
+   check_count, title, public_title, public_description, duration_secs,
+   state, visibility, origin, acknowledged_at, acknowledged_by)
+VALUES
+  ('${ORG}'::uuid, '${T_PAUSED}'::uuid, now() - interval '35 minute', NULL,
+   'minor', 'down', 0,
+   'Sandbox intermittently slow',
+   'Sandbox intermittently slow',
+   'Declared from a support report; sandbox responses are slow but succeeding.',
+   NULL, 'acknowledged', 'public', 'manual', now() - interval '30 minute',
+   CASE WHEN '${OWNER_USER_ID}' <> '' THEN '${OWNER_USER_ID}'::uuid ELSE NULL END);
+
+INSERT INTO incident_updates (org_id, incident_id, posted_at, phase, message, author)
+SELECT '${ORG}', i.id, i.started_at, 'investigating',
+       'Looking into slow sandbox responses.', NULLIF('${OWNER_USER_ID}', '')
+FROM incidents i
+WHERE i.org_id='${ORG}' AND i.target_id='${T_PAUSED}'::uuid AND i.ended_at IS NULL;
+
+INSERT INTO incidents
+  (org_id, target_id, started_at, ended_at, severity, status_at_start,
+   check_count, error_sample, public_title, public_description, duration_secs,
+   state, visibility, origin, regions_down, regions_up)
+VALUES
+  ('${ORG}'::uuid, '${T_API}'::uuid,
+   date_trunc('day', now()) - interval '3 hour',
+   date_trunc('day', now()),
+   'major', 'down', 8, 'no response',
+   'API outage resolved at midnight',
+   'Ended exactly on the UTC day boundary — paints yesterday, not today.',
+   10800, 'resolved', 'public', 'monitor', ${REGS_ALL}, ARRAY[]::text[]);
 SQL
 
 echo "==> Postgres: operational-layer incidents (internal-only + manually declared) with activity timelines"
@@ -848,24 +895,70 @@ FROM numbers(90) ARRAY JOIN [${CH_REGIONS}] AS r
 WHERE number < 5 OR number > 10;
 SQL
 
-echo "==> ClickHouse: last-5-min divergent writes — drives per-component current_status"
-# component_status() looks at the last 5 minutes only. Densify here (30 rows
-# at 4s spacing → 2 min span) so the live scheduler's ~5 in-window real
-# checks can't tip the classifier away from the intended state. Mix per
-# target:
-#   fix-api    100% up        → Operational
-#   fix-web    100% degraded  → Degraded
-#   fix-cdn    ~30% down      → PartialOutage
-#   fix-auth   ~70% down      → MajorOutage (>= half)
-#   fix-search 100% up        → Operational
-# fix-db skipped (Maintenance binding overrides the counter classifier).
-# fix-email skipped (no recent rows → counters.total()==0 → Operational
-#   fallback, exercising the "no recent data" branch).
+echo "==> ClickHouse: raw check rows aligned with every public incident window"
+# Mirror real engine output: an incident only ever exists because raw failing
+# checks confirmed it, so backfill one bad row per minute per down region for
+# each public incident's window (and up rows for the regions that stayed up).
+# Without this the public strip paints a day the operator's raw charts call
+# empty — a mismatch the real pipeline cannot produce. regions arrays come
+# straight from the incident rows; manual incidents (NULL regions) add nothing.
 ch -mn <<SQL
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
+SELECT toUUID(org_id), toUUID(target_id), r,
+       started + toIntervalSecond(60 * n),
+       multiIf(sas = 'degraded', 'degraded', sas = 'error', 'error', 'down'),
+       if(sas = 'degraded', 900, 5000),
+       if(sas = 'degraded', 200, NULL),
+       err
+FROM (
+  SELECT org_id, target_id, regions_down, started_at AS started,
+         status_at_start AS sas, coalesce(error_sample, 'connection refused') AS err,
+         arrayJoin(range(toUInt32(greatest(1,
+           dateDiff('second', started_at, coalesce(ended_at, now())) / 60)))) AS n
+  FROM postgresql('${PG_CONTAINER}:5432','monitor','incidents','monitor','monitor')
+  WHERE org_id = '${ORG}' AND visibility = 'public'
+    AND started_at >= now() - INTERVAL 90 DAY
+    AND regions_down IS NOT NULL AND length(regions_down) > 0
+)
+ARRAY JOIN regions_down AS r;
+
 INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
+SELECT toUUID(org_id), toUUID(target_id), r,
+       started + toIntervalSecond(60 * n),
+       'up', 120 + (n % 40), 200
+FROM (
+  SELECT org_id, target_id, regions_up, started_at AS started,
+         arrayJoin(range(toUInt32(greatest(1,
+           dateDiff('second', started_at, coalesce(ended_at, now())) / 60)))) AS n
+  FROM postgresql('${PG_CONTAINER}:5432','monitor','incidents','monitor','monitor')
+  WHERE org_id = '${ORG}' AND visibility = 'public'
+    AND started_at >= now() - INTERVAL 90 DAY
+    AND regions_up IS NOT NULL AND length(regions_up) > 0
+)
+ARRAY JOIN regions_up AS r;
+SQL
+
+echo "==> ClickHouse: last-5-min raw writes — operator drawer only, page state ignores these"
+# Component state now derives from confirmed incidents, NOT these rows — they
+# exist so the operator detail drawer, region breakdown, and latency charts
+# have realistic recent data, and so the eyeball test can prove the page
+# ignores raw failures. 30 rows at 4s spacing per region. Mix per target:
+#   fix-api    2 fresh 'error' blips in ONE region, rest up — the page and
+#              strip MUST stay green (no confirmed incident); the region
+#              drawer shows the raw failures. This is the deploy-blip case.
+#   fix-web    100% degraded — matches its open degraded incident.
+#   fix-cdn    ~30% down     — matches its open partial incident.
+#   fix-auth   ~70% down     — matches its open major incident.
+#   fix-search 100% up.
+# fix-db skipped (Maintenance binding). fix-email skipped (NoData gap demo).
+ch -mn <<SQL
+INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code,error)
 SELECT toUUID('${ORG}'),toUUID('${T_API}'),r,
        now() - toIntervalSecond(number*4),
-       'up', 90 + (number % 25), 200
+       if(number < 2 AND r = '${SEED_REGIONS[0]}', 'error', 'up'),
+       if(number < 2 AND r = '${SEED_REGIONS[0]}', 5000, 90 + (number % 25)),
+       if(number < 2 AND r = '${SEED_REGIONS[0]}', NULL, 200),
+       if(number < 2 AND r = '${SEED_REGIONS[0]}', 'no response', NULL)
 FROM numbers(30) ARRAY JOIN [${CH_REGIONS}] AS r;
 
 INSERT INTO monitor.check_results (org_id,target_id,region,timestamp,status,duration_ms,response_code)
@@ -957,11 +1050,81 @@ SELECT 'fixture region assignments', count(*)::text FROM target_regions tr
  WHERE t.org_id='${ORG}' AND t.tags @> ARRAY['seed-fixtures'];
 SQL
 
-# ── ClickHouse last-5-min counters + expected/actual state matrix ────────────
+# ── Expected/actual component-state matrix (confirmed-incident semantics) ────
+# States derive from open PUBLIC incidents + the active maintenance binding —
+# the SQL below mirrors PaintWindowRow::impact() + component_status():
+# maintenance wins; manual incidents map severity minor/major/critical →
+# Degraded/Partial/Major; auto incidents map degraded → Degraded, else
+# regions_up non-empty → Partial, empty → Major; no open incident → Operational.
 echo
-echo "## ClickHouse last-5-min counters per public component"
-ch_out=$(ch -q "
-SELECT spc.public_name, spc.sort_order, spc.public_group,
+echo "## Component states (from open public incidents + maintenance)"
+pg_states=$(pg -tA -F $'\t' <<SQL
+SELECT spc.public_name,
+       CASE
+         WHEN maint.target_id IS NOT NULL THEN 'Maintenance'
+         WHEN agg.worst = 3 THEN 'MajorOutage'
+         WHEN agg.worst = 2 THEN 'PartialOutage'
+         WHEN agg.worst = 1 THEN 'Degraded'
+         ELSE 'Operational'
+       END AS state
+FROM status_page_components spc
+LEFT JOIN (
+  SELECT i.target_id,
+         max(CASE
+           WHEN i.origin = 'manual' THEN
+             CASE i.severity WHEN 'minor' THEN 1 WHEN 'major' THEN 2 ELSE 3 END
+           WHEN i.status_at_start = 'degraded' THEN 1
+           WHEN coalesce(array_length(i.regions_up, 1), 0) > 0 THEN 2
+           ELSE 3
+         END) AS worst
+  FROM incidents i
+  WHERE i.org_id = '${ORG}' AND i.ended_at IS NULL AND i.visibility = 'public'
+  GROUP BY i.target_id
+) agg ON agg.target_id = spc.target_id
+LEFT JOIN (
+  SELECT DISTINCT mwc.target_id
+  FROM maintenance_window_components mwc
+  JOIN maintenance_windows mw ON mw.id = mwc.maintenance_id
+  WHERE mw.org_id = '${ORG}' AND mw.starts_at <= now() AND mw.ends_at > now()
+) maint ON maint.target_id = spc.target_id
+WHERE spc.org_id = '${ORG}'
+ORDER BY coalesce(spc.public_group, 'zzz'), spc.sort_order;
+SQL
+)
+
+# Expected state matrix — keep in lockstep with the header comment above.
+declare -A EXPECT=(
+  [API]=Operational
+  [Website]=Degraded
+  [CDN]=PartialOutage
+  [Database]=Maintenance
+  ['Auth Service']=MajorOutage
+  ['Email Delivery']=Operational
+  [Search]=Operational
+  ['Beta Sandbox']=Degraded
+)
+
+# Hard failures (non-zero exit); NOTES are non-fatal observations.
+FAILED=()
+NOTES=()
+printf '  %-18s %-14s %s\n' name expected actual
+while IFS=$'\t' read -r name actual; do
+  [[ -z "$name" ]] && continue
+  expected="${EXPECT[$name]:-?}"
+  mark="OK"
+  if [[ "$actual" != "$expected" ]]; then
+    mark="MISMATCH"
+    FAILED+=("component '${name}': expected ${expected}, derived ${actual} — check the open-incident seed rows")
+  fi
+  printf '  %-18s %-14s %s [%s]\n' "$name" "$expected" "$actual" "$mark"
+done <<< "$pg_states"
+
+# Informational: raw last-5-min counters (operator drawer data; the page
+# ignores these — fix-api SHOULD show errors here while rendering green).
+echo
+echo "## Raw last-5-min counters per public component (drawer data, page-inert)"
+ch -q "
+SELECT spc.public_name,
        coalesce(c.up_, 0)   AS up_,
        coalesce(c.down_, 0) AS down_,
        coalesce(c.deg_, 0)  AS deg_,
@@ -978,51 +1141,9 @@ LEFT JOIN (
   GROUP BY target_id
 ) c ON c.target_id = spc.target_id
 WHERE spc.org_id=toUUID('${ORG}')
-ORDER BY ifNull(spc.public_group, 'zzz'), spc.sort_order
-FORMAT TabSeparated")
+ORDER BY spc.public_name
+FORMAT PrettyCompactMonoBlock" | sed 's/^/  /'
 
-# Expected state matrix — keep in lockstep with header comment above.
-declare -A EXPECT=(
-  [API]=Operational
-  [Website]=Degraded
-  [CDN]=PartialOutage
-  [Database]=Maintenance
-  ['Auth Service']=MajorOutage
-  ['Email Delivery']=Operational
-  [Search]=Operational
-  ['Beta Sandbox']=Operational
-)
-
-classify() {
-  local up=$1 down=$2 deg=$3 err=$4 name=$5
-  # Maintenance binding wins regardless of counters.
-  if [[ "$name" == "Database" ]]; then echo Maintenance; return; fi
-  local total=$((up + down + deg + err))
-  local hard=$((down + err))
-  if (( total == 0 )); then echo Operational; return; fi
-  if (( hard == 0 )); then
-    if (( deg > 0 )); then echo Degraded; else echo Operational; fi
-    return
-  fi
-  if (( hard * 2 >= total )); then echo MajorOutage; else echo PartialOutage; fi
-}
-
-# Hard failures (non-zero exit); NOTES are non-fatal observations.
-FAILED=()
-NOTES=()
-printf '  %-18s %-14s %5s %5s %5s %5s   %s\n' name expected up down deg err actual
-while IFS=$'\t' read -r name _ord _group up down deg err; do
-  [[ -z "$name" ]] && continue
-  actual=$(classify "$up" "$down" "$deg" "$err" "$name")
-  expected="${EXPECT[$name]:-?}"
-  mark="OK"
-  if [[ "$actual" != "$expected" ]]; then
-    mark="MISMATCH"
-    FAILED+=("clickhouse component '${name}': expected ${expected}, classified ${actual} (up=${up} down=${down} deg=${deg} err=${err}) — check last-5-min seed writes")
-  fi
-  printf '  %-18s %-14s %5s %5s %5s %5s   %s [%s]\n' \
-    "$name" "$expected" "$up" "$down" "$deg" "$err" "$actual" "$mark"
-done <<< "$ch_out"
 
 # ── HTTP smoke ───────────────────────────────────────────────────────────────
 echo

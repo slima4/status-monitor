@@ -452,10 +452,17 @@ pub fn decide_multi(
                 // region-independent or the next tick re-opens it.
                 let trigger = bad[quorum - 1];
                 let origin = bad[0];
+                // Worst across every confirmed bad run — a degraded origin
+                // region must not mask a concurrently hard-down region.
+                let status_at_start = bad
+                    .iter()
+                    .flat_map(|v| v.bad.iter().map(|r| r.status))
+                    .max_by_key(|s| severity_rank(*s))
+                    .unwrap_or(CheckStatus::Down);
                 vec![Action::Open(NewOpenIncident {
                     target_id,
                     started_at: trigger.bad[0].timestamp,
-                    status_at_start: origin.bad[0].status,
+                    status_at_start,
                     check_count: origin.bad.len() as u32,
                     error_sample: bad
                         .iter()
@@ -510,6 +517,16 @@ fn is_bad(status: CheckStatus) -> bool {
     match status {
         CheckStatus::Down | CheckStatus::Error | CheckStatus::Degraded => true,
         CheckStatus::Up => false,
+    }
+}
+
+/// Ordering for "worst status at open": hard failures outrank degraded.
+fn severity_rank(status: CheckStatus) -> u8 {
+    match status {
+        CheckStatus::Up => 0,
+        CheckStatus::Degraded => 1,
+        CheckStatus::Error => 2,
+        CheckStatus::Down => 3,
     }
 }
 
@@ -925,8 +942,38 @@ mod tests {
         match decide(None, &results, 2) {
             Action::Open(new) => {
                 assert_eq!(new.check_count, 3);
-                // First non-up sets the kick-off status.
-                assert_eq!(new.status_at_start, CheckStatus::Error);
+                // Worst status in the confirmed run sets the kick-off status.
+                assert_eq!(new.status_at_start, CheckStatus::Down);
+            }
+            other => panic!("expected Open, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decide_multi_worst_region_sets_status_not_earliest() {
+        let b = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let t = Uuid::now_v7();
+        // Region A degrades first; region B hard-fails later. The earliest
+        // onset must not mask the hard failure.
+        let by_region = [
+            (
+                "eu".to_string(),
+                vec![
+                    result(t, ts(b, 0), CheckStatus::Degraded),
+                    result(t, ts(b, 30), CheckStatus::Degraded),
+                ],
+            ),
+            (
+                "us".to_string(),
+                vec![
+                    result(t, ts(b, 10), CheckStatus::Down),
+                    result(t, ts(b, 40), CheckStatus::Down),
+                ],
+            ),
+        ];
+        match decide_multi(t, &[], &by_region, 2, 2).into_iter().next() {
+            Some(Action::Open(new)) => {
+                assert_eq!(new.status_at_start, CheckStatus::Down);
             }
             other => panic!("expected Open, got {other:?}"),
         }

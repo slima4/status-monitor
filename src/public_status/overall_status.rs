@@ -1,88 +1,61 @@
 //! Pure status-mapping rules for the public status page.
 //!
-//! Three independent classifiers:
-//!  * [`component_status`] — last-5-minutes result counts + active maintenance
+//! Every classifier derives from *confirmed* incidents — the incident
+//! writer's per-region consecutive-failure gate plus region quorum — never
+//! from raw check samples. A single failed probe from one region must not
+//! repaint a public page; raw samples stay on the operator's region drawer.
+//!
+//! Independent classifiers:
+//!  * [`incident_impact`] — one confirmed incident → its component impact.
+//!  * [`component_status`] — worst open impact + active maintenance
 //!    → [`PublicComponentStatus`].
 //!  * [`overall_state`] — component statuses → [`OverallState`] (the banner).
-//!  * [`day_state`] — per-minute counts for one day + maintenance overlap →
-//!    [`DayState`] cell on the daily history strip.
+//!  * [`day_state`] — worst incident impact overlapping one day + whether the
+//!    day had checks at all → [`DayState`] cell on the daily history strip.
 //!
 //! Each is a referentially-transparent function so the truth tables can be
 //! exhaustively unit-tested below.
 
-use crate::domain::{
-    CheckResult, CheckStatus, DayState, OverallState, OverallStatus, PublicComponentStatus,
-};
+use crate::domain::{DayState, OverallState, OverallStatus, PublicComponentStatus};
 
-/// Counts of check statuses over some bucket (a window of recent checks, or a
-/// single minute of the daily history strip).
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct Counters {
-    pub up: u32,
-    pub down: u32,
-    pub degraded: u32,
-    pub error: u32,
+/// What one confirmed incident contributes to its component's public state.
+/// `Ord` ranks by severity so "worst wins" is `Iterator::max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IncidentImpact {
+    Degraded,
+    PartialOutage,
+    MajorOutage,
 }
 
-impl Counters {
-    pub fn total(&self) -> u32 {
-        self.up + self.down + self.degraded + self.error
-    }
-
-    /// `down` + `error` — the hard-failure count used by the mapping rules.
-    pub fn hard_failed(&self) -> u32 {
-        self.down + self.error
-    }
-
-    pub fn has_degraded(&self) -> bool {
-        self.degraded > 0
-    }
-
-    pub fn has_hard_failure(&self) -> bool {
-        self.hard_failed() > 0
-    }
-
-    /// Treats `degraded` as success for the purposes of the ≥50% rule —
-    /// matches the wording "≥ 50% of checks **down or error**".
-    pub fn hard_failed_ratio_ge_half(&self) -> bool {
-        let total = self.total();
-        total > 0 && self.hard_failed() * 2 >= total
-    }
-
-    pub fn from_results(results: &[CheckResult]) -> Self {
-        let mut c = Self::default();
-        for r in results {
-            match r.status {
-                CheckStatus::Up => c.up += 1,
-                CheckStatus::Down => c.down += 1,
-                CheckStatus::Degraded => c.degraded += 1,
-                CheckStatus::Error => c.error += 1,
-            }
-        }
-        c
+/// Impact of one confirmed incident. `degraded` is whether the incident
+/// opened on a `degraded` check status (slow / rate-limited, not hard-failed);
+/// `any_region_up` is whether some region still answered when it opened —
+/// present regions in `regions_up` mean a partial, not total, loss.
+pub fn incident_impact(degraded: bool, any_region_up: bool) -> IncidentImpact {
+    if degraded {
+        IncidentImpact::Degraded
+    } else if any_region_up {
+        IncidentImpact::PartialOutage
+    } else {
+        IncidentImpact::MajorOutage
     }
 }
 
-/// Component status. Maintenance dominates over any failure signal.
-pub fn component_status(c: &Counters, maintenance_active: bool) -> PublicComponentStatus {
+/// Component status from the worst impact among its open incidents.
+/// Maintenance dominates over any failure signal; no open incident →
+/// Operational.
+pub fn component_status(
+    worst: Option<IncidentImpact>,
+    maintenance_active: bool,
+) -> PublicComponentStatus {
     if maintenance_active {
         return PublicComponentStatus::Maintenance;
     }
-    if c.total() == 0 {
-        // No recent data — render as Operational rather than fabricating an outage.
-        return PublicComponentStatus::Operational;
-    }
-    if !c.has_hard_failure() {
-        return if c.has_degraded() {
-            PublicComponentStatus::Degraded
-        } else {
-            PublicComponentStatus::Operational
-        };
-    }
-    if c.hard_failed_ratio_ge_half() {
-        PublicComponentStatus::MajorOutage
-    } else {
-        PublicComponentStatus::PartialOutage
+    match worst {
+        Some(IncidentImpact::MajorOutage) => PublicComponentStatus::MajorOutage,
+        Some(IncidentImpact::PartialOutage) => PublicComponentStatus::PartialOutage,
+        Some(IncidentImpact::Degraded) => PublicComponentStatus::Degraded,
+        None => PublicComponentStatus::Operational,
     }
 }
 
@@ -129,42 +102,17 @@ pub fn overall_status(state: OverallState) -> OverallStatus {
     }
 }
 
-/// Daily history cell from per-minute counters + whether *any* minute of
-/// the day overlapped a maintenance window.
-///
-/// `minutes` is the slice of minute-level counters for the day; an empty
-/// slice means there were no recorded checks at all that day → `NoData`.
-/// Maintenance dominates over outages.
-pub fn day_state(maintenance_covers_any_minute: bool, minutes: &[Counters]) -> DayState {
-    if minutes.is_empty() {
-        return DayState::NoData;
-    }
-    if maintenance_covers_any_minute {
-        return DayState::Maintenance;
-    }
-    let mut any_major = false;
-    let mut any_partial = false;
-    let mut any_degraded_only = false;
-    for m in minutes {
-        if m.total() == 0 {
-            continue;
-        }
-        if m.hard_failed_ratio_ge_half() {
-            any_major = true;
-        } else if m.has_hard_failure() {
-            any_partial = true;
-        } else if m.has_degraded() {
-            any_degraded_only = true;
-        }
-    }
-    if any_major {
-        DayState::MajorOutage
-    } else if any_partial {
-        DayState::PartialOutage
-    } else if any_degraded_only {
-        DayState::Degraded
-    } else {
-        DayState::Operational
+/// Daily history cell: the worst confirmed-incident impact overlapping the
+/// day, or Operational. An incident is positive evidence and always paints —
+/// even with zero recorded checks (paused mid-incident, manual incident on an
+/// unprobed component). `NoData` is reserved for genuinely silent days.
+pub fn day_state(has_checks: bool, worst: Option<IncidentImpact>) -> DayState {
+    match worst {
+        Some(IncidentImpact::MajorOutage) => DayState::MajorOutage,
+        Some(IncidentImpact::PartialOutage) => DayState::PartialOutage,
+        Some(IncidentImpact::Degraded) => DayState::Degraded,
+        None if has_checks => DayState::Operational,
+        None => DayState::NoData,
     }
 }
 
@@ -172,141 +120,70 @@ pub fn day_state(maintenance_covers_any_minute: bool, minutes: &[Counters]) -> D
 mod tests {
     use super::*;
 
-    fn c(up: u32, down: u32, degraded: u32, error: u32) -> Counters {
-        Counters {
-            up,
-            down,
-            degraded,
-            error,
-        }
+    // ── incident_impact truth table ─────────────────────────────────────────
+
+    #[test]
+    fn impact_degraded_wins_over_region_split() {
+        assert_eq!(incident_impact(true, true), IncidentImpact::Degraded);
+        assert_eq!(incident_impact(true, false), IncidentImpact::Degraded);
+    }
+
+    #[test]
+    fn impact_some_region_up_is_partial() {
+        assert_eq!(incident_impact(false, true), IncidentImpact::PartialOutage);
+    }
+
+    #[test]
+    fn impact_no_region_up_is_major() {
+        assert_eq!(incident_impact(false, false), IncidentImpact::MajorOutage);
+    }
+
+    #[test]
+    fn impact_ord_ranks_major_worst() {
+        assert!(IncidentImpact::MajorOutage > IncidentImpact::PartialOutage);
+        assert!(IncidentImpact::PartialOutage > IncidentImpact::Degraded);
     }
 
     // ── component_status truth table ────────────────────────────────────────
 
     #[test]
-    fn component_maintenance_dominates_even_with_all_up() {
+    fn component_maintenance_dominates_even_with_major_impact() {
         assert_eq!(
-            component_status(&c(5, 0, 0, 0), true),
+            component_status(Some(IncidentImpact::MajorOutage), true),
             PublicComponentStatus::Maintenance
         );
     }
 
     #[test]
-    fn component_maintenance_dominates_even_with_major_outage() {
+    fn component_maintenance_dominates_with_no_incident() {
         assert_eq!(
-            component_status(&c(0, 5, 0, 0), true),
+            component_status(None, true),
             PublicComponentStatus::Maintenance
         );
     }
 
     #[test]
-    fn component_all_up_is_operational() {
+    fn component_no_open_incident_is_operational() {
         assert_eq!(
-            component_status(&c(5, 0, 0, 0), false),
+            component_status(None, false),
             PublicComponentStatus::Operational
         );
     }
 
     #[test]
-    fn component_no_data_renders_operational() {
+    fn component_maps_each_impact() {
         assert_eq!(
-            component_status(&c(0, 0, 0, 0), false),
-            PublicComponentStatus::Operational
-        );
-    }
-
-    #[test]
-    fn component_one_degraded_no_hard_failure_is_degraded() {
-        assert_eq!(
-            component_status(&c(4, 0, 1, 0), false),
+            component_status(Some(IncidentImpact::Degraded), false),
             PublicComponentStatus::Degraded
         );
-    }
-
-    #[test]
-    fn component_all_degraded_no_hard_failure_is_degraded() {
         assert_eq!(
-            component_status(&c(0, 0, 5, 0), false),
-            PublicComponentStatus::Degraded
-        );
-    }
-
-    #[test]
-    fn component_under_half_down_is_partial_outage() {
-        // 1 of 5 down → 20% → PartialOutage
-        assert_eq!(
-            component_status(&c(4, 1, 0, 0), false),
+            component_status(Some(IncidentImpact::PartialOutage), false),
             PublicComponentStatus::PartialOutage
         );
-    }
-
-    #[test]
-    fn component_under_half_error_is_partial_outage() {
         assert_eq!(
-            component_status(&c(4, 0, 0, 1), false),
-            PublicComponentStatus::PartialOutage
-        );
-    }
-
-    #[test]
-    fn component_mixed_under_half_failure_with_degraded_is_partial() {
-        // Degraded does NOT promote past PartialOutage when any hard failure exists.
-        assert_eq!(
-            component_status(&c(3, 1, 1, 0), false),
-            PublicComponentStatus::PartialOutage
-        );
-    }
-
-    #[test]
-    fn component_exactly_half_down_is_major_outage() {
-        // 2 of 4 down → exactly 50% → ≥50% → MajorOutage.
-        assert_eq!(
-            component_status(&c(2, 2, 0, 0), false),
+            component_status(Some(IncidentImpact::MajorOutage), false),
             PublicComponentStatus::MajorOutage
         );
-    }
-
-    #[test]
-    fn component_majority_error_is_major_outage() {
-        assert_eq!(
-            component_status(&c(1, 0, 0, 4), false),
-            PublicComponentStatus::MajorOutage
-        );
-    }
-
-    #[test]
-    fn component_all_down_is_major_outage() {
-        assert_eq!(
-            component_status(&c(0, 5, 0, 0), false),
-            PublicComponentStatus::MajorOutage
-        );
-    }
-
-    #[test]
-    fn component_from_results_helper_classifies_correctly() {
-        use chrono::Utc;
-        use uuid::Uuid;
-        let r = |s: CheckStatus| CheckResult {
-            target_id: Uuid::nil(),
-            org_id: Uuid::nil(),
-            timestamp: Utc::now(),
-            status: s,
-            duration_ms: 1,
-            dns_ms: None,
-            connect_ms: None,
-            tls_ms: None,
-            ttfb_ms: None,
-            response_code: None,
-            response_size: None,
-            error: None,
-        };
-        let results = vec![
-            r(CheckStatus::Up),
-            r(CheckStatus::Up),
-            r(CheckStatus::Degraded),
-        ];
-        let c = Counters::from_results(&results);
-        assert_eq!(component_status(&c, false), PublicComponentStatus::Degraded);
     }
 
     // ── overall_state truth table ───────────────────────────────────────────
@@ -339,9 +216,8 @@ mod tests {
 
     #[test]
     fn overall_maintenance_plus_degraded_is_minor_disruption() {
-        // Spec: "any Degraded, none worse → MinorDisruption" — Maintenance is
-        // NOT "worse", but Maintenance only wins when *all others* are
-        // Operational. Mixed Maintenance + Degraded → MinorDisruption.
+        // Maintenance wins only when *all others* are Operational. Mixed
+        // Maintenance + Degraded → MinorDisruption.
         let s = [
             PublicComponentStatus::Maintenance,
             PublicComponentStatus::Degraded,
@@ -415,64 +291,36 @@ mod tests {
     // ── day_state truth table ───────────────────────────────────────────────
 
     #[test]
-    fn day_no_rows_is_no_data() {
-        assert_eq!(day_state(false, &[]), DayState::NoData);
+    fn day_incident_paints_even_without_checks() {
+        assert_eq!(
+            day_state(false, Some(IncidentImpact::MajorOutage)),
+            DayState::MajorOutage
+        );
     }
 
     #[test]
-    fn day_maintenance_dominates_even_with_major_outage_minutes() {
-        let mins = [c(0, 10, 0, 0)];
-        assert_eq!(day_state(true, &mins), DayState::Maintenance);
+    fn day_silent_without_incident_is_no_data() {
+        assert_eq!(day_state(false, None), DayState::NoData);
     }
 
     #[test]
-    fn day_any_major_minute_wins() {
-        let mins = [c(10, 0, 0, 0), c(2, 8, 0, 0), c(10, 0, 0, 0)];
-        assert_eq!(day_state(false, &mins), DayState::MajorOutage);
+    fn day_with_checks_and_no_incident_is_operational() {
+        assert_eq!(day_state(true, None), DayState::Operational);
     }
 
     #[test]
-    fn day_exact_half_failure_minute_is_major() {
-        // ≥50% rule: 5/10 → Major
-        let mins = [c(5, 5, 0, 0)];
-        assert_eq!(day_state(false, &mins), DayState::MajorOutage);
-    }
-
-    #[test]
-    fn day_under_half_failure_minute_is_partial() {
-        let mins = [c(9, 1, 0, 0)];
-        assert_eq!(day_state(false, &mins), DayState::PartialOutage);
-    }
-
-    #[test]
-    fn day_partial_minute_overrides_degraded_only_minute() {
-        let mins = [c(0, 0, 5, 0), c(9, 1, 0, 0)];
-        assert_eq!(day_state(false, &mins), DayState::PartialOutage);
-    }
-
-    #[test]
-    fn day_only_degraded_minute_is_degraded() {
-        let mins = [c(0, 0, 5, 0)];
-        assert_eq!(day_state(false, &mins), DayState::Degraded);
-    }
-
-    #[test]
-    fn day_mixed_up_and_degraded_minutes_is_degraded() {
-        let mins = [c(10, 0, 0, 0), c(5, 0, 2, 0), c(10, 0, 0, 0)];
-        assert_eq!(day_state(false, &mins), DayState::Degraded);
-    }
-
-    #[test]
-    fn day_all_up_is_operational() {
-        let mins = [c(10, 0, 0, 0), c(10, 0, 0, 0)];
-        assert_eq!(day_state(false, &mins), DayState::Operational);
-    }
-
-    #[test]
-    fn day_skips_empty_minutes_does_not_make_no_data() {
-        // A handful of minutes with data, plus some empty-total minute rows
-        // (artifact of an aggregate query) → still classified, not NoData.
-        let mins = [c(10, 0, 0, 0), Counters::default(), c(10, 0, 0, 0)];
-        assert_eq!(day_state(false, &mins), DayState::Operational);
+    fn day_maps_each_impact() {
+        assert_eq!(
+            day_state(true, Some(IncidentImpact::Degraded)),
+            DayState::Degraded
+        );
+        assert_eq!(
+            day_state(true, Some(IncidentImpact::PartialOutage)),
+            DayState::PartialOutage
+        );
+        assert_eq!(
+            day_state(true, Some(IncidentImpact::MajorOutage)),
+            DayState::MajorOutage
+        );
     }
 }

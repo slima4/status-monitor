@@ -22,7 +22,7 @@ use sqlx::{FromRow, PgPool};
 use uuid::Uuid;
 
 use crate::domain::{
-    ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId,
+    CheckStatus, ComponentHistoryResponse, DayState, IncidentSeverity, IncidentStatusPhase, OrgId,
     PublicComponent, PublicComponentGroup, PublicComponentStatus, PublicIncident,
     PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, StatusPageId,
 };
@@ -30,7 +30,9 @@ use crate::error::Result;
 
 use super::auto_incident_title;
 use super::cache::HistoryIncidentMarker;
-use super::overall_status::{Counters, component_status, overall_state, overall_status};
+use super::overall_status::{
+    IncidentImpact, component_status, day_state, incident_impact, overall_state, overall_status,
+};
 
 /// Aggregator-local configuration. Holds only the knobs the aggregator reads
 /// directly; the shared `AppConfig` may shadow these later when env overrides
@@ -56,7 +58,6 @@ impl Default for AggregatorConfig {
     }
 }
 
-const CH_TABLE: &str = "check_results";
 // Day-resolution strip reads the hour rollup (13-month tail), so it spans the
 // full `history_days` window independent of the shorter 1m-rollup TTL.
 const CH_HISTORY_MV: &str = "check_results_1h";
@@ -102,42 +103,60 @@ impl OrgAggregator {
         let name_by_id: HashMap<Uuid, String> =
             components.iter().map(|c| (c.id, c.name.clone())).collect();
 
+        let days = self.cfg.history_days;
         let (
             (active_maintenance, upcoming_maintenance, maintenance_by_target),
             active_incidents,
             (recent_incidents, recent_incidents_has_more),
-            history_markers,
+            marker_windows,
+            paint_windows,
+            day_presence,
         ) = tokio::try_join!(
             self.load_maintenance(org, now, &component_ids, &name_by_id),
             self.load_active_incidents(org, &component_ids, &name_by_id),
             self.load_recent_incidents(org, now, &component_ids, &name_by_id),
-            self.load_history_markers(org, now, &component_ids, &name_by_id),
+            self.load_marker_windows(org, now, &component_ids),
+            self.load_paint_windows(org, now, &component_ids, days),
+            self.load_day_presence(org, &component_ids, now, days),
         )?;
 
-        // Index by target_id so the per-component loop is O(1), not O(n²) — a
-        // page with hundreds of monitors otherwise linear-scans both vecs per
-        // component on every cache miss.
-        let history_by_target: HashMap<Uuid, Vec<DayState>> = self
-            .load_history_strips(org, &component_ids, now)
-            .await?
+        let history_markers: Vec<HistoryIncidentMarker> = marker_windows
             .into_iter()
+            .map(|w| {
+                let component_name = name_by_id.get(&w.target_id).cloned().unwrap_or_default();
+                HistoryIncidentMarker {
+                    id: w.id,
+                    component_id: w.target_id,
+                    title: truncate_title(w.public_title.unwrap_or_else(|| {
+                        auto_incident_title(&component_name, &w.status_at_start)
+                    })),
+                    started_at: w.started_at,
+                    ended_at: w.ended_at,
+                }
+            })
             .collect();
-        let recent_counters: HashMap<Uuid, Counters> = self
-            .load_recent_counters(org, &component_ids, now)
-            .await?
-            .into_iter()
-            .collect();
+
+        let mut open_worst: HashMap<Uuid, IncidentImpact> = HashMap::new();
+        for w in paint_windows.iter().filter(|w| w.ended_at.is_none()) {
+            let impact = w.impact();
+            open_worst
+                .entry(w.target_id)
+                .and_modify(|cur| *cur = (*cur).max(impact))
+                .or_insert(impact);
+        }
+
+        let history_by_target =
+            paint_strips(&component_ids, &day_presence, &paint_windows, now, days);
 
         let mut public_components: Vec<(Option<String>, i32, PublicComponent)> = components
             .iter()
             .map(|c| {
                 let maint = maintenance_by_target.contains(&c.id);
-                let counters = recent_counters.get(&c.id).copied().unwrap_or_default();
-                let current = component_status(&counters, maint);
+                let current = component_status(open_worst.get(&c.id).copied(), maint);
                 let history = history_by_target
                     .get(&c.id)
                     .cloned()
-                    .unwrap_or_else(|| vec![DayState::NoData; self.cfg.history_days as usize]);
+                    .unwrap_or_else(|| vec![DayState::NoData; days as usize]);
                 let pc = PublicComponent {
                     id: c.id,
                     name: c.name.clone(),
@@ -224,12 +243,16 @@ impl OrgAggregator {
             .find(|c| c.id == id)
             .ok_or_else(|| anyhow::anyhow!("component not on this page"))?;
 
-        let history_by_target = self.load_history_strips(org, &[id], now).await?;
-        let history = history_by_target
-            .into_iter()
-            .find(|(target_id, _)| *target_id == id)
-            .map(|(_, h)| h)
-            .unwrap_or_else(|| vec![DayState::NoData; days as usize]);
+        // Fetch only the requested span — this endpoint is uncached.
+        let span = days.clamp(1, self.cfg.history_days);
+        let ids = [id];
+        let (paint_windows, day_presence) = tokio::try_join!(
+            self.load_paint_windows(org, now, &ids, span),
+            self.load_day_presence(org, &ids, now, span),
+        )?;
+        let history = paint_strips(&ids, &day_presence, &paint_windows, now, span)
+            .remove(&id)
+            .unwrap_or_else(|| vec![DayState::NoData; span as usize]);
         let history = pad_or_truncate(history, days as usize);
 
         Ok(ComponentHistoryResponse {
@@ -410,18 +433,17 @@ impl OrgAggregator {
 
     /// 90-day slim incident pool for the popover matcher. 1000-row cap guards
     /// against an incident-spam tenant blowing the rendered JSON.
-    async fn load_history_markers(
+    async fn load_marker_windows(
         &self,
         org: OrgId,
         now: DateTime<Utc>,
         component_ids: &[Uuid],
-        name_by_id: &HashMap<Uuid, String>,
-    ) -> Result<Vec<HistoryIncidentMarker>> {
+    ) -> Result<Vec<MarkerWindowRow>> {
         if component_ids.is_empty() {
             return Ok(Vec::new());
         }
         let since = now - ChronoDuration::days(self.cfg.history_days as i64);
-        let rows: Vec<HistoryMarkerRow> = sqlx::query_as::<_, HistoryMarkerRow>(
+        let rows = sqlx::query_as::<_, MarkerWindowRow>(
             r#"SELECT i.id, i.target_id,
                       i.public_title, i.status_at_start,
                       i.started_at, i.ended_at
@@ -438,22 +460,42 @@ impl OrgAggregator {
         .bind(component_ids)
         .fetch_all(&self.pg)
         .await
-        .context("load history-window incident markers")?;
-        Ok(rows
-            .into_iter()
-            .map(|r| {
-                let component_name = name_by_id.get(&r.target_id).cloned().unwrap_or_default();
-                HistoryIncidentMarker {
-                    id: r.id,
-                    component_id: r.target_id,
-                    title: truncate_title(r.public_title.unwrap_or_else(|| {
-                        auto_incident_title(&component_name, &r.status_at_start)
-                    })),
-                    started_at: r.started_at,
-                    ended_at: r.ended_at,
-                }
-            })
-            .collect())
+        .context("load marker windows")?;
+        Ok(rows)
+    }
+
+    /// Uncapped confirmed public incident windows feeding the open-incident
+    /// component states and the day-strip paint. Unlike the popover markers,
+    /// the paint must be complete or the strip renders green over a real
+    /// outage; rows are slim (no titles) and bounded by the span window.
+    async fn load_paint_windows(
+        &self,
+        org: OrgId,
+        now: DateTime<Utc>,
+        component_ids: &[Uuid],
+        span_days: u32,
+    ) -> Result<Vec<PaintWindowRow>> {
+        if component_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let since = now - ChronoDuration::days(span_days as i64);
+        let rows = sqlx::query_as::<_, PaintWindowRow>(
+            r#"SELECT i.target_id,
+                      i.status_at_start, i.severity, i.origin, i.regions_up,
+                      i.started_at, i.ended_at
+               FROM incidents i
+               WHERE i.org_id = $2
+                 AND (i.ended_at IS NULL OR i.ended_at >= $1)
+                 AND i.target_id = ANY($3)
+                 AND i.visibility = 'public'"#,
+        )
+        .bind(since)
+        .bind(org.0)
+        .bind(component_ids)
+        .fetch_all(&self.pg)
+        .await
+        .context("load paint windows")?;
+        Ok(rows)
     }
 
     async fn hydrate_incidents(
@@ -515,41 +557,30 @@ impl OrgAggregator {
             .collect())
     }
 
-    /// Fetches per-day worst-minute classification for each component using the
-    /// existing `check_results_1m` aggregating-merge view. Returns one
-    /// `Vec<DayState>` per component, oldest-first, length = `history_days`.
-    async fn load_history_strips(
+    /// Per-(component, day) check counts from the hour rollup — the `NoData`
+    /// signal for the day strip.
+    async fn load_day_presence(
         &self,
         org: OrgId,
         component_ids: &[Uuid],
         now: DateTime<Utc>,
-    ) -> Result<Vec<(Uuid, Vec<DayState>)>> {
+        span_days: u32,
+    ) -> Result<Vec<HistoryDayRow>> {
         if component_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let from = now - ChronoDuration::days(self.cfg.history_days as i64);
-        let rows: Vec<HistoryDayRow> = self
-            .ch
+        let from = now - ChronoDuration::days(span_days as i64);
+        self.ch
             .query(&format!(
                 r#"SELECT
                     target_id,
-                    toInt64(toUnixTimestamp(day)) AS day,
-                    maxIf(toUInt8(total > 0 AND (total - up_) * 2 >= total), total > 0) AS any_major,
-                    maxIf(toUInt8(total > 0 AND (total - up_) > 0), total > 0) AS any_failure,
-                    sum(total) AS day_total
-                FROM (
-                    SELECT
-                        target_id,
-                        toStartOfDay(hour) AS day,
-                        countMerge(total_checks) AS total,
-                        countIfMerge(up_checks) AS up_
-                    FROM {CH_HISTORY_MV}
-                    WHERE org_id = ?
-                      AND has(arrayMap(x -> toUUID(x), ?), target_id)
-                      AND hour >= fromUnixTimestamp(?)
-                      AND hour < fromUnixTimestamp(?)
-                    GROUP BY target_id, hour
-                )
+                    toInt64(toUnixTimestamp(toStartOfDay(hour))) AS day,
+                    countMerge(total_checks) AS day_total
+                FROM {CH_HISTORY_MV}
+                WHERE org_id = ?
+                  AND has(arrayMap(x -> toUUID(x), ?), target_id)
+                  AND hour >= fromUnixTimestamp(?)
+                  AND hour < fromUnixTimestamp(?)
                 GROUP BY target_id, day
                 ORDER BY target_id, day"#
             ))
@@ -559,85 +590,67 @@ impl OrgAggregator {
             .bind(now.timestamp())
             .fetch_all::<HistoryDayRow>()
             .await
-            .context("ch history strip")?;
+            .context("ch day presence")
+            .map_err(Into::into)
+    }
+}
 
-        let mut out: Vec<(Uuid, Vec<DayState>)> = Vec::with_capacity(component_ids.len());
-        for id in component_ids {
-            let mut strip = vec![DayState::NoData; self.cfg.history_days as usize];
-            for r in rows
-                .iter()
-                .filter(|r| r.target_id == *id && r.day_total > 0)
-            {
-                let day = ts_to_datetime(r.day);
-                let idx = days_ago_index(day, now, self.cfg.history_days);
-                if let Some(i) = idx {
-                    let s = if r.any_major != 0 {
-                        DayState::MajorOutage
-                    } else if r.any_failure != 0 {
-                        DayState::PartialOutage
-                    } else {
-                        DayState::Operational
-                    };
-                    strip[i] = s;
-                }
+/// Day-strip cells: data presence from the hour rollup (`NoData` detection),
+/// outage paint from confirmed incident windows — a raw check blip that never
+/// confirmed into an incident leaves the day green. Returns one oldest-first
+/// `Vec<DayState>` of length `span_days` per component.
+fn paint_strips(
+    component_ids: &[Uuid],
+    presence: &[HistoryDayRow],
+    windows: &[PaintWindowRow],
+    now: DateTime<Utc>,
+    span_days: u32,
+) -> HashMap<Uuid, Vec<DayState>> {
+    let days = span_days as usize;
+    let from = now - ChronoDuration::days(span_days as i64);
+
+    let mut has_data: HashMap<Uuid, Vec<bool>> = HashMap::new();
+    for r in presence.iter().filter(|r| r.day_total > 0) {
+        let day = ts_to_datetime(r.day).date_naive();
+        if let Some(i) = days_ago_index(day, now, span_days) {
+            has_data
+                .entry(r.target_id)
+                .or_insert_with(|| vec![false; days])[i] = true;
+        }
+    }
+
+    // Worst confirmed-incident impact per (component, day slot). Half-open on
+    // the end timestamp — a window ending exactly at midnight does not touch
+    // that day — matching the popover's `day_overlap` so cell colour and
+    // popover content never disagree.
+    let mut worst: HashMap<Uuid, Vec<Option<IncidentImpact>>> = HashMap::new();
+    for w in windows {
+        let slots = worst.entry(w.target_id).or_insert_with(|| vec![None; days]);
+        let impact = w.impact();
+        let end = w.ended_at.unwrap_or(now).min(now);
+        let mut d = w.started_at.max(from).date_naive();
+        while day_start_utc(d) < end {
+            if let Some(i) = days_ago_index(d, now, span_days) {
+                slots[i] = slots[i].max(Some(impact));
             }
-            out.push((*id, strip));
+            match d.succ_opt() {
+                Some(next) => d = next,
+                None => break,
+            }
         }
-        Ok(out)
     }
 
-    /// Pulls raw `check_results` for the last 5 minutes — narrow enough that the
-    /// cost is negligible (<= 5 × N rows) and gives the full
-    /// up/down/degraded/error breakdown the component classifier needs.
-    async fn load_recent_counters(
-        &self,
-        org: OrgId,
-        component_ids: &[Uuid],
-        now: DateTime<Utc>,
-    ) -> Result<Vec<(Uuid, Counters)>> {
-        if component_ids.is_empty() {
-            return Ok(Vec::new());
-        }
-        let from = now - ChronoDuration::minutes(5);
-        let rows: Vec<RecentCountRow> = self
-            .ch
-            .query(&format!(
-                r#"SELECT
-                       target_id,
-                       countIf(status = 'up')       AS up_,
-                       countIf(status = 'down')     AS down_,
-                       countIf(status = 'degraded') AS degraded_,
-                       countIf(status = 'error')    AS error_
-                   FROM {CH_TABLE}
-                   WHERE org_id = ?
-                     AND has(arrayMap(x -> toUUID(x), ?), target_id)
-                     AND timestamp >= fromUnixTimestamp(?)
-                     AND timestamp <  fromUnixTimestamp(?)
-                   GROUP BY target_id"#
-            ))
-            .bind(org.0)
-            .bind(component_ids)
-            .bind(from.timestamp())
-            .bind(now.timestamp())
-            .fetch_all::<RecentCountRow>()
-            .await
-            .context("ch recent counters")?;
-
-        Ok(rows
-            .into_iter()
-            .map(|r| {
-                (
-                    r.target_id,
-                    Counters {
-                        up: r.up_ as u32,
-                        down: r.down_ as u32,
-                        degraded: r.degraded_ as u32,
-                        error: r.error_ as u32,
-                    },
-                )
-            })
-            .collect())
-    }
+    component_ids
+        .iter()
+        .map(|id| {
+            let data = has_data.get(id);
+            let impacts = worst.get(id);
+            let strip = (0..days)
+                .map(|i| day_state(data.is_some_and(|v| v[i]), impacts.and_then(|v| v[i])))
+                .collect();
+            (*id, strip)
+        })
+        .collect()
 }
 
 // ── PG row types ────────────────────────────────────────────────────────────
@@ -676,13 +689,44 @@ struct IncidentRow {
 }
 
 #[derive(FromRow)]
-struct HistoryMarkerRow {
+struct MarkerWindowRow {
     id: Uuid,
     target_id: Uuid,
     public_title: Option<String>,
     status_at_start: String,
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
+}
+
+#[derive(FromRow)]
+struct PaintWindowRow {
+    target_id: Uuid,
+    status_at_start: String,
+    severity: String,
+    origin: String,
+    regions_up: Option<Vec<String>>,
+    started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
+}
+
+impl PaintWindowRow {
+    /// Manual incidents carry the operator's chosen severity — the check
+    /// fields are placeholders on them. Auto incidents derive from what the
+    /// probes saw at open: `regions_up` non-empty means some region still
+    /// answered (partial loss); empty means every vantage point failed.
+    fn impact(&self) -> IncidentImpact {
+        if self.origin == "manual" {
+            return match IncidentSeverity::from_db_str(&self.severity) {
+                IncidentSeverity::Minor => IncidentImpact::Degraded,
+                IncidentSeverity::Major => IncidentImpact::PartialOutage,
+                IncidentSeverity::Critical => IncidentImpact::MajorOutage,
+            };
+        }
+        incident_impact(
+            self.status_at_start == CheckStatus::Degraded.as_str(),
+            self.regions_up.as_ref().is_some_and(|r| !r.is_empty()),
+        )
+    }
 }
 
 #[derive(FromRow)]
@@ -700,19 +744,7 @@ struct HistoryDayRow {
     #[serde(with = "clickhouse::serde::uuid")]
     target_id: Uuid,
     day: i64, // DateTime in seconds; ClickHouse `toStartOfDay` returns DateTime
-    any_major: u8,
-    any_failure: u8,
     day_total: u64,
-}
-
-#[derive(Row, Deserialize)]
-struct RecentCountRow {
-    #[serde(with = "clickhouse::serde::uuid")]
-    target_id: Uuid,
-    up_: u64,
-    down_: u64,
-    degraded_: u64,
-    error_: u64,
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────────
@@ -737,12 +769,17 @@ fn ts_to_datetime(secs: i64) -> DateTime<Utc> {
     chrono::DateTime::<Utc>::from_timestamp(secs, 0).unwrap_or_else(Utc::now)
 }
 
-/// Maps a day timestamp to its slot in the `history_days`-long oldest-first
+fn day_start_utc(day: chrono::NaiveDate) -> DateTime<Utc> {
+    day.and_hms_opt(0, 0, 0)
+        .expect("midnight is valid for every date")
+        .and_utc()
+}
+
+/// Maps a calendar day to its slot in the `history_days`-long oldest-first
 /// strip. Returns `None` when the day falls outside the window.
-fn days_ago_index(day: DateTime<Utc>, now: DateTime<Utc>, history_days: u32) -> Option<usize> {
+fn days_ago_index(day: chrono::NaiveDate, now: DateTime<Utc>, history_days: u32) -> Option<usize> {
     let today = now.date_naive();
-    let target = day.date_naive();
-    let diff = (today - target).num_days();
+    let diff = (today - day).num_days();
     if diff < 0 || diff >= history_days as i64 {
         return None;
     }
@@ -774,22 +811,22 @@ mod tests {
     #[test]
     fn days_ago_index_today_is_last_slot() {
         let now = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
-        assert_eq!(days_ago_index(now, now, 90), Some(89));
+        assert_eq!(days_ago_index(now.date_naive(), now, 90), Some(89));
     }
 
     #[test]
     fn days_ago_index_oldest_in_window_is_first_slot() {
         let now = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
-        let oldest = now - ChronoDuration::days(89);
+        let oldest = (now - ChronoDuration::days(89)).date_naive();
         assert_eq!(days_ago_index(oldest, now, 90), Some(0));
     }
 
     #[test]
     fn days_ago_index_out_of_window_returns_none() {
         let now = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
-        let too_old = now - ChronoDuration::days(90);
+        let too_old = (now - ChronoDuration::days(90)).date_naive();
         assert!(days_ago_index(too_old, now, 90).is_none());
-        let future = now + ChronoDuration::days(1);
+        let future = (now + ChronoDuration::days(1)).date_naive();
         assert!(days_ago_index(future, now, 90).is_none());
     }
 
@@ -810,5 +847,115 @@ mod tests {
         let out = pad_or_truncate(v, 3);
         assert_eq!(out.len(), 3);
         assert_eq!(out[2], DayState::MajorOutage);
+    }
+
+    fn window(
+        target_id: Uuid,
+        origin: &str,
+        severity: &str,
+        status: &str,
+        regions_up: Option<Vec<String>>,
+        started_at: DateTime<Utc>,
+        ended_at: Option<DateTime<Utc>>,
+    ) -> PaintWindowRow {
+        PaintWindowRow {
+            target_id,
+            status_at_start: status.into(),
+            severity: severity.into(),
+            origin: origin.into(),
+            regions_up,
+            started_at,
+            ended_at,
+        }
+    }
+
+    fn presence_row(target_id: Uuid, at: DateTime<Utc>) -> HistoryDayRow {
+        HistoryDayRow {
+            target_id,
+            day: day_start_utc(at.date_naive()).timestamp(),
+            day_total: 1,
+        }
+    }
+
+    #[test]
+    fn manual_incident_impact_follows_severity() {
+        let t = Uuid::nil();
+        let now = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        for (severity, expected) in [
+            ("minor", IncidentImpact::Degraded),
+            ("major", IncidentImpact::PartialOutage),
+            ("critical", IncidentImpact::MajorOutage),
+        ] {
+            let w = window(t, "manual", severity, "down", None, now, None);
+            assert_eq!(w.impact(), expected, "severity {severity}");
+        }
+    }
+
+    #[test]
+    fn auto_incident_impact_ignores_severity_column() {
+        let t = Uuid::nil();
+        let now = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let partial = window(
+            t,
+            "monitor",
+            "major",
+            "down",
+            Some(vec!["eu".into()]),
+            now,
+            None,
+        );
+        assert_eq!(partial.impact(), IncidentImpact::PartialOutage);
+        let total = window(t, "monitor", "minor", "down", Some(vec![]), now, None);
+        assert_eq!(total.impact(), IncidentImpact::MajorOutage);
+        let degraded = window(t, "monitor", "critical", "degraded", None, now, None);
+        assert_eq!(degraded.impact(), IncidentImpact::Degraded);
+    }
+
+    #[test]
+    fn paint_ends_exactly_at_midnight_excludes_that_day() {
+        let t = Uuid::now_v7();
+        let now = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let midnight = Utc.with_ymd_and_hms(2026, 5, 13, 0, 0, 0).unwrap();
+        let w = window(
+            t,
+            "monitor",
+            "major",
+            "down",
+            None,
+            midnight - ChronoDuration::hours(3),
+            Some(midnight),
+        );
+        let presence = [
+            presence_row(t, now),
+            presence_row(t, midnight - ChronoDuration::hours(3)),
+        ];
+        let strips = paint_strips(&[t], &presence, &[w], now, 90);
+        let strip = &strips[&t];
+        // Yesterday (the incident's real day) painted, today untouched.
+        assert_eq!(strip[88], DayState::MajorOutage);
+        assert_eq!(strip[89], DayState::Operational);
+    }
+
+    #[test]
+    fn paint_open_incident_wins_over_missing_checks() {
+        let t = Uuid::now_v7();
+        let now = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+        let w = window(
+            t,
+            "monitor",
+            "major",
+            "down",
+            None,
+            now - ChronoDuration::hours(1),
+            None,
+        );
+        let strips = paint_strips(&[t], &[], &[w], now, 90);
+        let strip = &strips[&t];
+        assert_eq!(
+            strip[89],
+            DayState::MajorOutage,
+            "incident paints without checks"
+        );
+        assert_eq!(strip[0], DayState::NoData, "silent day stays NoData");
     }
 }

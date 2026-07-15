@@ -28,8 +28,9 @@ use chrono::Utc;
 use futures::FutureExt;
 use sqlx::PgPool;
 use uptimepage::domain::{
-    CheckResult, CheckSpec, CheckStatus, ExpectedStatus, NewStatusPage, NewStatusPageComponent,
-    NewTarget, OrgId, PublicComponentStatus, StatusPageId, WriteSource,
+    CheckResult, CheckSpec, CheckStatus, DayState, ExpectedStatus, NewStatusPage,
+    NewStatusPageComponent, NewTarget, OrgId, OverallState, PublicComponentStatus, StatusPageId,
+    WriteSource,
 };
 use uptimepage::public_status::{AggregatorConfig, OrgAggregator};
 use uptimepage::storage::{
@@ -159,9 +160,9 @@ where
     }
 }
 
-/// Exercises both `has(?, target_id)` query sites (recent counters + history
-/// strip) and the `DateTime → i64` deserialization in the history-strip
-/// `SELECT`. Either bug breaks this test with a 503-equivalent error.
+/// Exercises the history-strip `has(?, target_id)` query site and the
+/// `DateTime → i64` deserialization in its `SELECT`. Either bug breaks this
+/// test with a 503-equivalent error.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL + CLICKHOUSE_URL — run via `docker compose -f compose.dev.yml up -d` then `cargo test -- --ignored`"]
 async fn build_round_trips_seeded_data() {
@@ -205,14 +206,6 @@ async fn build_round_trips_seeded_data() {
             .collect();
         sink.write_batch(&rows).await.expect("ch insert");
 
-        // The materialized view rolls up on insert, but the underlying merge
-        // happens asynchronously. Force a flush so the 5-minute counters
-        // query sees the rows we just wrote.
-        ch.query("OPTIMIZE TABLE check_results_1m FINAL")
-            .execute()
-            .await
-            .expect("flush mv");
-
         let page_id = seed_page_with_target(&pool, org_id, target_id).await;
         let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
         let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
@@ -224,7 +217,7 @@ async fn build_round_trips_seeded_data() {
             .find(|c| c.id == target_id)
             .expect("seeded public component present in page");
 
-        // 5 up-results in the last 5 minutes → operational.
+        // No open confirmed incident → operational.
         assert_eq!(component.current_status, PublicComponentStatus::Operational);
         assert_eq!(component.history.len(), 90);
     })
@@ -275,10 +268,6 @@ async fn component_history_returns_strip_for_public_target() {
         sink.write_batch(&[ok_result(target_id, org_id.0, now)])
             .await
             .expect("ch insert");
-        ch.query("OPTIMIZE TABLE check_results_1m FINAL")
-            .execute()
-            .await
-            .expect("flush mv");
 
         let page_id = seed_page_with_target(&pool, org_id, target_id).await;
         let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
@@ -402,6 +391,147 @@ async fn build_excludes_internal_incidents() {
     let result = AssertUnwindSafe(body).catch_unwind().await;
     delete_target(&pool_for_cleanup, pub_target_id).await;
     delete_target(&pool_for_cleanup, int_target_id).await;
+    if let Err(p) = result {
+        std::panic::resume_unwind(p);
+    }
+}
+
+/// Component state and the day strip derive from confirmed public incidents,
+/// not raw samples: an open incident with surviving regions reads as a
+/// partial outage, one with none as a major outage, and both paint today's
+/// history cell. The banner takes the worst component.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL + CLICKHOUSE_URL"]
+async fn build_component_state_follows_confirmed_incidents() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    purge_prefix(&pool, "agg-conf-").await;
+
+    let org_id = seed_org(&pool, "agg-conf").await;
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let mk_target = |role: &str| public_target(&format!("agg-conf-{role}-{}", Uuid::now_v7()));
+    let partial_target = store
+        .create(
+            org_id,
+            mk_target("partial"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create partial target");
+    let major_target = store
+        .create(
+            org_id,
+            mk_target("major"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create major target");
+    let partial_id = partial_target.id;
+    let major_id = major_target.id;
+    let pool_for_cleanup = pool.clone();
+
+    let body = async move {
+        let sink = ClickhouseResultSink::new(
+            ch.clone(),
+            "default".into(),
+            "default".into(),
+            uptimepage::storage::OrgTtlDays::new(),
+        );
+        let now = Utc::now();
+        sink.write_batch(&[
+            ok_result(partial_id, org_id.0, now),
+            ok_result(major_id, org_id.0, now),
+        ])
+        .await
+        .expect("ch insert");
+
+        // Open incident with a surviving region → partial; without → major.
+        sqlx::query(
+            "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, regions_up, visibility) \
+             VALUES ($1, $2, $3, 'error', $4, 'public')",
+        )
+        .bind(org_id.0)
+        .bind(partial_id)
+        .bind(now - chrono::Duration::minutes(5))
+        .bind(vec!["eu-helsinki".to_string()])
+        .execute(&pool)
+        .await
+        .expect("insert partial incident");
+        sqlx::query(
+            "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, visibility) \
+             VALUES ($1, $2, $3, 'down', 'public')",
+        )
+        .bind(org_id.0)
+        .bind(major_id)
+        .bind(now - chrono::Duration::minutes(5))
+        .execute(&pool)
+        .await
+        .expect("insert major incident");
+
+        let page_id = seed_page_with_target(&pool, org_id, partial_id).await;
+        PgStatusPageStore::new(pool.clone())
+            .add_component(
+                org_id,
+                page_id,
+                NewStatusPageComponent {
+                    target_id: major_id,
+                    public_name: None,
+                    public_description: None,
+                    public_group: None,
+                    sort_order: 1,
+                },
+                i64::MAX,
+                None,
+            )
+            .await
+            .expect("add major component");
+
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
+
+        let component = |id: Uuid| {
+            page.groups
+                .iter()
+                .flat_map(|g| &g.components)
+                .find(|c| c.id == id)
+                .expect("component present")
+        };
+        let partial = component(partial_id);
+        let major = component(major_id);
+        assert_eq!(
+            partial.current_status,
+            PublicComponentStatus::PartialOutage,
+            "surviving region → partial outage"
+        );
+        assert_eq!(
+            major.current_status,
+            PublicComponentStatus::MajorOutage,
+            "no surviving region → major outage"
+        );
+        assert_eq!(
+            partial.history.last().copied(),
+            Some(DayState::PartialOutage),
+            "open incident paints today's cell"
+        );
+        assert_eq!(
+            major.history.last().copied(),
+            Some(DayState::MajorOutage),
+            "open incident paints today's cell"
+        );
+        assert_eq!(page.overall.state, OverallState::MajorOutage);
+    };
+
+    let result = AssertUnwindSafe(body).catch_unwind().await;
+    delete_target(&pool_for_cleanup, partial_id).await;
+    delete_target(&pool_for_cleanup, major_id).await;
     if let Err(p) = result {
         std::panic::resume_unwind(p);
     }
