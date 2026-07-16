@@ -2,7 +2,11 @@
 <article class="sticker-card dashboard-kpi-card corner-frame">
   <p class="dashboard-kpi-card__label">Uptime</p>
   <div class="dashboard-kpi-card__row">
-    <p class="dashboard-kpi-card__value">{{ uptime.uptime_pct }}<span class="dashboard-kpi-card__unit">%</span></p>
+    {% if let Some(pct) = uptime.uptime_pct %}
+    <p class="dashboard-kpi-card__value">{{ pct }}<span class="dashboard-kpi-card__unit">%</span></p>
+    {% else %}
+    <p class="dashboard-kpi-card__value dashboard-kpi-card__value--quiet">no data</p>
+    {% endif %}
     {% if kpi.spark_path != "" %}
     <svg class="dashboard-kpi-card__spark dashboard-kpi-card__spark--ok"
          viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">

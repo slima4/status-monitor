@@ -318,7 +318,8 @@ pub struct UptimeStatsView {
     pub down: u64,
     pub degraded: u64,
     pub error: u64,
-    pub uptime_pct: String,
+    /// `None` for an empty window, rendered as "no data" rather than a rate.
+    pub uptime_pct: Option<String>,
 }
 
 impl From<UptimeStats> for UptimeStatsView {
@@ -329,7 +330,7 @@ impl From<UptimeStats> for UptimeStatsView {
             down: s.down,
             degraded: s.degraded,
             error: s.error,
-            uptime_pct: fmt_uptime_pct(s.uptime_pct),
+            uptime_pct: s.uptime_pct.map(fmt_uptime_pct),
         }
     }
 }
@@ -527,7 +528,7 @@ async fn load_live_data(
         confirmed_incidents(state, org, target_id, prior_range, confirmed),
     )?;
     if confirmed && uptime.total > 0 {
-        uptime.uptime_pct = confirmed_uptime_pct(&cur_incidents, time_range);
+        uptime.uptime_pct = Some(confirmed_uptime_pct(&cur_incidents, time_range));
     }
     let kpi = build_kpi_trend(KpiInputs {
         current: &uptime,
@@ -668,14 +669,18 @@ fn build_kpi_trend(inp: KpiInputs) -> KpiTrend {
         };
     }
     let prior_pct = if inp.confirmed {
-        confirmed_uptime_pct(inp.prior_incidents, inp.prior_range)
+        Some(confirmed_uptime_pct(inp.prior_incidents, inp.prior_range))
     } else {
         inp.prior.uptime_pct
     };
     KpiTrend {
         spark_path,
         spark_fill,
-        uptime_delta: Some(uptime_pp_delta(inp.current.uptime_pct, prior_pct)),
+        uptime_delta: inp
+            .current
+            .uptime_pct
+            .zip(prior_pct)
+            .map(|(cur, prior)| uptime_pp_delta(cur, prior)),
         up_delta: Some(count_delta(
             inp.current.up,
             inp.prior.up,
@@ -1467,7 +1472,7 @@ mod tests {
                 down: 1,
                 degraded: 0,
                 error: 0,
-                uptime_pct: "99.00".into(),
+                uptime_pct: Some("99.00".into()),
             }),
             kpi: Arc::new(KpiTrend::default()),
             segments: Arc::from(vec![
@@ -1589,6 +1594,28 @@ mod tests {
     }
 
     #[test]
+    fn empty_window_renders_no_data_not_a_zero_rate() {
+        let mut p = sample_page();
+        p.uptime = Arc::new(UptimeStatsView {
+            total: 0,
+            up: 0,
+            down: 0,
+            degraded: 0,
+            error: 0,
+            uptime_pct: None,
+        });
+        let html = p.render().unwrap();
+        assert!(
+            html.contains("no data"),
+            "uptime card and ribbon read no data"
+        );
+        assert!(
+            !html.contains(r#"<span class="dashboard-kpi-card__unit">%</span>"#),
+            "no percent unit without a rate to qualify"
+        );
+    }
+
+    #[test]
     fn detail_renders_status_ribbon() {
         let html = sample_page().render().unwrap();
         assert!(html.contains("dashboard-ribbon"));
@@ -1685,7 +1712,7 @@ mod tests {
                 down: 1,
                 degraded: 0,
                 error: 0,
-                uptime_pct: "99.00".into(),
+                uptime_pct: Some("99.00".into()),
             }),
             kpi: Arc::new(KpiTrend::default()),
             last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
@@ -1829,7 +1856,7 @@ mod tests {
             down,
             degraded: 0,
             error,
-            uptime_pct: pct,
+            uptime_pct: Some(pct),
         }
     }
 

@@ -1017,20 +1017,16 @@ impl ResultsStore for ClickhouseResultsStore {
             .await
             .context("clickhouse uptime")?;
 
-        let uptime_pct = if row.total > 0 {
-            (row.up as f64 / row.total as f64) * 100.0
-        } else {
-            0.0
-        };
-
-        Ok(UptimeStats {
+        let mut stats = UptimeStats {
             total: row.total,
             up: row.up,
             down: row.down,
             degraded: row.degraded,
             error: row.error,
-            uptime_pct,
-        })
+            ..Default::default()
+        };
+        stats.finish();
+        Ok(stats)
     }
 
     async fn dashboard_rollup(

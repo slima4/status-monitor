@@ -30,7 +30,7 @@
   </div>
   <div class="dashboard-ribbon-meta">
     <span class="cli-brackets">{{ range }} ago</span>
-    <span class="dashboard-ribbon-meta__value">{{ uptime.uptime_pct }}%</span>
+    <span class="dashboard-ribbon-meta__value">{% if let Some(pct) = uptime.uptime_pct %}{{ pct }}%{% else %}no data{% endif %}</span>
     <span class="cli-brackets">now</span>
   </div>
   {% endif %}

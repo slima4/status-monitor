@@ -133,9 +133,10 @@ pub struct MonitorDetail {
     pub last_timing: CheckTiming,
     /// Response body size of the last check in bytes, when measured.
     pub last_response_size: Option<u32>,
-    /// Uptime percentage over the trailing 24 hours / 30 days.
-    pub uptime_24h: f64,
-    pub uptime_30d: f64,
+    /// Uptime percentage over the trailing 24 hours / 30 days. `null` when the
+    /// window holds no checks — that is unknown, not zero.
+    pub uptime_24h: Option<f64>,
+    pub uptime_30d: Option<f64>,
 }
 
 /// `get_monitor_history` arguments.
@@ -196,8 +197,9 @@ pub struct IncidentWindow {
 /// `get_monitor_history` result, bounded to the requested window.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MonitorHistory {
-    /// Uptime percentage over the window.
-    pub uptime: f64,
+    /// Uptime percentage over the window. `null` when the window holds no
+    /// checks — that is unknown, not zero.
+    pub uptime: Option<f64>,
     pub latency_series: Vec<LatencyPoint>,
     pub failures: Vec<Failure>,
     pub incidents: Vec<IncidentWindow>,

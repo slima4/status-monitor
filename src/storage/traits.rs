@@ -266,8 +266,9 @@ pub struct UptimeStats {
     pub down: u64,
     pub degraded: u64,
     pub error: u64,
-    #[schema(example = 99.94)]
-    pub uptime_pct: f64,
+    /// `None` for an empty window: no observations is not 0% uptime.
+    #[schema(example = 99.94, nullable)]
+    pub uptime_pct: Option<f64>,
 }
 
 impl UptimeStats {
@@ -282,10 +283,13 @@ impl UptimeStats {
                 CheckStatus::Error => stats.error += 1,
             }
         }
-        if stats.total > 0 {
-            stats.uptime_pct = (stats.up as f64 / stats.total as f64) * 100.0;
-        }
+        stats.finish();
         stats
+    }
+
+    /// Shared by both stores so their uptime can't drift.
+    pub(crate) fn finish(&mut self) {
+        self.uptime_pct = (self.total > 0).then(|| (self.up as f64 / self.total as f64) * 100.0);
     }
 }
 
@@ -468,6 +472,24 @@ mod tests {
     fn at(y: i32, m: u32, d: u32) -> DateTime<Utc> {
         use chrono::TimeZone;
         Utc.with_ymd_and_hms(y, m, d, 0, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn empty_window_has_no_uptime_rather_than_zero() {
+        let s = UptimeStats::from_results(&[]);
+        assert_eq!(s.uptime_pct, None, "no observations is not 0% uptime");
+    }
+
+    #[test]
+    fn uptime_is_the_rate_over_observed_checks() {
+        let mut s = UptimeStats {
+            total: 4,
+            up: 3,
+            down: 1,
+            ..Default::default()
+        };
+        s.finish();
+        assert_eq!(s.uptime_pct, Some(75.0));
     }
 
     #[test]

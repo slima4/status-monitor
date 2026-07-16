@@ -326,11 +326,17 @@ impl McpServer {
         // cover the 24h window too).
         if up24.total > 0 {
             let down = confirmed_downtime_secs(&incidents, r24.from, r24.to, now);
-            up24.uptime_pct = uptime_pct_from_downtime(down, (r24.to - r24.from).num_seconds());
+            up24.uptime_pct = Some(uptime_pct_from_downtime(
+                down,
+                (r24.to - r24.from).num_seconds(),
+            ));
         }
         if up30.total > 0 {
             let down = confirmed_downtime_secs(&incidents, r30.from, r30.to, now);
-            up30.uptime_pct = uptime_pct_from_downtime(down, (r30.to - r30.from).num_seconds());
+            up30.uptime_pct = Some(uptime_pct_from_downtime(
+                down,
+                (r30.to - r30.from).num_seconds(),
+            ));
         }
 
         let last = latest.first();
@@ -416,13 +422,15 @@ impl McpServer {
             })
             .collect();
 
-        // Uptime as confirmed downtime over the window, from the full incident
-        // set; keep the sample value when the window has no data.
+        // Uptime as confirmed downtime over the window, from the full incident set.
         let uptime_pct = if uptime.total > 0 {
             let down = confirmed_downtime_secs(&incidents, range.from, range.to, now);
-            uptime_pct_from_downtime(down, (range.to - range.from).num_seconds())
+            Some(uptime_pct_from_downtime(
+                down,
+                (range.to - range.from).num_seconds(),
+            ))
         } else {
-            uptime.uptime_pct
+            None
         };
 
         // The failures/windows lists stay bounded regardless of how flappy the

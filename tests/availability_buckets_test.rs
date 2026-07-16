@@ -115,5 +115,20 @@ async fn availability_buckets_count_up_and_total_from_rollup() {
         (up.total, up.up, up.down, up.degraded, up.error),
         (5, 3, 1, 1, 0)
     );
-    assert!((up.uptime_pct - 60.0).abs() < 0.001, "3/5 = 60%");
+    assert!(
+        up.uptime_pct.is_some_and(|p| (p - 60.0).abs() < 0.001),
+        "3/5 = 60%"
+    );
+
+    // An empty window reads as unknown uptime, not 0%.
+    let empty = TimeRange {
+        from: base - Duration::hours(3),
+        to: base - Duration::hours(2),
+    };
+    let none = store
+        .uptime(OrgId(org), target, ClampedRange::unclamped(empty), None)
+        .await
+        .expect("empty-window uptime query");
+    assert_eq!(none.total, 0);
+    assert_eq!(none.uptime_pct, None, "no observations is not 0% uptime");
 }

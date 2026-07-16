@@ -284,7 +284,9 @@ pub async fn latency_by_region(
     path = "/api/v1/targets/{id}/uptime",
     tag = "results",
     summary = "Uptime stats for a target over a time range",
-    description = "Counts per-status check totals and computes uptime percentage.",
+    description = "Counts per-status check totals and computes uptime percentage. \
+                   `uptime_pct` is null when the window holds no checks, which is \
+                   unknown rather than zero.",
     params(
         ("id" = Uuid, Path),
         ("from" = Option<DateTime<Utc>>, Query, description = "Inclusive lower bound (default: now-24h)"),
@@ -322,7 +324,10 @@ pub async fn uptime(
             .list_for_target(org, id, range.inner(), UPTIME_INCIDENT_CAP, 0, false)
             .await?;
         let down = confirmed_downtime_secs(&incidents, range.from, range.to, Utc::now());
-        stats.uptime_pct = uptime_pct_from_downtime(down, (range.to - range.from).num_seconds());
+        stats.uptime_pct = Some(uptime_pct_from_downtime(
+            down,
+            (range.to - range.from).num_seconds(),
+        ));
     }
     Ok(Json(stats))
 }

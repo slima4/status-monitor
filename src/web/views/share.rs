@@ -461,7 +461,7 @@ mod tests {
                 down: 0,
                 degraded: 0,
                 error: 0,
-                uptime_pct: "100.00".into(),
+                uptime_pct: Some("100.00".into()),
             }),
             kpi: Arc::new(Default::default()),
             results: Arc::from(vec![]),
