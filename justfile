@@ -4,22 +4,19 @@
 set shell := ["bash", "-cu"]
 
 # The linker lives in .cargo/config.toml (read by `just` AND bare `cargo` AND
-# rust-analyzer — one shared build fingerprint, no thrash). Only sccache is an
-# env wrapper, and it's set ONLY when present so a vanilla checkout still
-# builds (cargo treats an empty RUSTC_WRAPPER as unset). `just setup` installs
-# the toolset.
-export RUSTC_WRAPPER := `command -v sccache >/dev/null 2>&1 && echo sccache || true`
+# rust-analyzer — one shared build fingerprint, no thrash). No RUSTC_WRAPPER
+# here: sccache deadlocks the cold lib compile on macOS and can't cache a path
+# dependency anyway. CI sets it itself (ci.yml), where it does pay off.
 
 # Default = list recipes.
 default:
     @just --list
 
-# Install the build accelerators: sccache + cargo-nextest, and the fast
-# linker (mold on Linux, lld on macOS). Idempotent.
+# Install the build accelerators: cargo-nextest and the fast linker (mold on
+# Linux, lld on macOS). Idempotent. CI installs sccache via sccache-action.
 setup:
     #!/usr/bin/env bash
     set -euo pipefail
-    command -v sccache       >/dev/null 2>&1 || cargo install --locked sccache
     command -v cargo-nextest >/dev/null 2>&1 || cargo install --locked cargo-nextest
     if [ "{{os()}}" = "macos" ]; then
       brew list lld >/dev/null 2>&1 || brew install lld
@@ -40,7 +37,7 @@ setup:
     fi
     git config core.hooksPath .githooks
     echo "pre-commit installed → .githooks/pre-commit (bypass with --no-verify)"
-    echo "setup done — RUSTC_WRAPPER=${RUSTC_WRAPPER:-<none>}; linker via .cargo/config.toml"
+    echo "setup done — linker via .cargo/config.toml"
 
 # Reclaim disk: sweep build artifacts not accessed today (cargo-sweep).
 clean:

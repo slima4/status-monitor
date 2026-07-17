@@ -221,11 +221,10 @@ docker compose logs -f uptimepage
 ## Faster builds
 
 ```bash
-just setup        # once: sccache + cargo-nextest, and the linker
+just setup        # once: cargo-nextest and the linker
                   # (mold on Linux; macOS prints an lld opt-in snippet)
-just check        # primes test-profile artifacts so `just test` skips
-                  # the rebuild a `cargo check` -> `cargo test` profile
-                  # switch would otherwise force
+cargo check --lib # the iteration gate (~8.5s after a one-file edit)
+just check        # builds every test binary — pre-commit gate (~4min)
 ```
 
 - **Toolchain**: `rust-toolchain.toml` pins 1.95 for *every* entrypoint
@@ -236,13 +235,19 @@ just check        # primes test-profile artifacts so `just test` skips
   A Linux build needs `mold` installed — `just setup`. macOS is opt-in
   (Apple clang needs lld's machine-specific absolute path; `just setup`
   prints the `~/.cargo/config.toml` snippet).
-- **sccache**: compile cache for local dev (`just` sets `RUSTC_WRAPPER`
-  only when present) and CI (`mozilla-actions/sccache-action`, with
+- **Incremental**: the local lever. Set `incremental = true` in
+  `~/.cargo/config.toml` (machine-scoped). Worth ~4% on `just check`, which is
+  link-bound, but 28s -> 8.5s on `cargo check --lib`. The dev-app container does
+  the same via `CARGO_INCREMENTAL=1`.
+- **sccache**: CI only (`mozilla-actions/sccache-action`, with
   `Swatinem/rust-cache` reduced to `cache-targets: false` so they don't
-  double-store). Not in the release `Dockerfile` — cargo-chef already
-  layer-caches deps there and the sccache mount wouldn't survive CI.
+  double-store). Never set `RUSTC_WRAPPER` locally: it is mutually exclusive
+  with incremental, only registry deps are cacheable (never the local crate),
+  and on macOS it deadlocks the cold lib compile. Not in the release
+  `Dockerfile` either — cargo-chef already layer-caches deps there and the
+  sccache mount wouldn't survive CI.
 - CI installs the linker via `rui314/setup-mold`; the dev-app container
-  via `apk add mold` + a persistent sccache volume.
+  via `apk add mold`.
 
 ## Tests
 
