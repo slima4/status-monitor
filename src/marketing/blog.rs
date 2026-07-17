@@ -50,6 +50,9 @@ pub struct Post {
     /// Question/answer pairs mirroring the post's visible FAQ; emits
     /// `FAQPage` JSON-LD.
     pub faqs: Vec<(String, String)>,
+    /// Origin-relative path to a post-specific social card; the shared
+    /// site card is used when absent.
+    pub og_image: Option<String>,
     pub body_html: String,
     /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
     pub body_md: String,
@@ -71,6 +74,7 @@ struct FrontMatter {
     list_items: Vec<String>,
     #[serde(default)]
     faqs: Vec<FaqEntry>,
+    og_image: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -148,6 +152,12 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
     let (front, body) = split_front_matter(raw)
         .ok_or_else(|| anyhow::anyhow!("missing TOML front-matter block"))?;
     let fm: FrontMatter = toml::from_str(front)?;
+    if let Some(img) = &fm.og_image {
+        anyhow::ensure!(
+            img.starts_with("/static/"),
+            "og_image must be a /static/-rooted path, got {img:?}"
+        );
+    }
     Ok(Post {
         slug: fm.slug.unwrap_or_else(|| stem.to_string()),
         title: fm.title,
@@ -158,6 +168,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         draft: fm.draft,
         list_items: fm.list_items,
         faqs: fm.faqs.into_iter().map(|f| (f.q, f.a)).collect(),
+        og_image: fm.og_image,
         body_html: render(body),
         body_md: body.trim().to_string(),
     })
@@ -275,6 +286,7 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         &post.title,
         &post.excerpt,
         &post.slug,
+        post.og_image.as_deref(),
     );
     let date_modified = post.updated.as_deref().unwrap_or(&post.date);
     let json_ld = json_ld_blog_posting(
@@ -343,6 +355,32 @@ pub async fn post(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn og_image_assets_exist_at_social_card_size() {
+        for post in load_posts() {
+            let Some(img) = &post.og_image else { continue };
+            let rel = img.strip_prefix('/').unwrap();
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("{}: og_image {img} unreadable: {e}", post.slug));
+            assert_eq!(
+                &bytes[..8],
+                b"\x89PNG\r\n\x1a\n",
+                "{}: og_image must be a PNG",
+                post.slug
+            );
+            let w = u32::from_be_bytes(bytes[16..20].try_into().unwrap());
+            let h = u32::from_be_bytes(bytes[20..24].try_into().unwrap());
+            assert_eq!((w, h), (1200, 630), "{}: social card size", post.slug);
+        }
+    }
+
+    #[test]
+    fn og_image_outside_static_is_rejected() {
+        let raw = "+++\ntitle = \"x\"\ndate = \"2026-01-01\"\nog_image = \"https://cdn.example.com/x.png\"\n+++\nbody";
+        assert!(parse_post(raw, "x").is_err());
+    }
 
     #[test]
     fn list_items_appear_in_post_body() {

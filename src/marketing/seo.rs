@@ -102,6 +102,8 @@ const LLMS_FACTS: &[(&str, &str)] = &[
     ("Sign-in", "GitHub, Google or magic link"),
 ];
 
+const DEFAULT_OG_CARD: &str = "/static/marketing/og.png";
+
 #[derive(Debug, Clone, Serialize)]
 pub struct OpenGraph {
     pub title: String,
@@ -118,17 +120,23 @@ impl OpenGraph {
             description: META_DESCRIPTION.to_string(),
             og_type: "website".to_string(),
             url: url.to_string(),
-            image: absolute_asset(canonical_origin, "/static/marketing/og.png"),
+            image: absolute_asset(canonical_origin, DEFAULT_OG_CARD),
         }
     }
 
-    pub fn for_post(canonical_origin: &str, title: &str, excerpt: &str, slug: &str) -> Self {
+    pub fn for_post(
+        canonical_origin: &str,
+        title: &str,
+        excerpt: &str,
+        slug: &str,
+        og_image: Option<&str>,
+    ) -> Self {
         Self {
             title: title.to_string(),
             description: excerpt.to_string(),
             og_type: "article".to_string(),
             url: format!("{canonical_origin}/blog/{slug}"),
-            image: absolute_asset(canonical_origin, "/static/marketing/og.png"),
+            image: absolute_asset(canonical_origin, og_image.unwrap_or(DEFAULT_OG_CARD)),
         }
     }
 }

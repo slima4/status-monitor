@@ -267,6 +267,33 @@ async fn og_image_is_rooted_at_origin_on_subpages() {
 }
 
 #[tokio::test]
+async fn blog_post_og_image_overrides_the_shared_card() {
+    let (status, body, _) = get("/blog/is-98-uptime-good").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains(
+            r#"property="og:image" content="https://uptimepage.dev/static/marketing/og-98-uptime.png""#
+        ),
+        "og_image front-matter must replace the shared card"
+    );
+    assert!(
+        body.contains(
+            r#"name="twitter:image" content="https://uptimepage.dev/static/marketing/og-98-uptime.png""#
+        ),
+        "twitter:image must follow the override"
+    );
+
+    let (status, body, _) = get("/blog/error-budgets-explained").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains(
+            r#"property="og:image" content="https://uptimepage.dev/static/marketing/og.png""#
+        ),
+        "posts without og_image must keep the shared card"
+    );
+}
+
+#[tokio::test]
 async fn sitemap_lists_the_tools() {
     let (status, body, _) = get("/sitemap.xml").await;
     assert_eq!(status, StatusCode::OK);
