@@ -142,9 +142,16 @@
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">01</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9"/>
-                    <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M19.5 7a9 9 0 0 0 -7.5 -4a8.991 8.991 0 0 0 -7.484 4"/>
+                    <path d="M11.5 3a16.989 16.989 0 0 0 -1.826 4"/>
+                    <path d="M12.5 3a16.989 16.989 0 0 1 1.828 4"/>
+                    <path d="M19.5 17a9 9 0 0 1 -7.5 4a8.991 8.991 0 0 1 -7.484 -4"/>
+                    <path d="M11.5 21a16.989 16.989 0 0 1 -1.826 -4"/>
+                    <path d="M12.5 21a16.989 16.989 0 0 0 1.828 -4"/>
+                    <path d="M2 10l1 4l1.5 -4l1.5 4l1 -4"/>
+                    <path d="M17 10l1 4l1.5 -4l1.5 4l1 -4"/>
+                    <path d="M9.5 10l1 4l1.5 -4l1.5 4l1 -4"/>
                 </svg>
                 <h3 class="mk-h3">website &amp; api monitoring</h3>
                 <p class="mk-body">
@@ -156,24 +163,29 @@
 
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">02</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <path d="M18 16v-5a6 6 0 0 0-12 0v5l-2 3h16l-2-3Z"/>
-                    <path d="M10 19a2 2 0 0 0 4 0"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M5 13a7 7 0 1 0 14 0a7 7 0 0 0 -14 0"/>
+                    <path d="M7 4l-2.75 2"/>
+                    <path d="M17 4l2.75 2"/>
+                    <path d="M8 13h1l2 3l2 -6l2 3h1"/>
                 </svg>
                 <h3 class="mk-h3">page the person on-call</h3>
                 <p class="mk-body">
                     Slack, Discord, Telegram, WhatsApp, SMS, PagerDuty, email,
                     webhook, and more. Per-monitor channels with dedupe and
-                    flap-suppress so <span class="mk-mark">a 60s blip stays quiet</span>, and reminders that
-                    repeat until someone acknowledges.
+                    flap-suppress so <span class="mk-mark">a single failed check stays quiet</span>, and
+                    reminders that repeat until someone acknowledges.
                 </p>
             </article>
 
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">03</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <rect x="3" y="4" width="18" height="14" rx="2"/>
-                    <path d="M7 9h10M7 13h6"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M3 4m0 1a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1z"/>
+                    <path d="M7 20h10"/>
+                    <path d="M9 16v4"/>
+                    <path d="M15 16v4"/>
+                    <path d="M7 10h2l2 3l2 -6l1 3h3"/>
                 </svg>
                 <h3 class="mk-h3">public status page</h3>
                 <p class="mk-body">
@@ -187,9 +199,12 @@
 
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">04</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <path d="M5 4h14v16l-3-2-2 2-2-2-2 2-2-2-3 2V4Z"/>
-                    <path d="M9 9h6M9 13h4"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 16l6 -7l5 5l5 -6"/>
+                    <path d="M15 14m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
+                    <path d="M10 9m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
+                    <path d="M4 16m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
+                    <path d="M20 8m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
                 </svg>
                 <h3 class="mk-h3">incident timelines</h3>
                 <p class="mk-body">
@@ -200,9 +215,13 @@
 
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">05</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <circle cx="12" cy="12" r="9"/>
-                    <path d="M12 7v5l3 2"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M11.795 21h-6.795a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4"/>
+                    <path d="M18 18m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/>
+                    <path d="M15 3v4"/>
+                    <path d="M7 3v4"/>
+                    <path d="M3 11h16"/>
+                    <path d="M18 16.496v1.504l1 1"/>
                 </svg>
                 <h3 class="mk-h3">scheduled maintenance</h3>
                 <p class="mk-body">
@@ -214,10 +233,13 @@
 
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">06</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <circle cx="9" cy="8" r="3"/>
-                    <circle cx="17" cy="9" r="2.5"/>
-                    <path d="M3 19c0-3 3-5 6-5s6 2 6 5M15 19c0-2 2-3.5 4-3.5s2 1 2 3.5"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10 13a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                    <path d="M8 21v-1a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v1"/>
+                    <path d="M15 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                    <path d="M17 10h2a2 2 0 0 1 2 2v1"/>
+                    <path d="M5 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                    <path d="M3 13v-1a2 2 0 0 1 2 -2h2"/>
                 </svg>
                 <h3 class="mk-h3">team members</h3>
                 <p class="mk-body">
@@ -228,9 +250,11 @@
 
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">07</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/>
-                    <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                    <path d="M12.597 17.981a9.467 9.467 0 0 1 -.597 .019c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.205 .342 -.415 .67 -.63 .983"/>
+                    <path d="M16 22l5 -5"/>
+                    <path d="M21 21.5v-4.5h-4.5"/>
                 </svg>
                 <h3 class="mk-h3">share one monitor, no login</h3>
                 <p class="mk-body">
@@ -243,9 +267,9 @@
 
             <article class="mk-card space-y-3">
                 <span class="mk-numeral" aria-hidden="true">08</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
-                    <circle cx="7.5" cy="15.5" r="4.5"/>
-                    <path d="M10.7 12.3 20 3M17 6l3 3M13.5 9.5l3 3"/>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M7 4a2 2 0 0 0 -2 2v3a2 3 0 0 1 -2 3a2 3 0 0 1 2 3v3a2 2 0 0 0 2 2"/>
+                    <path d="M17 4a2 2 0 0 1 2 2v3a2 3 0 0 0 2 3a2 3 0 0 0 -2 3v3a2 2 0 0 1 -2 2"/>
                 </svg>
                 <h3 class="mk-h3">one token, every monitor</h3>
                 <p class="mk-body">
@@ -255,6 +279,25 @@
                     <span class="mk-mark">every monitor picks it up on the next check</span>. Secrets are
                     sealed at rest, never read back to you, and refused in URLs
                     where they would leak.
+                </p>
+            </article>
+
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">09</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M4 13c.325 2.532 1.881 4.781 4 6"/>
+                    <path d="M20 11a8.1 8.1 0 0 0 -15.5 -2"/>
+                    <path d="M4 5v4h4"/>
+                    <path d="M12 15h2a1 1 0 0 1 1 1v1a1 1 0 0 1 -1 1h-1a1 1 0 0 0 -1 1v1a1 1 0 0 0 1 1h2"/>
+                    <path d="M18 15v2a1 1 0 0 0 1 1h1"/>
+                    <path d="M21 15v6"/>
+                </svg>
+                <h3 class="mk-h3">running while you sleep</h3>
+                <p class="mk-body">
+                    Checks don't pause for nights, weekends, or holidays. Pro
+                    runs them every 60 seconds and keeps 90 days of history, so
+                    <span class="mk-mark">the 3am blip you slept through is still on the chart</span>
+                    months later.
                 </p>
             </article>
         </div>
