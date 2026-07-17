@@ -148,6 +148,8 @@ html:has(.marketing-shell) {
     border-radius: 2px;
     font-size: 0.875em;
     color: var(--mk-ink);
+    /* A chip is one token; a break after its hyphen would draw two borders. */
+    white-space: nowrap;
 }
 
 .mk-rule-top    { border-top: 1px solid var(--mk-rule); }
@@ -339,21 +341,6 @@ html:has(.marketing-shell) {
     transform: translateY(-1px);
     box-shadow: var(--mk-shadow-card-hover);
 }
-/* Offset must track half the section wrapper's space-y step to stay centred. */
-.mk-rule-above { position: relative; }
-.mk-rule-above::before {
-    content: "";
-    position: absolute;
-    top: -3rem;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: var(--mk-rule);
-}
-@media (min-width: 640px) {
-    .mk-rule-above::before { top: -3.5rem; }
-}
-
 /* ── Hairline grid (features, steps, use cases) ───────────────────── */
 /* Rules are the gap showing the container through, so an item count that
    doesn't divide the column count leaves a filled cell-shaped hole. */
@@ -395,16 +382,55 @@ html:has(.marketing-shell) {
     stroke-linejoin: round;
 }
 
-.mk-step__index {
+/* ── Steps (how it works) ─────────────────────────────────────────── */
+/* The connector derives its offset and insets from these two, so both the
+   badge and the grid must keep reading them rather than repeating a value. */
+.mk-steps {
+    --mk-steps-badge: 3.5rem;
+    --mk-steps-gap: 3rem;
+    display: grid;
+    gap: 2.5rem;
+}
+.mk-step { text-align: center; }
+/* Block-level, not inline: an inline badge sits on a baseline, which would
+   put its midline somewhere the connector can't derive. */
+.mk-step__badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--mk-steps-badge);
+    height: var(--mk-steps-badge);
+    margin: 0 auto 1.25rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    /* Opaque: masks the connector running behind the row. */
+    background: var(--mk-surface);
+    position: relative;
     font-family: var(--mk-font-mono);
     font-weight: 600;
-    font-size: 0.75rem;
+    font-size: 1.125rem;
     line-height: 1;
     color: var(--mk-ok);
-    display: inline-block;
-    margin-bottom: 0.5rem;
 }
-.mk-step__index::before { content: "// "; color: var(--mk-faint); }
+.mk-step__title { text-wrap: balance; }
+
+@media (min-width: 768px) {
+    .mk-steps {
+        position: relative;
+        grid-template-columns: repeat(3, 1fr);
+        column-gap: var(--mk-steps-gap);
+    }
+    /* Joins badge centre to badge centre; the insets are one half-column. */
+    .mk-steps::before {
+        content: "";
+        position: absolute;
+        top: calc(var(--mk-steps-badge) / 2);
+        left: calc((100% - 2 * var(--mk-steps-gap)) / 6);
+        right: calc((100% - 2 * var(--mk-steps-gap)) / 6);
+        height: 1px;
+        background: var(--mk-rule);
+    }
+}
 
 /* ── FAQ ──────────────────────────────────────────────────────────── */
 .mk-faq {

@@ -313,32 +313,32 @@
     </section>
 
     {# ── How it works ──────────────────────────────────────────── #}
-    <section id="how-it-works" class="mk-rule-above space-y-8">
+    <section id="how-it-works" class="space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
             <h2 class="mk-h2">Live in <em class="mk-h2-em">three steps</em>.</h2>
         </header>
 
-        <ol class="mk-grid mk-grid--3">
-            <li class="mk-grid__cell">
-                <span class="mk-step__index">01</span>
-                <h3 class="mk-h3">sign in</h3>
+        <ol class="mk-steps">
+            <li class="mk-step">
+                <span class="mk-step__badge">01</span>
+                <h3 class="mk-h3 mk-step__title">sign in</h3>
                 <p class="mk-body mt-2">
                     1 click with GitHub, Google or a magic link. No password,
                     no email opt-in. Your org gets a slug and the free tier.
                 </p>
             </li>
-            <li class="mk-grid__cell">
-                <span class="mk-step__index">02</span>
-                <h3 class="mk-h3">add a monitor</h3>
+            <li class="mk-step">
+                <span class="mk-step__badge">02</span>
+                <h3 class="mk-h3 mk-step__title">add a monitor</h3>
                 <p class="mk-body mt-2">
                     Paste a URL. Pick an interval. Pick channels. Monitored
                     in under a minute, or declare it in
                     <a href="/terraform-uptime-monitoring" class="mk-footer-link mk-footer-link--inline">Terraform</a>.
                 </p>
             </li>
-            <li class="mk-grid__cell">
-                <span class="mk-step__index">03</span>
-                <h3 class="mk-h3">share the page</h3>
+            <li class="mk-step">
+                <span class="mk-step__badge">03</span>
+                <h3 class="mk-h3 mk-step__title">share the page</h3>
                 <p class="mk-body mt-2">
                     Flip a monitor public, point customers at
                     <code class="mk-chip" translate="no">your-org.uptimepage.dev</code>,
@@ -349,7 +349,7 @@
     </section>
 
     {# ── Use cases ─────────────────────────────────────────────── #}
-    <section class="mk-rule-above space-y-8">
+    <section class="space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
             <h2 class="mk-h2">Where it fits.</h2>
         </header>
@@ -401,64 +401,60 @@
     </section>
 
     {# ── Pricing ───────────────────────────────────────────────── #}
-    <section id="pricing" class="mk-rule-above">
-        <div class="mx-auto max-w-3xl space-y-5">
-            <header class="space-y-2 text-center">
-                <h2 class="mk-h2">Free to start. <em class="mk-h2-em">Open source</em> to keep.</h2>
-            </header>
-            <div class="mk-tierband">
-                <div class="mk-tier">
-                    <span class="mk-tier__name">standard</span>
-                    <span class="mk-tier__price">$0</span>
-                    <span class="mk-tier__spec">20 monitors · 3-min checks · 30-day history</span>
-                </div>
-                <div class="mk-tier mk-tier--em">
-                    <span class="mk-tier__name">founding</span>
-                    <span class="mk-tier__price">$0</span>
-                    <span class="mk-tier__spec">50 monitors · 60-sec checks · 90-day history</span>
-                    <span class="mk-tier__flag">first {{ founding_total|thousands }} · {{ founding_left|thousands }} left</span>
-                </div>
-                <div class="mk-tier">
-                    <span class="mk-tier__name">pro</span>
-                    <span class="mk-tier__price">$9</span>
-                    <span class="mk-tier__spec">50 monitors · 60-sec checks · custom domain</span>
-                    <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
-                </div>
-                <div class="mk-tier">
-                    <span class="mk-tier__name">team</span>
-                    <span class="mk-tier__price">$19</span>
-                    <span class="mk-tier__spec">150 monitors · 30-sec checks · on-call rotations</span>
-                    <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
-                </div>
+    <section id="pricing" class="mx-auto max-w-3xl space-y-5">
+        <header class="space-y-2 text-center">
+            <h2 class="mk-h2">Free to start. <em class="mk-h2-em">Open source</em> to keep.</h2>
+        </header>
+        <div class="mk-tierband">
+            <div class="mk-tier">
+                <span class="mk-tier__name">standard</span>
+                <span class="mk-tier__price">$0</span>
+                <span class="mk-tier__spec">20 monitors · 3-min checks · 30-day history</span>
             </div>
-            <div class="flex flex-wrap items-center justify-center gap-2">
-                <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
-                    start free
-                    <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
-                    </svg>
-                </a>
-                <a href="/pricing" class="mk-cta mk-cta--ghost">see all plans</a>
+            <div class="mk-tier mk-tier--em">
+                <span class="mk-tier__name">founding</span>
+                <span class="mk-tier__price">$0</span>
+                <span class="mk-tier__spec">50 monitors · 60-sec checks · 90-day history</span>
+                <span class="mk-tier__flag">first {{ founding_total|thousands }} · {{ founding_left|thousands }} left</span>
             </div>
-            <p class="mk-mono mk-quiet text-xs text-center mk-ls-04">AGPL · self-host with no limits · no credit card</p>
-    </div>
+            <div class="mk-tier">
+                <span class="mk-tier__name">pro</span>
+                <span class="mk-tier__price">$9</span>
+                <span class="mk-tier__spec">50 monitors · 60-sec checks · custom domain</span>
+                <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
+            </div>
+            <div class="mk-tier">
+                <span class="mk-tier__name">team</span>
+                <span class="mk-tier__price">$19</span>
+                <span class="mk-tier__spec">150 monitors · 30-sec checks · on-call rotations</span>
+                <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center justify-center gap-2">
+            <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
+                start free
+                <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+                </svg>
+            </a>
+            <a href="/pricing" class="mk-cta mk-cta--ghost">see all plans</a>
+        </div>
+        <p class="mk-mono mk-quiet text-xs text-center mk-ls-04">AGPL · self-host with no limits · no credit card</p>
     </section>
 
     {# ── FAQ ───────────────────────────────────────────────────── #}
-    <section id="faq" class="mk-rule-above">
-        <div class="mx-auto max-w-3xl space-y-6">
-            <header class="space-y-2 text-center">
-                <h2 class="mk-h2">FAQ</h2>
-            </header>
-            <div>
-                {% for faq in faqs %}
-                <details class="mk-faq">
-                    <summary>{{ faq.0 }}</summary>
-                    <div class="mk-faq__body">{{ faq.1|safe }}</div>
-                </details>
-                {% endfor %}
-            </div>
-    </div>
+    <section id="faq" class="mx-auto max-w-3xl space-y-6">
+        <header class="space-y-2 text-center">
+            <h2 class="mk-h2">FAQ</h2>
+        </header>
+        <div>
+            {% for faq in faqs %}
+            <details class="mk-faq">
+                <summary>{{ faq.0 }}</summary>
+                <div class="mk-faq__body">{{ faq.1|safe }}</div>
+            </details>
+            {% endfor %}
+        </div>
     </section>
 
     {# ── Who runs on it ────────────────────────────────────────── #}

@@ -24,7 +24,7 @@ WRAPPER = '<div class="space-y-24 sm:space-y-28">'
 SECTIONS = [
     '<section id="features"',
     '<section id="how-it-works"',
-    '<section class="mk-rule-above space-y-8">',
+    '<section class="space-y-8">',
     '<section id="pricing"',
     '<section id="faq"',
 ]
