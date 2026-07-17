@@ -19,6 +19,7 @@
 pub mod blog;
 pub mod config;
 pub mod dispatch;
+pub mod gallery;
 pub mod landings;
 pub mod legal;
 pub mod pages;

@@ -23,6 +23,7 @@ use crate::marketing::seo::{
 use crate::web::filters;
 
 use super::config::{BRAND, MarketingCfg};
+use super::gallery;
 
 pub(super) const HTML_CONTENT_TYPE: HeaderValue =
     HeaderValue::from_static("text/html; charset=utf-8");
@@ -33,6 +34,37 @@ pub(super) const APPLICATION_XML: HeaderValue =
 const PAGE_CACHE_CONTROL: HeaderValue =
     HeaderValue::from_static("public, max-age=300, stale-while-revalidate=86400");
 const NOT_FOUND_CACHE_CONTROL: HeaderValue = HeaderValue::from_static("public, max-age=300");
+
+/// Neighbours resolved here, wrapping, so no lightbox arrow can point at a
+/// dead anchor.
+struct ShotView {
+    id: &'static str,
+    src: String,
+    alt: &'static str,
+    caption: &'static str,
+    width: u32,
+    height: u32,
+    prev_id: &'static str,
+    next_id: &'static str,
+}
+
+fn shot_views() -> Vec<ShotView> {
+    let n = gallery::SHOTS.len();
+    gallery::SHOTS
+        .iter()
+        .enumerate()
+        .map(|(i, s)| ShotView {
+            id: s.id,
+            src: crate::web::assets::url(s.file),
+            alt: s.alt,
+            caption: s.caption,
+            width: s.width,
+            height: s.height,
+            prev_id: gallery::SHOTS[(i + n - 1) % n].id,
+            next_id: gallery::SHOTS[(i + 1) % n].id,
+        })
+        .collect()
+}
 
 #[derive(Template, WebTemplate)]
 #[template(path = "marketing/landing.html")]
@@ -50,6 +82,7 @@ struct LandingPage {
     founding_total: u32,
     founding_left: u32,
     faqs: &'static [(&'static str, &'static str)],
+    shots: Vec<ShotView>,
 }
 
 const HOWTO_NAME: &str = "Set up uptime monitoring and a status page";
@@ -147,6 +180,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         founding_total: FOUNDING_TOTAL,
         founding_left: FOUNDING_TOTAL.saturating_sub(FOUNDING_CLAIMED),
         faqs: FAQS,
+        shots: shot_views(),
     };
     let body = page
         .render()

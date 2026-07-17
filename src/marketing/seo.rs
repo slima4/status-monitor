@@ -21,6 +21,7 @@ use super::blog::list_published;
 use super::config::{
     AUTHOR, BRAND, MCP_URL, META_DESCRIPTION, MarketingCfg, SOURCE_URL, TAGLINE, TERRAFORM_URL,
 };
+use super::gallery;
 use super::landings;
 use super::legal;
 use super::pages::{APPLICATION_XML, HTML_CONTENT_TYPE, TEXT_PLAIN};
@@ -184,6 +185,17 @@ pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
         "operatingSystem": "Web, Docker, Linux",
         "url": canonical_origin,
         "isAccessibleForFree": true,
+        // ImageObject over a bare URL so each shot carries its caption.
+        "screenshot": gallery::SHOTS
+            .iter()
+            .map(|s| serde_json::json!({
+                "@type": "ImageObject",
+                "contentUrl": gallery::absolute_url(canonical_origin, s),
+                "caption": s.caption,
+                "width": s.width,
+                "height": s.height,
+            }))
+            .collect::<Vec<_>>(),
         "offers": {
             "@type": "AggregateOffer",
             "lowPrice": "0",
@@ -717,7 +729,9 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
         urls.push((format!("{origin}{}", route.path), None));
     }
     let mut body = String::from(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n",
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset \
+         xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" \
+         xmlns:image=\"http://www.google.com/schemas/sitemap-image/1.1\">\n",
     );
     for (loc, lastmod) in urls {
         body.push_str("  <url>\n    <loc>");
@@ -727,6 +741,17 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
             body.push_str("    <lastmod>");
             body.push_str(&xml_escape(&d));
             body.push_str("</lastmod>\n");
+        }
+        // Lazy-loaded inside a horizontal scroller, so discovery should not
+        // depend on the crawler reaching them.
+        if loc == *origin {
+            for shot in gallery::SHOTS {
+                body.push_str("    <image:image>\n      <image:loc>");
+                body.push_str(&xml_escape(&gallery::absolute_url(origin, shot)));
+                body.push_str("</image:loc>\n      <image:title>");
+                body.push_str(&xml_escape(shot.caption));
+                body.push_str("</image:title>\n    </image:image>\n");
+            }
         }
         body.push_str("  </url>\n");
     }
@@ -804,6 +829,108 @@ mod tests {
         assert_eq!(v["url"], "https://uptimepage.dev/blog/best-tools");
         assert_eq!(v["itemListElement"][0]["position"], 1);
         assert_eq!(v["itemListElement"][1]["name"], "Gatus");
+    }
+
+    #[test]
+    fn software_application_carries_every_screenshot() {
+        let jl = json_ld_software_application("https://uptimepage.dev");
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        let shots = v["screenshot"].as_array().expect("screenshot is an array");
+        assert_eq!(shots.len(), gallery::SHOTS.len());
+        assert_eq!(shots[0]["@type"], "ImageObject");
+        assert!(
+            shots[0]["contentUrl"]
+                .as_str()
+                .unwrap()
+                .starts_with("https://uptimepage.dev/static/marketing/"),
+            "contentUrl must be absolute and origin-rooted: {:?}",
+            shots[0]["contentUrl"]
+        );
+        for (shot, json) in gallery::SHOTS.iter().zip(shots) {
+            assert_eq!(json["caption"], shot.caption);
+        }
+    }
+
+    #[test]
+    fn sitemap_declares_gallery_images_on_the_home_url_only() {
+        let cfg = MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: false,
+        };
+        let xml = build_sitemap(&cfg);
+        assert!(
+            xml.contains("xmlns:image=\"http://www.google.com/schemas/sitemap-image/1.1\""),
+            "image namespace must be declared or the entries are invalid"
+        );
+        assert_eq!(
+            xml.matches("<image:image>").count(),
+            gallery::SHOTS.len(),
+            "every shot appears exactly once — home page only, no repeats per url"
+        );
+        for shot in gallery::SHOTS {
+            assert!(
+                xml.contains(shot.caption),
+                "missing title for {}",
+                shot.file
+            );
+        }
+    }
+
+    #[test]
+    fn gallery_shots_are_unique_and_present_on_disk() {
+        let mut ids: Vec<&str> = gallery::SHOTS.iter().map(|s| s.id).collect();
+        ids.sort_unstable();
+        let before = ids.len();
+        ids.dedup();
+        assert_eq!(
+            before,
+            ids.len(),
+            "duplicate shot id would collide as an anchor"
+        );
+
+        for shot in gallery::SHOTS {
+            let path = std::path::Path::new("static").join(shot.file);
+            let bytes = std::fs::read(&path)
+                .unwrap_or_else(|e| panic!("{} is referenced but unreadable: {e}", path.display()));
+            // Declared dimensions are emitted as width/height attributes and into
+            // the sitemap; drift there is a layout shift and a bad sitemap entry.
+            let (w, h) = webp_dimensions(&bytes)
+                .unwrap_or_else(|| panic!("{} is not a readable webp", path.display()));
+            assert_eq!(
+                (w, h),
+                (shot.width, shot.height),
+                "{} is {w}x{h} on disk but declared {}x{}",
+                path.display(),
+                shot.width,
+                shot.height
+            );
+        }
+    }
+
+    /// Minimal VP8X/VP8L/VP8 canvas-size reader — enough to catch a shot being
+    /// replaced without its declared dimensions being updated.
+    fn webp_dimensions(b: &[u8]) -> Option<(u32, u32)> {
+        if b.len() < 30 || &b[0..4] != b"RIFF" || &b[8..12] != b"WEBP" {
+            return None;
+        }
+        match &b[12..16] {
+            b"VP8X" => {
+                let w = 1 + (u32::from(b[24]) | u32::from(b[25]) << 8 | u32::from(b[26]) << 16);
+                let h = 1 + (u32::from(b[27]) | u32::from(b[28]) << 8 | u32::from(b[29]) << 16);
+                Some((w, h))
+            }
+            b"VP8L" => {
+                let bits = u32::from_le_bytes([b[21], b[22], b[23], b[24]]);
+                Some((1 + (bits & 0x3FFF), 1 + ((bits >> 14) & 0x3FFF)))
+            }
+            b"VP8 " => {
+                let w = u32::from(u16::from_le_bytes([b[26], b[27]])) & 0x3FFF;
+                let h = u32::from(u16::from_le_bytes([b[28], b[29]])) & 0x3FFF;
+                Some((w, h))
+            }
+            _ => None,
+        }
     }
 
     #[test]

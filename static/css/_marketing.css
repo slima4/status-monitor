@@ -1198,6 +1198,20 @@ html:has(.marketing-shell) {
     flex: 0 0 auto;
     scroll-snap-align: start;
 }
+.mk-gallery__figure {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+}
+/* Also the on-page text Google Images weighs next to the shot. */
+.mk-gallery__caption {
+    font-family: var(--mk-font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.45;
+    color: var(--mk-quiet);
+    text-wrap: pretty;
+}
 .mk-gallery__card {
     position: relative;
     display: block;
