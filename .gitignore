@@ -22,6 +22,9 @@ skills-lock.json
 # Local specs (not tracked in vcs)
 /specs/
 
+# SEO working state (audits, crawl evidence, briefs): local-only, regenerable
+/.seoagent/
+
 # Local real-target seed (points at live public endpoints — keep private)
 /scripts/seed-real.sh
 
