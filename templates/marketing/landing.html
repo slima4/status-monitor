@@ -87,7 +87,7 @@
                 <a class="mk-gallery__card" href="#shot-monitors" aria-label="Enlarge the monitors screenshot">
                     <img class="mk-gallery__img" src="{{ "marketing/shot-monitor.webp"|asset }}"
                          loading="lazy" decoding="async"
-                         alt="The monitors list: grouped checks with live status, response time, and uptime.">
+                         alt="The monitors list: checks grouped by environment, each with live status, type, tags, last check time, and 30-day uptime.">
                     <span class="mk-gallery__zoom" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
                     </span>
@@ -96,26 +96,44 @@
                     <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
                     <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
                     <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-dashboard" aria-label="Previous image">&#10094;</a>
-                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-create-monitor" aria-label="Next image">&#10095;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-monitor-detail" aria-label="Next image">&#10095;</a>
                     <img class="mk-lightbox__img" src="{{ "marketing/shot-monitor.webp"|asset }}" loading="lazy" decoding="async" alt="The monitors list, full size.">
                 </div>
             </li>
 
             <li class="mk-gallery__item">
-                <a class="mk-gallery__card" href="#shot-create-monitor" aria-label="Enlarge the new-monitor screenshot">
-                    <img class="mk-gallery__img" src="{{ "marketing/shot-create-monitor.webp"|asset }}"
+                <a class="mk-gallery__card" href="#shot-monitor-detail" aria-label="Enlarge the monitor detail screenshot">
+                    <img class="mk-gallery__img" src="{{ "marketing/shot-monitor-detail.webp"|asset }}"
                          loading="lazy" decoding="async"
-                         alt="The new-monitor form: choose a check type (HTTP, TCP, ping, DNS, TLS, domain), interval, notification channels, and tags.">
+                         alt="One monitor in detail: uptime and check counts for the last 24 hours, plus median latency charted per region.">
                     <span class="mk-gallery__zoom" aria-hidden="true">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
                     </span>
                 </a>
-                <div id="shot-create-monitor" class="mk-lightbox">
+                <div id="shot-monitor-detail" class="mk-lightbox">
                     <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
                     <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
                     <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-monitors" aria-label="Previous image">&#10094;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-channels" aria-label="Next image">&#10095;</a>
+                    <img class="mk-lightbox__img" src="{{ "marketing/shot-monitor-detail.webp"|asset }}" loading="lazy" decoding="async" alt="One monitor in detail, full size.">
+                </div>
+            </li>
+
+            <li class="mk-gallery__item">
+                <a class="mk-gallery__card" href="#shot-channels" aria-label="Enlarge the notification channels screenshot">
+                    <img class="mk-gallery__img" src="{{ "marketing/shot-channels.webp"|asset }}"
+                         loading="lazy" decoding="async"
+                         alt="The notification channels list: Slack, PagerDuty, SMS, email, webhook, Discord, Teams, Pushover, ntfy, and Telegram, each enabled or disabled.">
+                    <span class="mk-gallery__zoom" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3M11 8.5v5M8.5 11h5"/></svg>
+                    </span>
+                </a>
+                <div id="shot-channels" class="mk-lightbox">
+                    <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
+                    <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-monitor-detail" aria-label="Previous image">&#10094;</a>
                     <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-create-channel" aria-label="Next image">&#10095;</a>
-                    <img class="mk-lightbox__img" src="{{ "marketing/shot-create-monitor.webp"|asset }}" loading="lazy" decoding="async" alt="The new-monitor form, full size.">
+                    <img class="mk-lightbox__img" src="{{ "marketing/shot-channels.webp"|asset }}" loading="lazy" decoding="async" alt="The notification channels list, full size.">
                 </div>
             </li>
 
@@ -131,7 +149,7 @@
                 <div id="shot-create-channel" class="mk-lightbox">
                     <a class="mk-lightbox__backdrop" href="#see" aria-label="Close" tabindex="-1"></a>
                     <a class="mk-lightbox__close" href="#see" aria-label="Close">&times;</a>
-                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-create-monitor" aria-label="Previous image">&#10094;</a>
+                    <a class="mk-lightbox__nav mk-lightbox__nav--prev" href="#shot-channels" aria-label="Previous image">&#10094;</a>
                     <a class="mk-lightbox__nav mk-lightbox__nav--next" href="#shot-status" aria-label="Next image">&#10095;</a>
                     <img class="mk-lightbox__img" src="{{ "marketing/shot-create-channel.webp"|asset }}" loading="lazy" decoding="async" alt="The new notification-channel form, full size.">
                 </div>

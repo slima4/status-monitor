@@ -1219,11 +1219,13 @@ html:has(.marketing-shell) {
         0 1px 0 oklch(1 0 0 / 0.6) inset,
         0 26px 46px -24px oklch(0 0 0 / 0.28);
 }
-.mk-gallery__card:active { transform: translateY(-3px) scale(0.98); }
+.mk-gallery__card:active { transform: translateY(-3px) scale(0.96); }
 .mk-gallery__img {
     display: block;
     width: 100%;
-    aspect-ratio: 1.6;
+    /* Matches the shots' own 5:4. A wider box would `cover`-crop their top and
+       bottom away, since every shot is a full app page rather than a banner. */
+    aspect-ratio: 1.25;
     object-fit: cover;
     background: var(--mk-bg-2);
 }
@@ -1253,9 +1255,23 @@ html:has(.marketing-shell) {
 }
 
 /* Lightbox — CSS :target drives open/close/prev/next; arrow keys are a progressive JS enhancement */
-.mk-lightbox { display: none; }
+
+/* `.marketing-shell > *` (input.css, @layer base) makes <main> a stacking
+   context, so the lightbox's own z-index can never beat the sticky header.
+   Unlayered here, to win over that layered rule without !important. */
+.marketing-shell > main:has(.mk-lightbox:target) { z-index: 70; }
+
+/* allow-discrete drives `display` both ways, as on the subscribe dialog in
+   input.css. No `overlay` — that is top-layer only, and this is not a dialog. */
+.mk-lightbox {
+    display: none;
+    opacity: 0;
+    transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1),
+                display 200ms allow-discrete;
+}
 .mk-lightbox:target {
     display: grid;
+    opacity: 1;
     place-items: center;
     position: fixed;
     inset: 0;
@@ -1263,6 +1279,7 @@ html:has(.marketing-shell) {
     padding: clamp(1rem, 5vw, 4rem);
     background: oklch(0.16 0.02 250 / 0.88);
 }
+@starting-style { .mk-lightbox:target { opacity: 0; } }
 .mk-lightbox__backdrop {
     position: absolute;
     inset: 0;
@@ -1270,15 +1287,23 @@ html:has(.marketing-shell) {
 }
 .mk-lightbox__img {
     position: relative;
-    max-width: min(1100px, 94vw);
-    max-height: 88vh;
+    /* 5:4 shots go tall, so height is the binding limit on most screens.
+       Leaves room for the close control and the prev/next arrows either side. */
+    max-width: min(1040px, 88vw);
+    max-height: 82vh;
     width: auto;
     height: auto;
     border: 1px solid var(--mk-rule);
     border-radius: 2px;
     background: var(--mk-surface);
     box-shadow: 0 40px 80px -30px oklch(0 0 0 / 0.55);
+    /* Transition lives here, not under :target — a declaration inside the
+       :target rule vanishes on close and the exit snaps. */
+    translate: 0 6px;
+    transition: translate 200ms cubic-bezier(0.2, 0, 0, 1);
 }
+.mk-lightbox:target .mk-lightbox__img { translate: 0 0; }
+@starting-style { .mk-lightbox:target .mk-lightbox__img { translate: 0 6px; } }
 .mk-lightbox__close {
     position: absolute;
     top: clamp(0.75rem, 3vw, 1.5rem);
@@ -1316,6 +1341,22 @@ html:has(.marketing-shell) {
 .mk-lightbox__nav:focus-visible { opacity: 1; background: oklch(1 0 0 / 0.14); }
 .mk-lightbox__nav--prev { left: clamp(0.5rem, 3vw, 2rem); }
 .mk-lightbox__nav--next { right: clamp(0.5rem, 3vw, 2rem); }
+
+/* Must sit AFTER the rules it overrides, not in the shared reduced-motion
+   block near the top: a media query adds no specificity, so an earlier
+   `transform: none` would lose to the later `:active` transform. */
+@media (prefers-reduced-motion: reduce) {
+    .mk-gallery__card,
+    .mk-gallery__zoom,
+    .mk-lightbox,
+    .mk-lightbox__nav { transition: none; }
+    .mk-gallery__card:hover,
+    .mk-gallery__card:focus-visible { transform: none; }
+    .mk-gallery__card:active { transform: none; }
+    /* The lightbox still opens; the shot just doesn't travel. */
+    .mk-lightbox__img,
+    .mk-lightbox:target .mk-lightbox__img { translate: 0 0; transition: none; }
+}
 
 /* Hero region map — compact framing above the status-page preview */
 .mk-heromap {
