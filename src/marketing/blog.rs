@@ -181,9 +181,11 @@ pub fn render(markdown: &str) -> String {
     opts.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
     let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
     let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, parser);
+    pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(parser));
     ammonia::Builder::default()
         .link_rel(Some("noopener noreferrer"))
+        .add_allowed_classes("div", &["mk-table-scroll"])
+        .add_tag_attributes("div", &["tabindex"])
         .clean(&html)
         .to_string()
 }
@@ -372,6 +374,17 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn renderer_wraps_tables_in_scroll_div() {
+        let html = render("| a |\n| - |\n| 1 |");
+        let open = html.find("mk-table-scroll");
+        assert!(html.contains("tabindex"), "got: {html}");
+        let table_end = html.find("</table>");
+        assert!(open.is_some() && table_end.is_some(), "got: {html}");
+        assert!(open < table_end, "got: {html}");
+        assert!(html[table_end.unwrap()..].contains("</div>"), "got: {html}");
     }
 
     #[test]

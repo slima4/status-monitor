@@ -34,7 +34,7 @@ fn render_trusted_unsanitised(markdown: &str) -> String {
     opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
     let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
     let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, parser);
+    pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(parser));
     html
 }
 

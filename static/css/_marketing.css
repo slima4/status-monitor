@@ -1152,15 +1152,28 @@ html:has(.marketing-shell) {
     border-top: 1px solid var(--mk-rule);
     margin: 2rem 0;
 }
-/* Markdown tables: pulled from CommonMark, so no class hook. Scroll on
-   overflow so a wide table never pushes the page sideways on mobile. */
-.mk-article table {
-    display: block;
+/* Markdown tables: the renderer wraps each one in .mk-table-scroll, so the
+   table itself can fill the column while a wide one scrolls inside the
+   wrapper instead of pushing the page sideways on mobile. */
+.mk-table-scroll {
     overflow-x: auto;
-    border-collapse: collapse;
     margin: 1.5rem 0;
-    font-size: 0.85rem;
+}
+.mk-article table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9375rem;
     line-height: 1.5;
+    font-variant-numeric: tabular-nums;
+}
+/* Raw-HTML tables bypass the renderer's wrapper; give them the old
+   self-scrolling behaviour so a wide one still can't pan the page. */
+.mk-article > table,
+.mk-article :not(.mk-table-scroll) > table {
+    display: block;
+    width: auto;
+    overflow-x: auto;
+    margin: 1.5rem 0;
 }
 .mk-article th,
 .mk-article td {

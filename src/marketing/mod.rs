@@ -22,6 +22,7 @@ pub mod dispatch;
 pub mod gallery;
 pub mod landings;
 pub mod legal;
+pub mod md;
 pub mod pages;
 pub mod seo;
 pub mod tools;
