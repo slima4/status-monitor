@@ -139,38 +139,40 @@
             <h2 class="mk-h2">Monitoring, alerts, status page, incidents.</h2>
         </header>
 
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">01</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M19.5 7a9 9 0 0 0 -7.5 -4a8.991 8.991 0 0 0 -7.484 4"/>
-                    <path d="M11.5 3a16.989 16.989 0 0 0 -1.826 4"/>
-                    <path d="M12.5 3a16.989 16.989 0 0 1 1.828 4"/>
-                    <path d="M19.5 17a9 9 0 0 1 -7.5 4a8.991 8.991 0 0 1 -7.484 -4"/>
-                    <path d="M11.5 21a16.989 16.989 0 0 1 -1.826 -4"/>
-                    <path d="M12.5 21a16.989 16.989 0 0 0 1.828 -4"/>
-                    <path d="M2 10l1 4l1.5 -4l1.5 4l1 -4"/>
-                    <path d="M17 10l1 4l1.5 -4l1.5 4l1 -4"/>
-                    <path d="M9.5 10l1 4l1.5 -4l1.5 4l1 -4"/>
-                </svg>
-                <h3 class="mk-h3">website &amp; api monitoring</h3>
-                <p class="mk-body">
+        <div class="mk-grid mk-grid--3">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M19.5 7a9 9 0 0 0 -7.5 -4a8.991 8.991 0 0 0 -7.484 4"/>
+                        <path d="M11.5 3a16.989 16.989 0 0 0 -1.826 4"/>
+                        <path d="M12.5 3a16.989 16.989 0 0 1 1.828 4"/>
+                        <path d="M19.5 17a9 9 0 0 1 -7.5 4a8.991 8.991 0 0 1 -7.484 -4"/>
+                        <path d="M11.5 21a16.989 16.989 0 0 1 -1.826 -4"/>
+                        <path d="M12.5 21a16.989 16.989 0 0 0 1.828 -4"/>
+                        <path d="M2 10l1 4l1.5 -4l1.5 4l1 -4"/>
+                        <path d="M17 10l1 4l1.5 -4l1.5 4l1 -4"/>
+                        <path d="M9.5 10l1 4l1.5 -4l1.5 4l1 -4"/>
+                    </svg>
+                    <h3 class="mk-h3">website &amp; api monitoring</h3>
+                </div>
+                <p class="mk-body mt-2">
                     HTTP, TCP, DNS, ping. Custom headers, basic-auth, bearer tokens,
                     response-code expectations, TLS verification. From a
                     marketing website to an internal API.
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">02</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M5 13a7 7 0 1 0 14 0a7 7 0 0 0 -14 0"/>
-                    <path d="M7 4l-2.75 2"/>
-                    <path d="M17 4l2.75 2"/>
-                    <path d="M8 13h1l2 3l2 -6l2 3h1"/>
-                </svg>
-                <h3 class="mk-h3">page the person on-call</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5 13a7 7 0 1 0 14 0a7 7 0 0 0 -14 0"/>
+                        <path d="M7 4l-2.75 2"/>
+                        <path d="M17 4l2.75 2"/>
+                        <path d="M8 13h1l2 3l2 -6l2 3h1"/>
+                    </svg>
+                    <h3 class="mk-h3">page the person on-call</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Slack, Discord, Telegram, WhatsApp, SMS, PagerDuty, email,
                     webhook, and more. Per-monitor channels with dedupe and
                     flap-suppress so <span class="mk-mark">a single failed check stays quiet</span>, and
@@ -178,17 +180,18 @@
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">03</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M3 4m0 1a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1z"/>
-                    <path d="M7 20h10"/>
-                    <path d="M9 16v4"/>
-                    <path d="M15 16v4"/>
-                    <path d="M7 10h2l2 3l2 -6l1 3h3"/>
-                </svg>
-                <h3 class="mk-h3">public status page</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M3 4m0 1a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v10a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1z"/>
+                        <path d="M7 20h10"/>
+                        <path d="M9 16v4"/>
+                        <path d="M15 16v4"/>
+                        <path d="M7 10h2l2 3l2 -6l1 3h3"/>
+                    </svg>
+                    <h3 class="mk-h3">public status page</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Brand colour + logo. 90-day timeline, live incidents,
                     scheduled maintenance, RSS feed, JSON API, embeddable
                     SVG badge. An
@@ -197,67 +200,71 @@
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">04</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 16l6 -7l5 5l5 -6"/>
-                    <path d="M15 14m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
-                    <path d="M10 9m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
-                    <path d="M4 16m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
-                    <path d="M20 8m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
-                </svg>
-                <h3 class="mk-h3">incident timelines</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 16l6 -7l5 5l5 -6"/>
+                        <path d="M15 14m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
+                        <path d="M10 9m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
+                        <path d="M4 16m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
+                        <path d="M20 8m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/>
+                    </svg>
+                    <h3 class="mk-h3">incident timelines</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Auto-opened on a down monitor, auto-closed on recovery.
                     Add a public note your customers see in real time.
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">05</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M11.795 21h-6.795a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4"/>
-                    <path d="M18 18m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/>
-                    <path d="M15 3v4"/>
-                    <path d="M7 3v4"/>
-                    <path d="M3 11h16"/>
-                    <path d="M18 16.496v1.504l1 1"/>
-                </svg>
-                <h3 class="mk-h3">scheduled maintenance</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M11.795 21h-6.795a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v4"/>
+                        <path d="M18 18m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0"/>
+                        <path d="M15 3v4"/>
+                        <path d="M7 3v4"/>
+                        <path d="M3 11h16"/>
+                        <path d="M18 16.496v1.504l1 1"/>
+                    </svg>
+                    <h3 class="mk-h3">scheduled maintenance</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Plan a window, the status page shows it ahead of time,
                     the alert engine stays quiet during it. No false pages
                     for planned work.
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">06</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M10 13a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
-                    <path d="M8 21v-1a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v1"/>
-                    <path d="M15 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
-                    <path d="M17 10h2a2 2 0 0 1 2 2v1"/>
-                    <path d="M5 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
-                    <path d="M3 13v-1a2 2 0 0 1 2 -2h2"/>
-                </svg>
-                <h3 class="mk-h3">team members</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M10 13a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                        <path d="M8 21v-1a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v1"/>
+                        <path d="M15 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                        <path d="M17 10h2a2 2 0 0 1 2 2v1"/>
+                        <path d="M5 5a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                        <path d="M3 13v-1a2 2 0 0 1 2 -2h2"/>
+                    </svg>
+                    <h3 class="mk-h3">team members</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Invite by email or GitHub handle. Role-based access:
                     owners, members. Audit log of who changed what.
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">07</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
-                    <path d="M12.597 17.981a9.467 9.467 0 0 1 -.597 .019c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.205 .342 -.415 .67 -.63 .983"/>
-                    <path d="M16 22l5 -5"/>
-                    <path d="M21 21.5v-4.5h-4.5"/>
-                </svg>
-                <h3 class="mk-h3">share one monitor, no login</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/>
+                        <path d="M12.597 17.981a9.467 9.467 0 0 1 -.597 .019c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6c-.205 .342 -.415 .67 -.63 .983"/>
+                        <path d="M16 22l5 -5"/>
+                        <path d="M21 21.5v-4.5h-4.5"/>
+                    </svg>
+                    <h3 class="mk-h3">share one monitor, no login</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Send a client or a vendor a link to a single monitor and they
                     see the live dashboard, uptime, latency and incidents, with
                     <span class="mk-mark">no account and nothing else of yours</span>. Credentials, headers
@@ -265,14 +272,15 @@
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">08</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M7 4a2 2 0 0 0 -2 2v3a2 3 0 0 1 -2 3a2 3 0 0 1 2 3v3a2 2 0 0 0 2 2"/>
-                    <path d="M17 4a2 2 0 0 1 2 2v3a2 3 0 0 0 2 3a2 3 0 0 0 -2 3v3a2 2 0 0 1 -2 2"/>
-                </svg>
-                <h3 class="mk-h3">one token, every monitor</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M7 4a2 2 0 0 0 -2 2v3a2 3 0 0 1 -2 3a2 3 0 0 1 2 3v3a2 2 0 0 0 2 2"/>
+                        <path d="M17 4a2 2 0 0 1 2 2v3a2 3 0 0 0 2 3a2 3 0 0 0 -2 3v3a2 2 0 0 1 -2 2"/>
+                    </svg>
+                    <h3 class="mk-h3">one token, every monitor</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Store a value once and reference it as
                     <code class="mk-chip" translate="no">&#123;&#123;api_token&#125;&#125;</code>
                     from any monitor's headers or body. Rotate it in one place and
@@ -282,18 +290,19 @@
                 </p>
             </article>
 
-            <article class="mk-card space-y-3">
-                <span class="mk-numeral" aria-hidden="true">09</span>
-                <svg class="mk-card__icon" viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M4 13c.325 2.532 1.881 4.781 4 6"/>
-                    <path d="M20 11a8.1 8.1 0 0 0 -15.5 -2"/>
-                    <path d="M4 5v4h4"/>
-                    <path d="M12 15h2a1 1 0 0 1 1 1v1a1 1 0 0 1 -1 1h-1a1 1 0 0 0 -1 1v1a1 1 0 0 0 1 1h2"/>
-                    <path d="M18 15v2a1 1 0 0 0 1 1h1"/>
-                    <path d="M21 15v6"/>
-                </svg>
-                <h3 class="mk-h3">running while you sleep</h3>
-                <p class="mk-body">
+            <article class="mk-grid__cell">
+                <div class="mk-feature__head">
+                    <svg class="mk-feature__icon" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 13c.325 2.532 1.881 4.781 4 6"/>
+                        <path d="M20 11a8.1 8.1 0 0 0 -15.5 -2"/>
+                        <path d="M4 5v4h4"/>
+                        <path d="M12 15h2a1 1 0 0 1 1 1v1a1 1 0 0 1 -1 1h-1a1 1 0 0 0 -1 1v1a1 1 0 0 0 1 1h2"/>
+                        <path d="M18 15v2a1 1 0 0 0 1 1h1"/>
+                        <path d="M21 15v6"/>
+                    </svg>
+                    <h3 class="mk-h3">running while you sleep</h3>
+                </div>
+                <p class="mk-body mt-2">
                     Checks don't pause for nights, weekends, or holidays. Pro
                     runs them every 60 seconds and keeps 90 days of history, so
                     <span class="mk-mark">the 3am blip you slept through is still on the chart</span>
@@ -304,13 +313,13 @@
     </section>
 
     {# ── How it works ──────────────────────────────────────────── #}
-    <section id="how-it-works" class="space-y-8">
+    <section id="how-it-works" class="mk-rule-above space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
             <h2 class="mk-h2">Live in <em class="mk-h2-em">three steps</em>.</h2>
         </header>
 
-        <ol class="grid gap-4 md:grid-cols-3">
-            <li class="mk-step">
+        <ol class="mk-grid mk-grid--3">
+            <li class="mk-grid__cell">
                 <span class="mk-step__index">01</span>
                 <h3 class="mk-h3">sign in</h3>
                 <p class="mk-body mt-2">
@@ -318,7 +327,7 @@
                     no email opt-in. Your org gets a slug and the free tier.
                 </p>
             </li>
-            <li class="mk-step">
+            <li class="mk-grid__cell">
                 <span class="mk-step__index">02</span>
                 <h3 class="mk-h3">add a monitor</h3>
                 <p class="mk-body mt-2">
@@ -327,7 +336,7 @@
                     <a href="/terraform-uptime-monitoring" class="mk-footer-link mk-footer-link--inline">Terraform</a>.
                 </p>
             </li>
-            <li class="mk-step">
+            <li class="mk-grid__cell">
                 <span class="mk-step__index">03</span>
                 <h3 class="mk-h3">share the page</h3>
                 <p class="mk-body mt-2">
@@ -340,13 +349,13 @@
     </section>
 
     {# ── Use cases ─────────────────────────────────────────────── #}
-    <section class="space-y-8">
+    <section class="mk-rule-above space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
             <h2 class="mk-h2">Where it fits.</h2>
         </header>
 
-        <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <article class="mk-card space-y-2">
+        <div class="mk-grid mk-grid--4">
+            <article class="mk-grid__cell space-y-2">
                 <p class="mk-eyebrow">saas &amp; sre</p>
                 <h3 class="mk-h3">page on-call, one tool</h3>
                 <p class="mk-body">
@@ -354,7 +363,7 @@
                     give customers a <a href="/status-page-for-saas" class="mk-footer-link mk-footer-link--inline">status page</a>, <span class="mk-mark">one tool, no second vendor</span>.
                 </p>
             </article>
-            <article class="mk-card space-y-2">
+            <article class="mk-grid__cell space-y-2">
                 <p class="mk-eyebrow">indie hackers</p>
                 <h3 class="mk-h3">a status page from day one</h3>
                 <p class="mk-body">
@@ -363,7 +372,7 @@
                     No real-company invoice.
                 </p>
             </article>
-            <article class="mk-card space-y-2">
+            <article class="mk-grid__cell space-y-2">
                 <p class="mk-eyebrow">internal tools</p>
                 <h3 class="mk-h3">watch every dependency</h3>
                 <p class="mk-body">
@@ -372,7 +381,7 @@
                     Page when one wobbles.
                 </p>
             </article>
-            <article class="mk-card space-y-2">
+            <article class="mk-grid__cell space-y-2">
                 <p class="mk-eyebrow">agencies</p>
                 <h3 class="mk-h3">many clients, one login</h3>
                 <p class="mk-body">
@@ -392,60 +401,64 @@
     </section>
 
     {# ── Pricing ───────────────────────────────────────────────── #}
-    <section id="pricing" class="mx-auto max-w-3xl space-y-5">
-        <header class="space-y-2 text-center">
-            <h2 class="mk-h2">Free to start. <em class="mk-h2-em">Open source</em> to keep.</h2>
-        </header>
-        <div class="mk-tierband">
-            <div class="mk-tier">
-                <span class="mk-tier__name">standard</span>
-                <span class="mk-tier__price">$0</span>
-                <span class="mk-tier__spec">20 monitors · 3-min checks · 30-day history</span>
+    <section id="pricing" class="mk-rule-above">
+        <div class="mx-auto max-w-3xl space-y-5">
+            <header class="space-y-2 text-center">
+                <h2 class="mk-h2">Free to start. <em class="mk-h2-em">Open source</em> to keep.</h2>
+            </header>
+            <div class="mk-tierband">
+                <div class="mk-tier">
+                    <span class="mk-tier__name">standard</span>
+                    <span class="mk-tier__price">$0</span>
+                    <span class="mk-tier__spec">20 monitors · 3-min checks · 30-day history</span>
+                </div>
+                <div class="mk-tier mk-tier--em">
+                    <span class="mk-tier__name">founding</span>
+                    <span class="mk-tier__price">$0</span>
+                    <span class="mk-tier__spec">50 monitors · 60-sec checks · 90-day history</span>
+                    <span class="mk-tier__flag">first {{ founding_total|thousands }} · {{ founding_left|thousands }} left</span>
+                </div>
+                <div class="mk-tier">
+                    <span class="mk-tier__name">pro</span>
+                    <span class="mk-tier__price">$9</span>
+                    <span class="mk-tier__spec">50 monitors · 60-sec checks · custom domain</span>
+                    <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
+                </div>
+                <div class="mk-tier">
+                    <span class="mk-tier__name">team</span>
+                    <span class="mk-tier__price">$19</span>
+                    <span class="mk-tier__spec">150 monitors · 30-sec checks · on-call rotations</span>
+                    <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
+                </div>
             </div>
-            <div class="mk-tier mk-tier--em">
-                <span class="mk-tier__name">founding</span>
-                <span class="mk-tier__price">$0</span>
-                <span class="mk-tier__spec">50 monitors · 60-sec checks · 90-day history</span>
-                <span class="mk-tier__flag">first {{ founding_total|thousands }} · {{ founding_left|thousands }} left</span>
+            <div class="flex flex-wrap items-center justify-center gap-2">
+                <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
+                    start free
+                    <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+                    </svg>
+                </a>
+                <a href="/pricing" class="mk-cta mk-cta--ghost">see all plans</a>
             </div>
-            <div class="mk-tier">
-                <span class="mk-tier__name">pro</span>
-                <span class="mk-tier__price">$9</span>
-                <span class="mk-tier__spec">50 monitors · 60-sec checks · custom domain</span>
-                <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
-            </div>
-            <div class="mk-tier">
-                <span class="mk-tier__name">team</span>
-                <span class="mk-tier__price">$19</span>
-                <span class="mk-tier__spec">150 monitors · 30-sec checks · on-call rotations</span>
-                <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
-            </div>
-        </div>
-        <div class="flex flex-wrap items-center justify-center gap-2">
-            <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary">
-                start free
-                <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
-                </svg>
-            </a>
-            <a href="/pricing" class="mk-cta mk-cta--ghost">see all plans</a>
-        </div>
-        <p class="mk-mono mk-quiet text-xs text-center mk-ls-04">AGPL · self-host with no limits · no credit card</p>
+            <p class="mk-mono mk-quiet text-xs text-center mk-ls-04">AGPL · self-host with no limits · no credit card</p>
+    </div>
     </section>
 
     {# ── FAQ ───────────────────────────────────────────────────── #}
-    <section id="faq" class="mx-auto max-w-3xl space-y-6">
-        <header class="space-y-2 text-center">
-            <h2 class="mk-h2">FAQ</h2>
-        </header>
-        <div>
-            {% for faq in faqs %}
-            <details class="mk-faq">
-                <summary>{{ faq.0 }}</summary>
-                <div class="mk-faq__body">{{ faq.1|safe }}</div>
-            </details>
-            {% endfor %}
-        </div>
+    <section id="faq" class="mk-rule-above">
+        <div class="mx-auto max-w-3xl space-y-6">
+            <header class="space-y-2 text-center">
+                <h2 class="mk-h2">FAQ</h2>
+            </header>
+            <div>
+                {% for faq in faqs %}
+                <details class="mk-faq">
+                    <summary>{{ faq.0 }}</summary>
+                    <div class="mk-faq__body">{{ faq.1|safe }}</div>
+                </details>
+                {% endfor %}
+            </div>
+    </div>
     </section>
 
     {# ── Who runs on it ────────────────────────────────────────── #}

@@ -323,7 +323,7 @@ html:has(.marketing-shell) {
     100% { transform: scale(3.5); opacity: 0;   }
 }
 
-/* ── Cards (features, use cases) ───────────────────────────────────── */
+/* ── Card (blog empty state) ──────────────────────────────────────── */
 .mk-card {
     background: var(--mk-surface);
     border: 1px solid var(--mk-rule);
@@ -339,24 +339,55 @@ html:has(.marketing-shell) {
     transform: translateY(-1px);
     box-shadow: var(--mk-shadow-card-hover);
 }
-/* Mono numeral comment in the corner, e.g. `// 01`. */
-.mk-numeral {
+/* Offset must track half the section wrapper's space-y step to stay centred. */
+.mk-rule-above { position: relative; }
+.mk-rule-above::before {
+    content: "";
     position: absolute;
-    top: 0.75rem;
-    right: 1rem;
-    font-family: var(--mk-font-mono);
-    font-weight: 500;
-    font-size: 0.6875rem;
-    color: var(--mk-quiet);
-    letter-spacing: 0;
-    pointer-events: none;
-    user-select: none;
+    top: -3rem;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--mk-rule);
 }
-.mk-numeral::before { content: "// "; color: var(--mk-faint); }
-.mk-card__icon {
+@media (min-width: 640px) {
+    .mk-rule-above::before { top: -3.5rem; }
+}
+
+/* ── Hairline grid (features, steps, use cases) ───────────────────── */
+/* Rules are the gap showing the container through, so an item count that
+   doesn't divide the column count leaves a filled cell-shaped hole. */
+.mk-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1px;
+    background: var(--mk-rule);
+}
+.mk-grid__cell {
+    background: var(--mk-bg);
+    padding: 1.5rem;
+}
+
+@media (min-width: 768px) {
+    .mk-grid--3 { grid-template-columns: repeat(3, 1fr); }
+    .mk-grid--4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 1024px) {
+    .mk-grid--4 { grid-template-columns: repeat(4, 1fr); }
+}
+
+.mk-feature__head {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+}
+/* Optical: drops the glyph onto the heading's cap-height. */
+.mk-feature__icon {
     color: var(--mk-ok);
-    width: 1.75rem;
-    height: 1.75rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    flex: none;
+    margin-top: 0.1rem;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.75;
@@ -364,31 +395,16 @@ html:has(.marketing-shell) {
     stroke-linejoin: round;
 }
 
-/* ── Steps (how it works) ─────────────────────────────────────────── */
-.mk-step {
-    position: relative;
-    padding: 1.5rem 1.25rem;
-    background: var(--mk-surface);
-    border: 1px solid var(--mk-rule);
-    border-radius: 2px;
-    transition: border-color 160ms ease, transform 160ms ease, box-shadow 160ms ease;
-    box-shadow: var(--mk-shadow-card);
-}
-.mk-step:hover {
-    border-color: var(--mk-rule-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--mk-shadow-card-hover);
-}
 .mk-step__index {
     font-family: var(--mk-font-mono);
     font-weight: 600;
-    font-size: 1.5rem;
+    font-size: 0.75rem;
     line-height: 1;
     color: var(--mk-ok);
     display: inline-block;
-    margin-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
 }
-.mk-step__index::after { content: "."; color: var(--mk-quiet); }
+.mk-step__index::before { content: "// "; color: var(--mk-faint); }
 
 /* ── FAQ ──────────────────────────────────────────────────────────── */
 .mk-faq {
@@ -810,7 +826,7 @@ html:has(.marketing-shell) {
 .mk-codeblock { border: 1px solid var(--mk-rule); background: var(--mk-surface); color: var(--mk-ink); font-size: 0.75rem; line-height: 1.6; }
 
 /* ── Home pricing teaser band ─────────────────────────────────────── */
-.mk-tierband { border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); overflow: hidden; text-align: left; box-shadow: var(--mk-shadow-frame); }
+.mk-tierband { text-align: left; background: var(--mk-bg-2); }
 .mk-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.9rem; padding: 0.9rem 1.1rem; font-family: var(--mk-font-mono); }
 .mk-tier + .mk-tier { border-top: 1px solid var(--mk-rule); }
 .mk-tier--em { background: var(--mk-ok-soft); }
@@ -1186,10 +1202,8 @@ html:has(.marketing-shell) {
     .mk-menu__bars::before,
     .mk-menu__bars::after,
     .mk-card,
-    .mk-step,
     .mk-blog-row,
     .mk-blog-row__title,
-    .mk-numeral,
     .mk-nav-link,
     .mk-faq summary,
     .mk-faq summary::after,
