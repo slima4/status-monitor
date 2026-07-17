@@ -225,6 +225,38 @@
                     owners, members. Audit log of who changed what.
                 </p>
             </article>
+
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">07</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                    <path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/>
+                    <path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>
+                </svg>
+                <h3 class="mk-h3">share one monitor, no login</h3>
+                <p class="mk-body">
+                    Send a client or a vendor a link to a single monitor and they
+                    see the live dashboard, uptime, latency and incidents, with
+                    <span class="mk-mark">no account and nothing else of yours</span>. Credentials, headers
+                    and tokens are redacted. Revoke or expire it whenever.
+                </p>
+            </article>
+
+            <article class="mk-card space-y-3">
+                <span class="mk-numeral" aria-hidden="true">08</span>
+                <svg class="mk-card__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                    <circle cx="7.5" cy="15.5" r="4.5"/>
+                    <path d="M10.7 12.3 20 3M17 6l3 3M13.5 9.5l3 3"/>
+                </svg>
+                <h3 class="mk-h3">one token, every monitor</h3>
+                <p class="mk-body">
+                    Store a value once and reference it as
+                    <code class="mk-chip" translate="no">&#123;&#123;api_token&#125;&#125;</code>
+                    from any monitor's headers or body. Rotate it in one place and
+                    <span class="mk-mark">every monitor picks it up on the next check</span>. Secrets are
+                    sealed at rest, never read back to you, and refused in URLs
+                    where they would leak.
+                </p>
+            </article>
         </div>
     </section>
 
@@ -335,8 +367,14 @@
             </div>
             <div class="mk-tier">
                 <span class="mk-tier__name">pro</span>
-                <span class="mk-tier__price">from $19</span>
-                <span class="mk-tier__spec">150 monitors · 30-sec checks · white-label</span>
+                <span class="mk-tier__price">$9</span>
+                <span class="mk-tier__spec">50 monitors · 60-sec checks · custom domain</span>
+                <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
+            </div>
+            <div class="mk-tier">
+                <span class="mk-tier__name">team</span>
+                <span class="mk-tier__price">$19</span>
+                <span class="mk-tier__spec">150 monitors · 30-sec checks · on-call rotations</span>
                 <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
             </div>
         </div>

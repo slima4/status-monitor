@@ -109,8 +109,8 @@ const FAQS: &[(&str, &str)] = &[
         "Is it really free?",
         "The Standard plan is $0 a month with no credit card. The first 1,000 \
          accounts get the more generous founding plan and keep it for life. Pro \
-         is paid and coming soon. Whatever plan you sign up on stays yours, and \
-         you can self-host the whole thing under AGPL for free.",
+         and Team are paid and coming soon. Whatever plan you sign up on stays \
+         yours, and you can self-host the whole thing under AGPL for free.",
     ),
     (
         "Can I use my own domain for the status page?",
@@ -232,9 +232,10 @@ const PRICING_FAQS: &[(&str, &str)] = &[
     ),
     (
         "What happens when the founding spots run out?",
-        "New accounts get Standard. If you claimed a founding spot you keep it at \
-         the founding limits for as long as the account is open. We do not quietly \
-         downgrade you.",
+        "New accounts get Standard, and Pro starts at $9 with the founding limits \
+         plus your own branding. If you claimed a founding spot you keep it at the \
+         founding limits for as long as the account is open, at no cost. We do not \
+         quietly downgrade you.",
     ),
     (
         "Can I self-host instead of using your servers?",
@@ -249,8 +250,8 @@ const PRICING_FAQS: &[(&str, &str)] = &[
     ),
     (
         "Do you sell or train on my data?",
-        "No. Your monitors, incidents, and contacts are yours. We make money from Pro \
-         and hosting, not from your data.",
+        "No. Your monitors, incidents, and contacts are yours. We make money from the \
+         paid plans and hosting, not from your data.",
     ),
 ];
 

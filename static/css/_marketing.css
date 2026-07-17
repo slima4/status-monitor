@@ -542,7 +542,14 @@ html:has(.marketing-shell) {
 .mk-price--feature::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--mk-ok); }
 .mk-price--feature .mk-price__amt b { color: var(--mk-ok); }
 @media (min-width: 768px) {
-    .mk-price--feature { transform: translateY(-0.5rem); box-shadow: var(--mk-shadow-card-hover); }
+    .mk-price--feature { box-shadow: var(--mk-shadow-card-hover); }
+}
+/* Negative block margin, not translateY: the grid stretches the card to the row
+   height minus its margins, so the featured tier grows past the others at both
+   ends. Held back to the 4-up breakpoint — with two columns there is a second
+   row underneath, and the overhang would eat half the gap above it. */
+@media (min-width: 1024px) {
+    .mk-price--feature { margin-block: -0.5rem; }
 }
 .mk-price--soon { opacity: 0.9; background: var(--mk-bg); }
 .mk-price--soon .mk-price__name { color: var(--mk-ink-soft); }
@@ -557,12 +564,23 @@ html:has(.marketing-shell) {
 .mk-price__badge--quiet { color: var(--mk-quiet); border-color: var(--mk-rule); }
 .mk-price__name { font-family: var(--mk-font-mono); font-weight: 600; font-size: 1.0625rem; color: var(--mk-ink); }
 .mk-price__name::before { content: "// "; color: var(--mk-faint); font-weight: 500; }
-.mk-price__tag { font-size: 0.8125rem; color: var(--mk-quiet); line-height: 1.5; min-height: 2.4em; }
+/* Reserves 3 lines. The tag is the only variable-height row above the CTA,
+   so an under-sized floor lands the buttons at different heights. Sized for
+   the narrowest card, which is the 4-up column. */
+.mk-price__tag { font-size: 0.8125rem; color: var(--mk-quiet); line-height: 1.5; min-height: 4.5em; }
 .mk-price__amt { font-family: var(--mk-font-mono); display: flex; align-items: baseline; gap: 0.4rem; }
 .mk-price__amt b { font-size: 2.25rem; font-weight: 600; color: var(--mk-ink); letter-spacing: -0.03em; line-height: 1; }
 .mk-price__amt span { font-size: 0.8125rem; color: var(--mk-quiet); }
-.mk-price__note { font-family: var(--mk-font-mono); font-size: 0.6875rem; line-height: 1.4; color: var(--mk-quiet); margin-top: -0.4rem; min-height: 1.95rem; }
-.mk-price__head { font-family: var(--mk-font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mk-quiet); }
+.mk-price__note,
+.mk-price__legal { font-family: var(--mk-font-mono); font-size: 0.6875rem; line-height: 1.4; color: var(--mk-quiet); }
+/* Tucked under the price, and floored so all four cards align. */
+.mk-price__note { margin-top: -0.4rem; min-height: 1.95rem; }
+/* Page footnote: no tuck, and clearance for the featured card's overhang. */
+.mk-price__legal { margin-top: 1.75rem; text-align: center; }
+/* Reserves 2 lines: "everything in standard, plus" wraps in the 4-up column
+   while "everything in pro, plus" does not, which would start each bullet
+   list at a different height. */
+.mk-price__head { font-family: var(--mk-font-mono); font-size: 0.6875rem; line-height: 1.4; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mk-quiet); min-height: 2.8em; }
 .mk-price__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
 .mk-price__feature {
     display: inline-flex;

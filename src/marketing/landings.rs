@@ -1144,7 +1144,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "OpenStatus and OneUptime: the dev-first platforms",
-                body: "These are the closest to Uptimepage in philosophy. OpenStatus is monitoring-as-code done well: a Terraform provider, a CLI, an MCP server, auto-resolving incidents, email and webhook subscribers, and probes across twenty-eight regions with sub-minute checks. Its trade-offs are a heavier stack (Turso plus Tinybird plus hosted queues) and an open-source checker that implements only HTTP, TCP and DNS, with ICMP, UDP and SSL-certificate monitors declared in config but not built. OneUptime does everything Uptimepage does and then adds on-call scheduling, escalation, logs, tracing and APM, but that reach costs you a Postgres, ClickHouse, Redis and many-service deployment to operate. Uptimepage aims at the same developer surface, Terraform, REST and MCP, but as one binary you can actually run. It matches those sub-minute checks too: 30 seconds on Pro and 10 seconds self-hosted, while the free founding plan already carries fifty monitors at sixty seconds.",
+                body: "These are the closest to Uptimepage in philosophy. OpenStatus is monitoring-as-code done well: a Terraform provider, a CLI, an MCP server, auto-resolving incidents, email and webhook subscribers, and probes across twenty-eight regions with sub-minute checks. Its trade-offs are a heavier stack (Turso plus Tinybird plus hosted queues) and an open-source checker that implements only HTTP, TCP and DNS, with ICMP, UDP and SSL-certificate monitors declared in config but not built. OneUptime does everything Uptimepage does and then adds on-call scheduling, escalation, logs, tracing and APM, but that reach costs you a Postgres, ClickHouse, Redis and many-service deployment to operate. Uptimepage aims at the same developer surface, Terraform, REST and MCP, but as one binary you can actually run. It matches those sub-minute checks too: 30 seconds on Team and 10 seconds self-hosted, while the free founding plan already carries fifty monitors at sixty seconds.",
             },
             Section {
                 heading: "Gatus: the protocol-rich checker",
@@ -3103,7 +3103,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
         },
     ],
     notes: &[
-        "Fastest interval each tool can reach; hosted free tiers are usually slower. Uptimepage's self-hosted floor is 10s, and hosted plans run at 60s on the free founding plan (with 50 monitors) or 30s on Pro.",
+        "Fastest interval each tool can reach; hosted free tiers are usually slower. Uptimepage's self-hosted floor is 10s, and hosted plans run at 60s on the free founding plan (with 50 monitors) or 30s on Team.",
         "OpenStatus lists ICMP, UDP and SSL-certificate monitors in its config, but its open-source Go checker implements only HTTP, TCP and DNS.",
         "Uptime Kuma has 31 monitor types and 94 alert integrations, but it is single-user, is configured over a socket API rather than REST or Terraform, and its status pages offer RSS, not email or webhook subscribers.",
         "Gatus is a health dashboard with badges rather than a subscriber status page, and its multi-region support is an experimental status-federation feature, not distributed probes.",

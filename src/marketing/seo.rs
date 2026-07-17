@@ -87,11 +87,11 @@ const LLMS_FACTS: &[(&str, &str)] = &[
     ),
     (
         "Pricing",
-        "Standard plan is free with no card. The founding plan is free for the first 1,000 accounts and kept for life. Pro is paid and coming soon. Self-host is free under AGPL.",
+        "Standard is free with no card. Founding is free for the first 1,000 accounts and kept for life. Pro is $9/month and Team is $19/month, both coming soon. Self-host is free under AGPL.",
     ),
     (
-        "Free tier limits",
-        "Standard: 20 monitors, checks every 3 minutes, 30-day history, 3 global regions, 1 status page with 15 components, 3 team members, every alert channel, API and MCP. Founding adds 50 monitors, 60-second checks, all regions, 90-day history, 5 team members and BYO SMS. Pro adds 150 monitors, 30-second checks, 13-month history, custom domain and white-label.",
+        "Plan limits",
+        "Standard: 20 monitors, checks every 3 minutes, 30-day history, 3 global regions, 1 status page with 15 components, 3 team members, every alert channel, API and MCP. Founding adds 50 monitors, 60-second checks, all regions, 90-day history, 5 team members, 2 status pages and BYO SMS, free for the first 1,000 accounts and kept for life. Pro is $9/month: the founding limits plus a custom status-page domain and white-label. Team is $19/month and adds 150 monitors, 30-second checks, 13-month history, 15 team members, 5 status pages, and on-call rotations with escalation policies.",
     ),
     (
         "Self-hosting",
@@ -175,6 +175,10 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
 
 /// Canonical product entity (`@id`), with a freemium `AggregateOffer` so
 /// search and answer engines read the real price range, not a guessed tier.
+///
+/// `price` sits alongside `lowPrice`/`highPrice` because Google requires
+/// `offers.price` for the Software App result and accepts no range in its
+/// place; 0 is what it prescribes for an app usable without payment.
 pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
@@ -198,10 +202,11 @@ pub fn json_ld_software_application(canonical_origin: &str) -> JsonLd {
             .collect::<Vec<_>>(),
         "offers": {
             "@type": "AggregateOffer",
+            "price": "0",
             "lowPrice": "0",
             "highPrice": "19",
             "priceCurrency": "USD",
-            "offerCount": "3",
+            "offerCount": "4",
         },
         "publisher": { "@id": format!("{canonical_origin}/#organization") },
     });
@@ -943,6 +948,9 @@ mod tests {
         assert_eq!(v["offers"]["@type"], "AggregateOffer");
         assert_eq!(v["offers"]["lowPrice"], "0");
         assert_eq!(v["offers"]["priceCurrency"], "USD");
+        // Google requires offers.price for Software App and takes no range in
+        // its place, so dropping this silently forfeits the result.
+        assert_eq!(v["offers"]["price"], "0");
         assert_eq!(
             v["publisher"]["@id"],
             "https://uptimepage.dev/#organization"
