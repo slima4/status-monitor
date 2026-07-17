@@ -1210,6 +1210,12 @@ html:has(.marketing-shell) {
 .mk-article--pingdom-alternatives tbody tr:last-child td:first-child {
     font-weight: 600;
 }
+/* The post is about the 98% row; the content bolds that row's first cell,
+   so the tint follows the marker instead of a positional index. Down-red,
+   not ok-green: the row is the warning, not an endorsement. */
+.mk-article--is-98-uptime-good tbody tr:has(strong) td {
+    color: var(--mk-down);
+}
 
 /* ── Section orchestration: first-paint stagger ────────────────────
    Marketing pages are full reloads (no htmx swap) — unconditional
