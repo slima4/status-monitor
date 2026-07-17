@@ -1275,17 +1275,13 @@ html:has(.marketing-shell) {
    Unlayered here, to win over that layered rule without !important. */
 .marketing-shell > main:has(.mk-lightbox:target) { z-index: 70; }
 
-/* allow-discrete drives `display` both ways, as on the subscribe dialog in
-   input.css. No `overlay` — that is top-layer only, and this is not a dialog. */
-.mk-lightbox {
-    display: none;
-    opacity: 0;
-    transition: opacity 200ms cubic-bezier(0.2, 0, 0, 1),
-                display 200ms allow-discrete;
-}
+/* The overlay must not fade. Prev/next moves :target between two siblings, so
+   both transition at once: the outgoing backdrop is still at 0.88 alpha while
+   the incoming one climbs from 0, and the composite dips to ~0.69 mid-swap,
+   flashing the page through. Only the image animates. */
+.mk-lightbox { display: none; }
 .mk-lightbox:target {
     display: grid;
-    opacity: 1;
     place-items: center;
     position: fixed;
     inset: 0;
@@ -1293,7 +1289,6 @@ html:has(.marketing-shell) {
     padding: clamp(1rem, 5vw, 4rem);
     background: oklch(0.16 0.02 250 / 0.88);
 }
-@starting-style { .mk-lightbox:target { opacity: 0; } }
 .mk-lightbox__backdrop {
     position: absolute;
     inset: 0;
@@ -1311,8 +1306,8 @@ html:has(.marketing-shell) {
     border-radius: 2px;
     background: var(--mk-surface);
     box-shadow: 0 40px 80px -30px oklch(0 0 0 / 0.55);
-    /* Transition lives here, not under :target — a declaration inside the
-       :target rule vanishes on close and the exit snaps. */
+    /* Travel only, never opacity: prev/next swaps one shot for another, and a
+       fade would leave the frame empty mid-swap. */
     translate: 0 6px;
     transition: translate 200ms cubic-bezier(0.2, 0, 0, 1);
 }
@@ -1362,7 +1357,6 @@ html:has(.marketing-shell) {
 @media (prefers-reduced-motion: reduce) {
     .mk-gallery__card,
     .mk-gallery__zoom,
-    .mk-lightbox,
     .mk-lightbox__nav { transition: none; }
     .mk-gallery__card:hover,
     .mk-gallery__card:focus-visible { transform: none; }
