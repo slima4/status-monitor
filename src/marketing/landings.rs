@@ -293,7 +293,7 @@ pub const LANDINGS: &[Landing] = &[
                 href: "/vs/statuspage",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Open-source uptime monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
             ResourceLink {
@@ -306,7 +306,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/open-source-uptime-monitoring",
         created: "2026-07-11",
-        lastmod: "2026-07-11",
+        lastmod: "2026-07-17",
         title: "Open-Source Uptime Monitoring, Self-Hosted",
         eyebrow: "open source",
         h1: "An open-source uptime monitor you run yourself",
@@ -359,7 +359,7 @@ docker compose up -d"#,
                 href: "/vs/uptime-kuma",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Best open-source monitors, ranked",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -512,7 +512,7 @@ docker compose up -d"#,
                 href: "/status-page-for-agencies",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Self-hosted monitors compared",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -603,7 +603,7 @@ docker compose up -d"#,
                 href: "/tools/uptime-sla-calculator",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Open-source uptime tools",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
             ResourceLink {
@@ -936,7 +936,7 @@ docker compose up -d"#,
                 href: "/terraform-uptime-monitoring",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Open-source monitors compared",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
             ResourceLink {
@@ -1096,7 +1096,7 @@ docker compose up -d"#,
                 href: "/vs/uptime-kuma",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Self-hosted monitoring tools",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -1209,7 +1209,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Where OpenStatus is ahead",
-                body: "Teams and vantage points. OpenStatus runs a hosted probe fleet across twenty-eight regions on three cloud providers, so you see your service the way users on other continents do, without running agents yourself. It has organizations with unlimited members on paid tiers, status pages that take email, webhook and Slack subscribers on top of RSS, and auto-resolving incident handling. Kuma is single-login with no roles, checks from wherever you installed it unless you reach for its Globalping monitor type, and its status pages offer an RSS feed rather than subscriber notifications.",
+                body: "Teams and check locations. OpenStatus runs a hosted probe fleet across twenty-eight regions on three cloud providers, so you see your service the way users on other continents do, without running agents yourself. It has organizations with unlimited members on paid tiers, status pages that take email, webhook and Slack subscribers on top of RSS, and auto-resolving incident handling. Kuma is single-login with no roles, checks from wherever you installed it unless you reach for its Globalping monitor type, and its status pages offer an RSS feed rather than subscriber notifications.",
             },
             Section {
                 heading: "The honest caveats on both",
@@ -1231,7 +1231,7 @@ docker compose up -d"#,
                 href: "/vs/self-hosted-monitoring",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Open-source uptime monitoring guide",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -1240,7 +1240,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-gatus",
         created: "2026-07-05",
-        lastmod: "2026-07-05",
+        lastmod: "2026-07-17",
         title: "Uptime Kuma vs Gatus",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Gatus: clicks or YAML?",
@@ -1258,7 +1258,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "What neither gives you",
-                body: "A customer-facing status page with subscribers, and a team. Kuma's status pages are real but nobody can subscribe to them, and the whole app is one shared login. Gatus's dashboard doubles as its status page: fine for an internal dashboard, not something you show customers, and its access control is one basic-auth or OIDC gate. Both check from a single vantage point unless you assemble more instances yourself.",
+                body: "A customer-facing status page with subscribers, and a team. Kuma's status pages are real but nobody can subscribe to them, and the whole app is one shared login. Gatus's dashboard doubles as its status page: fine for an internal dashboard, not something you show customers, and its access control is one basic-auth or OIDC gate. Both check from wherever you run them, unless you set up more instances yourself or use Kuma's Globalping monitor type.",
             },
             Section {
                 heading: "Where Uptimepage fits",
@@ -1280,7 +1280,7 @@ docker compose up -d"#,
                 href: "/compare/openstatus-vs-uptime-kuma",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "More open-source monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -1382,7 +1382,7 @@ docker compose up -d"#,
                 href: "/vs/self-hosted-monitoring",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Open-source monitoring tools",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -1435,7 +1435,7 @@ docker compose up -d"#,
                 href: "/open-source-status-page",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Self-hosted uptime monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -1454,7 +1454,7 @@ docker compose up -d"#,
         sections: &[
             Section {
                 heading: "Both are monitoring as code. Only one hands you a fleet.",
-                body: "Gatus gives you a YAML file and a binary, and the vantage point is wherever you put that binary. OpenStatus gives you a YAML file, a CLI, a GitHub Action and an official Terraform provider, and runs the probes for you across 28 regions on three cloud providers. If seeing your service from Singapore matters, one of these solves it with a config line and the other solves it by making you deploy in Singapore.",
+                body: "Gatus gives you a YAML file and a binary, and it checks from wherever you put that binary. OpenStatus gives you a YAML file, a CLI, a GitHub Action and an official Terraform provider, and runs the probes for you across 28 regions on three cloud providers. If seeing your service from Singapore matters, one of these solves it with a config line and the other solves it by making you deploy in Singapore.",
             },
             Section {
                 heading: "Where Gatus is ahead",
@@ -1541,7 +1541,166 @@ docker compose up -d"#,
                 href: "/blog/monitoring-as-code",
             },
             ResourceLink {
-                label: "Best self-hosted monitors",
+                label: "Open-source monitors: the list",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/uptime-kuma-vs-upptime",
+        created: "2026-07-17",
+        lastmod: "2026-07-17",
+        title: "Uptime Kuma vs Upptime",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptime Kuma vs Upptime: a server, or no server at all?",
+        meta_description: "Uptime Kuma is a container you host. Upptime runs on GitHub Actions with nothing to host. Intervals, status pages, alerting and the limits of each. July 2026.",
+        lede: "Both tools check that your site is up. They differ in one big way: do you want to run a server, or not? Uptime Kuma is a container with a database. Upptime runs on GitHub and needs no server. Everything else comes from that one difference.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "The main difference",
+                body: "Uptime Kuma is software you host yourself. You run one container with a database, then log in and add monitors in the dashboard. Upptime works the other way round. It uses only GitHub Actions, Issues and Pages, so there is no server to run and nothing to pay. GitHub Actions runs the checks on a schedule and saves response times to git. It opens an Issue when your site goes down and closes it when the site comes back. It also builds a status page on GitHub Pages. All the settings live in one file.",
+            },
+            Section {
+                heading: "What Upptime does better",
+                body: "There is nothing to run. No container to update, no database to back up, and no bill if you already use GitHub. Every check result and every settings change is a git commit, so you get a full history for free. Incidents are normal GitHub Issues, so your team can assign them and discuss them in the same place, and Slack gets a message on each update. The code is MIT licensed. If your project already lives on GitHub, this takes very little work.",
+            },
+            Section {
+                heading: "What Uptime Kuma does better",
+                body: "Speed and range. Upptime can check every five minutes at most, because that is the fastest a GitHub Actions schedule allows. Uptime Kuma 2.x checks every second. It supports 31 monitor types, including databases, MQTT, SNMP and a real Chromium browser check, and it sends alerts to 94 services. It also has the largest community of these tools, so someone has usually solved your problem already. If you need to know about downtime within one minute, Upptime cannot tell you.",
+            },
+            Section {
+                heading: "The limits of both",
+                body: "Upptime keeps its data in the repository, so if you delete the repository the data goes too. Its checks run on GitHub's servers, not in a place you choose. Its status page shows what happened, but customers cannot subscribe to it. Uptime Kuma has different limits, and they come from how it is built. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. And it checks from the server where you installed it, unless you add its Globalping monitor type, which borrows community-hosted probes you do not control.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "You may like Upptime because its settings live in version control, but five minutes is too slow for you. Or you may like Uptime Kuma's checks, but one login is not enough. Uptimepage sits between the two. It checks every 60 seconds over HTTP, TCP, DNS, TLS and ping. You can set it up in the UI, or declare it with the Terraform provider and REST API. It has organizations with user roles, and probes in several regions that you can also run yourself. Its status page is branded, and customers can subscribe by email or webhook. Incidents open on their own. It is one Rust binary. Host it free with no card, or self-host it under AGPL.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Uptime Kuma vs Gatus",
+                href: "/compare/uptime-kuma-vs-gatus",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "Open-source monitor rundown",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/uptime-kuma-vs-oneuptime",
+        created: "2026-07-17",
+        lastmod: "2026-07-17",
+        title: "Uptime Kuma vs OneUptime",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptime Kuma vs OneUptime: one tool, or the whole stack?",
+        meta_description: "Uptime Kuma watches uptime in one container. OneUptime bundles monitoring, status pages, on-call, logs and APM. Scope, weight and team features. July 2026.",
+        lede: "These two tools are not the same size, so comparing them feature by feature helps little. Uptime Kuma is a monitor. OneUptime is a platform that wants to replace most of your monitoring tools. Pick the wrong one and it will be too small for you, or far too big.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "The main difference",
+                body: "Size, mostly. Uptime Kuma checks uptime, and it does that in one container. OneUptime says clearly that it wants to replace many paid tools at once. It does uptime monitoring in place of Pingdom or UptimeRobot, and status pages with subscribers in place of Statuspage. It handles on-call schedules and escalation in place of PagerDuty or Opsgenie. It also covers incident management, APM and metrics in place of Datadog or New Relic, plus log management and error tracking in place of Sentry. All of it is Apache 2.0 and free to self-host.",
+            },
+            Section {
+                heading: "What OneUptime does better",
+                body: "Everything that happens after a check fails. It has real teams and on-call schedules with escalation rules. It sends alerts by SMS, phone call, push and Slack. It handles the whole incident, from the first report to the post-mortem. Its status pages take subscribers and can be public or private. It also collects traces, dashboards, logs and stack traces, so the tool that wakes you up can also show you the cause. It has a Helm chart for production and a docker compose install for smaller setups.",
+            },
+            Section {
+                heading: "What Uptime Kuma does better",
+                body: "Focus, and the checks. Kuma supports 31 monitor types from the start, including databases, MQTT, SNMP and a real Chromium browser check. It sends alerts to 94 services, and version 2.x checks every second. You install it as one container in about five minutes, and it has by far the biggest community of these tools. If you only need uptime checks, OneUptime is a very large platform to run for one job.",
+            },
+            Section {
+                heading: "The limits of both",
+                body: "OneUptime's size is also its price. It runs as many services, and it publishes sizing guides because you need them. Choosing it changes your whole setup, so it is harder to leave than a single monitor. Uptime Kuma has the usual limits. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. And it sees your service from the server where you installed it, unless you add its Globalping monitor type, which borrows community-hosted probes you do not control.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Most teams that grow past Kuma do not want a full observability platform. They want the two or three things Kuma lacks: an account for each teammate, a status page customers can subscribe to, and monitoring settings kept in version control. Uptimepage adds those things and little else, on purpose. It checks every 60 seconds over HTTP, TCP, DNS, TLS and ping. It has organizations with user roles, a Terraform provider, a REST API and an MCP server. Its probes run in several regions, and you can run your own. Its status page is branded, and customers can subscribe by email or webhook. It is one binary. Host it free, or self-host it under AGPL.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "OpenStatus vs Uptime Kuma",
+                href: "/compare/openstatus-vs-uptime-kuma",
+            },
+            ResourceLink {
+                label: "The self-hosted field, compared",
+                href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "Open-source monitoring stacks",
+                href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/uptime-kuma-vs-kener",
+        created: "2026-07-17",
+        lastmod: "2026-07-17",
+        title: "Uptime Kuma vs Kener",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptime Kuma vs Kener: monitoring first, or the status page first?",
+        meta_description: "Uptime Kuma is a monitoring dashboard that can publish a page. Kener is a status page with checks attached. Check types, branding, API, roles. July 2026.",
+        lede: "Both tools are self-hosted, both are MIT licensed, and both show a status page. But they do not agree on which part matters most. Kuma is a monitoring dashboard for you, and it can also publish a page. Kener is a page for your users, and it can also run checks. So ask yourself first: who will look at it?",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "The main difference",
+                body: "Uptime Kuma puts monitoring first. The dashboard is the main product, and it is where you spend your time. The status page is an extra that it can also produce. Kener starts from the other side, and it says so clearly: it is a status page system built with SvelteKit and Node. Its goal is a good-looking page that takes little effort to set up, with monitoring added to keep the page correct. Neither tool is worse than the other. They answer different questions.",
+            },
+            Section {
+                heading: "What Kener does better",
+                body: "The page itself, and the people who work on it. You can brand the page with your logo, colors, custom CSS and themes. It has light and dark mode, translations, and times shown in the reader's timezone. You can embed status widgets and badges in other sites. One install can run several status pages. It has roles for team members, API keys, and a full REST API for incidents, monitors and reports. It also has maintenance windows and incident timelines with acknowledgements. And it connects to analytics tools you may already use, including Plausible, Umami, GA, Mixpanel and Clarity.",
+            },
+            Section {
+                heading: "What Uptime Kuma does better",
+                body: "The checks, by a long way. Kuma supports 31 monitor types, including databases, MQTT, SNMP and a real Chromium browser check. Kener supports eight: API, ping, TCP, DNS, SSL, SQL, heartbeat and GameDig. Kuma sends alerts to 94 services. Kener sends email, webhook, Slack and Discord. Kuma 2.x checks every second, and its community is much larger. If the checks matter more to you than the page, choose Kuma.",
+            },
+            Section {
+                heading: "The limits of both",
+                body: "Kener's official compose setup runs Redis next to the app, so you run two parts, not one. Its check list is short, so an unusual protocol may be missing. Uptime Kuma's limits come from how it is built. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. Its status pages take no subscribers, and it checks from the server where you installed it, unless you add its Globalping monitor type.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Kener already handles branding well, so Uptimepage's advantages here are narrow. Uptimepage is one binary, with no second service to run. Its probes check from several regions, not one. You can declare monitors with a Terraform provider, a REST API and an MCP server. Its status pages take email and webhook subscribers once they confirm. And incidents open on their own when checks fail, so nobody has to write them by hand. Host it free with no card, or self-host it under AGPL.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Uptime Kuma vs Cachet",
+                href: "/compare/uptime-kuma-vs-cachet",
+            },
+            ResourceLink {
+                label: "Self-hosted status pages, compared",
+                href: "/vs/self-hosted-status-pages",
+            },
+            ResourceLink {
+                label: "Open-source monitor shortlist",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
         ],
@@ -2001,6 +2160,60 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Is Uptime Kuma still fine for a homelab?",
                 "Yes, and it is probably the best pick there. The comparison only gets interesting once a second person needs access, customers need a status page, or you want config in version control.",
+            ),
+        ],
+        "/compare/uptime-kuma-vs-upptime" => &[
+            (
+                "How often can Upptime check?",
+                "Every five minutes at most. Upptime runs its checks as GitHub Actions on a schedule, and five minutes is the fastest that schedule allows. You cannot set it lower. Uptime Kuma 2.x checks every second, and Uptimepage checks every 60 seconds.",
+            ),
+            (
+                "Does Upptime need a server?",
+                "No, and that is the main idea behind it. GitHub Actions runs the checks, GitHub Issues stores the incidents, and GitHub Pages shows the status page. If you already use GitHub, there is nothing more to host or pay for.",
+            ),
+            (
+                "Where does Upptime store its history?",
+                "In the repository. It commits response times to git, so you get a full history for free. But if you delete the repository, you lose that history too.",
+            ),
+            (
+                "Can customers subscribe to either status page?",
+                "Not really. Upptime shows a page and opens Issues, and it can send Slack messages on updates. Uptime Kuma's pages send nothing to subscribers. Uptimepage pages take email and webhook subscribers once they confirm.",
+            ),
+        ],
+        "/compare/uptime-kuma-vs-oneuptime" => &[
+            (
+                "Is OneUptime too big if I only need uptime checks?",
+                "Usually, yes. OneUptime wants to replace uptime monitoring, status pages, on-call, incidents, APM, logs and error tracking, all at once. If you only need uptime, you have to run and size a large platform for one job. Uptime Kuma does that job in a single container.",
+            ),
+            (
+                "Which one supports a team?",
+                "OneUptime. It has real teams, on-call schedules with escalation rules, and status pages with subscribers. Uptime Kuma has one shared login and no user roles. That is part of how it is built, not a setting you can turn on.",
+            ),
+            (
+                "Are both actually free to self-host?",
+                "Yes. OneUptime is Apache 2.0, with a docker compose install and a Helm chart for production. Uptime Kuma is MIT and runs as one container. Uptimepage is AGPL and self-hosts with docker compose.",
+            ),
+            (
+                "What sits between the two?",
+                "Teams that grow past Kuma usually want three things: an account for each teammate, a status page customers can subscribe to, and monitoring settings kept in version control. Uptimepage gives you those three things, and you do not have to adopt a full observability platform to get them.",
+            ),
+        ],
+        "/compare/uptime-kuma-vs-kener" => &[
+            (
+                "Which has better status pages?",
+                "Kener, clearly. You can brand the page with your logo, colors, custom CSS and themes. It has light and dark mode, translations, times in the reader's timezone, widgets and badges you can embed, and several status pages from one install. Status pages are what Kener is built for.",
+            ),
+            (
+                "Which checks more things?",
+                "Uptime Kuma, by a long way: 31 monitor types against Kener's eight, and 94 alert services against email, webhook, Slack and Discord.",
+            ),
+            (
+                "Does Kener have a REST API?",
+                "Yes, a full one. It covers incidents, monitors and reports, and it has API keys for integrations. This is a real difference from Uptime Kuma, which has no official REST API to manage monitors.",
+            ),
+            (
+                "Is Kener a single container?",
+                "Not quite. Its official compose setup runs Redis next to the app, so there are two parts. Uptime Kuma is one container, and Uptimepage is one binary.",
             ),
         ],
         "/compare/terraform-providers" => &[
@@ -2532,7 +2745,7 @@ static OPEN_SOURCE_MONITOR_MATRIX: Matrix = Matrix {
             label: "multi-region probes",
             cells: &[
                 ("yes, agents you run", "yes"),
-                ("single instance", "no"),
+                ("via Globalping add-on", "part"),
                 ("28 regions on hosted", "part"),
                 ("federate it yourself", "part"),
             ],
@@ -2566,7 +2779,7 @@ static OPEN_SOURCE_MONITOR_MATRIX: Matrix = Matrix {
 /// Head-to-head facts for `/vs/self-hosted-status-pages`, verified in July
 /// 2026 against each project's repository and, for Cachet, its live v3 source
 /// (`cachethq/core`, whose docs lag the code). Cells are `(text, tone)`; the
-/// first column is always Uptimepage. Refresh when a project ships.
+/// first column is always Uptimepage. Refresh when a project releases a new version.
 static SELF_HOSTED_MATRIX: Matrix = Matrix {
     heading: "how they compare",
     columns: &["Uptimepage", "Upptime", "Cachet", "Statping"],
@@ -3315,6 +3528,9 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
     match path {
         "/compare/openstatus-vs-uptime-kuma" => Some(&OPENSTATUS_KUMA_MATRIX),
         "/compare/uptime-kuma-vs-gatus" => Some(&KUMA_GATUS_MATRIX),
+        "/compare/uptime-kuma-vs-upptime" => Some(&KUMA_UPPTIME_MATRIX),
+        "/compare/uptime-kuma-vs-oneuptime" => Some(&KUMA_ONEUPTIME_MATRIX),
+        "/compare/uptime-kuma-vs-kener" => Some(&KUMA_KENER_MATRIX),
         "/compare/pingdom-vs-statuscake" => Some(&PINGDOM_STATUSCAKE_MATRIX),
         "/compare/uptime-kuma-vs-healthchecks" => Some(&KUMA_HEALTHCHECKS_MATRIX),
         "/compare/terraform-providers" => Some(&TERRAFORM_PROVIDER_MATRIX),
@@ -3419,7 +3635,7 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
         "OpenStatus's open-source checker implements HTTP, TCP and DNS; ICMP, UDP and TLS-certificate monitor types exist in its API schema.",
         "Uptime Kuma's 2.x line added a Globalping monitor type, so checks can run from other locations without a second instance; it is still not a probe fleet you control.",
         "Star counts rounded from GitHub, July 2026.",
-        "Verified July 2026 against each project's repository, documentation and plan pages. Refresh when a project ships.",
+        "Verified July 2026 against each project's repository, documentation and plan pages. Refresh when a project releases a new version.",
     ],
 };
 
@@ -3521,7 +3737,303 @@ static KUMA_GATUS_MATRIX: Matrix = Matrix {
     notes: &[
         "Kuma counts include the Apprise meta-provider and types implemented outside its monitor-types module; Gatus provider count from its README.",
         "Star counts rounded from GitHub, July 2026.",
-        "Verified July 2026 against both repositories. Refresh when a project ships.",
+        "Verified July 2026 against both repositories. Refresh when a project releases a new version.",
+    ],
+};
+
+/// Third-party face-off for `/compare/uptime-kuma-vs-upptime`, verified July
+/// 2026 against both repositories and Upptime's configuration docs.
+static KUMA_UPPTIME_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Uptime Kuma", "Upptime", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("MIT", ""), ("MIT code · ODbL data", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "configuration",
+            cells: &[
+                ("UI only", ""),
+                ("one YAML file in git", ""),
+                ("UI + Terraform + REST + MCP", ""),
+            ],
+        },
+        MatrixRow {
+            label: "what you run",
+            cells: &[
+                ("one container (Node)", "yes"),
+                ("no server, GitHub Actions", "yes"),
+                ("one binary + compose", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted option",
+            cells: &[
+                ("no", "no"),
+                ("GitHub Pages, free", "part"),
+                ("yes, free tier", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("31 incl. DBs · MQTT · browser", ""),
+                ("HTTP · tcp-ping", ""),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "fastest interval",
+            cells: &[
+                ("1s", ""),
+                ("5 min, the Actions schedule", "no"),
+                ("60s free · 30s Pro · 10s self-hosted", ""),
+            ],
+        },
+        MatrixRow {
+            label: "probe locations",
+            cells: &[
+                ("via Globalping add-on", "part"),
+                ("GitHub runners, or Globalping", "part"),
+                ("multi-region, or run your own", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "status page",
+            cells: &[
+                ("yes, custom domains", "yes"),
+                ("GitHub Pages + custom domain", "yes"),
+                ("branded, own subdomain", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "page subscribers",
+            cells: &[
+                ("RSS only", "part"),
+                ("GitHub Issues + Slack", "part"),
+                ("email · webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "incidents",
+            cells: &[
+                ("posted by hand", "part"),
+                ("auto-opened as Issues", "yes"),
+                ("auto-opened from checks", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "history lives in",
+            cells: &[
+                ("its database", ""),
+                ("the git repo", ""),
+                ("Postgres + ClickHouse", ""),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("single login", "no"),
+                ("GitHub repo permissions", "part"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~89k", ""), ("~17k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "Upptime's five-minute limit is what a GitHub Actions schedule allows. It is not a setting you can change.",
+        "Upptime checks are HTTP unless `check: tcp-ping` is set, which also covers Globalping locations.",
+        "Star counts rounded from GitHub, July 2026.",
+        "Verified July 2026 against both repositories. Refresh when a project releases a new version.",
+    ],
+};
+
+/// Third-party face-off for `/compare/uptime-kuma-vs-oneuptime`, verified July
+/// 2026 against both repositories. OneUptime rows track `ONEUPTIME_MATRIX`.
+static KUMA_ONEUPTIME_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Uptime Kuma", "OneUptime", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("MIT", ""), ("Apache-2.0", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "scope",
+            cells: &[
+                ("uptime only", ""),
+                ("uptime + status + on-call + APM + logs", ""),
+                ("uptime + status + incidents", ""),
+            ],
+        },
+        MatrixRow {
+            label: "configuration",
+            cells: &[
+                ("UI only", ""),
+                ("Terraform · CLI", ""),
+                ("UI + Terraform + REST + MCP", ""),
+            ],
+        },
+        MatrixRow {
+            label: "deploy footprint",
+            cells: &[
+                ("one container (Node)", "yes"),
+                ("6-14 services", "no"),
+                ("1 binary + 2 DBs", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "hosted option",
+            cells: &[("no", "no"), ("yes", "yes"), ("yes, free tier", "yes")],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("31 incl. DBs · MQTT · browser", ""),
+                ("25+ types", ""),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "fastest interval",
+            cells: &[
+                ("1s", ""),
+                ("60s", ""),
+                ("60s free · 30s Pro · 10s self-hosted", ""),
+            ],
+        },
+        MatrixRow {
+            label: "page subscribers",
+            cells: &[
+                ("RSS only", "part"),
+                ("email · SMS · Slack", "yes"),
+                ("email · webhook", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "on-call & escalation",
+            cells: &[("none", "no"), ("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("single login", "no"),
+                ("yes", "yes"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "multi-region probes",
+            cells: &[
+                ("via Globalping add-on", "part"),
+                ("yes", "yes"),
+                ("yes, or run your own", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "tech stack",
+            cells: &[("JavaScript", ""), ("TypeScript", ""), ("Rust", "")],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~89k", ""), ("~7.3k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "OneUptime rows match our fuller OneUptime comparison, checked against its repository.",
+        "Star counts rounded from GitHub, July 2026.",
+        "Verified July 2026 against both repositories. Refresh when a project releases a new version.",
+    ],
+};
+
+/// Third-party face-off for `/compare/uptime-kuma-vs-kener`, verified July 2026
+/// against both repositories. Kener's check interval and whether its pages take
+/// end-user subscribers are not documented, so no row claims either.
+static KUMA_KENER_MATRIX: Matrix = Matrix {
+    heading: "the facts, side by side",
+    columns: &["Uptime Kuma", "Kener", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("MIT", ""), ("MIT", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "built for",
+            cells: &[
+                ("a monitoring dashboard", ""),
+                ("the status page first", ""),
+                ("monitoring + status page", ""),
+            ],
+        },
+        MatrixRow {
+            label: "configuration",
+            cells: &[
+                ("UI only", ""),
+                ("UI + REST API", ""),
+                ("UI + Terraform + REST + MCP", ""),
+            ],
+        },
+        MatrixRow {
+            label: "deploy footprint",
+            cells: &[
+                ("one container (Node)", "yes"),
+                ("app + Redis", "part"),
+                ("1 binary + 2 DBs", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "check types",
+            cells: &[
+                ("31 incl. DBs · MQTT · browser", ""),
+                ("8 incl. SQL · heartbeat · GameDig", ""),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "alert channels",
+            cells: &[
+                ("94 services", ""),
+                ("email · webhook · Slack · Discord", ""),
+                ("Slack · Telegram · PagerDuty · SMS + more", ""),
+            ],
+        },
+        MatrixRow {
+            label: "page branding",
+            cells: &[
+                ("yes, custom domains", "yes"),
+                ("logo · colors · CSS · themes · i18n", "yes"),
+                ("branded, own subdomain", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "pages per instance",
+            cells: &[("many", ""), ("many", ""), ("many", "")],
+        },
+        MatrixRow {
+            label: "REST API for monitors",
+            cells: &[("none official", "no"), ("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("single login", "no"),
+                ("role-based collaboration", "yes"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "community (GitHub stars)",
+            cells: &[("~89k", ""), ("~5.1k", ""), ("young", "")],
+        },
+    ],
+    notes: &[
+        "Kener's check and alert lists come from its README. Its check interval and page subscriptions are not documented, so no row claims either.",
+        "Star counts rounded from GitHub, July 2026.",
+        "Verified July 2026 against both repositories. Refresh when a project releases a new version.",
     ],
 };
 
