@@ -1662,12 +1662,10 @@
         color: var(--theme-text);
         text-decoration: none;
         display: inline-flex;
-        align-items: baseline;
+        align-items: center;
         gap: 0.5rem;
     }
-    .nav-brand__mark { color: var(--theme-accent); font-weight: 600; }
-    .nav-brand__mark::before { content: "["; color: var(--theme-text-quiet); }
-    .nav-brand__mark::after  { content: "]"; color: var(--theme-text-quiet); }
+    .nav-brand__mark { flex: none; width: 1.25rem; height: 1.25rem; }
     .nav-brand__em { color: var(--theme-accent); font-weight: 600; }
     .nav-link {
         @apply text-sm;
