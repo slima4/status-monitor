@@ -22,6 +22,17 @@ API, or Terraform. Self-host the single binary or use the hosted service.
 
 </div>
 
+## Quick start
+
+Hosted, no install:
+
+1. Sign up at **[uptimepage.dev](https://uptimepage.dev)** with GitHub or Google — no card.
+2. Add a monitor: paste a URL, pick a check type and interval, save.
+3. Bind a notification channel (Slack, email, PagerDuty, …) so failures reach you.
+4. Turn on a public status page and share the link.
+
+Prefer code? Drive the same account by [REST API](docs/api.md), [Terraform](#terraform), or [MCP](#mcp-server). Want to run it yourself? Go to [Self-host](#self-host).
+
 ## Why uptimepage
 
 Monitoring with a built-in status page isn't new — the bet here is doing it
@@ -61,7 +72,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 |---|---|
 | **Checks** | HTTP, TCP, ICMP ping, heartbeat (inbound dead-man's-switch), DNS, TLS-cert expiry, domain expiry, browser login flow — per-host circuit breaking, designed for ~50k concurrent in-flight |
 | **Public status page** | HTML + JSON + RSS, per-component opt-in, incident narration, maintenance windows, email + webhook subscribers |
-| **Alerting** | Slack, webhook, Telegram, WhatsApp, SMS, PagerDuty, ntfy, Pushover, Discord, … — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
+| **Alerting** | Slack, PagerDuty, Discord, Microsoft Teams, Google Chat, Telegram, WhatsApp, SMS, email, webhook, ntfy, Pushover — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
 | **Incidents** | Internal incident state ⊥ public phase, acknowledge to silence paging, per-monitor reminder cadence |
 | **Multi-region** | Regional probe agents, per-region views, run your own agent anywhere |
 | **Automation** | REST API, scoped API tokens, Terraform provider, MCP server for LLM clients |
@@ -186,7 +197,7 @@ resource "uptimepage_target" "api" {
 
 ## MCP server
 
-An [MCP](https://modelcontextprotocol.io) server lets an LLM client (the claude.ai connector, Claude Desktop, an IDE) answer questions about one org's monitors and take a few guarded actions, over Streamable HTTP at `/mcp`. Seven read-only tools plus four write tools (each scope-gated, confirmed per action, and audited). Auth is an org-bound scoped token — paste one by hand, or use the one-click OAuth 2.1 connector. Off by default; enable with `UPTIMEPAGE_MCP_ENABLED=true` (`+ MCP_OAUTH_ENABLED` for the connector). See [docs/mcp.md](docs/mcp.md).
+An [MCP](https://modelcontextprotocol.io) server lets an LLM client (the claude.ai connector, Claude Desktop, an IDE) answer questions about one org's monitors and take a few guarded actions, over Streamable HTTP at `/mcp`. Ten read-only tools plus six write tools (each scope-gated, confirmed per action, and audited). Auth is an org-bound scoped token — paste one by hand, or use the one-click OAuth 2.1 connector. Off by default; enable with `UPTIMEPAGE_MCP_ENABLED=true` (`+ MCP_OAUTH_ENABLED` for the connector). See [docs/mcp.md](docs/mcp.md).
 
 ## Self-host
 
