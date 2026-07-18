@@ -56,10 +56,7 @@
     </a>
     <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface)]">
         <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
-            <a href="/" class="nav-brand" aria-label="Uptimepage — home">
-                <img class="nav-brand__mark" src="{{ "img/favicon.svg"|asset }}" alt="" aria-hidden="true" width="20" height="20">
-                <span>Uptime<span class="nav-brand__em">page</span></span>
-            </a>
+            {% include "_nav_brand.html" %}
             {% if active_tab != "login" && active_tab != "recover" %}
             {# Error/consent pages pass active_tab="" — no picker fetch there. #}
             {% if active_tab != "" %}
