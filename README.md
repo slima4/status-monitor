@@ -18,7 +18,7 @@ API, or Terraform. Self-host the single binary or use the hosted service.
 
 [**Try it free →**](https://uptimepage.dev)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://uptimepage.github.io/uptimepage/)&nbsp;&nbsp;·&nbsp;&nbsp;[Self-host](#self-host)&nbsp;&nbsp;·&nbsp;&nbsp;[Terraform](#terraform)&nbsp;&nbsp;·&nbsp;&nbsp;[MCP](#mcp-server)
 
-<img src="docs/img/screenshot-dashboard.png" alt="uptimepage dashboard — uptime, response time, and per-monitor status" width="900">
+<img src="static/marketing/uptime-monitoring-dashboard.webp" alt="uptimepage dashboard — uptime, response time, and per-monitor status" width="900">
 
 </div>
 
@@ -72,7 +72,8 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 
 <div align="center">
 
-<img src="docs/img/screenshot-monitors.png" alt="uptimepage monitors list — grouped, Terraform-managed checks" width="900">
+<img src="static/marketing/uptime-monitors-list.webp" alt="The monitors list: checks grouped by environment, each with live status, type, tags, last check time, and 30-day uptime." width="900">
+<br><sub>Monitors — grouped by environment, filterable by type, tag, or owner</sub>
 
 </div>
 
@@ -95,12 +96,27 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 
 A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binary. Per-target opt-in via `public_status`; the page bypasses basic auth at the Caddy layer with a per-IP rate limit, caches for 10 s in-process, and degrades gracefully if ClickHouse is unreachable. Operators narrate incidents (`PATCH /api/v1/incidents/{id}`, `POST /api/v1/incidents/{id}/updates`) and schedule maintenance windows (`POST /api/v1/maintenance`). Visitors subscribe for email or webhook updates. See [docs/public-status.md](docs/public-status.md).
 
+<div align="center">
+
+<img src="static/marketing/public-status-page.webp" alt="A public status page reading All Systems Operational, with 90-day uptime history per component." width="900">
+<br><sub>Public status page — 90 days of history per component</sub>
+
+</div>
+
 ## Alerting
 
 Notification channels are per-org resources (Slack incoming webhook, generic
 HTTP webhook, Telegram bot, SMS gateway, …) created via `/api/v1/notification-channels`.
-Transport secrets are sealed at rest and never echoed back. A target opts in
-by binding one or more channels in its `alerts` array:
+Transport secrets are sealed at rest and never echoed back.
+
+<div align="center">
+
+<img src="static/marketing/notification-channels-slack-pagerduty-sms.webp" alt="The notification channels list: Slack, PagerDuty, SMS, email, webhook, Discord, Teams, Pushover, ntfy, and Telegram, each enabled or disabled." width="900">
+<br><sub>Alerting — Slack, PagerDuty, SMS, webhook, and seven more</sub>
+
+</div>
+
+A target opts in by binding one or more channels in its `alerts` array:
 
 ```jsonc
 "alerts": [
@@ -113,12 +129,26 @@ Fire-once + recovery semantics. Channels are tenant-isolated — a target can
 only bind a channel its own org owns. See [docs/api.md](docs/api.md) for the
 full contract.
 
+<div align="center">
+
+<img src="static/marketing/add-notification-channel.webp" alt="The new notification-channel form: choose a channel type such as Slack, Discord, email, Telegram, PagerDuty, SMS, or webhook." width="900">
+<br><sub>Adding a channel — pick a transport, paste one credential</sub>
+
+</div>
+
 ## Multi-region
 
 Run probe agents in the regions your users live in; the control plane assigns
 checks per region and the dashboard and status page can be viewed per-region.
 Bring your own agent anywhere — a single binary with an org-scoped token. See
 [docs/multi-region.md](docs/multi-region.md).
+
+<div align="center">
+
+<img src="static/marketing/monitor-latency-by-region.webp" alt="One monitor in detail: uptime and check counts for the last 24 hours, plus median latency charted per region." width="900">
+<br><sub>Monitor detail — latency broken down by region</sub>
+
+</div>
 
 ## Terraform
 
