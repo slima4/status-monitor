@@ -34,8 +34,9 @@
 # Once no agent has reported within operator.agent_stale_after_secs (default
 # 90), the silence sweeper marks every assigned monitor unmonitored and the
 # public page renders each component grey "No data" instead of Operational.
-# The seed bumps agents.last_seen_at, but that only lasts 90s — so run the app
-# with a window wide enough to shoot in:
+# The seed seeds a placeholder agent per enabled region and bumps last_seen_at
+# (dev-regions-down deletes the real rows, so a bump alone hits nothing), but
+# that freshness only lasts 90s — so run the app with a window wide enough:
 #
 #   UPTIMEPAGE_OPERATOR__AGENT_STALE_AFTER_SECS=86400
 #
@@ -276,12 +277,21 @@ ON CONFLICT DO NOTHING;
 SQL
 
 echo "==> Postgres: refresh agent liveness (dead-man's switch)"
-# Stopped agents go stale, and the silence sweeper then marks every assigned
-# monitor unmonitored — the public page renders a grey "No data" per component
-# rather than claiming up. Correct behaviour, fatal to the shot. The bump only
-# buys operator.agent_stale_after_secs (default 90s), so the shoot stack also
-# needs a wide window; see the header.
+# The silence sweeper marks a monitor unmonitored unless a live agent row covers
+# its region — the public page then renders a grey "No data" per component
+# rather than claiming up. Correct behaviour, fatal to the shot. dev-regions-down
+# deletes the agent rows outright, so bumping last_seen_at is not enough: seed a
+# placeholder that probes nothing (a bare row starts no prober) per enabled
+# region. The bump then buys operator.agent_stale_after_secs (default 90s), so
+# the shoot stack also needs a wide window; see the header.
 pg <<SQL
+INSERT INTO agents (region, name, enabled, token_hash, token_prefix, last_seen_at)
+SELECT r.id, 'marketing-seed', true,
+       'seed-placeholder', 'seedmktg' || left(md5(r.id), 8), now()
+  FROM regions r
+ WHERE r.enabled
+   AND NOT EXISTS (SELECT 1 FROM agents a WHERE a.region = r.id AND a.enabled);
+
 UPDATE agents SET last_seen_at = now() WHERE enabled;
 UPDATE monitor_silence_state SET resolved_at = now()
  WHERE org_id = '${ORG}' AND resolved_at IS NULL;

@@ -190,6 +190,12 @@ seed-fixtures:
 seed-latency-demo:
     bash scripts/seed-latency-demo.sh
 
+# Seed a photogenic operator tenant (40 monitors, 90d up history, resolved
+# incidents) for shooting the marketing screenshot gallery. Stop the dev-region
+# agents first; see the script header for the shoot-time stale-window override.
+seed-marketing:
+    bash scripts/seed-marketing.sh
+
 # Reset the dev Postgres DB (keeps ClickHouse + the warm build cache).
 # Use after editing a migration — pre-launch policy edits migrations in
 # place, which trips sqlx's "migration N modified" checksum guard.
