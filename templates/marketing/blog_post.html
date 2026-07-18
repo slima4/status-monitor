@@ -23,6 +23,14 @@
     <div class="mk-article mk-article--{{ slug }}">
         {{ body_html|safe }}
     </div>
+    {% if !related.is_empty() %}
+    <nav aria-label="Related notes">
+        <div class="mk-terminal">
+            <div class="mk-terminal__chrome"><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__tag">~/notes</span></div>
+            <div class="mk-terminal__body"><span class="mk-terminal__line mk-terminal__line--prompt">ls --related</span><span class="mk-terminal__line mk-terminal__line--blank"></span>{% for r in related %}<a href="/blog/{{ r.slug }}" class="mk-terminal__item"><span class="mk-terminal__date">{{ r.date }}</span>{{ r.title }}</a>{% endfor %}</div>
+        </div>
+    </nav>
+    {% endif %}
     <footer class="mk-author">
         <img class="mk-author__img" src="{{ author.image|asset }}" width="72" height="72" alt="{{ author.name }}" loading="lazy">
         <div class="mk-author__body">

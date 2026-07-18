@@ -567,6 +567,20 @@ html:has(.marketing-shell) {
     0%, 50%       { opacity: 1; }
     50.01%, 100%  { opacity: 0; }
 }
+.mk-terminal__item {
+    display: block;
+    text-decoration: none;
+    color: var(--mk-ink);
+    transition: color 140ms ease;
+}
+.mk-terminal__item + .mk-terminal__item { margin-top: 0.15rem; }
+.mk-terminal__item .mk-terminal__date {
+    display: inline-block;
+    width: 6rem;
+    color: var(--mk-quiet);
+}
+.mk-terminal__item:hover,
+.mk-terminal__item:hover .mk-terminal__date { color: var(--mk-ok); }
 
 /* ── Pricing card ─────────────────────────────────────────────────── */
 .mk-price {

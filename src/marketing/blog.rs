@@ -29,6 +29,7 @@ use super::seo::{
 };
 use crate::web::filters;
 
+const RELATED_LIMIT: usize = 3;
 const POST_CACHE_CONTROL: HeaderValue =
     HeaderValue::from_static("public, max-age=600, stale-while-revalidate=86400");
 const INDEX_CACHE_CONTROL: HeaderValue =
@@ -238,6 +239,7 @@ struct BlogPostPage {
     author: &'static Author,
     tags: Vec<String>,
     body_html: String,
+    related: Vec<RelatedLink>,
     version: &'static str,
 }
 
@@ -277,6 +279,39 @@ fn render_index(cfg: &MarketingCfg) -> CachedRender {
     .render()
     .unwrap_or_else(|e| format!("<!-- blog index render failed: {e} -->"));
     cached_render(body)
+}
+
+/// A cross-link surfaced beneath a post to keep readers on-site and
+/// spread internal link equity.
+#[derive(Debug, Clone)]
+pub struct RelatedLink {
+    pub slug: String,
+    pub title: String,
+    pub date: String,
+}
+
+/// Rank other published posts by shared-tag overlap, newest first as the
+/// tiebreak, backfilling with recent posts so every article links out
+/// even when its tags are unique.
+fn related_posts(post: &Post, limit: usize) -> Vec<RelatedLink> {
+    let mut scored: Vec<(usize, &'static Post)> = list_published()
+        .into_iter()
+        .filter(|p| p.slug != post.slug)
+        .map(|p| {
+            let overlap = p.tags.iter().filter(|t| post.tags.contains(t)).count();
+            (overlap, p)
+        })
+        .collect();
+    scored.sort_by_key(|&(overlap, _)| std::cmp::Reverse(overlap));
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, p)| RelatedLink {
+            slug: p.slug.clone(),
+            title: p.title.clone(),
+            date: p.date.clone(),
+        })
+        .collect()
 }
 
 fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
@@ -328,6 +363,7 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         author: &AUTHOR,
         tags: post.tags.clone(),
         body_html: post.body_html.clone(),
+        related: related_posts(post, RELATED_LIMIT),
         version: env!("CARGO_PKG_VERSION"),
     }
     .render()
@@ -484,6 +520,31 @@ mod tests {
                 "{}: excerpt {} chars > 160",
                 p.slug,
                 p.excerpt.len()
+            );
+        }
+    }
+
+    #[test]
+    fn every_post_links_out_to_related() {
+        let posts = list_published();
+        let others = posts.len().saturating_sub(1);
+        if others == 0 {
+            return;
+        }
+        let want = RELATED_LIMIT.min(others);
+        for p in &posts {
+            let related = related_posts(p, RELATED_LIMIT);
+            assert_eq!(
+                related.len(),
+                want,
+                "{}: expected {want} related links, got {}",
+                p.slug,
+                related.len()
+            );
+            assert!(
+                related.iter().all(|r| r.slug != p.slug),
+                "{}: related links must not include the post itself",
+                p.slug
             );
         }
     }
