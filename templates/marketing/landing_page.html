@@ -50,7 +50,7 @@
     </section>
     {% endif %}
 
-    <section class="mx-auto max-w-2xl space-y-8">
+    <section class="mx-auto max-w-3xl space-y-8">
         {% for s in sections %}
         <div class="space-y-3">
             <h2 class="mk-h3">{{ s.heading }}</h2>
@@ -60,14 +60,14 @@
     </section>
 
     {% if let Some(c) = code %}
-    <section class="mx-auto max-w-2xl space-y-3">
+    <section class="mx-auto max-w-3xl space-y-3">
         <h2 class="mk-h3">{{ c.caption }}</h2>
         <pre class="mk-mono overflow-x-auto rounded-sm p-4 mk-codeblock"><code>{{ c.body }}</code></pre>
     </section>
     {% endif %}
 
     {% if !resources.is_empty() %}
-    <section class="mx-auto max-w-2xl space-y-3">
+    <section class="mx-auto max-w-3xl space-y-3">
         <h2 class="mk-h3">Links</h2>
         <ul class="space-y-2">
             {% for r in resources %}
@@ -94,7 +94,7 @@
     {% endif %}
 
     {% if !features.is_empty() %}
-    <section class="mx-auto max-w-2xl space-y-4">
+    <section class="mx-auto max-w-3xl space-y-4">
         <h2 class="mk-h2 text-center">At a glance</h2>
         <ul class="overflow-hidden rounded-sm mk-panel">
             {% for f in features %}
