@@ -1,27 +1,27 @@
 <div class="monitors-popover__label">workspace</div>
 <a href="/settings/notifications" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "notifications" %} aria-current="page"{% endif %}>notifications</a>
+   class="monitors-popover__item"{% if active_tab == "notifications" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-mail" /></svg>notifications</a>
 <a href="/settings/variables" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "variables" %} aria-current="page"{% endif %}>variables</a>
+   class="monitors-popover__item"{% if active_tab == "variables" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-variable" /></svg>variables</a>
 <a href="/settings/team" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "team" %} aria-current="page"{% endif %}>team</a>
+   class="monitors-popover__item"{% if active_tab == "team" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-users" /></svg>team</a>
 {% if ""|escalation_ui %}
 <a href="/settings/escalation" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "escalation" %} aria-current="page"{% endif %}>escalation</a>
+   class="monitors-popover__item"{% if active_tab == "escalation" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-alert" /></svg>escalation</a>
 <a href="/settings/on-call" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "on-call" %} aria-current="page"{% endif %}>on-call</a>
+   class="monitors-popover__item"{% if active_tab == "on-call" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-users" /></svg>on-call</a>
 {% endif %}
 <div class="monitors-popover__sep"></div>
 <div class="monitors-popover__label">account</div>
 <a href="/settings/usage" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "usage" %} aria-current="page"{% endif %}>usage &amp; billing</a>
+   class="monitors-popover__item"{% if active_tab == "usage" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-gauge" /></svg>usage &amp; billing</a>
 <a href="/settings/api-tokens" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "settings" %} aria-current="page"{% endif %}>api tokens</a>
+   class="monitors-popover__item"{% if active_tab == "settings" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-key" /></svg>api tokens</a>
 <a href="/settings/account" role="menuitem"
-   class="monitors-popover__item"{% if active_tab == "account" %} aria-current="page"{% endif %}>account</a>
+   class="monitors-popover__item"{% if active_tab == "account" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-user" /></svg>account</a>
 <div class="monitors-popover__sep"></div>
 <button type="button" role="menuitem"
         hx-post="/auth/logout"
         hx-headers='{"X-Requested-With":"uptimepage"}'
         hx-on::after-request="window.location.href='/login'"
-        class="monitors-popover__item monitors-popover__item--danger">log out</button>
+        class="monitors-popover__item monitors-popover__item--danger"><svg class="mp-icon" aria-hidden="true"><use href="#i-logout" /></svg>log out</button>

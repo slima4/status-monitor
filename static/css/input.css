@@ -4218,12 +4218,35 @@
     }
     .monitors-popover__item {
         @apply text-left;
-        display: block;
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
         text-decoration: none;
         background: transparent;
         border: 0;
         font: inherit;
     }
+    /* Sprite host: keeps <symbol> defs in the DOM, out of layout. */
+    .nav-icon-sprite {
+        position: absolute;
+        width: 0;
+        height: 0;
+        overflow: hidden;
+    }
+    .mp-icon {
+        flex: 0 0 auto;
+        width: 1.05em;
+        height: 1.05em;
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 1.75;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        opacity: 0.85;
+    }
+    /* Glyphs show only in the dropdown sheet, not the inline desktop bar. */
+    .nav-link > .mp-icon { display: none; }
+    .monitors-popover .nav-link > .mp-icon { display: inline-flex; }
     /* .monitors-menu/.monitors-popover also chrome the header nav menus.
        Presence of aria-current marks the current page/org (links emit
        "page", the org switcher "true"); both light up the accent. */
@@ -4246,7 +4269,9 @@
     /* Primary links reuse .nav-link inline on desktop; inside the compact-nav
        sheet they render as full-width menu rows. */
     .monitors-popover .nav-link {
-        display: block;
+        display: flex;
+        align-items: center;
+        gap: 0.55rem;
         padding: 0.4rem 0.6rem;
         border-radius: 2px;
     }
