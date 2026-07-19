@@ -8,8 +8,12 @@
     const btnOf = (root) => root.querySelector("[data-navmenu-toggle]");
 
     function place(root) {
-        window.smPositionFloating(btnOf(root), panelOf(root), {
+        // Anchor to the rail, not the toggle, so panel edges line up; the 1px
+        // overlap reads as the rail extending. Menus outside a rail keep the gap.
+        const rail = root.closest(".nav-rail");
+        window.smPositionFloating(rail || btnOf(root), panelOf(root), {
             align: root.dataset.navmenuAlign || "start",
+            gap: rail ? -1 : undefined,
         });
     }
 

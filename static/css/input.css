@@ -4292,6 +4292,37 @@
         min-width: 11rem;
         display: flex;
         flex-direction: column;
+        opacity: 1;
+        transform: translateY(0);
+        transition:
+            opacity 130ms ease,
+            transform 150ms cubic-bezier(0.16, 1, 0.3, 1),
+            display 150ms allow-discrete;
+    }
+    /* Collapsed state = the enter/exit keyframe: straight drop, no scale. */
+    .monitors-popover[hidden] {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+    @starting-style {
+        .monitors-popover:not([hidden]) {
+            opacity: 0;
+            transform: translateY(-8px);
+        }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .monitors-popover { transition: none; }
+    }
+    /* Dock header menus flush under the rail as one surface: no top seam,
+       shared square right corner, shadow cast only downward. */
+    .nav-rail .monitors-popover {
+        border-top: 0;
+        border-top-right-radius: 0;
+        box-shadow: 0 12px 22px -14px color-mix(in oklch, var(--theme-ink) 45%, transparent);
+    }
+    .nav-rail:has(.monitors-menu[data-open="true"]) {
+        border-bottom-right-radius: 0;
+        transition: border-radius 130ms ease;
     }
     .monitors-popover__item {
         @apply text-left;
