@@ -4,7 +4,7 @@ date = "2026-07-18"
 slug = "rust-vs-go-uptime-monitor"
 excerpt = "Go is the usual pick for a network service like this. I went with Rust for one reason: a monitor sells clean timing, and its own runtime cannot add random delay. Here is the trade, and where Go still wins."
 tags = ["rust", "go", "monitoring", "devops"]
-draft = true
+draft = false
 
 [[faqs]]
 q = "Is Rust better than Go for an uptime monitor?"
