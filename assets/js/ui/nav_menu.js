@@ -1,14 +1,17 @@
-// Nav org picker: positions the menu via smPositionFloating and switches the
-// session's active org through the JSON API. Document-level delegation — the
-// picker arrives via an htmx load after this script runs.
+// One controller for every [data-navmenu] root (org switcher, account
+// dropdown, compact hamburger), one panel open at a time. Own attribute
+// namespace because monitors_list.js owns [data-menu-toggle] for row menus.
 (function () {
     let open = null;
 
-    // Picker-own attributes: monitors_list.js delegates on the generic
-    // [data-menu-toggle] at document level, so sharing names would make
-    // its handler swallow picker clicks and strand open row menus.
-    const panelOf = (root) => root.querySelector("[data-picker-panel]");
-    const btnOf = (root) => root.querySelector("[data-picker-toggle]");
+    const panelOf = (root) => root.querySelector("[data-navmenu-panel]");
+    const btnOf = (root) => root.querySelector("[data-navmenu-toggle]");
+
+    function place(root) {
+        window.smPositionFloating(btnOf(root), panelOf(root), {
+            align: root.dataset.navmenuAlign || "start",
+        });
+    }
 
     function close() {
         if (!open) return;
@@ -28,7 +31,7 @@
         open = root;
         root.dataset.open = "true";
         btnOf(root).setAttribute("aria-expanded", "true");
-        window.smPositionFloating(btnOf(root), panelOf(root), {});
+        place(root);
     }
 
     async function switchOrg(item) {
@@ -54,17 +57,17 @@
     }
 
     document.addEventListener("click", (e) => {
-        const toggle = e.target.closest("[data-picker-toggle]");
+        const toggle = e.target.closest("[data-navmenu-toggle]");
         if (toggle) {
             e.preventDefault();
-            openFor(toggle.closest("[data-org-picker]"));
+            openFor(toggle.closest("[data-navmenu]"));
             return;
         }
-        const item = e.target.closest("[data-org-switch]");
-        if (item && open && open.contains(item)) {
+        const org = e.target.closest("[data-org-switch]");
+        if (org && open && open.contains(org)) {
             e.preventDefault();
             close();
-            if (item.getAttribute("aria-current") !== "true") switchOrg(item);
+            if (org.getAttribute("aria-current") !== "true") switchOrg(org);
             return;
         }
         if (open && !open.contains(e.target)) close();
@@ -79,7 +82,7 @@
     });
 
     const reposition = () => {
-        if (open) window.smPositionFloating(btnOf(open), panelOf(open), {});
+        if (open) place(open);
     };
     window.addEventListener("scroll", reposition, true);
     window.addEventListener("resize", reposition);

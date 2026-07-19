@@ -57,6 +57,8 @@ pub trait IncidentNarrationStore: Send + Sync {
     /// (so the banner shows "first opened …" without re-sorting). Capped at
     /// `limit` for the dashboard banner.
     async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>>;
+    /// Count of open incidents (`ended_at IS NULL`) for the nav health pill.
+    async fn count_active(&self, org: OrgId) -> Result<u32>;
     /// Confirmed incidents for one target overlapping `range`, newest first. An
     /// incident still open at `range.to` is included; `ongoing_only` keeps only those.
     async fn list_for_target(
@@ -316,6 +318,17 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         Ok(rows.into_iter().map(row_to_active).collect())
     }
 
+    async fn count_active(&self, org: OrgId) -> Result<u32> {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM incidents WHERE org_id = $1 AND ended_at IS NULL",
+        )
+        .bind(org.0)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("count_active incidents: {e}"))?;
+        Ok(n.max(0) as u32)
+    }
+
     async fn list_for_target(
         &self,
         org: OrgId,
@@ -516,6 +529,17 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
         out.sort_by_key(|a| a.started_at);
         out.truncate(limit);
         Ok(out)
+    }
+
+    async fn count_active(&self, _org: OrgId) -> Result<u32> {
+        let n = self
+            .inner
+            .lock()
+            .incidents
+            .iter()
+            .filter(|i| i.ended_at.is_none())
+            .count();
+        Ok(n as u32)
     }
 
     async fn list_for_target(

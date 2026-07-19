@@ -122,6 +122,17 @@ fn build_regions_for_org_cache() -> RegionsForOrgCache {
         .build()
 }
 
+/// Open-incident count for the nav pill; short TTL bounds the count query to
+/// once per org per window regardless of page volume.
+pub type NavPillCache = Cache<OrgId, u32>;
+
+fn build_nav_pill_cache() -> NavPillCache {
+    Cache::builder()
+        .time_to_live(Duration::from_secs(15))
+        .max_capacity(10_000)
+        .build()
+}
+
 /// Per-process fast-path for recently-ingested agent `batch_id`s. NOT the
 /// source of truth: it is per-replica, so during a blue/green cutover a retry
 /// can land on the other color and miss here. The authoritative cross-process
@@ -230,6 +241,7 @@ pub struct AppState {
     pub incident_metrics_cache: IncidentMetricsCache,
     pub region_catalog_cache: RegionCatalogCache,
     pub regions_for_org_cache: RegionsForOrgCache,
+    pub nav_pill_cache: NavPillCache,
     pub idempotency: Arc<IdempotencyCache>,
     pub public_source: Arc<dyn PublicSource>,
     pub maintenance_store: Arc<dyn MaintenanceStore>,
@@ -438,6 +450,21 @@ impl AppState {
         Ok(regions)
     }
 
+    /// Cached open-incident count for the nav pill. A store error yields 0 so a
+    /// blip never breaks every page's chrome.
+    pub async fn open_incident_count(&self, org: OrgId) -> u32 {
+        if let Some(n) = self.nav_pill_cache.get(&org) {
+            return n;
+        }
+        let n = self
+            .incident_narration_store
+            .count_active(org)
+            .await
+            .unwrap_or(0);
+        self.nav_pill_cache.insert(org, n);
+        n
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cfg: AppConfig,
@@ -523,6 +550,7 @@ impl AppState {
             incident_metrics_cache: build_incident_metrics_cache(),
             region_catalog_cache: build_region_catalog_cache(),
             regions_for_org_cache: build_regions_for_org_cache(),
+            nav_pill_cache: build_nav_pill_cache(),
             idempotency: Arc::new(IdempotencyCache::new()),
             public_source,
             maintenance_store,

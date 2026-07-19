@@ -609,6 +609,7 @@
     dialog#sm-confirm-modal,
     dialog#sm-prompt-modal,
     dialog#sm-share-modal,
+    dialog#sm-command-palette,
     dialog#delete-modal {
         background: var(--theme-surface-elev);
         color: var(--theme-text);
@@ -619,6 +620,7 @@
     dialog#sm-confirm-modal::backdrop,
     dialog#sm-prompt-modal::backdrop,
     dialog#sm-share-modal::backdrop,
+    dialog#sm-command-palette::backdrop,
     dialog#delete-modal::backdrop {
         background: color-mix(in oklch, var(--theme-ink) 55%, transparent);
     }
@@ -1679,6 +1681,231 @@
         color: var(--theme-text);
     }
     .nav-link--active:hover { color: var(--theme-text); }
+
+    /* Org slug shown when there's nothing to switch to. */
+    .nav-root { display: inline-flex; align-items: center; gap: 0.5rem; }
+    .nav-root__slug {
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        color: var(--theme-text);
+    }
+    /* Deep-page trail; detail templates fill the nav_crumb block. */
+    .nav-crumb {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        font-family: var(--font-mono);
+        font-size: 0.875rem;
+        color: var(--theme-text-muted);
+    }
+    .nav-crumb a { color: var(--theme-text-muted); text-decoration: none; }
+    .nav-crumb a:hover { color: var(--theme-accent); }
+
+    /* Right cluster as one hairline rail, same register as .sm-rail: a framed
+       toolbar of borderless segments that fill on hover, instead of three
+       separate boxes. */
+    .nav-rail {
+        @apply inline-flex items-center gap-1.5 rounded-sm border p-1;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
+        font-variant-numeric: tabular-nums;
+    }
+    /* Hairline divider between segment groups (status | search | identity). */
+    .nav-rail__sep {
+        align-self: stretch;
+        width: 1px;
+        margin: 0.15rem 0.1rem;
+        background: var(--theme-line);
+    }
+    /* Drop the leading divider until the pill has loaded in. */
+    #nav-pill:empty + .nav-rail__sep { display: none; }
+    .nav-rail__seg {
+        @apply inline-flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs font-medium;
+        border: 0;
+        background: transparent;
+        color: var(--theme-text-muted);
+        font-family: var(--font-mono);
+        text-decoration: none;
+        cursor: pointer;
+        transition: background-color 120ms ease, color 120ms ease, transform 120ms ease;
+    }
+    .nav-rail__seg:hover,
+    .monitors-menu[data-open="true"] > .nav-rail__seg {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+    }
+    /* Tactile press on the interactive segments (not the static readout). */
+    .nav-rail__seg:active { transform: scale(0.96); }
+    .nav-rail__seg--static:active { transform: none; }
+    /* Health readout is a non-interactive segment; the LED carries state. */
+    .nav-rail__seg--static,
+    .nav-rail__seg--static:hover {
+        background: transparent;
+        color: var(--theme-text-muted);
+        cursor: default;
+    }
+    .nav-rail__seg--alert,
+    .nav-rail__seg--alert:hover { color: var(--theme-state-warn-fg-strong); }
+    .nav-rail__seg--alert:hover {
+        background: var(--theme-surface-sunk);
+        text-decoration: underline;
+    }
+    .nav-rail__led { flex: none; width: 0.5rem; height: 0.5rem; border-radius: 50%; }
+    .nav-rail__led--ok { background: var(--theme-state-ok-strong); }
+    .nav-rail__led--alert { background: var(--theme-state-warn-fg-strong); }
+    /* Account avatar segment: brand-green initials mark identity. */
+    .nav-avatar__initials {
+        font-family: var(--font-mono);
+        font-size: 0.6875rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        color: var(--theme-accent);
+    }
+    /* Identity header; htmx OOB fills it, :empty hides it pre-load. */
+    .nav-identity:empty { display: none; }
+    .nav-identity__email {
+        padding: 0.4rem 0.6rem 0;
+        font-size: 0.8125rem;
+        color: var(--theme-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .nav-identity__meta {
+        padding: 0 0.6rem 0.1rem;
+        font-size: 0.6875rem;
+        color: var(--theme-text-muted);
+    }
+
+    /* Command palette (⌘K) — content inside the shared modal skin. */
+    dialog#sm-command-palette {
+        width: 100%;
+        max-width: 34rem;
+        padding: 0;
+        margin-top: 12vh;
+        margin-bottom: auto;
+    }
+    /* Soft enter/exit; exit rides a small translate, not full height. */
+    @media (prefers-reduced-motion: no-preference) {
+        dialog#sm-command-palette {
+            opacity: 0;
+            translate: 0 6px;
+            transition: opacity 140ms ease, translate 140ms ease,
+                        overlay 140ms allow-discrete, display 140ms allow-discrete;
+        }
+        dialog#sm-command-palette[open] { opacity: 1; translate: 0 0; }
+        @starting-style {
+            dialog#sm-command-palette[open] { opacity: 0; translate: 0 6px; }
+        }
+        dialog#sm-command-palette::backdrop {
+            opacity: 0;
+            transition: opacity 140ms ease, overlay 140ms allow-discrete, display 140ms allow-discrete;
+        }
+        dialog#sm-command-palette[open]::backdrop { opacity: 1; }
+        @starting-style {
+            dialog#sm-command-palette[open]::backdrop { opacity: 0; }
+        }
+    }
+    /* Blinking caret before the input reads as a live shell prompt. */
+    .cmdk__promptrow {
+        display: flex;
+        align-items: center;
+        border-bottom: 1px solid var(--theme-line);
+    }
+    .cmdk__prompt {
+        padding-left: 1rem;
+        color: var(--theme-accent);
+        font-family: var(--font-mono);
+        animation: sm-caret-blink 1.1s steps(1) infinite;
+    }
+    @keyframes sm-caret-blink { 50% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+        .cmdk__prompt { animation: none; }
+    }
+    .cmdk__input {
+        flex: 1 1 auto;
+        padding: 0.85rem 1rem 0.85rem 0.5rem;
+        border: 0;
+        background: transparent;
+        color: var(--theme-text);
+        caret-color: var(--theme-accent);
+        font-family: var(--font-mono);
+        font-size: 0.95rem;
+        outline: none;
+    }
+    .cmdk__input::placeholder { color: var(--theme-text-quiet); }
+    .cmdk__results {
+        max-height: min(24rem, 60vh);
+        overflow-y: auto;
+        padding: 0.25rem;
+    }
+    .cmdk__group {
+        padding: 0.5rem 0.6rem 0.2rem;
+        font-family: var(--font-mono);
+        font-size: 0.625rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--theme-text-muted);
+    }
+    .cmdk__group::before { content: "# "; }
+    .cmdk__item {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        padding: 0.45rem 0.6rem;
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+        color: var(--theme-text);
+        text-decoration: none;
+        cursor: pointer;
+    }
+    .cmdk__item[aria-selected="true"] {
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+        box-shadow: inset 2px 0 0 var(--theme-accent);
+    }
+    .cmdk__label { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cmdk__meta {
+        flex: none;
+        color: var(--theme-text-quiet);
+        font-size: 0.6875rem;
+    }
+    .cmdk__empty {
+        padding: 1.25rem 0.6rem;
+        text-align: center;
+        color: var(--theme-text-quiet);
+        font-family: var(--font-mono);
+        font-size: 0.8125rem;
+    }
+
+    /* Go-to shortcut hint bar: floats up when the `g` prefix is armed. */
+    .nav-keys-hint {
+        position: fixed;
+        bottom: 1.25rem;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 50;
+        display: flex;
+        gap: 0.9rem;
+        padding: 0.5rem 0.9rem;
+        background: var(--theme-surface-elev);
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        font-family: var(--font-mono);
+        font-size: 0.75rem;
+        color: var(--theme-text-muted);
+        box-shadow: 0 6px 24px color-mix(in oklch, var(--theme-ink) 18%, transparent);
+    }
+    .nav-keys-hint[hidden] { display: none; }
+    .nav-keys-hint kbd {
+        margin-right: 0.4rem;
+        padding: 0.05rem 0.35rem;
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        background: var(--theme-surface-sunk);
+        color: var(--theme-accent);
+        font-weight: 600;
+    }
 
     /* Status pill for the landing trust strip. `--ok` / `--warn` only swap
        the fill; the ink edge + chunky radius are shared so the cartoon
@@ -3997,8 +4224,33 @@
         border: 0;
         font: inherit;
     }
-    /* .monitors-menu/.monitors-popover also chrome the nav org picker. */
-    .monitors-popover__item[aria-current="true"] { color: var(--theme-accent); }
+    /* .monitors-menu/.monitors-popover also chrome the header nav menus.
+       Presence of aria-current marks the current page/org (links emit
+       "page", the org switcher "true"); both light up the accent. */
+    .monitors-popover__item[aria-current] { color: var(--theme-accent); }
+    /* Account/compact-nav dropdown: wider than a row menu, and capped so a
+       tall list scrolls inside the panel on short viewports. */
+    .monitors-popover--nav {
+        min-width: 13rem;
+        max-height: calc(100vh - 5rem);
+        overflow-y: auto;
+    }
+    /* Muted section header inside the account dropdown. */
+    .monitors-popover__label {
+        padding: 0.4rem 0.6rem 0.15rem;
+        font-size: 0.6875rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--theme-text-muted);
+    }
+    /* Primary links reuse .nav-link inline on desktop; inside the compact-nav
+       sheet they render as full-width menu rows. */
+    .monitors-popover .nav-link {
+        display: block;
+        padding: 0.4rem 0.6rem;
+        border-radius: 2px;
+    }
+    .monitors-popover .nav-link:hover { background: var(--theme-surface-sunk); }
     .monitors-popover__item--danger { color: var(--theme-state-bad-fg); }
     .monitors-popover__item--danger:hover,
     .monitors-popover__item--danger:focus-visible {

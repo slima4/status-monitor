@@ -32,7 +32,9 @@
     <script defer src="{{ "js/ui/popover_pos.js"|asset }}"></script>
     <script defer src="{{ "js/ui/combobox.js"|asset }}"></script>
     <script defer src="{{ "js/ui/localtime.js"|asset }}"></script>
-    <script defer src="{{ "js/ui/org_picker.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/nav_menu.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/command_palette.js"|asset }}"></script>
+    <script defer src="{{ "js/ui/nav_keys.js"|asset }}"></script>
     <script>
       // Shared API-response readers for inline page scripts. Defined here
       // (not deferred) so they exist before any per-page content script
@@ -55,47 +57,42 @@
         Skip to main content
     </a>
     <header class="border-b border-[color:var(--theme-line)] bg-[color:var(--theme-surface)]">
-        <nav aria-label="Primary" class="container mx-auto flex items-center gap-6 px-4 py-3">
+        <nav aria-label="Primary" class="container mx-auto flex items-center gap-4 px-4 py-3">
             {% include "_nav_brand.html" %}
             {% if active_tab != "login" && active_tab != "recover" %}
-            {# Error/consent pages pass active_tab="" — no picker fetch there. #}
+            {# Error/consent pages pass active_tab="" — no nav fetch there. #}
             {% if active_tab != "" %}
-            <span hx-get="/web/partials/org-picker" hx-trigger="load" hx-swap="outerHTML"></span>
+            <span hx-get="/web/partials/nav" hx-trigger="load" hx-swap="outerHTML"></span>
             {% endif %}
-            <a href="/"{% if active_tab == "dashboard" %} aria-current="page"{% endif %}
-               class="nav-link{% if active_tab == "dashboard" %} nav-link--active{% endif %}">dashboard</a>
-            <a href="/targets"{% if active_tab == "targets" %} aria-current="page"{% endif %}
-               class="nav-link{% if active_tab == "targets" %} nav-link--active{% endif %}">monitors</a>
-            <a href="/incidents"{% if active_tab == "incidents" %} aria-current="page"{% endif %}
-               class="nav-link{% if active_tab == "incidents" %} nav-link--active{% endif %}">incidents</a>
-            <div class="ml-auto flex items-center gap-4">
-              <a href="/settings/account"{% if active_tab == "account" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "account" %} nav-link--active{% endif %}">account</a>
-              <a href="/settings/usage"{% if active_tab == "usage" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "usage" %} nav-link--active{% endif %}">usage</a>
-              <a href="/settings/pages"{% if active_tab == "pages" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "pages" %} nav-link--active{% endif %}">pages</a>
-              <a href="/settings/notifications"{% if active_tab == "notifications" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "notifications" %} nav-link--active{% endif %}">notifications</a>
-              <a href="/settings/variables"{% if active_tab == "variables" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "variables" %} nav-link--active{% endif %}">variables</a>
-              <a href="/settings/team"{% if active_tab == "team" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "team" %} nav-link--active{% endif %}">team</a>
-              {% if ""|escalation_ui %}
-              <a href="/settings/escalation"{% if active_tab == "escalation" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "escalation" %} nav-link--active{% endif %}">escalation</a>
-              <a href="/settings/on-call"{% if active_tab == "on-call" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "on-call" %} nav-link--active{% endif %}">on-call</a>
-              {% endif %}
-              <a href="/settings/api-tokens"{% if active_tab == "settings" %} aria-current="page"{% endif %}
-                 class="nav-link{% if active_tab == "settings" %} nav-link--active{% endif %}">settings</a>
-              <button type="button"
-                      hx-post="/auth/logout"
-                      hx-headers='{"X-Requested-With":"uptimepage"}'
-                      hx-on::after-request="window.location.href='/login'"
-                      class="btn-ghost px-2.5 py-1 text-xs font-medium">
-                log out
-              </button>
+            {% block nav_crumb %}{% endblock %}
+            <div class="hidden items-center gap-6 md:flex">
+              {% include "nav/_primary_links.html" %}
+            </div>
+            <div class="ml-auto nav-rail">
+              <span id="nav-pill"></span>
+              <span class="nav-rail__sep" aria-hidden="true"></span>
+              <button type="button" class="nav-rail__seg" data-cmdk-open aria-haspopup="dialog"
+                      aria-label="Search — Command-K">⌘K</button>
+              <span class="nav-rail__sep" aria-hidden="true"></span>
+              <div class="monitors-menu hidden md:inline-flex" data-navmenu data-navmenu-align="end">
+                <button type="button" class="nav-rail__seg" data-navmenu-toggle
+                        aria-haspopup="menu" aria-expanded="false" aria-label="Account and settings">
+                  <span id="nav-avatar" class="nav-avatar__initials" aria-hidden="true">··</span>
+                </button>
+                <div class="monitors-popover monitors-popover--nav" role="menu" hidden data-navmenu-panel>
+                  <div id="nav-identity" class="nav-identity"></div>
+                  {% include "nav/_account_items.html" %}
+                </div>
+              </div>
+              <div class="monitors-menu md:hidden" data-navmenu data-navmenu-align="end">
+                <button type="button" class="nav-rail__seg" data-navmenu-toggle
+                        aria-haspopup="menu" aria-expanded="false" aria-label="Menu">menu ▾</button>
+                <div class="monitors-popover monitors-popover--nav" role="menu" hidden data-navmenu-panel>
+                  {% include "nav/_primary_links.html" %}
+                  <div class="monitors-popover__sep"></div>
+                  {% include "nav/_account_items.html" %}
+                </div>
+              </div>
             </div>
             {% endif %}
         </nav>

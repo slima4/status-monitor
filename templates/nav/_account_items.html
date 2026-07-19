@@ -1,0 +1,27 @@
+<div class="monitors-popover__label">workspace</div>
+<a href="/settings/notifications" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "notifications" %} aria-current="page"{% endif %}>notifications</a>
+<a href="/settings/variables" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "variables" %} aria-current="page"{% endif %}>variables</a>
+<a href="/settings/team" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "team" %} aria-current="page"{% endif %}>team</a>
+{% if ""|escalation_ui %}
+<a href="/settings/escalation" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "escalation" %} aria-current="page"{% endif %}>escalation</a>
+<a href="/settings/on-call" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "on-call" %} aria-current="page"{% endif %}>on-call</a>
+{% endif %}
+<div class="monitors-popover__sep"></div>
+<div class="monitors-popover__label">account</div>
+<a href="/settings/usage" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "usage" %} aria-current="page"{% endif %}>usage &amp; billing</a>
+<a href="/settings/api-tokens" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "settings" %} aria-current="page"{% endif %}>api tokens</a>
+<a href="/settings/account" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "account" %} aria-current="page"{% endif %}>account</a>
+<div class="monitors-popover__sep"></div>
+<button type="button" role="menuitem"
+        hx-post="/auth/logout"
+        hx-headers='{"X-Requested-With":"uptimepage"}'
+        hx-on::after-request="window.location.href='/login'"
+        class="monitors-popover__item monitors-popover__item--danger">log out</button>

@@ -1,0 +1,33 @@
+<span class="nav-root">
+    {% if show_switcher %}
+    <div class="monitors-menu" data-navmenu>
+        <button type="button" class="nav-link" data-navmenu-toggle
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Switch organization — current: {{ slug }}">
+            <span class="cli-brackets">{{ slug }} ▾</span>
+        </button>
+        <div class="monitors-popover" role="menu" hidden data-navmenu-panel>
+            {% for o in orgs %}
+            <button type="button" class="monitors-popover__item" role="menuitem"
+                    data-org-switch="{{ o.id }}"
+                    {% if o.is_active %}aria-current="true"{% endif %}>{{ o.slug }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <span class="nav-root__slug">{{ slug }}</span>
+    {% endif %}
+</span>
+<span id="nav-pill" hx-swap-oob="true">
+    {% if open_incidents == 0 %}
+    <span class="nav-rail__seg nav-rail__seg--static" title="No open incidents"><span class="nav-rail__led nav-rail__led--ok" aria-hidden="true"></span>all ok</span>
+    {% else %}
+    <a href="/incidents" class="nav-rail__seg nav-rail__seg--alert" title="Open incidents"><span class="nav-rail__led nav-rail__led--alert" aria-hidden="true"></span>{{ open_incidents }} open</a>
+    {% endif %}
+</span>
+<span id="nav-avatar" hx-swap-oob="true" class="nav-avatar__initials" aria-hidden="true">{{ initials }}</span>
+<div id="nav-identity" hx-swap-oob="true" class="nav-identity">
+    <div class="nav-identity__email">{{ email }}</div>
+    <div class="nav-identity__meta">{{ slug }}{% if role != "" %} · {{ role }}{% endif %}</div>
+    <div class="monitors-popover__sep"></div>
+</div>
