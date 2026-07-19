@@ -534,6 +534,12 @@ pub fn test_cipher() -> Arc<uptimepage::security::Cipher> {
 /// `CurrentOrg` extractor verifies `user` is an active member of it);
 /// `session_id` sets the session id. Supersedes the per-file `as_member` /
 /// `app_with_session` / `with_session` copies.
+/// Email the injected session carries. The nav identity renders the session
+/// email, not a DB lookup, so assertions on identity must expect this.
+pub fn session_email(user: uptimepage::domain::UserId) -> String {
+    format!("u-{}@test.example", user.0)
+}
+
 pub fn with_session(
     router: Router,
     user: uptimepage::domain::UserId,
@@ -543,7 +549,7 @@ pub fn with_session(
     router.layer(session_layer(uptimepage::web::Session {
         user: Some(uptimepage::web::User {
             id: user,
-            email: format!("u-{}@test.example", user.0),
+            email: session_email(user),
         }),
         active_org_id: org,
         session_id_hash: session_id.map(str::to_owned),

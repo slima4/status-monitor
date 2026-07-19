@@ -394,7 +394,7 @@ async fn nav_partial_renders_switcher_pill_and_identity() {
     let (status, body) = get(&single).await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("nav-rail__led--ok"));
-    assert!(body.contains("picker@team.test"));
+    assert!(body.contains(&common::session_email(user)));
     assert!(!body.contains("data-org-switch"));
 
     // Second membership: switcher lists both orgs, marks the active one.
