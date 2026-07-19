@@ -1794,6 +1794,15 @@
     }
     .nav-search:hover { border-color: var(--theme-focus-ring); color: var(--theme-text); }
     .nav-search__text { flex: 1 1 auto; text-align: left; }
+    /* Below md the wide field would push the rail past the viewport; collapse
+       it to an icon-only tap target (the ⌘K hint is moot without a keyboard). */
+    @media (max-width: 767.98px) {
+        .nav-search { min-width: 0; gap: 0; padding: 0; width: 1.75rem; justify-content: center; }
+        .nav-search__text,
+        .nav-search__keyhint { display: none; }
+        /* Drop the redundant "operational" copy; the LED already carries it. */
+        .nav-rail__seg--static .nav-rail__label { display: none; }
+    }
 
     /* Account avatar: initials in a circular chip, image-ready (a future
        <img> clips to the round via overflow). Hover/open feedback lives on
