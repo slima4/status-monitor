@@ -8,11 +8,7 @@
       hx-trigger="change, keyup delay:300ms from:input[name='q']"
       class="monitors-toolbar">
   <label class="monitors-search" for="monitors-search">
-    <svg class="monitors-search__icon" viewBox="0 0 24 24" fill="none"
-         stroke="currentColor" stroke-width="2" aria-hidden="true">
-      <circle cx="11" cy="11" r="7"/>
-      <path d="M20 20l-3.5-3.5" stroke-linecap="round"/>
-    </svg>
+    <svg class="monitors-search__icon" aria-hidden="true"><use href="#i-search" /></svg>
     {# `hx-preserve` keeps the cursor across #target-rows swaps. #}
     <input id="monitors-search" name="q" type="search" value="{{ q }}"
            placeholder="Search by name, host, tag…"

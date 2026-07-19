@@ -1710,15 +1710,6 @@
         border-color: var(--theme-line);
         font-variant-numeric: tabular-nums;
     }
-    /* Hairline divider between segment groups (status | search | identity). */
-    .nav-rail__sep {
-        align-self: stretch;
-        width: 1px;
-        margin: 0.15rem 0.1rem;
-        background: var(--theme-line);
-    }
-    /* Drop the leading divider until the pill has loaded in. */
-    #nav-pill:empty + .nav-rail__sep { display: none; }
     .nav-rail__seg {
         @apply inline-flex items-center gap-1.5 rounded-sm px-2 py-1 text-xs font-medium;
         border: 0;
@@ -1783,13 +1774,55 @@
         from { opacity: 0.45; transform: scale(1); }
         to { opacity: 0; transform: scale(2.2); }
     }
-    /* Account avatar segment: brand-green initials mark identity. */
-    .nav-avatar__initials {
+    /* ⌘K trigger styled as an inset search field (button, not an input):
+       sunk fill inside the elevated rail, icon + muted prompt + key chip. */
+    .nav-search {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        min-width: 9.5rem;
+        height: 1.75rem;
+        padding: 0 0.55rem;
+        border: 1px solid var(--theme-line);
+        border-radius: 2px;
+        background: var(--theme-surface-sunk);
+        color: var(--theme-text-quiet);
         font-family: var(--font-mono);
-        font-size: 0.6875rem;
+        font-size: 0.8125rem;
+        cursor: pointer;
+        transition: border-color 120ms ease, color 120ms ease;
+    }
+    .nav-search:hover { border-color: var(--theme-focus-ring); color: var(--theme-text); }
+    .nav-search__text { flex: 1 1 auto; text-align: left; }
+
+    /* Account avatar: initials in a circular chip, image-ready (a future
+       <img> clips to the round via overflow). Hover/open feedback lives on
+       the chip itself, not a square painted behind it. */
+    .nav-rail__seg--avatar { padding: 0.15rem; }
+    .nav-rail__seg--avatar:hover,
+    .monitors-menu[data-open="true"] > .nav-rail__seg--avatar { background: transparent; }
+    .nav-avatar__initials {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1.6rem;
+        height: 1.6rem;
+        border-radius: 50%;
+        overflow: hidden;
+        background: color-mix(in oklch, var(--theme-accent) 14%, transparent);
+        border: 1px solid color-mix(in oklch, var(--theme-accent) 38%, transparent);
+        color: var(--theme-accent);
+        font-family: var(--font-mono);
+        font-size: 0.625rem;
         font-weight: 600;
         letter-spacing: 0.02em;
-        color: var(--theme-accent);
+        text-transform: uppercase;
+        transition: background-color 120ms ease, border-color 120ms ease;
+    }
+    .nav-rail__seg--avatar:hover .nav-avatar__initials,
+    .monitors-menu[data-open="true"] .nav-avatar__initials {
+        border-color: var(--theme-accent);
+        background: color-mix(in oklch, var(--theme-accent) 22%, transparent);
     }
     /* Identity header; htmx OOB fills it, :empty hides it pre-load. */
     .nav-identity:empty { display: none; }
@@ -3718,8 +3751,14 @@
     .monitors-search__icon {
         @apply h-4 w-4;
         color: var(--theme-text-quiet);
+        fill: none;
+        stroke: currentColor;
+        stroke-width: 2;
+        stroke-linecap: round;
+        stroke-linejoin: round;
     }
-    .monitors-search__keyhint {
+    .monitors-search__keyhint,
+    .nav-search__keyhint {
         @apply rounded font-mono text-[10px];
         background: var(--sm-monitors-keyhint-bg);
         color: var(--sm-monitors-keyhint-fg);

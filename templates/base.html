@@ -71,12 +71,14 @@
             </div>
             <div class="ml-auto nav-rail">
               <span id="nav-pill"></span>
-              <span class="nav-rail__sep" aria-hidden="true"></span>
-              <button type="button" class="nav-rail__seg" data-cmdk-open aria-haspopup="dialog"
-                      aria-label="Search — Command-K"><svg class="mp-icon" aria-hidden="true"><use href="#i-search" /></svg>⌘K</button>
-              <span class="nav-rail__sep" aria-hidden="true"></span>
+              <button type="button" class="nav-search" data-cmdk-open aria-haspopup="dialog"
+                      aria-label="Search — Command-K">
+                <svg class="mp-icon" aria-hidden="true"><use href="#i-search" /></svg>
+                <span class="nav-search__text">search</span>
+                <span class="nav-search__keyhint" aria-hidden="true">⌘K</span>
+              </button>
               <div class="monitors-menu hidden md:inline-flex" data-navmenu data-navmenu-align="end">
-                <button type="button" class="nav-rail__seg" data-navmenu-toggle
+                <button type="button" class="nav-rail__seg nav-rail__seg--avatar" data-navmenu-toggle
                         aria-haspopup="menu" aria-expanded="false" aria-label="Account and settings">
                   <span id="nav-avatar" class="nav-avatar__initials" aria-hidden="true">··</span>
                 </button>
