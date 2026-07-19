@@ -7,16 +7,16 @@
     let selected = 0;
 
     const STATIC = [
-        { group: "go", label: "dashboard", href: "/", meta: "g d" },
-        { group: "go", label: "monitors", href: "/targets", meta: "g m" },
-        { group: "go", label: "incidents", href: "/incidents", meta: "g i" },
-        { group: "go", label: "status pages", href: "/settings/pages", meta: "g p" },
-        { group: "go", label: "notifications", href: "/settings/notifications", meta: "g n" },
-        { group: "go", label: "variables", href: "/settings/variables", meta: "g v" },
-        { group: "go", label: "team", href: "/settings/team", meta: "g t" },
-        { group: "go", label: "usage & billing", href: "/settings/usage", meta: "g u" },
-        { group: "go", label: "api tokens", href: "/settings/api-tokens", meta: "" },
-        { group: "go", label: "account", href: "/settings/account", meta: "g a" },
+        { group: "go", label: "dashboard", href: "/", meta: "g d", icon: "i-grid" },
+        { group: "go", label: "monitors", href: "/targets", meta: "g m", icon: "i-pulse" },
+        { group: "go", label: "incidents", href: "/incidents", meta: "g i", icon: "i-alert" },
+        { group: "go", label: "status pages", href: "/settings/pages", meta: "g p", icon: "i-www" },
+        { group: "go", label: "notifications", href: "/settings/notifications", meta: "g n", icon: "i-mail" },
+        { group: "go", label: "variables", href: "/settings/variables", meta: "g v", icon: "i-variable" },
+        { group: "go", label: "team", href: "/settings/team", meta: "g t", icon: "i-users" },
+        { group: "go", label: "usage & billing", href: "/settings/usage", meta: "g u", icon: "i-gauge" },
+        { group: "go", label: "api tokens", href: "/settings/api-tokens", meta: "", icon: "i-key" },
+        { group: "go", label: "account", href: "/settings/account", meta: "g a", icon: "i-user" },
         { group: "action", label: "+ new monitor", href: "/targets/new", meta: "" },
     ];
 
@@ -97,10 +97,11 @@
             html += '<div class="cmdk__group">' + GROUP_LABEL[g] + "</div>";
             for (const r of inGroup) {
                 const i = rows.push(r) - 1;
+                const icon = r.icon ? '<svg class="mp-icon" aria-hidden="true"><use href="#' + r.icon + '"></use></svg>' : "";
                 const meta = r.meta ? '<span class="cmdk__meta">' + esc(r.meta) + "</span>" : "";
                 html +=
                     '<div class="cmdk__item" role="option" id="cmdk-opt-' + i + '" data-cmdk-idx="' + i + '">' +
-                    '<span class="cmdk__label">' + esc(r.label) + "</span>" + meta + "</div>";
+                    icon + '<span class="cmdk__label">' + esc(r.label) + "</span>" + meta + "</div>";
             }
         }
         results.innerHTML = html || '<div class="cmdk__empty">no matches</div>';
