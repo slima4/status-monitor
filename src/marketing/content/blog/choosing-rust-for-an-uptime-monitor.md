@@ -1,26 +1,26 @@
 +++
 title = "Why I chose Rust over Go for an uptime monitor"
 date = "2026-07-18"
-slug = "rust-vs-go-uptime-monitor"
-excerpt = "Go is the usual pick for a network service like this. I went with Rust for one reason: a monitor sells clean timing, and its own runtime cannot add random delay. Here is the trade, and where Go still wins."
+slug = "choosing-rust-for-an-uptime-monitor"
+excerpt = "Go is the usual pick for a service like this. I chose Rust for one reason: a monitor sells clean timing, and its own runtime must not add random delay."
 tags = ["rust", "go", "monitoring", "devops"]
 draft = false
 
 [[faqs]]
 q = "Is Rust better than Go for an uptime monitor?"
-a = "For this specific job, Rust fit better because it has no garbage collector, so the prober does not add random pauses to the latency numbers it reports, and it catches data races at compile time. Go is still an excellent choice for most network services, and it is faster to learn and build."
+a = "Rust has no garbage collector. For this job that matters, because the prober does not add random pauses to the latency it reports, and the compiler catches data races before they ship. Go is still an excellent choice for most network services, and it is faster to learn and build."
 
 [[faqs]]
 q = "Does Go's garbage collector really affect latency?"
-a = "For most apps, no. For a monitor that measures and reports millisecond timings across tens of thousands of concurrent checks, garbage collection work can land inside those measurements and lift high percentiles like p99. A runtime with no garbage collector removes that source of noise."
+a = "Go has a garbage collector. It is fast and most apps never feel it, but at high concurrency its work can land inside the millisecond timings a monitor reports and lift high percentiles like p99. A runtime with no garbage collector removes that source of noise."
 
 [[faqs]]
 q = "How much memory does the Rust monitor use?"
-a = "In a laptop load test, one machine held 50,000 checks in flight at about 933 MiB peak, and a live server uses around 42 MiB while running its monitors. These are laptop numbers meant for catching slowdowns between versions, not for production capacity planning."
+a = "In one run, a single machine held 50,000 checks in flight and peaked at 933 MiB of memory. A live server uses around 42 MiB while running its monitors. These are laptop load-test numbers for catching slowdowns between versions, not for production capacity planning."
 
 [[faqs]]
 q = "Is Rust worth the slower development for a solo developer?"
-a = "It depends on the job. For a narrow, timing-sensitive service run without a team, the compiler catching data races and memory bugs pays back the slower build. For a general web app on a deadline, Go or another language may be the better trade."
+a = "Rust asks more from you first. For a narrow, timing-sensitive service run without a team, the compiler catching data races and memory bugs pays back the slower build. For a general web app on a deadline, Go or another language may be the better trade."
 +++
 
 I build Uptimepage, an [open-source uptime monitor](/open-source-uptime-monitoring) and status page written in Rust. People ask why Rust and not Go, since Go is the usual pick for this kind of network service. Here is the honest answer. It is not that Rust wins everywhere. It is that one part of this job made the choice for me.
