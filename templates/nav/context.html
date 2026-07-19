@@ -20,7 +20,7 @@
 </span>
 <span id="nav-pill" hx-swap-oob="true">
     {% if open_incidents == 0 %}
-    <span class="nav-rail__seg nav-rail__seg--static" title="No open incidents"><span class="nav-rail__led nav-rail__led--ok" aria-hidden="true"></span>all ok</span>
+    <span class="nav-rail__seg nav-rail__seg--static" title="No open incidents"><span class="nav-rail__led nav-rail__led--ok" aria-hidden="true"></span>operational</span>
     {% else %}
     <a href="/incidents" class="nav-rail__seg nav-rail__seg--alert" title="Open incidents"><span class="nav-rail__led nav-rail__led--alert" aria-hidden="true"></span>{{ open_incidents }} open</a>
     {% endif %}
