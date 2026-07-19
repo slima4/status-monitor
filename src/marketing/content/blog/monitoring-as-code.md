@@ -1,7 +1,7 @@
 +++
 title = "Your monitoring config belongs in a pull request"
 date = "2026-06-16"
-updated = "2026-07-06"
+updated = "2026-07-19"
 slug = "monitoring-as-code"
 excerpt = "Click-created monitors rot: nobody recalls why a threshold is set, and the reasoning leaves with its author. Terraform fixes that, and bites back in places."
 tags = ["terraform", "infrastructure-as-code", "monitoring", "devops"]
@@ -62,7 +62,7 @@ Every Terraform tutorial stops at "and now run apply." Three things they don't t
 
 **Delete the block, delete the monitor.** Remove those eight lines from your `.tf` file, run apply, and the actual check stops running. Silently. For most resources that's a shrug. For the thing watching your production API, "I cleaned up some config and we stopped monitoring payments for a week" is a real sentence people have said out loud. I have come closer to saying it than I'd like. Treat a removed monitor with the same suspicion as a dropped table, because the blast radius is the same: you don't notice until the thing you stopped watching breaks.
 
-**Secrets in state.** If your check needs basic auth or a token, that value has to get to the provider somehow. Historically, anything you passed landed in the state file in plaintext, forever, for anyone with read access to the backend. Terraform 1.11, back in February 2025, fixed this properly with write-only arguments: values that flow through to the provider on apply but are never persisted to state. The Uptimepage provider marks the basic-auth password write-only, so this does the right thing:
+**Secrets in state.** If your check needs basic auth or a token, that value has to get to the provider somehow, and whatever you pass is written to the state file in plaintext, for anyone with read access to the backend. The provider marks the password `sensitive`, and it's worth being precise about what that buys you: `sensitive` keeps the value out of plan output and logs. It does not keep it out of state. Terraform 1.11, back in February 2025, added the real fix, write-only arguments: values that flow through to the provider on apply and are never persisted to state. Until the Uptimepage provider adopts them, treat the state file itself as a secret:
 
 ```terraform
 variable "admin_password" {
@@ -94,7 +94,7 @@ resource "uptimepage_target" "admin" {
 }
 ```
 
-The password reaches the API; it doesn't reach your state. If you're on a Terraform older than 1.11, this is a real reason to upgrade.
+The password reaches the API and stays out of your terminal, but it still lands in state. Use a backend that encrypts at rest and be deliberate about who can read it. Once the provider picks up write-only arguments, the password will stop touching state entirely; until then, the encrypted backend is what actually protects it.
 
 ## Don't rebuild what you already have
 
@@ -107,7 +107,7 @@ import {
 }
 ```
 
-Run `plan` and read it like a hawk. A clean import shows no changes. If the plan wants to modify things, your HCL doesn't match reality yet, so fix the code, not the monitor, until the diff is empty. Then delete the `import` block; it's done its job. One catch from the section above: a write-only secret like that basic-auth password can't be read back from the API, so an import won't recover it. You set it in config yourself, once, and Terraform takes it from there.
+Run `plan` and read it like a hawk. A clean import shows no changes. If the plan wants to modify things, your HCL doesn't match reality yet, so fix the code, not the monitor, until the diff is empty. Then delete the `import` block; it's done its job. One catch from the section above: a secret like that basic-auth password can't be read back from the API, so an import won't recover it. You set it in config yourself, once, and Terraform takes it from there.
 
 ## A workflow that won't page you
 
