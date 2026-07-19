@@ -213,6 +213,7 @@ html:has(.marketing-shell) {
     border: 1px solid var(--mk-rule);
     border-radius: 2px;
     box-shadow: var(--mk-shadow-frame);
+    max-height: calc(100vh - 5rem); overflow-y: auto;
     z-index: 40;
 }
 .mk-menu__panel .mk-nav-link {
@@ -223,6 +224,115 @@ html:has(.marketing-shell) {
     transition: background-color 140ms ease, color 140ms ease;
 }
 .mk-menu__panel .mk-nav-link:hover { background: var(--mk-bg-2); }
+
+/* Grouped mobile menu — headings segment the flat link list. */
+.mk-mnav { display: flex; flex-direction: column; gap: 0.125rem; }
+.mk-mnav__head {
+    font-family: var(--mk-font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--mk-quiet);
+    padding: 0.625rem 0.75rem 0.25rem;
+}
+.mk-mnav__head:first-child { padding-top: 0.25rem; }
+.mk-mnav__head::before { content: "// "; color: var(--mk-faint); }
+
+/* ── Desktop dropdown nav — <details> groups, hover/keyboard enhanced ─ */
+.mk-navgrp { position: relative; }
+.mk-navgrp > summary {
+    list-style: none;
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    color: var(--mk-ink-soft);
+    font-family: var(--mk-font-mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: 0.25rem 0;
+    cursor: pointer;
+    transition: color 140ms ease;
+}
+.mk-navgrp > summary::-webkit-details-marker { display: none; }
+.mk-navgrp__caret {
+    width: 0; height: 0;
+    border-left: 3.5px solid transparent;
+    border-right: 3.5px solid transparent;
+    border-top: 4px solid currentColor;
+    opacity: 0.55;
+    transition: transform 160ms ease, opacity 140ms ease;
+}
+.mk-navgrp > summary:hover { color: var(--mk-ok); }
+.mk-navgrp[open] > summary,
+.mk-navgrp__trigger.is-active { color: var(--mk-ok); }
+.mk-nav-link.is-active { color: var(--mk-ok); }
+.mk-mnav__head.is-active,
+.mk-mnav__head.is-active::before { color: var(--mk-ok); }
+.mk-navgrp[open] > summary .mk-navgrp__caret { transform: rotate(180deg); opacity: 1; }
+
+.mk-mega {
+    position: absolute;
+    top: calc(100% + 0.75rem);
+    left: 0;
+    display: flex;
+    gap: 2rem;
+    padding: 1rem 1.25rem;
+    background: var(--mk-surface);
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    box-shadow: var(--mk-shadow-frame);
+    z-index: 40;
+    transition: opacity 140ms ease, transform 140ms ease;
+}
+/* Right-anchor keeps the rightmost panel from spilling past the viewport edge. */
+.mk-mega--end { left: auto; right: 0; }
+/* Soft enter as the panel goes from closed to open; degrades to instant where
+   @starting-style is unsupported. Exit stays instant (native details). */
+@starting-style {
+    .mk-navgrp[open] > .mk-mega { opacity: 0; transform: translateY(-4px); }
+}
+/* Pointer bridge across the trigger-to-panel gap so hover intent survives it. */
+.mk-mega::before {
+    content: ""; position: absolute;
+    top: -0.75rem; left: 0; right: 0; height: 0.75rem;
+}
+.mk-mega__col { min-width: 11rem; }
+.mk-mega__head {
+    font-family: var(--mk-font-mono);
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--mk-quiet);
+    margin-bottom: 0.5rem;
+    padding: 0 0.5rem;
+}
+.mk-mega__head::before { content: "// "; color: var(--mk-faint); }
+.mk-mega__item {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 2.5rem;
+    padding: 0.4375rem 0.5rem;
+    border-radius: 2px;
+    text-decoration: none;
+    transition: background-color 140ms ease;
+}
+.mk-mega__item:hover { background: var(--mk-bg-2); }
+.mk-mega__item-title {
+    display: block;
+    font-family: var(--mk-font-mono);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--mk-ink);
+    transition: color 140ms ease;
+}
+.mk-mega__item:hover .mk-mega__item-title { color: var(--mk-ok); }
+.mk-mega__item-desc {
+    display: block;
+    font-size: 0.75rem;
+    line-height: 1.35;
+    color: var(--mk-quiet);
+    margin-top: 0.0625rem;
+    text-wrap: pretty;
+}
 
 .mk-brand {
     display: inline-flex;
@@ -1262,6 +1372,11 @@ html:has(.marketing-shell) {
     .mk-blog-row,
     .mk-blog-row__title,
     .mk-nav-link,
+    .mk-navgrp > summary,
+    .mk-navgrp__caret,
+    .mk-mega,
+    .mk-mega__item,
+    .mk-mega__item-title,
     .mk-faq summary,
     .mk-faq summary::after,
     .mk-footer-link { transition: none; }
