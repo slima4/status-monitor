@@ -812,6 +812,100 @@ async fn cron(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Respo
     serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
 }
 
+// ── Incident update generator ───────────────────────────────────────
+// Deterministic and browser-only: no incident text is submitted or stored.
+
+pub const INCIDENT_UPDATE_PATH: &str = "/tools/incident-update-generator";
+const INCIDENT_UPDATE_CREATED: &str = "2026-07-20";
+const INCIDENT_UPDATE_LASTMOD: &str = "2026-07-20";
+pub const INCIDENT_UPDATE_TITLE: &str = "Incident Update Message Generator";
+pub const INCIDENT_UPDATE_DESCRIPTION: &str = "Write clear investigating, identified, monitoring, resolved and maintenance messages for your status page. Free, private and generated in your browser.";
+
+const INCIDENT_UPDATE_FAQS: &[(&str, &str)] = &[
+    (
+        "What should an incident update include?",
+        "Lead with the customer impact, say what the team is doing, and give a specific time for the next update. Share confirmed facts and label anything still under investigation.",
+    ),
+    (
+        "How often should a status page be updated?",
+        "Set the next update time in the first message and keep that promise, even when there is no major change. During a serious outage, updates every 30 to 60 minutes are a useful starting point.",
+    ),
+    (
+        "What is the difference between investigating and identified?",
+        "Investigating means the cause is not confirmed. Identified means the team has confirmed the cause and is working on a fix or mitigation. Do not move to identified based only on a suspicion.",
+    ),
+    (
+        "Should an incident update include an estimated resolution time?",
+        "Only include an estimate when the team has enough evidence to trust it. An accurate next-update time is more useful than a speculative resolution time that may slip.",
+    ),
+    (
+        "Does this generator send or store incident details?",
+        "No. The messages are generated locally in your browser. Uptimepage does not receive or store anything you type into this tool.",
+    ),
+];
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/tool_incident_update.html")]
+struct IncidentUpdatePage {
+    app_url: String,
+    canonical_url: String,
+    og: OpenGraph,
+    breadcrumb_json_ld: JsonLd,
+    web_application_json_ld: JsonLd,
+    webpage_json_ld: JsonLd,
+    faq_json_ld: JsonLd,
+    faqs: &'static [(&'static str, &'static str)],
+    version: &'static str,
+}
+
+static INCIDENT_UPDATE_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_incident_update(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}{}", cfg.canonical_origin, INCIDENT_UPDATE_PATH);
+    let mut og = OpenGraph::default_for(
+        &format!("{INCIDENT_UPDATE_TITLE} | {BRAND}"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
+    og.description = INCIDENT_UPDATE_DESCRIPTION.to_string();
+    let page = IncidentUpdatePage {
+        app_url: cfg.app_url.clone(),
+        breadcrumb_json_ld: json_ld_breadcrumb(
+            &cfg.canonical_origin,
+            INCIDENT_UPDATE_TITLE,
+            INCIDENT_UPDATE_PATH,
+        ),
+        web_application_json_ld: json_ld_web_application(
+            &cfg.canonical_origin,
+            INCIDENT_UPDATE_TITLE,
+            INCIDENT_UPDATE_PATH,
+            INCIDENT_UPDATE_DESCRIPTION,
+        ),
+        webpage_json_ld: json_ld_webpage(
+            &cfg.canonical_origin,
+            INCIDENT_UPDATE_PATH,
+            INCIDENT_UPDATE_TITLE,
+            INCIDENT_UPDATE_CREATED,
+            INCIDENT_UPDATE_LASTMOD,
+            true,
+        ),
+        faq_json_ld: json_ld_faqpage(INCIDENT_UPDATE_FAQS),
+        faqs: INCIDENT_UPDATE_FAQS,
+        canonical_url,
+        og,
+        version: env!("CARGO_PKG_VERSION"),
+    };
+    let body = page
+        .render()
+        .unwrap_or_else(|e| format!("<!-- incident-update render failed: {e} -->"));
+    cached_render(body)
+}
+
+async fn incident_update(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = INCIDENT_UPDATE_CACHED.get_or_init(|| render_incident_update(&cfg));
+    serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
+}
+
 /// Path + copy for each tool, so the sitemap and llms index iterate one list.
 pub struct ToolMeta {
     pub path: &'static str,
@@ -838,6 +932,12 @@ pub const TOOLS: &[ToolMeta] = &[
         title: ERROR_BUDGET_TITLE,
         description: ERROR_BUDGET_DESCRIPTION,
         lastmod: ERROR_BUDGET_LASTMOD,
+    },
+    ToolMeta {
+        path: INCIDENT_UPDATE_PATH,
+        title: INCIDENT_UPDATE_TITLE,
+        description: INCIDENT_UPDATE_DESCRIPTION,
+        lastmod: INCIDENT_UPDATE_LASTMOD,
     },
 ];
 
@@ -917,6 +1017,7 @@ pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<Market
         .route(UPTIME_SLA_PATH, axum::routing::get(uptime_sla))
         .route(CRON_PATH, axum::routing::get(cron))
         .route(ERROR_BUDGET_PATH, axum::routing::get(error_budget))
+        .route(INCIDENT_UPDATE_PATH, axum::routing::get(incident_update))
 }
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
@@ -924,6 +1025,7 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     UPTIME_SLA_CACHED.get_or_init(|| render_uptime_sla(cfg));
     CRON_CACHED.get_or_init(|| render_cron(cfg));
     ERROR_BUDGET_CACHED.get_or_init(|| render_error_budget(cfg));
+    INCIDENT_UPDATE_CACHED.get_or_init(|| render_incident_update(cfg));
 }
 
 #[cfg(test)]
@@ -1001,6 +1103,7 @@ mod tests {
         assert!(paths.contains(&UPTIME_SLA_PATH));
         assert!(paths.contains(&CRON_PATH));
         assert!(paths.contains(&ERROR_BUDGET_PATH));
+        assert!(paths.contains(&INCIDENT_UPDATE_PATH));
         for t in TOOLS {
             assert!(
                 t.path.starts_with("/tools/"),

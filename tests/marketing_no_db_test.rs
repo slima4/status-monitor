@@ -249,6 +249,23 @@ async fn cron_tool_renders_without_db() {
 }
 
 #[tokio::test]
+async fn incident_update_tool_renders_without_db() {
+    let (status, body, headers) = get("/tools/incident-update-generator").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("Incident update message generator"));
+    assert!(body.contains("Investigating API issues"));
+    assert!(body.contains("js/marketing/incident_update"));
+    assert!(body.contains("WebApplication") && body.contains("isAccessibleForFree"));
+    assert!(body.contains("Incident communication FAQ"));
+    assert!(body.contains("Start with a common incident"));
+    assert!(body.contains("Message quality"));
+    assert!(body.contains("Email / support"));
+    assert!(body.contains("What should customers do?"));
+    assert!(body.contains("https://app.uptimepage.dev/login"));
+    assert!(headers.contains_key(header::ETAG));
+}
+
+#[tokio::test]
 async fn og_image_is_rooted_at_origin_on_subpages() {
     for path in [
         "/pricing",
@@ -304,6 +321,10 @@ async fn sitemap_lists_the_tools() {
     assert!(
         body.contains("https://uptimepage.dev/tools/cron-expression-generator"),
         "sitemap must list the cron tool"
+    );
+    assert!(
+        body.contains("https://uptimepage.dev/tools/incident-update-generator"),
+        "sitemap must list the incident update tool"
     );
 }
 
