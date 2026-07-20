@@ -1575,32 +1575,52 @@ html:has(.marketing-shell) {
     .mk-lightbox:target .mk-lightbox__img { translate: 0 0; transition: none; }
 }
 
-/* Hero region map — compact framing above the status-page preview */
-.mk-heromap {
-    border: 1px solid var(--mk-rule);
-    border-radius: 2px;
-    background: var(--mk-surface);
-    padding: 0.75rem 0.875rem 0.5rem;
-    box-shadow: var(--mk-shadow-frame);
+/* Hero — layer the copy and map in one grid cell so the SVG behaves like art,
+   while remaining real, accessible markup. */
+.mk-hero {
+    display: grid;
+    isolation: isolate;
 }
-.mk-heromap__label {
-    margin: 0 0 0.5rem;
-    font-size: 0.625rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--mk-quiet);
+/* Clip at the viewport, not the hero box, so translated map art can continue
+   through the container gutter without creating horizontal page scroll. */
+.marketing-shell:has(.mk-hero) { overflow-x: clip; }
+.mk-hero__copy,
+.mk-hero__map { grid-area: 1 / 1; }
+.mk-hero__copy {
+    max-width: 47rem;
 }
-.mk-heromap .mk-map {
+.mk-hero__map {
+    align-self: start;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.58;
+    translate: 20% 0;
+}
+
+@media (min-width: 1024px) {
+    .mk-hero__map {
+        width: calc(100% + clamp(2rem, 5vw, 5rem));
+        margin-left: calc(clamp(2rem, 5vw, 5rem) * -1);
+    }
+}
+
+.mk-hero__map .mk-map {
     border: 0;
     border-radius: 0;
-    background: none;
+    background: transparent;
     padding: 0;
     box-shadow: none;
 }
-.mk-heromap .mk-map__legend {
-    margin-top: 0.75rem;
-    gap: 0.4rem 1rem;
-    font-size: 0.6875rem;
+
+.mk-hero__map .mk-map__svg {
+    transform-origin: top center;
+    scale: 0.8;
+    /* The SVG is 150/360 as tall as it is wide; reclaim the scaled height. */
+    margin-bottom: -8.333%;
+}
+
+.mk-hero__map .mk-map__legend {
+    margin-top: clamp(1rem, 2vw, 1.5rem);
 }
 
 /* ── Region map ───────────────────────────────────────────────────── */
