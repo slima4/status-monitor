@@ -134,9 +134,9 @@ mod tests {
     }
 
     #[test]
-    fn single_org_renders_plain_slug_not_switcher() {
+    fn single_org_omits_slug_and_switcher() {
         let html = ctx(0, false).render().unwrap();
-        assert!(html.contains("nav-root__slug"));
+        assert!(!html.contains("nav-root__slug"));
         assert!(!html.contains("data-org-switch"));
     }
 

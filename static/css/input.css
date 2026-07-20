@@ -1682,13 +1682,7 @@
     }
     .nav-link--active:hover { color: var(--theme-text); }
 
-    /* Org slug shown when there's nothing to switch to. */
     .nav-root { display: inline-flex; align-items: center; gap: 0.5rem; }
-    .nav-root__slug {
-        font-family: var(--font-mono);
-        font-size: 0.875rem;
-        color: var(--theme-text);
-    }
     /* Deep-page trail; detail templates fill the nav_crumb block. */
     .nav-crumb {
         display: inline-flex;
