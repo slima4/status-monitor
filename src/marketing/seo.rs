@@ -697,6 +697,32 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
     Bytes::from(s)
 }
 
+struct SitemapUrl {
+    loc: String,
+    lastmod: Option<String>,
+    images: Vec<SitemapImage>,
+}
+
+struct SitemapImage {
+    loc: String,
+    title: String,
+}
+
+impl SitemapUrl {
+    fn new(loc: String, lastmod: Option<String>) -> Self {
+        Self {
+            loc,
+            lastmod,
+            images: Vec::new(),
+        }
+    }
+
+    fn with_images(mut self, images: Vec<SitemapImage>) -> Self {
+        self.images = images;
+        self
+    }
+}
+
 fn build_sitemap(cfg: &MarketingCfg) -> String {
     let origin = &cfg.canonical_origin;
     // Only the blog index borrows a date (it changes on publish); the home page
@@ -710,62 +736,78 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
     } else {
         None
     };
-    let mut urls: Vec<(String, Option<String>)> = vec![
-        (origin.clone(), None),
-        (format!("{origin}/pricing"), None),
-        (format!("{origin}/blog"), blog_lastmod),
+    // Lazy-loaded inside a horizontal scroller, so discovery should not
+    // depend on the crawler reaching them.
+    let gallery_images: Vec<SitemapImage> = gallery::SHOTS
+        .iter()
+        .map(|shot| SitemapImage {
+            loc: gallery::absolute_url(origin, shot),
+            title: shot.caption.to_string(),
+        })
+        .collect();
+    let mut urls: Vec<SitemapUrl> = vec![
+        SitemapUrl::new(origin.clone(), None).with_images(gallery_images),
+        SitemapUrl::new(format!("{origin}/pricing"), None),
+        SitemapUrl::new(format!("{origin}/blog"), blog_lastmod),
     ];
     if cfg.blog_enabled {
         for post in list_published() {
-            urls.push((
-                format!("{origin}/blog/{}", post.slug),
-                Some(post.updated.clone().unwrap_or_else(|| post.date.clone())),
-            ));
+            let images = post
+                .images
+                .iter()
+                .map(|img| SitemapImage {
+                    loc: format!("{origin}{}", img.path),
+                    title: img.alt.clone(),
+                })
+                .collect();
+            urls.push(
+                SitemapUrl::new(
+                    format!("{origin}/blog/{}", post.slug),
+                    Some(post.updated.clone().unwrap_or_else(|| post.date.clone())),
+                )
+                .with_images(images),
+            );
         }
     }
     for landing in landings::LANDINGS {
-        urls.push((
+        urls.push(SitemapUrl::new(
             format!("{origin}{}", landing.path),
             Some(landing.lastmod.to_string()),
         ));
     }
-    urls.push((
+    urls.push(SitemapUrl::new(
         format!("{origin}{}", tools::TOOLS_INDEX_PATH),
         Some(tools::TOOLS_INDEX_LASTMOD.to_string()),
     ));
     for tool in tools::TOOLS {
-        urls.push((
+        urls.push(SitemapUrl::new(
             format!("{origin}{}", tool.path),
             Some(tool.lastmod.to_string()),
         ));
     }
     for route in legal::ROUTES {
-        urls.push((format!("{origin}{}", route.path), None));
+        urls.push(SitemapUrl::new(format!("{origin}{}", route.path), None));
     }
     let mut body = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset \
          xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\" \
          xmlns:image=\"http://www.google.com/schemas/sitemap-image/1.1\">\n",
     );
-    for (loc, lastmod) in urls {
+    for url in urls {
         body.push_str("  <url>\n    <loc>");
-        body.push_str(&xml_escape(&loc));
+        body.push_str(&xml_escape(&url.loc));
         body.push_str("</loc>\n");
-        if let Some(d) = lastmod {
+        if let Some(d) = url.lastmod {
             body.push_str("    <lastmod>");
             body.push_str(&xml_escape(&d));
             body.push_str("</lastmod>\n");
         }
-        // Lazy-loaded inside a horizontal scroller, so discovery should not
-        // depend on the crawler reaching them.
-        if loc == *origin {
-            for shot in gallery::SHOTS {
-                body.push_str("    <image:image>\n      <image:loc>");
-                body.push_str(&xml_escape(&gallery::absolute_url(origin, shot)));
-                body.push_str("</image:loc>\n      <image:title>");
-                body.push_str(&xml_escape(shot.caption));
-                body.push_str("</image:title>\n    </image:image>\n");
-            }
+        for image in url.images {
+            body.push_str("    <image:image>\n      <image:loc>");
+            body.push_str(&xml_escape(&image.loc));
+            body.push_str("</image:loc>\n      <image:title>");
+            body.push_str(&xml_escape(&image.title));
+            body.push_str("</image:title>\n    </image:image>\n");
         }
         body.push_str("  </url>\n");
     }
@@ -888,6 +930,66 @@ mod tests {
                 "missing title for {}",
                 shot.file
             );
+        }
+    }
+
+    #[test]
+    fn sitemap_declares_blog_post_images_under_their_post_url() {
+        let cfg = MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: true,
+        };
+        let xml = build_sitemap(&cfg);
+        let illustrated: Vec<_> = list_published()
+            .into_iter()
+            .filter(|p| !p.images.is_empty())
+            .collect();
+        assert!(
+            !illustrated.is_empty(),
+            "fixture check: at least one published post ships images"
+        );
+        assert_eq!(
+            xml.matches("<image:image>").count(),
+            gallery::SHOTS.len() + illustrated.iter().map(|p| p.images.len()).sum::<usize>()
+        );
+        for post in illustrated {
+            let block = xml
+                .split("  <url>")
+                .find(|u| {
+                    u.contains(&format!(
+                        "<loc>{}/blog/{}</loc>",
+                        cfg.canonical_origin, post.slug
+                    ))
+                })
+                .expect("post url in sitemap");
+            for img in &post.images {
+                assert!(
+                    block.contains(&format!(
+                        "<image:loc>{}{}</image:loc>",
+                        cfg.canonical_origin, img.path
+                    )),
+                    "{} missing {} under its own url",
+                    post.slug,
+                    img.path
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn blog_images_are_local_unfingerprinted_paths_present_on_disk() {
+        for post in list_published() {
+            for img in &post.images {
+                assert!(
+                    !img.path.contains('?'),
+                    "{}: sitemap path must match the unfingerprinted src the page renders, got {}",
+                    post.slug,
+                    img.path
+                );
+                let path = std::path::Path::new(img.path.trim_start_matches('/'));
+                assert!(path.is_file(), "{}: missing asset {}", post.slug, img.path);
+            }
         }
     }
 

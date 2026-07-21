@@ -57,6 +57,15 @@ pub struct Post {
     pub body_html: String,
     /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
     pub body_md: String,
+    /// Local images the post renders, for the image sitemap.
+    pub images: Vec<PostImage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PostImage {
+    /// Unfingerprinted: a path the page doesn't render indexes as a second image.
+    pub path: String,
+    pub alt: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +181,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         og_image: fm.og_image,
         body_html: render(body),
         body_md: body.trim().to_string(),
+        images: collect_images(body),
     })
 }
 
@@ -188,18 +198,56 @@ fn split_front_matter(raw: &str) -> Option<(&str, &str)> {
 /// HTML; every `<script>`, `onerror=`, and `javascript:` href is
 /// dropped before the bytes leave this function.
 pub fn render(markdown: &str) -> String {
-    let mut opts = pulldown_cmark::Options::empty();
-    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
-    opts.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
-    let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
     let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(parser));
+    pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(parser(markdown)));
     ammonia::Builder::default()
         .link_rel(Some("noopener noreferrer"))
         .add_allowed_classes("div", &["mk-table-scroll"])
         .add_tag_attributes("div", &["tabindex"])
         .clean(&html)
         .to_string()
+}
+
+/// Shared so an extension can't apply to the render but not the sitemap.
+fn parser(markdown: &str) -> pulldown_cmark::Parser<'_> {
+    let mut opts = pulldown_cmark::Options::empty();
+    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    opts.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+    pulldown_cmark::Parser::new_ext(markdown, opts)
+}
+
+/// Mirrors pulldown-cmark's `raw_text`, which fills the rendered `alt`:
+/// everything up to the matching close folds into one string, so a nested
+/// image belongs to its parent's alt rather than standing on its own.
+/// Remote images are not ours to submit; alt-less ones have nothing to say.
+fn collect_images(markdown: &str) -> Vec<PostImage> {
+    use pulldown_cmark::{Event, Tag};
+
+    let mut out: Vec<PostImage> = Vec::new();
+    let mut open: Option<(String, String, usize)> = None;
+    for ev in parser(markdown) {
+        let Some((_, alt, depth)) = open.as_mut() else {
+            if let Event::Start(Tag::Image { dest_url, .. }) = ev {
+                open = Some((dest_url.into_string(), String::new(), 0));
+            }
+            continue;
+        };
+        match ev {
+            Event::Start(_) => *depth += 1,
+            Event::End(_) if *depth > 0 => *depth -= 1,
+            Event::End(_) => {
+                let (path, alt, _) = open.take().expect("matched above");
+                let alt = alt.trim().to_string();
+                if path.starts_with("/static/") && !alt.is_empty() {
+                    out.push(PostImage { path, alt });
+                }
+            }
+            Event::Text(t) | Event::Code(t) | Event::InlineHtml(t) => alt.push_str(&t),
+            Event::SoftBreak | Event::HardBreak | Event::Rule => alt.push(' '),
+            _ => {}
+        }
+    }
+    out
 }
 
 #[derive(Template, WebTemplate)]
@@ -391,6 +439,50 @@ pub async fn post(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Asserts against the rendered `alt`, the only description that counts.
+    #[track_caller]
+    fn assert_alt_matches_render(markdown: &str, expected: &str) {
+        let images = collect_images(markdown);
+        assert_eq!(images.len(), 1, "{markdown:?} -> {images:?}");
+        assert_eq!(images[0].alt, expected);
+        assert!(
+            render(markdown).contains(&format!("alt=\"{expected}\"")),
+            "rendered alt disagrees: {}",
+            render(markdown)
+        );
+    }
+
+    #[test]
+    fn image_alt_folds_a_line_break_into_a_space() {
+        assert_alt_matches_render("![line one\nline two](/static/a.webp)", "line one line two");
+    }
+
+    #[test]
+    fn image_alt_drops_strikethrough_markers() {
+        assert_alt_matches_render("![before ~~after~~](/static/a.webp)", "before after");
+    }
+
+    #[test]
+    fn nested_image_folds_into_its_parents_alt() {
+        let images = collect_images("![outer ![inner](/static/b.webp) tail](/static/a.webp)");
+        assert_eq!(
+            images.len(),
+            1,
+            "the inner image is alt text, not an image of its own: {images:?}"
+        );
+        assert_eq!(images[0].path, "/static/a.webp");
+        assert_eq!(images[0].alt, "outer inner tail");
+    }
+
+    #[test]
+    fn collect_images_skips_remote_and_alt_less_images() {
+        let images = collect_images(
+            "![hosted elsewhere](https://example.com/a.webp)\n\n![](/static/b.webp)\n\n![kept](/static/c.webp)",
+        );
+        let paths: Vec<&str> = images.iter().map(|i| i.path.as_str()).collect();
+        assert_eq!(paths, ["/static/c.webp"]);
+    }
 
     #[test]
     fn og_image_assets_exist_at_social_card_size() {
