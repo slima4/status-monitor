@@ -88,7 +88,7 @@ than 24h the backup job failed — check cron on the backup server.
 ### Step 2 — Restore to a test environment
 
 ```bash
-# Provision a throwaway VM (Hetzner CX11 ~€4/mo, destroy after the test)
+# Provision a throwaway VM (destroy after the test)
 # OR use a local VM/container.
 
 # Copy the latest backup

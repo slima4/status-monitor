@@ -28,6 +28,10 @@ skills-lock.json
 # Local real-target seed (points at live public endpoints — keep private)
 /scripts/seed-real.sh
 
+# Operator documents; this repo is public. They live in uptimepage-ops.
+/docs/internal/gdpr-requests-log.md
+/docs/internal/legal-review-checklist.md
+
 # Internal ops runbooks (local-only; operational notes, not shipped docs)
 /runbooks/
 
