@@ -8,7 +8,7 @@ tags = ["mcp", "ai", "monitoring", "security", "api"]
 draft = false
 +++
 
-Ask your assistant "what's down right now, and how long has it been bad?" and have it actually answer from your real monitors, in your real org, without you opening a dashboard. That's live today. Uptimepage now ships an [MCP](https://modelcontextprotocol.io) server.
+Ask your assistant "what's down right now, and how long has it been bad?" and have it actually answer from your real monitors, in your real org, without you opening a dashboard. That's live today. Uptimepage now ships an [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server.
 
 MCP, the Model Context Protocol, is the plumbing that lets a large language model call tools instead of hallucinating about them. Think of it as the difference between an assistant that *guesses* your uptime and one that *queries* it. We expose monitoring as a set of tools, and your LLM client (Claude, an IDE, whatever speaks MCP) discovers them, calls them, and reads back typed data.
 

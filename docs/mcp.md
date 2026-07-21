@@ -1,6 +1,6 @@
 # MCP server
 
-uptimepage exposes a [Model Context Protocol](https://modelcontextprotocol.io) server so an LLM client — the [claude.ai](https://claude.ai) connector, Claude Desktop, an IDE, or MCP Inspector — can answer operational questions about **one organization** and take a few guarded actions, through typed, authorized, audited tools.
+uptimepage exposes a [Model Context Protocol](https://modelcontextprotocol.io/docs/getting-started/intro) server so an LLM client — the [claude.ai](https://claude.ai) connector, Claude Desktop, an IDE, or MCP Inspector — can answer operational questions about **one organization** and take a few guarded actions, through typed, authorized, audited tools.
 
 It is another authorized front door to the same stores the web app and [`/api/v1`](api.md) use, not a bypass: tenant isolation, scopes, rate limits, and audit all apply. Every tool takes the org from the credential — never from a tool argument — so a connection can only ever see and touch its own org.
 
