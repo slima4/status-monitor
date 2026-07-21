@@ -3,7 +3,7 @@
 Before publishing **any** legal document under `docs/legal/`, work
 through this checklist:
 
-- [x] Project name finalised as `uptimepage` (brand, crate/binary); legal entity `uptimepage-inc`
+- [x] Project name finalised as `uptimepage` (brand, crate/binary); operator is a natural person until incorporation
 - [x] Contact emails live on product domain: `hello@` (general/legal), `security@` (vulns/compromise), `support@` (in-app)
 - [ ] Verify the data inventory matches what your deployment actually
       stores (don't claim you don't store something that you do)
@@ -35,7 +35,7 @@ When you complete the checklist, sign off in a commit message:
 
 ---
 
-## Deployment status (uptimepage-inc)
+## Deployment status
 
 These values were filled in from the deployment configuration. Items
 marked **ACTION** still need a human decision or real data before the
@@ -43,9 +43,9 @@ docs go live:
 
 | Item | Status |
 |---|---|
-| Project name | `uptimepage` (brand + Rust crate/binary); legal entity stays `uptimepage-inc` until incorporation |
+| Project name | `uptimepage` (brand + Rust crate/binary) |
 | Contact / abuse / security email | `hello@uptimepage.dev` (general + abuse), `security@uptimepage.dev` (vulns), `support@uptimepage.dev` (in-app) — all aliases of one monitored mailbox |
-| Operator (legal entity) | `uptimepage-inc`, Nicosia, Cyprus — **ACTION:** add registered company number / VAT ID if the entity is incorporated |
+| Operator | Artem Senenko, Nicosia, Cyprus (natural person, no company registered) — **ACTION:** on incorporation, switch the operator named in `impressum.md`, `terms.md` and `privacy.md` and add the company number / VAT ID. Cyprus uses `Ltd`, not `Inc`. **ACTION:** §5 TMG wants a full postal address for a natural person; only city and country are given |
 | Hosting location | Hetzner, Nürnberg, Germany — stated in Privacy Policy §6 and Impressum |
 | Governing law | Germany (Hetzner-hosted). **ACTION:** confirm — the operating entity is in Cyprus; decide whether German or Cypriot law should govern |
 | Public domain | `uptimepage.dev` set in `security.txt` (Canonical/Policy). Confirm the security policy scope matches before publishing |

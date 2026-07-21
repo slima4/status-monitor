@@ -1,12 +1,12 @@
 # Terms of Service
 
-**Last updated:** 2026-05-15
+**Last updated:** 2026-07-21
 
 ## 1. About these Terms
 
 These Terms of Service ("Terms") govern your use of the uptimepage
-service (the "Service"), operated by uptimepage-inc ("we", "us"). By
-signing up, you agree to these Terms.
+service (the "Service"), operated by Artem Senenko, Nicosia, Cyprus
+("we", "us"). By signing up, you agree to these Terms.
 
 The Service's source code is published under an open-source licence at
 https://github.com/uptimepage/uptimepage. You may self-host the Service

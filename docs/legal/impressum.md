@@ -4,8 +4,11 @@
 
 ## Operator
 
-uptimepage-inc
+Artem Senenko
 Nicosia, Cyprus
+
+The Service is operated by a natural person. No company is currently
+registered.
 
 ## Contact
 
@@ -15,7 +18,7 @@ Email: hello@uptimepage.dev
 
 (per §55 Abs. 2 RStV)
 
-uptimepage-inc, Nicosia, Cyprus (as above)
+Artem Senenko, Nicosia, Cyprus (as above)
 
 ## Hosting
 

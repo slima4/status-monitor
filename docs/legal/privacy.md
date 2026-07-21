@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** 2026-06-24
+**Last updated:** 2026-07-21
 
 This Privacy Policy explains how the uptimepage service ("we", "us")
 collects and processes personal data. It is intended to satisfy our
@@ -9,8 +9,9 @@ similar laws.
 
 ## 1. Data Controller
 
-uptimepage-inc is the data controller for personal data processed via
-the Service.
+Artem Senenko, Nicosia, Cyprus, is the data controller for personal data
+processed via the Service. The controller is a natural person; no company
+is currently registered.
 
 **Contact:** hello@uptimepage.dev
 **For data-subject requests:** hello@uptimepage.dev (see §10)
