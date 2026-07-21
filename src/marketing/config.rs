@@ -50,6 +50,8 @@ pub const AUTHOR: Author = Author {
         ),
         ("GitHub", "https://github.com/slima4"),
         ("X", "https://x.com/sl1ma4"),
+        ("Mastodon", "https://mastodon.social/@slima4"),
+        ("Strivle", "https://www.strivle.com/u/slima4"),
     ],
 };
 

@@ -1,6 +1,6 @@
 {% let nav_solutions = canonical_url.contains("/status-page-for-") || canonical_url.contains("/uptime-monitoring-for-developers") || canonical_url.contains("/self-hosted-status-page") || canonical_url.contains("/white-label-uptime-monitoring") || canonical_url.contains("/open-source-status-page") %}
 {% let nav_compare = canonical_url.contains("/vs/") || canonical_url.contains("/compare/") || canonical_url.contains("/open-source-uptime-monitoring") %}
-{% let nav_resources = canonical_url.contains("/blog") || canonical_url.contains("/tools") || canonical_url.contains("/mcp-server") || canonical_url.contains("/terraform-uptime-monitoring") || canonical_url.contains("/terraform-status-page") %}
+{% let nav_resources = canonical_url.contains("/blog") || canonical_url.contains("/tools") || canonical_url.contains("/mcp-server") || canonical_url.contains("/terraform-uptime-monitoring") || canonical_url.contains("/terraform-status-page") || canonical_url.contains("/about") %}
 {% let nav_pricing = canonical_url.ends_with("/pricing") %}
 <details class="mk-navgrp">
     <summary class="mk-navgrp__trigger">product<span class="mk-navgrp__caret" aria-hidden="true"></span></summary>
@@ -108,6 +108,10 @@
             <a href="/terraform-uptime-monitoring" class="mk-mega__item">
                 <span class="mk-mega__item-title">terraform</span>
                 <span class="mk-mega__item-desc">monitoring as code</span>
+            </a>
+            <a href="/about" class="mk-mega__item">
+                <span class="mk-mega__item-title">about</span>
+                <span class="mk-mega__item-desc">who builds this</span>
             </a>
         </div>
         <div class="mk-mega__col">

@@ -23,7 +23,7 @@ use axum::http::HeaderValue;
 use axum::response::{Redirect, Response};
 use axum::routing::get;
 
-use super::config::{BRAND, MarketingCfg, TERRAFORM_URL};
+use super::config::{BRAND, MarketingCfg, SOURCE_URL, TERRAFORM_URL};
 use super::pages::{CachedRender, cached_render, serve_cached};
 use super::seo::{JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_webpage};
 use crate::web::filters;
@@ -2185,6 +2185,88 @@ resource "uptimepage_target" "api" {
             ResourceLink {
                 label: "Monitoring as code",
                 href: "/terraform-uptime-monitoring",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/about",
+        created: "2026-07-21",
+        lastmod: "2026-07-21",
+        title: "About Uptimepage",
+        eyebrow: "about",
+        h1: "Who builds Uptimepage, and why",
+        meta_description: "Uptimepage is an open-source uptime monitor and status page in one product, built and run by one engineer in Nicosia, Cyprus. AGPL, self-host or hosted.",
+        lede: "Uptimepage is an uptime monitor and a public status page in the same product, built and run by one engineer. The source is AGPL, so you can read every line, run it on your own servers, or let us host it.",
+        features: &[
+            Feature {
+                label: "Based in",
+                value: "Nicosia, Cyprus",
+            },
+            Feature {
+                label: "Built by",
+                value: "one engineer",
+            },
+            Feature {
+                label: "Licence",
+                value: "AGPL-3.0",
+            },
+            Feature {
+                label: "Source",
+                value: "public on GitHub",
+            },
+            Feature {
+                label: "Written in",
+                value: "Rust, one binary",
+            },
+            Feature {
+                label: "Contact",
+                value: "hello@uptimepage.dev",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "Who builds it",
+                body: "Uptimepage is built and run from Nicosia, Cyprus by Artem Senenko, a software engineer with more than twenty years spent building and running production systems: microservice architecture on Kubernetes, cloud infrastructure on AWS and Terraform, and security-critical SaaS in fintech. One person writes the code, answers the email and carries the pager.",
+            },
+            Section {
+                heading: "Why it exists",
+                body: "Most teams pay one vendor to check that a service is up, and a second to tell customers when it is not. The two rarely agree, because the status page is published by hand while the checks run somewhere else. Here they are the same product. A failing check opens an incident, and that incident is what customers read, so nobody has to remember to update a page at three in the morning.",
+            },
+            Section {
+                heading: "Why Rust",
+                body: "The whole product is one statically linked binary. There is no runtime to install and no interpreter to keep patched, so checking every sixty seconds from several regions stays cheap to run. Memory safety without a garbage collector is what keeps the prober predictable when a target starts timing out instead of answering.",
+            },
+            Section {
+                heading: "Why AGPL",
+                body: "The hosted service runs the same binary you can download. No enterprise edition holds back the parts that matter, and no feature appears only after a sales call. If the hosted tier stops suiting you, leaving is a migration rather than a rewrite, because the API and the Terraform provider are identical either way.",
+            },
+            Section {
+                heading: "How it is paid for",
+                body: "The Standard plan is $0 a month and does not ask for a card. Paid hosted plans are not open yet; when they are, they are what will pay for the work. Self-hosting stays free, because the licence is AGPL and the source is public.",
+            },
+            Section {
+                heading: "Getting in touch",
+                body: "Write to hello@uptimepage.dev and a person reads it. Bugs and feature requests are better as GitHub issues, where the discussion stays public and searchable. Legal details are in the impressum.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Source on GitHub",
+                href: SOURCE_URL,
+            },
+            ResourceLink {
+                label: "Pricing",
+                href: "/pricing",
+            },
+            ResourceLink {
+                label: "Notes",
+                href: "/blog",
+            },
+            ResourceLink {
+                label: "Impressum",
+                href: "/impressum",
             },
         ],
         cta: "Start free",
@@ -4859,7 +4941,8 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                     l.h1,
                     l.created,
                     l.lastmod,
-                    !l.path.starts_with("/compare/"),
+                    // /about describes the operator, not the product.
+                    !l.path.starts_with("/compare/") && l.path != "/about",
                 ),
                 faq_json_ld: (!faqs.is_empty()).then(|| json_ld_faqpage(faqs)),
                 faqs,
