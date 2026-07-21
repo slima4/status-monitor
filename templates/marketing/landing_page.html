@@ -5,6 +5,7 @@
 <script type="application/ld+json">{{ breadcrumb_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ webpage_json_ld.as_str()|safe }}</script>
 {% if let Some(faq) = faq_json_ld %}<script type="application/ld+json">{{ faq.as_str()|safe }}</script>{% endif %}
+{% if let Some(person) = person_json_ld %}<script type="application/ld+json">{{ person.as_str()|safe }}</script>{% endif %}
 {% endblock %}
 {% block content %}
 <div class="space-y-16 sm:space-y-20">

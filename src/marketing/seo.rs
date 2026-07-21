@@ -313,8 +313,8 @@ pub fn json_ld_webpage(
         "@id": format!("{canonical_origin}{path}#webpage"),
         "name": name,
         "url": format!("{canonical_origin}{path}"),
-        "datePublished": created,
-        "dateModified": modified,
+        "datePublished": iso_datetime(created),
+        "dateModified": iso_datetime(modified),
         "isPartOf": { "@id": format!("{canonical_origin}/#website") },
         "publisher": { "@id": format!("{canonical_origin}/#organization") },
     });
@@ -409,25 +409,16 @@ pub fn json_ld_blog_posting(
     image: &str,
 ) -> JsonLd {
     let url = format!("{canonical_origin}/blog/{slug}");
-    let same_as: Vec<&str> = AUTHOR.same_as.iter().map(|(_, u)| *u).collect();
     let payload = serde_json::json!({
         "@context": "https://schema.org",
         "@type": "BlogPosting",
         "headline": title,
         "description": excerpt,
         "image": image,
-        "datePublished": date_published,
-        "dateModified": date_modified,
+        "datePublished": iso_datetime(date_published),
+        "dateModified": iso_datetime(date_modified),
         "mainEntityOfPage": url,
-        "author": {
-            "@type": "Person",
-            "name": AUTHOR.name,
-            "url": AUTHOR.url,
-            "jobTitle": AUTHOR.role,
-            "description": AUTHOR.bio,
-            "image": absolute_asset(canonical_origin, &format!("/static/{}", AUTHOR.image)),
-            "sameAs": same_as,
-        },
+        "author": author(canonical_origin),
         "publisher": publisher(canonical_origin),
     });
     JsonLd::from_value(payload)
@@ -443,8 +434,8 @@ pub fn json_ld_blog(canonical_origin: &str, posts: &[(&str, &str, &str)]) -> Jso
                 "@type": "BlogPosting",
                 "headline": title,
                 "url": format!("{canonical_origin}/blog/{slug}"),
-                "datePublished": date,
-                "author": { "@type": "Person", "name": AUTHOR.name, "url": AUTHOR.url },
+                "datePublished": iso_datetime(date),
+                "author": { "@id": author_id(canonical_origin) },
             })
         })
         .collect();
@@ -453,6 +444,7 @@ pub fn json_ld_blog(canonical_origin: &str, posts: &[(&str, &str, &str)]) -> Jso
         "@type": "Blog",
         "name": format!("{BRAND} Blog"),
         "url": format!("{canonical_origin}/blog"),
+        "author": author(canonical_origin),
         "publisher": publisher(canonical_origin),
         "blogPost": entries,
     });
@@ -479,6 +471,38 @@ pub fn json_ld_howto(name: &str, steps: &[(&str, &str)]) -> JsonLd {
         "name": name,
         "step": step_list,
     });
+    JsonLd::from_value(payload)
+}
+
+/// Landing that carries the author's `Person` node; the `@id` fragment
+/// resolves here rather than to a page that never describes the entity.
+pub const AUTHOR_PAGE: &str = "/about";
+
+fn author_id(canonical_origin: &str) -> String {
+    format!("{canonical_origin}{AUTHOR_PAGE}#author")
+}
+
+/// One `@id`-addressable Person so every post resolves to the same entity
+/// instead of a fresh look-alike node per page. `url` is the on-site page
+/// describing the author; the third-party profiles stay in `sameAs`.
+fn author(canonical_origin: &str) -> serde_json::Value {
+    let same_as: Vec<&str> = AUTHOR.same_as.iter().map(|(_, u)| *u).collect();
+    serde_json::json!({
+        "@type": "Person",
+        "@id": author_id(canonical_origin),
+        "name": AUTHOR.name,
+        "url": format!("{canonical_origin}{AUTHOR_PAGE}"),
+        "jobTitle": AUTHOR.role,
+        "description": AUTHOR.bio,
+        "image": absolute_asset(canonical_origin, &format!("/static/{}", AUTHOR.image)),
+        "sameAs": same_as,
+    })
+}
+
+/// Standalone `Person`, for the page the author `@id` resolves to.
+pub fn json_ld_person(canonical_origin: &str) -> JsonLd {
+    let mut payload = author(canonical_origin);
+    payload["@context"] = serde_json::json!("https://schema.org");
     JsonLd::from_value(payload)
 }
 
@@ -831,6 +855,21 @@ fn absolute_asset(canonical_origin: &str, path: &str) -> String {
     format!("{canonical_origin}{path}")
 }
 
+/// Bare `YYYY-MM-DD` dates carry no zone; widen them to the full ISO 8601
+/// instant so a crawler reads one timestamp rather than guessing a zone.
+fn iso_datetime(date: &str) -> Cow<'_, str> {
+    let bare = date.len() == 10
+        && date.bytes().enumerate().all(|(i, b)| match i {
+            4 | 7 => b == b'-',
+            _ => b.is_ascii_digit(),
+        });
+    if bare {
+        Cow::Owned(format!("{date}T00:00:00+00:00"))
+    } else {
+        Cow::Borrowed(date)
+    }
+}
+
 fn xml_escape(s: &str) -> Cow<'_, str> {
     if !s
         .bytes()
@@ -1126,6 +1165,62 @@ mod tests {
         assert_eq!(v["@type"], "FAQPage");
         assert_eq!(v["mainEntity"].as_array().unwrap().len(), 2);
         assert_eq!(v["mainEntity"][0]["acceptedAnswer"]["text"], "A1");
+    }
+
+    #[test]
+    fn json_ld_blog_posting_dates_carry_a_zone() {
+        let jl = json_ld_blog_posting(
+            "https://x.test",
+            "T",
+            "E",
+            "s",
+            "2026-06-20",
+            "2026-07-15T09:30:00+02:00",
+            "https://x.test/og.png",
+        );
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["datePublished"], "2026-06-20T00:00:00+00:00");
+        assert_eq!(v["dateModified"], "2026-07-15T09:30:00+02:00");
+    }
+
+    #[test]
+    fn json_ld_blog_posts_share_one_author_node() {
+        let post = json_ld_blog_posting(
+            "https://x.test",
+            "T",
+            "E",
+            "s",
+            "2026-06-20",
+            "2026-06-20",
+            "https://x.test/og.png",
+        );
+        let post: serde_json::Value = serde_json::from_str(post.as_str()).unwrap();
+        assert_eq!(post["author"]["@id"], "https://x.test/about#author");
+        assert_eq!(post["author"]["name"], AUTHOR.name);
+
+        let list = json_ld_blog("https://x.test", &[("T", "s", "2026-06-20")]);
+        let list: serde_json::Value = serde_json::from_str(list.as_str()).unwrap();
+        assert_eq!(list["author"]["@id"], "https://x.test/about#author");
+        assert_eq!(
+            list["blogPost"][0]["author"],
+            serde_json::json!({ "@id": "https://x.test/about#author" }),
+            "listing entries reference the node, not a duplicate of it"
+        );
+    }
+
+    #[test]
+    fn json_ld_person_points_on_site_and_keeps_profiles_in_same_as() {
+        let jl = json_ld_person("https://x.test");
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["@context"], "https://schema.org");
+        assert_eq!(v["@type"], "Person");
+        assert_eq!(v["@id"], "https://x.test/about#author");
+        assert_eq!(v["url"], "https://x.test/about");
+        let same_as = v["sameAs"].as_array().unwrap();
+        assert!(
+            same_as.iter().any(|u| u == AUTHOR.url),
+            "the off-site profile belongs in sameAs: {same_as:?}"
+        );
     }
 
     #[test]

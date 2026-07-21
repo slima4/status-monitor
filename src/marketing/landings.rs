@@ -25,7 +25,10 @@ use axum::routing::get;
 
 use super::config::{BRAND, MarketingCfg, SOURCE_URL, TERRAFORM_URL};
 use super::pages::{CachedRender, cached_render, serve_cached};
-use super::seo::{JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_webpage};
+use super::seo::{
+    AUTHOR_PAGE, JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_person,
+    json_ld_webpage,
+};
 use crate::web::filters;
 
 const LANDING_CACHE_CONTROL: HeaderValue =
@@ -2291,6 +2294,7 @@ struct LandingDoc {
     breadcrumb_json_ld: JsonLd,
     webpage_json_ld: JsonLd,
     faq_json_ld: Option<JsonLd>,
+    person_json_ld: Option<JsonLd>,
     faqs: &'static [(&'static str, &'static str)],
     app_url: String,
     version: &'static str,
@@ -4942,9 +4946,11 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                     l.created,
                     l.lastmod,
                     // /about describes the operator, not the product.
-                    !l.path.starts_with("/compare/") && l.path != "/about",
+                    !l.path.starts_with("/compare/") && l.path != AUTHOR_PAGE,
                 ),
                 faq_json_ld: (!faqs.is_empty()).then(|| json_ld_faqpage(faqs)),
+                person_json_ld: (l.path == AUTHOR_PAGE)
+                    .then(|| json_ld_person(&cfg.canonical_origin)),
                 faqs,
                 app_url: cfg.app_url.clone(),
                 version: env!("CARGO_PKG_VERSION"),
@@ -5124,6 +5130,25 @@ mod tests {
                 l.path
             );
             assert!(!l.sections.is_empty(), "{} missing sections", l.path);
+        }
+    }
+
+    #[test]
+    fn only_the_author_page_carries_the_person_node() {
+        let cfg = MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: false,
+        };
+        let rendered = render_all(&cfg);
+        let marker = "\"@id\":\"https://uptimepage.dev/about#author\"";
+        for (path, page) in &rendered {
+            let html = std::str::from_utf8(&page.body).expect("landings render UTF-8");
+            assert_eq!(
+                html.contains(marker),
+                *path == AUTHOR_PAGE,
+                "{path} Person node presence does not match the author page"
+            );
         }
     }
 }
