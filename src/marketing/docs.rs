@@ -227,6 +227,16 @@ pub const DOCS: &[DocPage] = &[
         dir: "",
     },
     DocPage {
+        slug: "team",
+        title: "Team",
+        description: "Roles, inviting people, seats, and what a member can do that an owner cannot.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/team.md"),
+        dir: "",
+    },
+    DocPage {
         slug: "variables",
         title: "Variables and secrets",
         description: "Reusable org-scoped values and write-only secrets referenced from monitor request fields.",

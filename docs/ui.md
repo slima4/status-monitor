@@ -36,7 +36,7 @@ What responders see here is deliberately separate from what customers see on a s
 | **Notifications** | Add and test alert channels: Slack, Discord, Teams, Google Chat, Telegram, WhatsApp, SMS, email, PagerDuty, ntfy, Pushover, or any webhook. See [Notifications](notifications.md). |
 | **Status pages** | Create and publish your public pages, set branding and logo, and choose which monitors appear under which names. See [Per-org status pages](per-org-status.md). |
 | **Variables** | Org-scoped values and write-only secrets that monitors reference as `{{key}}`. See [Variables and secrets](variables.md). |
-| **Team** | Invite people by email, set roles, revoke pending invitations, and remove members. Owner-only; other members see it read-only. |
+| **Team** | Invite people by email, set roles, resend or revoke pending invitations, and remove members. See [Team](team.md). |
 | **Usage** | Current versus limit for every quota on your plan, as progress bars. The numbers here are the numbers you are enforced at. See [Plans and limits](hosted/plans-and-limits.md). |
 | **Account** | Export your data as JSON, or delete your account. Deletion is reversible for 30 days by signing back in. |
 
