@@ -147,7 +147,7 @@ pub const DOCS: &[DocPage] = &[
         description: "What uptimepage is, what it runs on, and where to start reading.",
         section: Section::Start,
         scope: Scope::Everyone,
-        lastmod: "2026-06-03",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/overview.md"),
         dir: "",
     },
@@ -157,7 +157,7 @@ pub const DOCS: &[DocPage] = &[
         description: "How checks are scheduled, executed, batched, and stored across Postgres and ClickHouse.",
         section: Section::Start,
         scope: Scope::Everyone,
-        lastmod: "2026-06-29",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/architecture.md"),
         dir: "",
     },
@@ -167,7 +167,7 @@ pub const DOCS: &[DocPage] = &[
         description: "A tour of the app: dashboard, monitors, incidents, settings, and sharing a monitor.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-08",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/ui.md"),
         dir: "",
     },
@@ -177,7 +177,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Acknowledgement, ownership, on-call, escalation, and the retrospective around a failing check.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-06-11",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/incidents.md"),
         dir: "",
     },
@@ -207,7 +207,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The customer-facing surface: components, incidents, maintenance, badges, JSON and RSS.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-06-19",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/public-status.md"),
         dir: "",
     },
@@ -217,7 +217,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Running one or more branded status pages per organization, each on its own subdomain.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-05-31",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/per-org-status.md"),
         dir: "",
     },
@@ -227,7 +227,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Read-only capability URLs that open one monitor's full dashboard without an account.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-05-31",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/share-links.md"),
         dir: "",
     },
@@ -247,7 +247,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Reusable org-scoped values and write-only secrets referenced from monitor request fields.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-06-26",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/variables.md"),
         dir: "",
     },
@@ -267,7 +267,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The /api/v1 surface: monitors, incidents, channels, status pages, and the public endpoints.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-07-08",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/api.md"),
         dir: "",
     },
@@ -277,7 +277,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Managing monitors, channels, and status pages as code with the official provider.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-06-18",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/terraform.md"),
         dir: "",
     },
@@ -297,7 +297,7 @@ pub const DOCS: &[DocPage] = &[
         description: "How plans bound resources and request budgets, and how each limit is enforced.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-07-08",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/quotas.md"),
         dir: "",
     },
@@ -407,7 +407,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Local setup for working on the service itself: toolchain, workflows, and the test gates.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-07-17",
+        lastmod: "2026-07-22",
         source: include_str!("../../docs/development.md"),
         dir: "",
     },
@@ -435,6 +435,12 @@ pub const DOCS: &[DocPage] = &[
 
 pub fn find(slug: &str) -> Option<&'static DocPage> {
     DOCS.iter().find(|d| d.slug == slug)
+}
+
+/// The index lists every page's title and description, so it changes
+/// whenever any of them does. Dates are ISO, so lexical max is chronological.
+pub fn index_lastmod() -> Option<&'static str> {
+    DOCS.iter().map(|d| d.lastmod).max()
 }
 
 /// Sanitising render. The allowlist adds exactly what this module's own

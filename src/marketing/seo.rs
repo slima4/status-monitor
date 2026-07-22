@@ -848,9 +848,9 @@ impl SitemapUrl {
 
 fn build_sitemap(cfg: &MarketingCfg) -> String {
     let origin = &cfg.canonical_origin;
-    // Only the blog index borrows a date (it changes on publish); the home page
-    // and legal pages have no per-page change tracking, so they omit lastmod
-    // rather than borrow an unrelated blog date.
+    // An index page takes the newest date of what it lists; the home page and
+    // legal pages have no per-page change tracking, so they omit lastmod
+    // rather than borrow an unrelated date.
     let blog_lastmod: Option<String> = if cfg.blog_enabled {
         list_published()
             .iter()
@@ -910,7 +910,7 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
     }
     urls.push(SitemapUrl::new(
         format!("{origin}{}", crate::marketing::docs::DOCS_INDEX_PATH),
-        None,
+        crate::marketing::docs::index_lastmod().map(str::to_string),
     ));
     for doc in crate::marketing::docs::DOCS {
         urls.push(SitemapUrl::new(
@@ -1079,6 +1079,31 @@ mod tests {
                 "missing title for {}",
                 shot.file
             );
+        }
+    }
+
+    #[test]
+    fn sitemap_dates_every_docs_url() {
+        let cfg = MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: false,
+            mcp_url: None,
+        };
+        let xml = build_sitemap(&cfg);
+        let newest = crate::marketing::docs::index_lastmod().expect("docs are never empty");
+        for (path, expected) in
+            std::iter::once((crate::marketing::docs::DOCS_INDEX_PATH.to_string(), newest)).chain(
+                crate::marketing::docs::DOCS
+                    .iter()
+                    .map(|doc| (doc.path(), doc.lastmod)),
+            )
+        {
+            let entry = format!(
+                "<loc>https://uptimepage.dev{path}</loc>\n    \
+                 <lastmod>{expected}</lastmod>"
+            );
+            assert!(xml.contains(&entry), "missing dated sitemap entry: {entry}");
         }
     }
 
