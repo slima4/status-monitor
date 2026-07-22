@@ -19,6 +19,7 @@
 pub mod blog;
 pub mod config;
 pub mod dispatch;
+pub mod docs;
 pub mod gallery;
 pub mod landings;
 pub mod legal;
@@ -60,6 +61,7 @@ pub fn router(cfg: MarketingCfg) -> Router {
     r = legal::mount(r);
     r = landings::mount(r);
     r = tools::mount(r);
+    r = docs::mount(r);
     if state.blog_enabled {
         r = r
             .route("/blog", get(blog::index))
@@ -85,6 +87,7 @@ fn warm_caches(state: &Arc<MarketingCfg>) {
     legal::warm(state);
     landings::warm(state);
     tools::warm(state);
+    docs::warm(state);
     if state.blog_enabled {
         blog::warm(state);
     }

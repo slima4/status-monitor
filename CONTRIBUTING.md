@@ -49,7 +49,8 @@ Be kind. Be specific. Assume good faith.
    a regression test.
 
 4. **Update documentation** when behavior changes. The docs live 
-   under `docs/` and render via mdBook.
+   under `docs/` and are compiled into the binary, which serves them 
+   at `/docs` on the marketing host.
 
 ## What we're looking for
 

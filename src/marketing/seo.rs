@@ -326,6 +326,34 @@ pub fn json_ld_webpage(
     JsonLd::from_value(payload)
 }
 
+/// `TechArticle` for a documentation page. Docs are reference material
+/// about the product, not editorial, so they carry the technical type
+/// rather than `BlogPosting`.
+pub fn json_ld_tech_article(
+    canonical_origin: &str,
+    path: &str,
+    name: &str,
+    description: &str,
+    modified: &str,
+) -> JsonLd {
+    let payload = serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "TechArticle",
+        "@id": format!("{canonical_origin}{path}#article"),
+        "headline": name,
+        "name": name,
+        "description": description,
+        "url": format!("{canonical_origin}{path}"),
+        "dateModified": iso_datetime(modified),
+        "inLanguage": "en",
+        "isPartOf": { "@id": format!("{canonical_origin}/#website") },
+        "about": { "@id": format!("{canonical_origin}/#software") },
+        "author": author(canonical_origin),
+        "publisher": { "@id": format!("{canonical_origin}/#organization") },
+    });
+    JsonLd::from_value(payload)
+}
+
 pub fn json_ld_website(canonical_origin: &str) -> JsonLd {
     let payload = serde_json::json!({
         "@context": "https://schema.org",
@@ -635,6 +663,21 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
         }
     }
 
+    s.push_str("## Documentation\n");
+    s.push_str(&format!(
+        "Index: {origin}{}\n",
+        crate::marketing::docs::DOCS_INDEX_PATH
+    ));
+    for doc in crate::marketing::docs::DOCS {
+        s.push_str(&format!(
+            "- [{title}]({origin}{path}): {desc}\n",
+            title = doc.title,
+            path = doc.path(),
+            desc = doc.description,
+        ));
+    }
+    s.push('\n');
+
     s.push_str("## Tools\n");
     s.push_str(&format!(
         "All free tools: {origin}{}\n",
@@ -807,6 +850,16 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
         urls.push(SitemapUrl::new(
             format!("{origin}{}", tool.path),
             Some(tool.lastmod.to_string()),
+        ));
+    }
+    urls.push(SitemapUrl::new(
+        format!("{origin}{}", crate::marketing::docs::DOCS_INDEX_PATH),
+        None,
+    ));
+    for doc in crate::marketing::docs::DOCS {
+        urls.push(SitemapUrl::new(
+            format!("{origin}{}", doc.path()),
+            Some(doc.lastmod.to_string()),
         ));
     }
     for route in legal::ROUTES {

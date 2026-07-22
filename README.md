@@ -12,11 +12,10 @@ turn green and red into a polished
 public status page your customers can subscribe to. Drive it by click, REST
 API, or Terraform. Self-host the single binary or use the hosted service.
 
-[![docs](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml/badge.svg)](https://github.com/uptimepage/uptimepage/actions/workflows/docs.yml)
 [![Terraform Registry](https://img.shields.io/badge/terraform-registry-7B42BC?logo=terraform&logoColor=white)](https://registry.terraform.io/providers/uptimepage/uptimepage)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 
-[**Try it free →**](https://uptimepage.dev)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://uptimepage.github.io/uptimepage/)&nbsp;&nbsp;·&nbsp;&nbsp;[Self-host](#self-host)&nbsp;&nbsp;·&nbsp;&nbsp;[Terraform](#terraform)&nbsp;&nbsp;·&nbsp;&nbsp;[MCP](#mcp-server)
+[**Try it free →**](https://uptimepage.dev)&nbsp;&nbsp;·&nbsp;&nbsp;[Docs](https://uptimepage.dev/docs)&nbsp;&nbsp;·&nbsp;&nbsp;[Self-host](#self-host)&nbsp;&nbsp;·&nbsp;&nbsp;[Terraform](#terraform)&nbsp;&nbsp;·&nbsp;&nbsp;[MCP](#mcp-server)
 
 <img src="static/marketing/uptime-monitoring-dashboard.webp" alt="uptimepage dashboard — uptime, response time, and per-monitor status" width="900">
 
@@ -79,7 +78,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 | **Built on** | Rust 1.95 / Tokio / Axum, Postgres + ClickHouse, one ~23 MB self-contained binary |
 
 **Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub or Google.
-**Full docs: <https://uptimepage.github.io/uptimepage/>**
+**Full docs: <https://uptimepage.dev/docs>**
 
 <div align="center">
 
@@ -277,7 +276,7 @@ cargo run --release
 
 ## Docs
 
-Hosted: <https://uptimepage.github.io/uptimepage/>
+Hosted: <https://uptimepage.dev/docs>
 
 Sources under [`docs/`](docs/) — readable directly on GitHub too:
 

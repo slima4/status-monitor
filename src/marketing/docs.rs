@@ -1,0 +1,743 @@
+//! Product documentation on the marketing host: a `/docs` index plus one
+//! page per Markdown source under `docs/`. Same slice-driven shape as
+//! [`super::legal`] and [`super::landings`] — the [`DOCS`] table feeds the
+//! route lookup, the render cache, the sidebar, and the sitemap, so a new
+//! page is one entry plus one file.
+//!
+//! Sources are pulled in with `include_str!`, which registers a compiler
+//! dependency per file — unlike the blog's `include_dir!`, an edited page
+//! cannot survive into a warm rebuild.
+//!
+//! The renderer sanitises. Docs take third-party pull requests exactly
+//! like the blog, so the trusted legal renderer must not be reused here;
+//! the allowlist is only widened for the heading ids this module's own
+//! transforms emit.
+
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+
+use askama::Template;
+use askama_web::WebTemplate;
+use axum::Router;
+use axum::extract::{Path, State};
+use axum::http::HeaderMap;
+use axum::http::HeaderValue;
+use axum::response::Response;
+use axum::routing::get;
+
+use super::config::{BRAND, MarketingCfg};
+use super::md::TocEntry;
+use super::pages::{CachedRender, cached_render, not_found, serve_cached};
+use super::seo::{JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_tech_article};
+use crate::web::filters;
+
+/// A deploy can change the sidebar on every page at once, so an
+/// already-visited page serves its old nav until this lapses.
+const DOCS_CACHE_CONTROL: HeaderValue =
+    HeaderValue::from_static("public, max-age=3600, stale-while-revalidate=86400");
+
+pub const DOCS_INDEX_PATH: &str = "/docs";
+
+/// Which readers a page is written for. Purely an orientation signal —
+/// nothing here is gated, and self-hosters see the hosted pages just as
+/// hosted users see the deployment ones.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Everyone,
+    SelfHosting,
+    Hosted,
+}
+
+impl Scope {
+    pub fn badge(self) -> Option<&'static str> {
+        match self {
+            Scope::Everyone => None,
+            Scope::SelfHosting => Some("self-hosting"),
+            Scope::Hosted => Some("hosted"),
+        }
+    }
+}
+
+/// Sidebar grouping, rendered in declaration order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Section {
+    Start,
+    Guide,
+    Reference,
+    SelfHosting,
+    Hosted,
+}
+
+/// Reading order, hosted before self-hosting: most readers are on the
+/// hosted service, and a self-hoster looking for their section finds it
+/// either way.
+pub const SECTIONS: &[Section] = &[
+    Section::Start,
+    Section::Guide,
+    Section::Reference,
+    Section::Hosted,
+    Section::SelfHosting,
+];
+
+impl Section {
+    pub fn label(self) -> &'static str {
+        match self {
+            Section::Start => "start here",
+            Section::Guide => "using uptimepage",
+            Section::Reference => "reference",
+            Section::SelfHosting => "self-hosting",
+            Section::Hosted => "hosted service",
+        }
+    }
+
+    pub fn blurb(self) -> &'static str {
+        match self {
+            Section::Start => "What the service is and how the pieces fit together.",
+            Section::Guide => "Day-to-day work: monitors, incidents, status pages, alerts.",
+            Section::Reference => "The API, Terraform, MCP, and the limits everything runs under.",
+            Section::SelfHosting => "Running your own instance: deploy, configure, operate, debug.",
+            Section::Hosted => "What differs when we run it for you at uptimepage.dev.",
+        }
+    }
+}
+
+pub struct DocPage {
+    /// Path under `/docs`, mirroring the source layout under `docs/`.
+    pub slug: &'static str,
+    pub title: &'static str,
+    pub description: &'static str,
+    pub section: Section,
+    pub scope: Scope,
+    pub lastmod: &'static str,
+    source: &'static str,
+    /// The source file's directory under `docs/`, so relative links in it
+    /// resolve the way they do on disk.
+    dir: &'static str,
+}
+
+impl DocPage {
+    pub fn path(&self) -> String {
+        format!("{DOCS_INDEX_PATH}/{}", self.slug)
+    }
+}
+
+/// Single source of truth for the documentation. Order within a section is
+/// the order readers see.
+pub const DOCS: &[DocPage] = &[
+    DocPage {
+        slug: "overview",
+        title: "Overview",
+        description: "What uptimepage is, what it runs on, and where to start reading.",
+        section: Section::Start,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-03",
+        source: include_str!("../../docs/overview.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "architecture",
+        title: "Architecture",
+        description: "How checks are scheduled, executed, batched, and stored across Postgres and ClickHouse.",
+        section: Section::Start,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-29",
+        source: include_str!("../../docs/architecture.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "ui",
+        title: "Web UI",
+        description: "A tour of the app: dashboard, monitors, incidents, settings, and sharing a monitor.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-08",
+        source: include_str!("../../docs/ui.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "incidents",
+        title: "Incident management",
+        description: "Acknowledgement, ownership, on-call, escalation, and the retrospective around a failing check.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-11",
+        source: include_str!("../../docs/incidents.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "public-status",
+        title: "Public status page",
+        description: "The customer-facing surface: components, incidents, maintenance, badges, JSON and RSS.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-19",
+        source: include_str!("../../docs/public-status.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "per-org-status",
+        title: "Per-org status pages",
+        description: "Running one or more branded status pages per organization, each on its own subdomain.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-05-31",
+        source: include_str!("../../docs/per-org-status.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "share-links",
+        title: "Share links",
+        description: "Read-only capability URLs that open one monitor's full dashboard without an account.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-05-31",
+        source: include_str!("../../docs/share-links.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "variables",
+        title: "Variables and secrets",
+        description: "Reusable org-scoped values and write-only secrets referenced from monitor request fields.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-26",
+        source: include_str!("../../docs/variables.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "authentication",
+        title: "Authentication",
+        description: "OAuth sign-in, magic links, API tokens, and the scopes that bound them.",
+        section: Section::Reference,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-26",
+        source: include_str!("../../docs/authentication.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "api",
+        title: "REST API",
+        description: "The /api/v1 surface: monitors, incidents, channels, status pages, and the public endpoints.",
+        section: Section::Reference,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-08",
+        source: include_str!("../../docs/api.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "terraform",
+        title: "Terraform",
+        description: "Managing monitors, channels, and status pages as code with the official provider.",
+        section: Section::Reference,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-18",
+        source: include_str!("../../docs/terraform.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "mcp",
+        title: "MCP server",
+        description: "Letting an LLM client answer operational questions and take guarded actions on one org.",
+        section: Section::Reference,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-21",
+        source: include_str!("../../docs/mcp.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "quotas",
+        title: "Quotas and rate limits",
+        description: "How plans bound resources and request budgets, and how each limit is enforced.",
+        section: Section::Reference,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-08",
+        source: include_str!("../../docs/quotas.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "multi-tenancy",
+        title: "Multi-tenancy",
+        description: "The org model, how the active org is resolved, and how tenant isolation is enforced.",
+        section: Section::Reference,
+        scope: Scope::Everyone,
+        lastmod: "2026-06-12",
+        source: include_str!("../../docs/multi-tenancy.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "hosted/plans-and-limits",
+        title: "Plans and limits",
+        description: "The quotas and rate budgets each hosted plan carries, and what happens at the ceiling.",
+        section: Section::Hosted,
+        scope: Scope::Hosted,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/hosted/plans-and-limits.md"),
+        dir: "hosted",
+    },
+    DocPage {
+        slug: "hosted/regions",
+        title: "Probe regions",
+        description: "Where the hosted service checks from, and how to pick regions for a monitor.",
+        section: Section::Hosted,
+        scope: Scope::Hosted,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/hosted/regions.md"),
+        dir: "hosted",
+    },
+    DocPage {
+        slug: "hosted/data-retention",
+        title: "Data retention",
+        description: "How long raw checks, rollups, incidents, and audit records are kept on the hosted service.",
+        section: Section::Hosted,
+        scope: Scope::Hosted,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/hosted/data-retention.md"),
+        dir: "hosted",
+    },
+    DocPage {
+        slug: "hosted/support",
+        title: "Support",
+        description: "How to reach us, what to include, and where the hosted service stands on SLAs.",
+        section: Section::Hosted,
+        scope: Scope::Hosted,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/hosted/support.md"),
+        dir: "hosted",
+    },
+    DocPage {
+        slug: "configuration",
+        title: "Configuration",
+        description: "Every configuration key, its default, and the environment variable that overrides it.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-07-14",
+        source: include_str!("../../docs/configuration.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "deployment",
+        title: "Deployment",
+        description: "Running the production stack: Caddy, TLS, the public status surface, and email.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-05-30",
+        source: include_str!("../../docs/deployment.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "multi-region",
+        title: "Multi-region probes",
+        description: "Running probe agents in more than one region, and the operator surface that manages them.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-07-08",
+        source: include_str!("../../docs/multi-region.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "metrics",
+        title: "Metrics and tracing",
+        description: "The Prometheus series the service exposes and how to ship traces off the box.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-06-22",
+        source: include_str!("../../docs/metrics.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "troubleshooting",
+        title: "Troubleshooting",
+        description: "Symptoms you are likely to hit while operating an instance, and what they mean.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-05-30",
+        source: include_str!("../../docs/troubleshooting.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "development",
+        title: "Development",
+        description: "Local setup for working on the service itself: toolchain, workflows, and the test gates.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-07-17",
+        source: include_str!("../../docs/development.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "benchmarks",
+        title: "Benchmarks",
+        description: "Criterion micro-benchmarks measuring the cost of a single check through the production path.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-05-14",
+        source: include_str!("../../docs/benchmarks.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "loadtest",
+        title: "Load test",
+        description: "The end-to-end harness that drives the real check executor against in-process mock servers.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-05-14",
+        source: include_str!("../../docs/loadtest.md"),
+        dir: "",
+    },
+];
+
+pub fn find(slug: &str) -> Option<&'static DocPage> {
+    DOCS.iter().find(|d| d.slug == slug)
+}
+
+/// Sanitising render. The allowlist adds exactly what this module's own
+/// transforms emit — the heading ids the contents list points at — and
+/// nothing else.
+fn render(markdown: &str, dir: &str) -> (String, Vec<TocEntry>) {
+    let mut opts = pulldown_cmark::Options::empty();
+    opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
+    opts.insert(pulldown_cmark::Options::ENABLE_STRIKETHROUGH);
+    let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
+    let (events, toc) =
+        super::md::anchor_headings(super::md::rewrite_doc_links(parser, dir).collect());
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(events.into_iter()));
+    let clean = ammonia::Builder::default()
+        .link_rel(Some("noopener noreferrer"))
+        .add_allowed_classes("div", &["mk-table-scroll"])
+        .add_tag_attributes("div", &["tabindex"])
+        .add_tag_attributes("h2", &["id"])
+        .add_tag_attributes("h3", &["id"])
+        .clean(&html)
+        .to_string();
+    (clean, toc)
+}
+
+/// A sidebar link. Resolved once so the nav is identical on every page
+/// apart from which entry is current.
+#[derive(Debug, Clone)]
+pub struct NavItem {
+    pub href: String,
+    pub title: &'static str,
+    pub slug: &'static str,
+    pub badge: Option<&'static str>,
+    pub description: &'static str,
+}
+
+#[derive(Debug, Clone)]
+pub struct NavSection {
+    pub label: &'static str,
+    pub blurb: &'static str,
+    pub items: Vec<NavItem>,
+}
+
+static NAV: OnceLock<Vec<NavSection>> = OnceLock::new();
+
+fn nav() -> &'static [NavSection] {
+    NAV.get_or_init(|| {
+        SECTIONS
+            .iter()
+            .map(|section| NavSection {
+                label: section.label(),
+                blurb: section.blurb(),
+                items: DOCS
+                    .iter()
+                    .filter(|d| d.section == *section)
+                    .map(|d| NavItem {
+                        href: d.path(),
+                        title: d.title,
+                        slug: d.slug,
+                        badge: d.scope.badge(),
+                        description: d.description,
+                    })
+                    .collect(),
+            })
+            .collect()
+    })
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/docs_page.html")]
+struct DocsPage {
+    canonical_url: String,
+    app_url: String,
+    og: OpenGraph,
+    article_ld: JsonLd,
+    breadcrumb_ld: JsonLd,
+    title: &'static str,
+    badge: Option<&'static str>,
+    lastmod: &'static str,
+    body_html: String,
+    toc: Vec<TocEntry>,
+    sections: &'static [NavSection],
+    current: &'static str,
+    version: &'static str,
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/docs_index.html")]
+struct DocsIndex {
+    canonical_url: String,
+    app_url: String,
+    og: OpenGraph,
+    breadcrumb_ld: JsonLd,
+    sections: &'static [NavSection],
+    current: &'static str,
+    version: &'static str,
+}
+
+static RENDERED: OnceLock<HashMap<&'static str, CachedRender>> = OnceLock::new();
+static INDEX_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
+    DOCS.iter()
+        .map(|doc| {
+            let path = doc.path();
+            let canonical_url = format!("{}{path}", cfg.canonical_origin);
+            let mut og = OpenGraph::default_for(
+                &format!("{} | {BRAND} docs", doc.title),
+                &canonical_url,
+                &cfg.canonical_origin,
+            );
+            og.description = doc.description.to_string();
+            let (body_html, toc) = render(doc.source, doc.dir);
+            let page = DocsPage {
+                article_ld: json_ld_tech_article(
+                    &cfg.canonical_origin,
+                    &path,
+                    doc.title,
+                    doc.description,
+                    doc.lastmod,
+                ),
+                breadcrumb_ld: json_ld_breadcrumb(&cfg.canonical_origin, doc.title, &path),
+                canonical_url,
+                app_url: cfg.app_url.clone(),
+                og,
+                title: doc.title,
+                badge: doc.scope.badge(),
+                lastmod: doc.lastmod,
+                body_html,
+                toc,
+                sections: nav(),
+                current: doc.slug,
+                version: env!("CARGO_PKG_VERSION"),
+            };
+            let body = page
+                .render()
+                .unwrap_or_else(|e| format!("<!-- docs render failed: {e} -->"));
+            (doc.slug, cached_render(body))
+        })
+        .collect()
+}
+
+fn render_index(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}{DOCS_INDEX_PATH}", cfg.canonical_origin);
+    let mut og = OpenGraph::default_for(
+        &format!("Documentation | {BRAND}"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
+    og.description =
+        "Uptimepage documentation: monitors, incidents, status pages, the REST API, Terraform, \
+         MCP, self-hosting, and the hosted service."
+            .to_string();
+    let body = DocsIndex {
+        breadcrumb_ld: json_ld_breadcrumb(&cfg.canonical_origin, "Docs", DOCS_INDEX_PATH),
+        canonical_url,
+        app_url: cfg.app_url.clone(),
+        og,
+        sections: nav(),
+        current: "",
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .render()
+    .unwrap_or_else(|e| format!("<!-- docs index render failed: {e} -->"));
+    cached_render(body)
+}
+
+pub(crate) fn warm(cfg: &MarketingCfg) {
+    INDEX_CACHED.get_or_init(|| render_index(cfg));
+    RENDERED.get_or_init(|| render_all(cfg));
+}
+
+async fn index(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = INDEX_CACHED.get_or_init(|| render_index(&cfg));
+    serve_cached(&headers, cached, &DOCS_CACHE_CONTROL)
+}
+
+async fn page(
+    State(cfg): State<Arc<MarketingCfg>>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let cache = RENDERED.get_or_init(|| render_all(&cfg));
+    match cache.get(slug.trim_end_matches('/')) {
+        Some(cached) => serve_cached(&headers, cached, &DOCS_CACHE_CONTROL),
+        None => not_found(State(cfg)).await,
+    }
+}
+
+/// One wildcard route rather than a mount per entry: slugs are nested
+/// (`hosted/regions`), and the lookup is the same table either way.
+pub fn mount(router: Router<Arc<MarketingCfg>>) -> Router<Arc<MarketingCfg>> {
+    router
+        .route(DOCS_INDEX_PATH, get(index))
+        .route("/docs/{*slug}", get(page))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every Markdown file under `docs/` that is not legal copy or an
+    /// internal runbook must be reachable, or it is dead weight nobody can
+    /// find.
+    #[test]
+    fn every_source_file_is_published() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("docs");
+        let mut found: Vec<String> = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("read docs dir") {
+                let path = entry.expect("dir entry").path();
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if path.is_dir() {
+                    if name != "legal" && name != "internal" {
+                        stack.push(path);
+                    }
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                    let rel = path.strip_prefix(&root).expect("under docs");
+                    found.push(rel.with_extension("").to_string_lossy().replace('\\', "/"));
+                }
+            }
+        }
+        for slug in found {
+            assert!(
+                find(&slug).is_some(),
+                "docs/{slug}.md is not listed in DOCS, so nothing links to it"
+            );
+        }
+    }
+
+    #[test]
+    fn slugs_are_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for doc in DOCS {
+            assert!(seen.insert(doc.slug), "duplicate slug {}", doc.slug);
+        }
+    }
+
+    /// `SECTIONS` drives the sidebar and the index, so a page in a section
+    /// missing from it renders nowhere despite being routed.
+    #[test]
+    fn every_section_in_use_is_listed() {
+        for doc in DOCS {
+            assert!(
+                SECTIONS.contains(&doc.section),
+                "{}: section {:?} is not in SECTIONS, so the page has no nav entry",
+                doc.slug,
+                doc.section
+            );
+        }
+    }
+
+    #[test]
+    fn descriptions_fit_serp_limits() {
+        for doc in DOCS {
+            assert!(
+                !doc.description.is_empty() && doc.description.len() <= 160,
+                "{}: description is {} chars",
+                doc.slug,
+                doc.description.len()
+            );
+        }
+    }
+
+    /// Replaces the link checker that retired with the mdBook build: every
+    /// cross-page link must resolve to a published page, and every anchor
+    /// to a heading id that page actually emits.
+    #[test]
+    fn internal_links_and_anchors_resolve() {
+        let rendered: HashMap<&str, (String, Vec<TocEntry>)> = DOCS
+            .iter()
+            .map(|doc| (doc.slug, render(doc.source, doc.dir)))
+            .collect();
+        for doc in DOCS {
+            let (html, _) = &rendered[doc.slug];
+            for href in hrefs(html) {
+                // A bare `#anchor` stays same-page, so it resolves against
+                // the linking document rather than another entry.
+                let (slug, anchor) = match href.strip_prefix('#') {
+                    Some(anchor) => (doc.slug, Some(anchor)),
+                    None => {
+                        let Some(rest) = href.strip_prefix("/docs/") else {
+                            continue;
+                        };
+                        match rest.split_once('#') {
+                            Some((s, a)) => (s, Some(a)),
+                            None => (rest, None),
+                        }
+                    }
+                };
+                assert!(
+                    find(slug).is_some(),
+                    "{}: links to /docs/{slug}, which is not a published page",
+                    doc.slug
+                );
+                let Some(anchor) = anchor else { continue };
+                let (_, toc) = &rendered[slug];
+                assert!(
+                    toc.iter().any(|t| t.id == anchor),
+                    "{}: links to /docs/{slug}#{anchor}, which that page has no heading for",
+                    doc.slug
+                );
+            }
+        }
+    }
+
+    fn hrefs(html: &str) -> Vec<String> {
+        html.match_indices("href=\"")
+            .filter_map(|(i, m)| {
+                let rest = &html[i + m.len()..];
+                rest.find('"').map(|end| rest[..end].to_string())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn headings_keep_their_ids_through_sanitisation() {
+        let (html, toc) = render("## Retry budget\n\ntext\n", "");
+        assert_eq!(toc.len(), 1);
+        assert_eq!(toc[0].id, "retry-budget");
+        assert!(html.contains("id=\"retry-budget\""), "got: {html}");
+    }
+
+    #[test]
+    fn renderer_strips_script_and_handlers() {
+        let html = render(
+            "<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>",
+            "",
+        )
+        .0;
+        assert!(!html.contains("<script"), "got: {html}");
+        assert!(!html.contains("onerror"), "got: {html}");
+    }
+
+    #[test]
+    fn relative_doc_links_become_site_paths() {
+        let html = render("[api](api.md) and [cfg](configuration.md#logging)", "").0;
+        assert!(html.contains("href=\"/docs/api\""), "got: {html}");
+        assert!(
+            html.contains("href=\"/docs/configuration#logging\""),
+            "got: {html}"
+        );
+    }
+
+    #[test]
+    fn parent_relative_links_resolve_from_the_source_directory() {
+        let html = render("[api](../api.md)", "hosted").0;
+        assert!(html.contains("href=\"/docs/api\""), "got: {html}");
+    }
+}

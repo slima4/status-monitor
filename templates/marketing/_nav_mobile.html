@@ -1,6 +1,6 @@
 {% let nav_solutions = canonical_url.contains("/status-page-for-") || canonical_url.contains("/uptime-monitoring-for-developers") || canonical_url.contains("/self-hosted-status-page") || canonical_url.contains("/white-label-uptime-monitoring") || canonical_url.contains("/open-source-status-page") %}
 {% let nav_compare = canonical_url.contains("/vs/") || canonical_url.contains("/compare/") || canonical_url.contains("/open-source-uptime-monitoring") %}
-{% let nav_resources = canonical_url.contains("/blog") || canonical_url.contains("/tools") || canonical_url.contains("/mcp-server") || canonical_url.contains("/terraform-uptime-monitoring") || canonical_url.contains("/terraform-status-page") || canonical_url.contains("/about") %}
+{% let nav_resources = canonical_url.contains("/docs") || canonical_url.contains("/blog") || canonical_url.contains("/tools") || canonical_url.contains("/mcp-server") || canonical_url.contains("/terraform-uptime-monitoring") || canonical_url.contains("/terraform-status-page") || canonical_url.contains("/about") %}
 {% let nav_pricing = canonical_url.ends_with("/pricing") %}
 <nav class="mk-mnav" aria-label="Sections">
     <p class="mk-mnav__head">product</p>
@@ -26,6 +26,7 @@
     <a href="/vs/oneuptime" class="mk-nav-link">vs oneuptime</a>
 
     <p class="mk-mnav__head{% if nav_resources %} is-active{% endif %}">resources</p>
+    <a href="/docs" class="mk-nav-link">docs</a>
     <a href="/blog" class="mk-nav-link">notes</a>
     <a href="/mcp-server" class="mk-nav-link">mcp server</a>
     <a href="/terraform-uptime-monitoring" class="mk-nav-link">terraform</a>

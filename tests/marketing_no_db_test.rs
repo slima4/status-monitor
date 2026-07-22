@@ -471,6 +471,55 @@ async fn sitemap_lists_legal_routes() {
 }
 
 #[tokio::test]
+async fn every_doc_page_renders_without_db() {
+    for doc in uptimepage::marketing::docs::DOCS {
+        let path = doc.path();
+        let (status, body, _) = get(&path).await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert!(body.contains(doc.title), "{path} missing its title");
+        assert!(
+            body.contains("mk-doc-nav__link"),
+            "{path} rendered without the docs sidebar"
+        );
+    }
+}
+
+#[tokio::test]
+async fn docs_index_renders_without_db() {
+    let (status, body, _) = get("/docs").await;
+    assert_eq!(status, StatusCode::OK);
+    for doc in uptimepage::marketing::docs::DOCS {
+        assert!(
+            body.contains(&format!("href=\"{}\"", doc.path())),
+            "docs index missing {}",
+            doc.slug
+        );
+    }
+}
+
+#[tokio::test]
+async fn unknown_doc_page_returns_branded_404() {
+    let (status, body, _) = get("/docs/not-a-page").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(body.contains("Uptimepage"));
+}
+
+#[tokio::test]
+async fn sitemap_and_llms_list_every_doc() {
+    let (_, sitemap, _) = get("/sitemap.xml").await;
+    let (_, llms, _) = get("/llms.txt").await;
+    for doc in uptimepage::marketing::docs::DOCS {
+        let loc = format!("<loc>https://uptimepage.dev{}</loc>", doc.path());
+        assert!(sitemap.contains(&loc), "sitemap missing {loc}");
+        assert!(
+            llms.contains(&format!("https://uptimepage.dev{}", doc.path())),
+            "llms.txt missing {}",
+            doc.slug
+        );
+    }
+}
+
+#[tokio::test]
 async fn cookie_does_not_change_response_body() {
     // Cookie isolation: marketing serves identical bytes whether or not
     // a `_sm_session` cookie tags along. No Vary: Cookie, no
@@ -518,4 +567,53 @@ async fn cookie_does_not_change_response_body() {
         .await
         .unwrap();
     assert_eq!(plain_bytes, with_bytes);
+}
+
+/// The sidebar is baked into every page's cached render, so a nav that
+/// differs between pages means a stale cache somewhere rather than a
+/// content change. Also pins exactly one entry marked current.
+#[tokio::test]
+async fn docs_nav_is_identical_across_pages() {
+    let mut seen: Option<(String, String)> = None;
+    for doc in uptimepage::marketing::docs::DOCS {
+        let (_, body, _) = get(&doc.path()).await;
+        let start = body.find("mk-doc-nav__body").expect("sidebar");
+        let end = body[start..].find("</nav>").expect("sidebar end") + start;
+        let sidebar = &body[start..end];
+        let active = sidebar.matches("is-active").count();
+        assert_eq!(active, 1, "{}: {active} active nav entries", doc.slug);
+        // Exactly-one-active would still hold if every page marked the same
+        // wrong entry, so pin which one.
+        let active_href = sidebar
+            .split("<a ")
+            .find(|tag| tag.contains("is-active"))
+            .and_then(|tag| tag.split("href=\"").nth(1))
+            .and_then(|rest| rest.split('"').next())
+            .expect("active nav entry carries an href");
+        assert_eq!(
+            active_href,
+            doc.path(),
+            "{}: sidebar marks the wrong entry current",
+            doc.slug
+        );
+        let neutral = sidebar
+            .replace(" is-active", "")
+            .replace(" aria-current=\"page\"", "");
+        let count = sidebar.matches("mk-doc-nav__link").count();
+        match &seen {
+            None => {
+                assert_eq!(
+                    count,
+                    uptimepage::marketing::docs::DOCS.len(),
+                    "sidebar must link every published page"
+                );
+                seen = Some((neutral, doc.slug.to_string()));
+            }
+            Some((first, first_slug)) => assert_eq!(
+                &neutral, first,
+                "{} nav differs from {first_slug}",
+                doc.slug
+            ),
+        }
+    }
 }

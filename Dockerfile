@@ -55,12 +55,13 @@ COPY static ./static
 COPY assets ./assets
 COPY templates ./templates
 # build.rs runs scripts/fetch-tailwind.sh then bakes static/css/app.css.
-# legal.rs `include_str!`s the policy markdown + THIRD-PARTY-LICENSES.md at
-# compile time, so those files must be in the build context here (the
-# planner/cook stage stays deps-only — it never compiles the local crate).
+# legal.rs and docs.rs `include_str!` the markdown under docs/, plus
+# THIRD-PARTY-LICENSES.md, at compile time, so those files must be in the
+# build context here (the planner/cook stage stays deps-only — it never
+# compiles the local crate).
 COPY build.rs ./
 COPY scripts ./scripts
-COPY docs/legal ./docs/legal
+COPY docs ./docs
 COPY THIRD-PARTY-LICENSES.md ./
 # AGPL-3.0 §13: bake the exact source identity so the running binary's
 # footer offers the Corresponding Source. CI passes the commit/repo; an
