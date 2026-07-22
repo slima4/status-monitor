@@ -724,6 +724,8 @@ async fn main() -> Result<()> {
             app_url: state.cfg.marketing.app_url.clone(),
             canonical_origin: state.cfg.marketing.canonical_origin.clone(),
             blog_enabled: state.cfg.marketing.blog_enabled,
+            mcp_url: (state.cfg.mcp.enabled && !state.cfg.mcp.resource_uri.is_empty())
+                .then(|| state.cfg.mcp.resource_uri.clone()),
         };
         // Pre-warm the in-memory post cache so the first /blog hit
         // doesn't pay the parse cost.

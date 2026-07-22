@@ -15,6 +15,7 @@
 
 mod audit;
 mod auth;
+mod card;
 mod confirm;
 mod cursor;
 mod error;
@@ -53,7 +54,15 @@ pub fn mount(router: Router, state: AppState) -> Router {
             crate::quotas::rate_limit_middleware,
         ))
         .layer(from_fn_with_state(state.clone(), auth::middleware));
-    router.merge(mcp)
+    // Public discovery: outside the auth + rate-limit layers, and only once
+    // there is an absolute endpoint to advertise.
+    if state.cfg.mcp.resource_uri.is_empty() {
+        return router.merge(mcp);
+    }
+    let discovery = Router::new()
+        .route(card::PATH, axum::routing::get(card::server_card))
+        .with_state(state);
+    router.merge(mcp).merge(discovery)
 }
 
 /// Build the rmcp Streamable-HTTP service. `allowed_origins` feeds the

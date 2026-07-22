@@ -15,6 +15,7 @@ fn router() -> axum::Router {
         app_url: "https://app.uptimepage.dev".into(),
         canonical_origin: "https://uptimepage.dev".into(),
         blog_enabled: true,
+        mcp_url: Some("https://mcp.uptimepage.dev/mcp".into()),
     })
 }
 
@@ -119,11 +120,149 @@ async fn robots_txt_points_at_sitemap() {
     assert_eq!(status, StatusCode::OK);
     assert!(body.contains("User-agent: *"));
     assert!(body.contains("https://uptimepage.dev/sitemap.xml"));
+    assert!(
+        body.contains("Content-Signal: search=yes, ai-input=yes, ai-train=yes"),
+        "AI usage preferences must be declared, got {body:?}"
+    );
     let ct = headers
         .get(header::CONTENT_TYPE)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
     assert!(ct.starts_with("text/plain"), "got {ct:?}");
+}
+
+async fn get_as_markdown(path: &str) -> (StatusCode, String, axum::http::HeaderMap) {
+    let resp = router()
+        .oneshot(
+            Request::builder()
+                .uri(path)
+                .header(header::HOST, "uptimepage.dev")
+                .header(header::ACCEPT, "text/markdown")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("router call");
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .expect("collect body");
+    (
+        status,
+        String::from_utf8(bytes.to_vec()).unwrap_or_default(),
+        headers,
+    )
+}
+
+#[tokio::test]
+async fn agents_get_the_markdown_source_of_a_doc() {
+    let (status, body, headers) = get_as_markdown("/docs/api").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        headers.get(header::CONTENT_TYPE).unwrap(),
+        "text/markdown; charset=utf-8"
+    );
+    assert_eq!(headers.get(header::VARY).unwrap(), "accept");
+    assert!(headers.contains_key("x-markdown-tokens"));
+    assert!(
+        body.starts_with("# REST API"),
+        "got {:?}",
+        &body[..40.min(body.len())]
+    );
+    assert!(!body.contains("<html"), "must not be the rendered page");
+}
+
+#[tokio::test]
+async fn agents_get_markdown_for_posts_and_the_landing_page() {
+    let (_, post, _) = get_as_markdown("/blog/boring-uptime").await;
+    assert!(post.starts_with("# Why your uptime monitor should be boring"));
+
+    let (_, landing, _) = get_as_markdown("/").await;
+    assert!(landing.starts_with("# Uptimepage"));
+}
+
+#[tokio::test]
+async fn browsers_still_get_html_and_a_vary_header() {
+    let (status, body, headers) = get("/docs/api").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("<html"), "browsers keep the rendered page");
+    assert_eq!(
+        headers.get(header::VARY).unwrap(),
+        "accept",
+        "caches must key both representations"
+    );
+    assert!(!headers.contains_key("x-markdown-tokens"));
+}
+
+#[tokio::test]
+async fn compression_does_not_drop_the_accept_vary() {
+    let resp = router()
+        .oneshot(
+            Request::builder()
+                .uri("/docs/api")
+                .header(header::HOST, "uptimepage.dev")
+                .header(header::ACCEPT, "text/markdown")
+                .header(header::ACCEPT_ENCODING, "gzip")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .expect("router call");
+    let vary: Vec<_> = resp
+        .headers()
+        .get_all(header::VARY)
+        .iter()
+        .map(|v| v.to_str().unwrap().to_ascii_lowercase())
+        .collect();
+    assert!(
+        vary.iter()
+            .any(|v| v.contains("accept") && !v.contains("accept-encoding")
+                || v.split(',').any(|p| p.trim() == "accept")),
+        "Accept dropped from Vary: {vary:?}"
+    );
+}
+
+#[tokio::test]
+async fn api_catalog_is_served_as_a_linkset() {
+    let (status, body, headers) = get("/.well-known/api-catalog").await;
+    assert_eq!(status, StatusCode::OK);
+    let ct = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+    assert!(ct.starts_with("application/linkset+json"), "got {ct:?}");
+    assert!(ct.contains("rfc9727"), "profile parameter missing: {ct:?}");
+    let doc: serde_json::Value = serde_json::from_str(&body).expect("linkset json");
+    assert!(doc["linkset"][0]["item"].is_array());
+}
+
+#[tokio::test]
+async fn apex_points_at_the_mcp_hosts_server_card() {
+    let (status, _, headers) = get("/.well-known/mcp/server-card.json").await;
+    assert_eq!(status, StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(
+        headers.get(header::LOCATION).unwrap(),
+        "https://mcp.uptimepage.dev/.well-known/mcp/server-card.json"
+    );
+}
+
+#[tokio::test]
+async fn pages_advertise_the_catalog_over_link() {
+    let (_, _, headers) = get("/").await;
+    let link = headers
+        .get(header::LINK)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default();
+    assert!(
+        link.contains("<https://uptimepage.dev/.well-known/api-catalog>; rel=\"api-catalog\""),
+        "got {link:?}"
+    );
+    assert!(link.contains("rel=\"service-desc\""), "got {link:?}");
+    assert!(link.contains("rel=\"service-doc\""), "got {link:?}");
+
+    let (_, _, docs) = get("/docs/api").await;
+    assert!(docs.contains_key(header::LINK), "doc pages need it too");
 }
 
 #[tokio::test]

@@ -55,12 +55,16 @@ pub const AUTHOR: Author = Author {
     ],
 };
 
-/// What the marketing handlers read. Mirrors the relevant fields of
-/// `crate::config::MarketingConfig` so this struct compiles untouched
-/// in the extracted service.
+/// What the marketing handlers read: the relevant fields of
+/// `crate::config::MarketingConfig`, plus what the discovery surfaces need
+/// from other config sections. Owns its fields so this struct compiles
+/// untouched in the extracted service.
 #[derive(Debug, Clone)]
 pub struct MarketingCfg {
     pub app_url: String,
     pub canonical_origin: String,
     pub blog_enabled: bool,
+    /// This deployment's MCP endpoint. Never falls back to [`MCP_URL`]:
+    /// the catalog is a machine contract, that constant is hosted-only copy.
+    pub mcp_url: Option<String>,
 }

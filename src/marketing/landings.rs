@@ -5199,6 +5199,7 @@ mod tests {
             app_url: "https://app.uptimepage.dev".into(),
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: false,
+            mcp_url: None,
         };
         let rendered = render_all(&cfg);
         let marker = "\"@id\":\"https://uptimepage.dev/about#author\"";

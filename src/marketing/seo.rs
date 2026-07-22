@@ -19,7 +19,7 @@ use serde::Serialize;
 
 use super::blog::list_published;
 use super::config::{
-    AUTHOR, BRAND, MCP_URL, META_DESCRIPTION, MarketingCfg, SOURCE_URL, TAGLINE, TERRAFORM_URL,
+    AUTHOR, BRAND, META_DESCRIPTION, MarketingCfg, SOURCE_URL, TAGLINE, TERRAFORM_URL,
 };
 use super::gallery;
 use super::landings;
@@ -80,7 +80,6 @@ const LLMS_FACTS: &[(&str, &str)] = &[
         "windows that silence the page engine",
     ),
     ("Data export", "JSON API, RSS feed, embeddable SVG badge"),
-    ("MCP server", MCP_URL),
     ("Terraform provider", TERRAFORM_URL),
     (
         "Team",
@@ -591,6 +590,12 @@ pub async fn llms_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
     plain_text(body.clone(), TEXT_PLAIN)
 }
 
+/// The site index in Markdown, shared with the landing page's
+/// `Accept: text/markdown` representation.
+pub(crate) fn llms_markdown(cfg: &MarketingCfg) -> Bytes {
+    LLMS_CACHED.get_or_init(|| build_llms(cfg)).clone()
+}
+
 pub async fn llms_full_txt(State(cfg): State<Arc<MarketingCfg>>) -> Response {
     let body = LLMS_FULL_CACHED.get_or_init(|| build_llms_full(&cfg));
     plain_text(body.clone(), TEXT_PLAIN)
@@ -616,9 +621,17 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     LLMS_FULL_CACHED.get_or_init(|| build_llms_full(cfg));
 }
 
+/// Assistants citing the docs and blog is the point of the site, so every
+/// signal is granted. See <https://contentsignals.org/>.
+const CONTENT_SIGNAL: &str = "search=yes, ai-input=yes, ai-train=yes";
+
 fn build_robots(cfg: &MarketingCfg) -> Bytes {
     Bytes::from(format!(
-        "User-agent: *\nAllow: /\nSitemap: {origin}/sitemap.xml\n",
+        "# Content preferences: https://contentsignals.org/\n\
+         User-agent: *\n\
+         Content-Signal: {CONTENT_SIGNAL}\n\
+         Allow: /\n\
+         Sitemap: {origin}/sitemap.xml\n",
         origin = cfg.canonical_origin
     ))
 }
@@ -715,9 +728,11 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
     s.push('\n');
 
     s.push_str("## Developers & automation\n");
-    s.push_str(&format!(
-        "- [MCP server]({MCP_URL}): Connect an LLM client (Claude, IDEs) to read monitors and incidents and take fenced actions. OAuth one-click.\n"
-    ));
+    if let Some(mcp) = cfg.mcp_url.as_deref() {
+        s.push_str(&format!(
+            "- [MCP server]({mcp}): Connect an LLM client (Claude, IDEs) to read monitors and incidents and take fenced actions. OAuth one-click.\n"
+        ));
+    }
     s.push_str(&format!(
         "- [Terraform provider]({TERRAFORM_URL}): Manage monitors, status pages and notification channels as config-as-code.\n\n"
     ));
@@ -748,6 +763,9 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
     s.push_str("## Facts\n");
     for (k, v) in LLMS_FACTS {
         s.push_str(&format!("- {k}: {v}\n"));
+    }
+    if let Some(mcp) = cfg.mcp_url.as_deref() {
+        s.push_str(&format!("- MCP server: {mcp}\n"));
     }
     s.push('\n');
 
@@ -1043,6 +1061,7 @@ mod tests {
             app_url: "https://app.uptimepage.dev".into(),
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: false,
+            mcp_url: None,
         };
         let xml = build_sitemap(&cfg);
         assert!(
@@ -1069,6 +1088,7 @@ mod tests {
             app_url: "https://app.uptimepage.dev".into(),
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: true,
+            mcp_url: None,
         };
         let xml = build_sitemap(&cfg);
         let illustrated: Vec<_> = list_published()

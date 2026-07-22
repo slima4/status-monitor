@@ -534,7 +534,16 @@ struct DocsIndex {
 }
 
 static RENDERED: OnceLock<HashMap<&'static str, CachedRender>> = OnceLock::new();
+static SOURCES: OnceLock<HashMap<&'static str, CachedRender>> = OnceLock::new();
 static INDEX_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+/// Served verbatim under `Accept: text/markdown` — same bytes the HTML is
+/// rendered from, so the two can never disagree.
+fn sources() -> HashMap<&'static str, CachedRender> {
+    DOCS.iter()
+        .map(|doc| (doc.slug, cached_render(doc.source.to_string())))
+        .collect()
+}
 
 fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
     DOCS.iter()
@@ -608,6 +617,7 @@ fn render_index(cfg: &MarketingCfg) -> CachedRender {
 pub(crate) fn warm(cfg: &MarketingCfg) {
     INDEX_CACHED.get_or_init(|| render_index(cfg));
     RENDERED.get_or_init(|| render_all(cfg));
+    SOURCES.get_or_init(sources);
 }
 
 async fn index(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
@@ -621,8 +631,15 @@ async fn page(
     headers: HeaderMap,
 ) -> Response {
     let cache = RENDERED.get_or_init(|| render_all(&cfg));
-    match cache.get(slug.trim_end_matches('/')) {
-        Some(cached) => serve_cached(&headers, cached, &DOCS_CACHE_CONTROL),
+    let slug = slug.trim_end_matches('/');
+    match cache.get(slug) {
+        Some(cached) => {
+            let source = SOURCES
+                .get_or_init(sources)
+                .get(slug)
+                .expect("DOCS drives both");
+            super::negotiate::serve(&headers, cached, source, &DOCS_CACHE_CONTROL)
+        }
         None => not_found(State(cfg)).await,
     }
 }

@@ -148,6 +148,7 @@ pub struct NotFoundPage {
 /// startup config — so re-rendering and re-hashing per request would
 /// burn ~80–150 µs for an identical response.
 static LANDING_CACHED: OnceLock<CachedRender> = OnceLock::new();
+static LANDING_MD: OnceLock<CachedRender> = OnceLock::new();
 static NF_CACHED: OnceLock<CachedRender> = OnceLock::new();
 
 #[derive(Clone)]
@@ -199,7 +200,20 @@ fn render_not_found(cfg: &MarketingCfg) -> CachedRender {
 
 pub async fn landing(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
     let cached = LANDING_CACHED.get_or_init(|| render_landing(&cfg));
-    serve_cached(&headers, cached, &PAGE_CACHE_CONTROL)
+    let markdown = LANDING_MD.get_or_init(|| render_landing_markdown(&cfg));
+    super::negotiate::serve(&headers, cached, markdown, &PAGE_CACHE_CONTROL)
+}
+
+/// The landing page has no Markdown source of its own — it is a template.
+/// `llms.txt` is the authored Markdown statement of the same thing, so an
+/// agent asking for Markdown at `/` gets the site index rather than a
+/// stripped-down rendering of the hero.
+fn render_landing_markdown(cfg: &MarketingCfg) -> CachedRender {
+    let body = super::seo::llms_markdown(cfg);
+    CachedRender {
+        etag: body_etag(&String::from_utf8_lossy(&body)),
+        body,
+    }
 }
 
 pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
@@ -334,6 +348,7 @@ pub async fn pricing(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
     LANDING_CACHED.get_or_init(|| render_landing(cfg));
+    LANDING_MD.get_or_init(|| render_landing_markdown(cfg));
     PRICING_CACHED.get_or_init(|| render_pricing(cfg));
     NF_CACHED.get_or_init(|| render_not_found(cfg));
 }

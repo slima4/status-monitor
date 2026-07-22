@@ -18,12 +18,14 @@
 
 pub mod blog;
 pub mod config;
+pub mod discovery;
 pub mod dispatch;
 pub mod docs;
 pub mod gallery;
 pub mod landings;
 pub mod legal;
 pub mod md;
+mod negotiate;
 pub mod pages;
 pub mod seo;
 pub mod tools;
@@ -31,8 +33,10 @@ pub mod tools;
 use std::sync::Arc;
 
 use axum::Router;
+use axum::http::header::LINK;
 use axum::routing::get;
 use tower_http::compression::CompressionLayer;
+use tower_http::set_header::SetResponseHeaderLayer;
 
 pub use config::MarketingCfg;
 pub use dispatch::RouteByHost;
@@ -54,6 +58,8 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .route("/sitemap.xml", get(seo::sitemap_xml))
         .route("/llms.txt", get(seo::llms_txt))
         .route("/llms-full.txt", get(seo::llms_full_txt))
+        .route(discovery::CATALOG_PATH, get(discovery::api_catalog))
+        .route(discovery::CARD_PATH, get(discovery::mcp_server_card))
         .route(
             "/startupranking1371476620941810.html",
             get(seo::startupranking_verification),
@@ -66,6 +72,10 @@ pub fn router(cfg: MarketingCfg) -> Router {
         r = r
             .route("/blog", get(blog::index))
             .route("/blog/{slug}", get(blog::post));
+    }
+    // Wraps only the page routes above; `/static` and the 404 mount after.
+    if let Some(link) = discovery::link_header(&state) {
+        r = r.layer(SetResponseHeaderLayer::if_not_present(LINK, link));
     }
     // The dispatcher routes the whole apex/www host to this router, so
     // marketing must own a `/static/{*path}` route — otherwise every
@@ -88,6 +98,7 @@ fn warm_caches(state: &Arc<MarketingCfg>) {
     landings::warm(state);
     tools::warm(state);
     docs::warm(state);
+    discovery::warm(state);
     if state.blog_enabled {
         blog::warm(state);
     }

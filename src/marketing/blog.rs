@@ -95,6 +95,7 @@ struct FaqEntry {
 
 static POSTS: OnceLock<Vec<Post>> = OnceLock::new();
 static RENDERED_INDEX: OnceLock<HashMap<String, CachedRender>> = OnceLock::new();
+static SOURCES: OnceLock<HashMap<String, CachedRender>> = OnceLock::new();
 static INDEX_CACHED: OnceLock<CachedRender> = OnceLock::new();
 
 /// Parse + render every published post once. Idempotent; the renders
@@ -122,6 +123,20 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     init();
     INDEX_CACHED.get_or_init(|| render_index(cfg));
     RENDERED_INDEX.get_or_init(|| build_post_index(cfg));
+    SOURCES.get_or_init(build_sources);
+}
+
+/// The post body under `Accept: text/markdown`, with the front-matter
+/// title and date restored as Markdown so the served document stands on
+/// its own.
+fn build_sources() -> HashMap<String, CachedRender> {
+    list_published()
+        .into_iter()
+        .map(|p| {
+            let doc = format!("# {}\n\n_{}_\n\n{}", p.title, p.date, p.body_md);
+            (p.slug.clone(), cached_render(doc))
+        })
+        .collect()
 }
 
 fn build_post_index(cfg: &MarketingCfg) -> HashMap<String, CachedRender> {
@@ -431,7 +446,13 @@ pub async fn post(
 ) -> Response {
     let cache = RENDERED_INDEX.get_or_init(|| build_post_index(&cfg));
     match cache.get(&slug) {
-        Some(cached) => serve_cached(&headers, cached, &POST_CACHE_CONTROL),
+        Some(cached) => {
+            let source = SOURCES
+                .get_or_init(build_sources)
+                .get(&slug)
+                .expect("same post list");
+            super::negotiate::serve(&headers, cached, source, &POST_CACHE_CONTROL)
+        }
         None => not_found(State(cfg)).await,
     }
 }

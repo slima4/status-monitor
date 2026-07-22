@@ -109,3 +109,48 @@ async fn mcp_with_sm_live_token_but_no_db_challenges() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+async fn server_card_is_public_and_matches_the_running_server() {
+    let app = build_test_app_with_web(|cfg| {
+        cfg.mcp.enabled = true;
+        cfg.mcp.resource_uri = "https://mcp.example.test/mcp".into();
+        cfg.marketing.canonical_origin = "https://example.test".into();
+    });
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/.well-known/mcp/server-card.json")
+                .header("host", "localhost")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let card: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(card["name"], "test.example/uptimepage");
+    assert_eq!(card["version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(card["remotes"][0]["url"], "https://mcp.example.test/mcp");
+    assert_eq!(card["remotes"][0]["transport"], "streamable-http");
+    assert!(card["capabilities"]["tools"].is_object(), "{card}");
+}
+
+#[tokio::test]
+async fn server_card_is_absent_without_a_configured_endpoint() {
+    let app = build_test_app_with_web(|cfg| cfg.mcp.enabled = true);
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/.well-known/mcp/server-card.json")
+                .header("host", "localhost")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
