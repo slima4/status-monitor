@@ -28,7 +28,9 @@ use axum::routing::get;
 use super::config::{BRAND, MarketingCfg};
 use super::md::TocEntry;
 use super::pages::{CachedRender, cached_render, not_found, serve_cached};
-use super::seo::{JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_tech_article};
+use super::seo::{
+    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_breadcrumb_trail, json_ld_tech_article,
+};
 use crate::web::filters;
 
 /// A deploy can change the sidebar on every page at once, so an
@@ -509,7 +511,10 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                     doc.description,
                     doc.lastmod,
                 ),
-                breadcrumb_ld: json_ld_breadcrumb(&cfg.canonical_origin, doc.title, &path),
+                breadcrumb_ld: json_ld_breadcrumb_trail(
+                    &cfg.canonical_origin,
+                    &[("Docs", DOCS_INDEX_PATH), (doc.title, &path)],
+                ),
                 canonical_url,
                 app_url: cfg.app_url.clone(),
                 og,

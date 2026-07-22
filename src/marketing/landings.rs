@@ -164,6 +164,10 @@ pub const LANDINGS: &[Landing] = &[
         code: None,
         resources: &[
             ResourceLink {
+                label: "Status page docs",
+                href: "/docs/per-org-status",
+            },
+            ResourceLink {
                 label: "Free pricing",
                 href: "/pricing",
             },
@@ -237,6 +241,10 @@ pub const LANDINGS: &[Landing] = &[
         ],
         code: None,
         resources: &[
+            ResourceLink {
+                label: "Status page docs",
+                href: "/docs/per-org-status",
+            },
             ResourceLink {
                 label: "Free pricing",
                 href: "/pricing",
@@ -312,6 +320,10 @@ pub const LANDINGS: &[Landing] = &[
         code: None,
         resources: &[
             ResourceLink {
+                label: "Deployment docs",
+                href: "/docs/deployment",
+            },
+            ResourceLink {
                 label: "Status page for SaaS",
                 href: "/status-page-for-saas",
             },
@@ -381,6 +393,10 @@ cd uptimepage
 docker compose up -d"#,
         }),
         resources: &[
+            ResourceLink {
+                label: "Deployment docs",
+                href: "/docs/deployment",
+            },
             ResourceLink {
                 label: "Self-hosted status page",
                 href: "/self-hosted-status-page",
@@ -473,6 +489,10 @@ docker compose up -d"#,
         }),
         resources: &[
             ResourceLink {
+                label: "Deployment docs",
+                href: "/docs/deployment",
+            },
+            ResourceLink {
                 label: "An uptime bar you cannot fake",
                 href: "/blog/status-page-you-cant-fake",
             },
@@ -554,6 +574,10 @@ docker compose up -d"#,
         ],
         code: None,
         resources: &[
+            ResourceLink {
+                label: "Status page docs",
+                href: "/docs/per-org-status",
+            },
             ResourceLink {
                 label: "Status pages for agencies",
                 href: "/status-page-for-agencies",
@@ -653,6 +677,10 @@ docker compose up -d"#,
 }"#,
         }),
         resources: &[
+            ResourceLink {
+                label: "REST API docs",
+                href: "/docs/api",
+            },
             ResourceLink {
                 label: "Terraform provider",
                 href: "/terraform-uptime-monitoring",
@@ -995,6 +1023,10 @@ docker compose up -d"#,
         }),
         resources: &[
             ResourceLink {
+                label: "Deployment docs",
+                href: "/docs/deployment",
+            },
+            ResourceLink {
                 label: "Monitoring as code",
                 href: "/terraform-uptime-monitoring",
             },
@@ -1147,6 +1179,10 @@ docker compose up -d"#,
         code: None,
         resources: &[
             ResourceLink {
+                label: "Deployment docs",
+                href: "/docs/deployment",
+            },
+            ResourceLink {
                 label: "Open-source status page",
                 href: "/open-source-status-page",
             },
@@ -1224,6 +1260,10 @@ docker compose up -d"#,
         ],
         code: None,
         resources: &[
+            ResourceLink {
+                label: "Deployment docs",
+                href: "/docs/deployment",
+            },
             ResourceLink {
                 label: "vs Upptime, Cachet, Statping",
                 href: "/vs/self-hosted-status-pages",
@@ -1827,6 +1867,10 @@ resource "uptimepage_status_page_component" "api" {
         }),
         resources: &[
             ResourceLink {
+                label: "Terraform docs",
+                href: "/docs/terraform",
+            },
+            ResourceLink {
                 label: "Terraform uptime monitoring",
                 href: "/terraform-uptime-monitoring",
             },
@@ -1927,6 +1971,10 @@ resource "uptimepage_status_page_component" "web" {
         }),
         resources: &[
             ResourceLink {
+                label: "Terraform docs",
+                href: "/docs/terraform",
+            },
+            ResourceLink {
                 label: "Terraform providers, compared",
                 href: "/compare/terraform-providers",
             },
@@ -1979,6 +2027,10 @@ resource "uptimepage_status_page_component" "web" {
         ],
         code: None,
         resources: &[
+            ResourceLink {
+                label: "MCP server docs",
+                href: "/docs/mcp",
+            },
             ResourceLink {
                 label: "MCP server",
                 href: "/mcp-server",
@@ -2087,6 +2139,10 @@ resource "uptimepage_target" "api" {
         }),
         resources: &[
             ResourceLink {
+                label: "Terraform docs",
+                href: "/docs/terraform",
+            },
+            ResourceLink {
                 label: "Terraform Registry",
                 href: TERRAFORM_URL,
             },
@@ -2177,6 +2233,10 @@ resource "uptimepage_target" "api" {
 }"#,
         }),
         resources: &[
+            ResourceLink {
+                label: "MCP server docs",
+                href: "/docs/mcp",
+            },
             ResourceLink {
                 label: "How the MCP server works",
                 href: "/blog/mcp-server",

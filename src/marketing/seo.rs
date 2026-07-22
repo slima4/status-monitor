@@ -299,6 +299,27 @@ pub fn json_ld_breadcrumb(canonical_origin: &str, name: &str, path: &str) -> Jso
     JsonLd::from_value(payload)
 }
 
+/// `BreadcrumbList` for a page nested deeper than one level (Home › Docs ›
+/// page). `trail` is every step after Home, in order.
+pub fn json_ld_breadcrumb_trail(canonical_origin: &str, trail: &[(&str, &str)]) -> JsonLd {
+    let mut items = vec![serde_json::json!({
+        "@type": "ListItem", "position": 1, "name": "Home", "item": canonical_origin,
+    })];
+    for (i, (name, path)) in trail.iter().enumerate() {
+        items.push(serde_json::json!({
+            "@type": "ListItem",
+            "position": i + 2,
+            "name": name,
+            "item": format!("{canonical_origin}{path}"),
+        }));
+    }
+    JsonLd::from_value(serde_json::json!({
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": items,
+    }))
+}
+
 pub fn json_ld_webpage(
     canonical_origin: &str,
     path: &str,
@@ -1167,6 +1188,25 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
         assert_eq!(v["itemListElement"][0]["item"]["@type"], "Thing");
         assert_eq!(v["itemListElement"][0]["item"]["name"], "Uptime Kuma");
+    }
+
+    #[test]
+    fn json_ld_breadcrumb_trail_numbers_every_level_from_home() {
+        let jl = json_ld_breadcrumb_trail(
+            "https://uptimepage.dev",
+            &[("Docs", "/docs"), ("Probe regions", "/docs/hosted/regions")],
+        );
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        let items = v["itemListElement"].as_array().unwrap();
+        let steps: Vec<(u64, &str)> = items
+            .iter()
+            .map(|i| (i["position"].as_u64().unwrap(), i["name"].as_str().unwrap()))
+            .collect();
+        assert_eq!(steps, [(1, "Home"), (2, "Docs"), (3, "Probe regions")]);
+        assert_eq!(
+            items[2]["item"],
+            "https://uptimepage.dev/docs/hosted/regions"
+        );
     }
 
     #[test]
