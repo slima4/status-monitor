@@ -127,6 +127,16 @@ impl DocPage {
 /// the order readers see.
 pub const DOCS: &[DocPage] = &[
     DocPage {
+        slug: "getting-started",
+        title: "Getting started",
+        description: "Sign in, add a monitor, get alerted, and publish a status page in about ten minutes.",
+        section: Section::Start,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/getting-started.md"),
+        dir: "",
+    },
+    DocPage {
         slug: "overview",
         title: "Overview",
         description: "What uptimepage is, what it runs on, and where to start reading.",
@@ -164,6 +174,16 @@ pub const DOCS: &[DocPage] = &[
         scope: Scope::Everyone,
         lastmod: "2026-06-11",
         source: include_str!("../../docs/incidents.md"),
+        dir: "",
+    },
+    DocPage {
+        slug: "monitor-types",
+        title: "Monitor types",
+        description: "The eight check kinds, what each one actually proves, and which to reach for.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/monitor-types.md"),
         dir: "",
     },
     DocPage {

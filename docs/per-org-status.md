@@ -1,6 +1,6 @@
 # Per-org status pages
 
-Each org owns one or more public status pages. A page lives at `{slug}.{base_domain}` in SaaS mode (`acme.uptimepage.dev`, `status.acme.uptimepage.dev`, …, apex-wildcard shape) and renders **only** the monitors that org has curated onto it, with that page's branding, incidents, and maintenance. A new org starts with one default page (slug = the org slug) created at signup; the owner can rename it, add more pages, or take any page offline.
+Each org owns one or more public status pages. A page lives at `{slug}.{base_domain}` in SaaS mode (`acme.uptimepage.dev`, `status.acme.uptimepage.dev`, …, apex-wildcard shape) and renders **only** the monitors that org has curated onto it, with that page's branding, incidents, and maintenance. An org starts with no pages; the owner creates one from the settings screen, which mints it published at a temporary slug and opens the editor to set the real one. Pages can be renamed, added to, or taken offline at any time.
 
 The number of pages an org can run is plan-capped (`max_status_pages`); the free plan gets one. Multiple pages let an org split surfaces — e.g. a public page and a separate internal-stakeholder page — each showing a different subset of monitors under a different URL.
 
@@ -61,7 +61,7 @@ Every route is scoped to the caller's active org: a page id that isn't in that o
 |---|---|---|
 | `name` | 1–80 chars; the operator-facing label in the Pages list (not shown publicly) | — (required) |
 | `slug` | globally-unique subdomain slug; 3–30 chars, lowercase letters / digits / hyphens, starts with a letter. A rename is a hard cutover — the old URL stops working immediately | — (required) |
-| `enabled` | published? a draft (`false`) 404s on its public host | off on create via the API; the signup default page is on |
+| `enabled` | published? a draft (`false`) 404s on its public host | off on create via the API; the settings screen creates it on, at a temporary slug |
 | `public_display_name` | 1–80 chars | the org's name |
 | `public_brand_color` | `#RRGGBB` (6-digit hex) | `#3b82f6` |
 | `public_about` | Markdown, ≤ 500 chars, rendered to sanitised HTML | omitted |

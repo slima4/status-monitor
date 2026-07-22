@@ -191,7 +191,7 @@ Some third-party APIs rate-limit by source IP regardless. GitHub's unauthenticat
 
 #### Per-host throttle
 
-The worker side caps the number of concurrent checks one tenant can fan at the same `(host, port)` so a burst of monitors against one upstream doesn't look like a probe. When the cap is reached, the over-cap check is recorded as `degraded` with `error="throttled: host concurrency cap"` and **no alert fires** — the upstream is fine, the back-pressure is operator-side. The cap is per-tenant: one customer's burst never starves another customer's monitor of the same host. Default cap is two in-flight per `(org, host, port)`; tune via `checker.per_host_max_inflight`. RDAP queries (domain expiry) carry their own per-TLD cap via `checker.rdap_max_inflight`.
+The worker side caps the number of concurrent checks one tenant can fan at the same `(host, port)` so a burst of monitors against one upstream doesn't look like a probe. When the cap is reached, the over-cap tick is **dropped**: no `CheckResult` is written, so it never counts as a failure and no alert fires — the upstream is fine, the back-pressure is operator-side. The cap is per-tenant: one customer's burst never starves another customer's monitor of the same host. Default cap is two in-flight per `(org, host, port)`; tune via `checker.per_host_max_inflight`. RDAP queries (domain expiry) carry their own per-TLD cap via `checker.rdap_max_inflight`.
 
 ### TCP
 
@@ -206,6 +206,34 @@ The worker side caps the number of concurrent checks one tenant can fan at the s
 ```
 
 Sends one ICMP echo request per resolved (SSRF-filtered) address until a reply arrives; the round-trip time is recorded as `duration_ms`. Silence for the full timeout is `down` — ICMP has no refusal signal. Self-hosters: the probe opens an unprivileged `SOCK_DGRAM` ICMP socket, so the process needs `net.ipv4.ping_group_range` to cover its GID (Docker sets this by default) or `CAP_NET_RAW`; without either, ping checks report `error` with the reason.
+
+### DNS
+
+```jsonc
+{
+  "type": "dns",
+  "domain": "api.example.com",
+  "record_type": "A",
+  "resolver": "1.1.1.1",           // optional; omit for the process resolver
+  "expected_contains": "192.0.2.1", // optional strict match
+  "timeout": 3000
+}
+```
+
+Resolves `domain` and reads the answers. `record_type` is one of `A`, `AAAA`,
+`CNAME`, `MX`, `NS`, `TXT`, `SOA`, `PTR`, `CAA`, `SRV`. A trailing dot on the
+domain is tolerated. `resolver` takes `ip` or `ip:port` (`1.1.1.1`,
+`8.8.8.8:53`) to query one specific server instead of the process default.
+
+Status: an empty answer set — including NXDOMAIN and no-records — is `down`.
+With `expected_contains` set, an answer set where no value contains that
+substring is also `down`, which is how a hijacked or mis-pointed record
+surfaces rather than passing because *something* resolved. Without it, any
+non-empty answer is `up`. A resolver failure (SERVFAIL, network error) is also
+`down`; only the outer check timeout records an `error`.
+
+The result carries `domain`, `record_type`, the `answers` list,
+`expected_contains`, and `matched` so a failure shows what actually resolved.
 
 ### Heartbeat (inbound dead-man's-switch)
 
