@@ -33,7 +33,7 @@ What responders see here is deliberately separate from what customers see on a s
 
 | Screen | What you do there |
 |---|---|
-| **Notifications** | Add and test alert channels: Slack, Discord, Teams, Google Chat, Telegram, WhatsApp, SMS, email, PagerDuty, ntfy, Pushover, or any webhook. Send a test before saving, and see which monitors a channel is bound to before deleting it. |
+| **Notifications** | Add and test alert channels: Slack, Discord, Teams, Google Chat, Telegram, WhatsApp, SMS, email, PagerDuty, ntfy, Pushover, or any webhook. See [Notifications](notifications.md). |
 | **Status pages** | Create and publish your public pages, set branding and logo, and choose which monitors appear under which names. See [Per-org status pages](per-org-status.md). |
 | **Variables** | Org-scoped values and write-only secrets that monitors reference as `{{key}}`. See [Variables and secrets](variables.md). |
 | **Team** | Invite people by email, set roles, revoke pending invitations, and remove members. Owner-only; other members see it read-only. |

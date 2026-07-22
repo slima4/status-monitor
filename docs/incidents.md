@@ -79,7 +79,7 @@ Resolution at page time, for a given instant: an override covering that instant 
 
 ### Contact channels
 
-A resolved user is paged through the org channels they have opted into — each member picks, on the on-call page, which notification channels reach them. A `user`/`schedule` target therefore resolves to people, then to their chosen channels; the paging log records the targeted user alongside the channel. If a member has chosen no channels, they resolve but cannot be paged.
+A resolved user is paged through the org [notification channels](notifications.md) they have opted into — each member picks, on the on-call page, which notification channels reach them. A `user`/`schedule` target therefore resolves to people, then to their chosen channels; the paging log records the targeted user alongside the channel. If a member has chosen no channels, they resolve but cannot be paged.
 
 ## Publishing to a status page
 

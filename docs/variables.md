@@ -18,8 +18,11 @@ References resolve in these HTTP request fields:
 | Header value | yes | yes |
 | Request body | yes | yes |
 | Body assertion (expected body contains) | yes | no |
+| Flow step `fill` value | yes | yes |
 
-A secret is confined to header values and the request body. It is rejected in the URL and in the body assertion, because those surface through logs, redirects, or the captured response and would leak the value. A plain variable is allowed anywhere on the request side.
+A secret is confined to header values, the request body, and the value a flow step types into a form field. It is rejected in the URL and in the body assertion, because those surface through logs, redirects, or the captured response and would leak the value. A plain variable is allowed anywhere on the request side.
+
+A flow monitor's `fill` value is the one place a credential would otherwise be stored literally, since a login script needs the password. Reference a secret there and the stored config keeps only the `{{key}}`.
 
 Substitution is single pass: a value that itself contains `{{x}}` is inserted as plain text and is never scanned for further references, so one variable can never expand into another.
 
@@ -56,7 +59,9 @@ Where secrets live: a secret value is sealed with the application key (KEK) befo
 
 No-key fallback: if no KEK is configured (a self-hosted instance that has not set one), a secret is stored in plaintext, the same fallback that target credentials use. The value is still write-only in the API and the UI, but it is not encrypted at rest. Configure a KEK if you need encryption at rest.
 
-What is redacted: a secret value is never serialized by any read API and never rendered in the UI after it is saved. The public status page never resolves variables, so nothing reaches a shared surface. An interactive **test** or **check now** runs against the real resolved request, and the captured response is scrubbed of any secret value it echoed back, so the test surface cannot reveal a secret either.
+What is redacted: a secret value is never serialized by any read API and never rendered in the UI after it is saved. The public status page never resolves variables, so nothing reaches a shared surface. An interactive **test** or **check now** runs against the real resolved request, and the captured response is scrubbed of any secret value it echoed back, so the test surface cannot reveal a secret either. Values shorter than four characters are left alone: replacing a one or two character string would mangle unrelated response text and protects nothing worth protecting.
+
+Repointing a URL variable: if a monitor builds its URL from a plain variable and also sends a secret in a header, editing that URL variable sends the credential to whatever host it now names. Nothing blocks this, because it is sometimes what you intend, but the save is logged with the keys involved. Treat a URL variable on a monitor that carries a secret as a credential-scoped setting.
 
 Redirects: when a monitor follows a redirect to a different origin, the probe strips the standard sensitive headers (`Authorization`, cookies, `x-api-key`, and similar) so a credential cannot follow a hostile `Location`. The authentication picker writes its credential into `Authorization` or `x-api-key`, both of which are covered. If you place a secret in a non-standard header name of your own and your monitor follows redirects to hosts you do not control, that header is not on the strip list and could follow the redirect; prefer the picker's headers for credentials.
 

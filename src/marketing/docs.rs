@@ -167,6 +167,16 @@ pub const DOCS: &[DocPage] = &[
         dir: "",
     },
     DocPage {
+        slug: "notifications",
+        title: "Notifications",
+        description: "Alert channels, how a monitor binds them, and what decides when an alert fires.",
+        section: Section::Guide,
+        scope: Scope::Everyone,
+        lastmod: "2026-07-22",
+        source: include_str!("../../docs/notifications.md"),
+        dir: "",
+    },
+    DocPage {
         slug: "public-status",
         title: "Public status page",
         description: "The customer-facing surface: components, incidents, maintenance, badges, JSON and RSS.",
