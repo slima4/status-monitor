@@ -1,4 +1,5 @@
 use axum::Router;
+use axum::response::Redirect;
 use axum::routing::{get, post};
 use tower_cookies::CookieManagerLayer;
 
@@ -258,6 +259,24 @@ pub fn routes(state: AppState) -> Router {
     // reads the session) + CSRF + the cross-cutting layers. Gated internally on
     // mcp config.
     r = r.merge(crate::oauth::routes(cfg));
+
+    // This host serves the API the catalog describes, so an agent handed an
+    // API URL looks for it here. The document itself stays single-sourced on
+    // the marketing host.
+    if cfg.marketing.enabled && !cfg.marketing.canonical_origin.is_empty() {
+        let catalog = format!(
+            "{}{}",
+            cfg.marketing.canonical_origin.trim_end_matches('/'),
+            crate::marketing::discovery::CATALOG_PATH
+        );
+        r = r.route(
+            crate::marketing::discovery::CATALOG_PATH,
+            get(move || {
+                let catalog = catalog.clone();
+                async move { Redirect::temporary(&catalog) }
+            }),
+        );
+    }
 
     assets::mount_static(r)
         .fallback(error::not_found)
