@@ -1,8 +1,8 @@
 # REST API
 
-Mounted under `/api/v1` on the configured API bind. JSON in, JSON out. No authentication in v1 — bind to loopback or front it with a reverse proxy you trust.
+Mounted under `/api/v1` on the configured API bind. JSON in, JSON out. Every `/api/v1/*` endpoint is authenticated: a session cookie from the operator UI, or an `Authorization: Bearer` API token bound to one org and carrying its own scopes. The health probes and the OpenAPI document are the exception and stay open. See [Authentication](authentication.md#api-token-auth).
 
-OpenAPI 3.1 document at `GET /api/openapi.json`; Swagger UI at `GET /docs`.
+OpenAPI 3.1 document at `GET /api/openapi.json`; Swagger UI at `GET /docs` on the app host (<https://app.uptimepage.dev/docs> on the hosted service).
 
 All responses use `Content-Type: application/json; charset=utf-8`.
 

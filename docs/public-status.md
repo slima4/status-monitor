@@ -60,17 +60,20 @@ curation:
 
 ```bash
 # Add monitor $TARGET_ID to page $PAGE_ID
-curl -X POST http://127.0.0.1:8080/api/v1/status-pages/$PAGE_ID/components \
+curl -X POST https://app.uptimepage.dev/api/v1/status-pages/$PAGE_ID/components \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"target_id": "'$TARGET_ID'", "public_name": "Public API", "public_group": "Core APIs"}'
 
 # Edit the per-page name / description / group later
-curl -X PATCH http://127.0.0.1:8080/api/v1/status-pages/$PAGE_ID/components/$TARGET_ID \
+curl -X PATCH https://app.uptimepage.dev/api/v1/status-pages/$PAGE_ID/components/$TARGET_ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'content-type: application/json' \
   -d '{"public_description": "Primary REST surface, all regions."}'
 
 # Remove it from the page
-curl -X DELETE http://127.0.0.1:8080/api/v1/status-pages/$PAGE_ID/components/$TARGET_ID
+curl -X DELETE https://app.uptimepage.dev/api/v1/status-pages/$PAGE_ID/components/$TARGET_ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN"
 ```
 
 On the `PATCH`, `public_name`, `public_description`, and `public_group`
@@ -100,7 +103,8 @@ resolved" entries that show up on `/status` and in the RSS feed.
 Update the title + severity:
 
 ```bash
-curl -X PATCH http://127.0.0.1:8080/api/v1/incidents/$INCIDENT_ID \
+curl -X PATCH https://app.uptimepage.dev/api/v1/incidents/$INCIDENT_ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
     "public_title": "Elevated 5xx in EU-WEST",
@@ -116,7 +120,8 @@ Omitting the field leaves it unchanged.
 Append a status update to the timeline:
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/incidents/$INCIDENT_ID/updates \
+curl -X POST https://app.uptimepage.dev/api/v1/incidents/$INCIDENT_ID/updates \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
     "phase": "identified",
@@ -151,7 +156,8 @@ renders as a maintenance cell rather than an outage cell.
 Create:
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/maintenance \
+curl -X POST https://app.uptimepage.dev/api/v1/maintenance \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'content-type: application/json' \
   -d '{
     "title": "PG13 → PG16 cutover",
@@ -165,11 +171,13 @@ curl -X POST http://127.0.0.1:8080/api/v1/maintenance \
 List, edit, delete:
 
 ```bash
-curl 'http://127.0.0.1:8080/api/v1/maintenance?status=upcoming&limit=10'
-curl -X PATCH http://127.0.0.1:8080/api/v1/maintenance/$ID \
+curl 'https://app.uptimepage.dev/api/v1/maintenance?status=upcoming&limit=10'
+curl -X PATCH https://app.uptimepage.dev/api/v1/maintenance/$ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
      -H 'content-type: application/json' \
      -d '{"title": "PG cutover (postponed)"}'
-curl -X DELETE http://127.0.0.1:8080/api/v1/maintenance/$ID
+curl -X DELETE https://app.uptimepage.dev/api/v1/maintenance/$ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN"
 ```
 
 Validation rules:
@@ -236,10 +244,10 @@ operators can embed in README files or external dashboards. Two modes:
 
 ```markdown
 <!-- Overall page status -->
-![status](https://status.example.com/api/public/v1/badge.svg)
+![status](https://acme.uptimepage.dev/api/public/v1/badge.svg)
 
 <!-- Single component -->
-![api status](https://status.example.com/api/public/v1/badge.svg?component=<uuid>)
+![api status](https://acme.uptimepage.dev/api/public/v1/badge.svg?component=<uuid>)
 ```
 
 The badge reuses the cached page payload, so it tracks the `/status`

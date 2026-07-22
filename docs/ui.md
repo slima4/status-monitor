@@ -1,121 +1,53 @@
 # Web UI
 
-The same Rust binary that serves `/api/v1/*` also serves a server-rendered HTML UI on the same port. Open `http://<host>:<api-port>/` in a browser.
+The app is where you add monitors, watch them, and respond when one goes down. On the hosted service it is <https://app.uptimepage.dev>; on your own instance it is whatever host and port you bound the API to.
 
-## Stack
+Every screen here is a faster way to reach the [REST API](api.md), not a separate feature set. Monitors and notification channels can also be declared as code with [Terraform](terraform.md).
 
-| Layer | What | Where |
-|---|---|---|
-| Templates | askama 0.16 + askama_web 0.16 (compile-time HTML, type-checked by `cargo build`) | `templates/` |
-| Interactivity | HTMX 2.0.9 + json-enc (partial swaps, JSON form submission — no SPA framework) | `static/js/htmx.min.js`, `static/js/json-enc.js` |
-| Charts | ECharts 6 (lazy-loaded only on pages that need it) | `static/js/echarts.min.js`, `static/js/charts/` |
-| CSS | Tailwind 4.3 (CSS-first config via `@import`, `@source`, `@theme`, `@layer`) | `static/css/input.css` → `app.css` |
-| Asset serving | `rust-embed` — assets are baked into the binary at compile time | `src/web/assets.rs` |
+## Dashboard
 
-After `cargo build --release` you have one ~23 MB executable that contains every template, every CSS byte, and every vendored JS file. No node, no bundler, no separate frontend service.
+The landing screen after sign-in: summary cards across the top, then one dense table listing every monitor.
 
-## Routes
+The cards give you overall uptime, response time, check volume, and the current up/down split, next to a health rail showing the last 24 hours. The table below carries a row per monitor with its status, type, p50 and p95 response times, a latency sparkline, error rate, and uptime, and you can sort and filter it. It is built to stay readable at a thousand monitors, so the answer to "which one is slow" is a sort rather than a scroll.
 
-| Path | Purpose |
+## Monitors
+
+**Monitors** lists everything you are checking, with filters by name, tag, and enabled state. Monitors created by an API token or by Terraform carry a small `api` or `terraform` chip, so it is obvious which ones a UI edit might get overwritten on the next apply.
+
+Opening a monitor gives you its detail view: current status, uptime figures, response-time percentiles, a breakdown of where the time goes (DNS, connect, TLS, first byte), recent check results, and the incident history. Four time ranges (1 hour, 24 hours, 7 days, 30 days) switch the whole page at once, and if the monitor runs in several regions you can filter any chart down to one of them.
+
+**Add monitor** takes a URL, an interval, and the regions to check from. Two sections are worth a look before you save:
+
+- **Detection** decides when a failure counts. Set how many consecutive failures open an incident, and how many regions have to agree. See [Probe regions](hosted/regions.md) for what the region policies mean.
+- **Notifications** binds the alert channels for this monitor, sets how often to remind you while it stays down, and whether recovery is announced. It only appears once your org has at least one channel.
+
+Credentials are not typed into the monitor form. Headers reference org secrets instead, picked with the variable helper, so the literal value lives in one place. See [Variables and secrets](variables.md).
+
+## Incidents
+
+**Incidents** is the responder view: what is open, who acknowledged it, and what has happened since. You can declare an incident by hand for something your monitors cannot see, post updates as you learn more, and close it with a retrospective.
+
+What responders see here is deliberately separate from what customers see on a status page. [Incident management](incidents.md) covers the model and the workflow.
+
+## Settings
+
+| Screen | What you do there |
 |---|---|
-| `GET /` | Dashboard. Auto-refreshing region polls `/web/partials/dashboard` every 5 s; donut + 24h bar pull from `/api/v1/dashboard/summary`. |
-| `GET /targets` | Targets list. Filter by name (client-side), tag, enabled. Row delete + paginate via HTMX. Rows authored by an API token or Terraform carry a `managed-chip` (`api` / `terraform`); UI-authored rows show none. |
-| `GET /targets/{id}` | Target detail. Status badge, four time-range presets (1h/24h/7d/30d), uptime KPIs, latency p50/p95/p99 line, DNS/connect/TLS/TTFB stacked area, recent-results table, redacted JSON config. Externally-managed monitors also get a managed-by chip and a banner warning that UI edits may be overwritten on the next apply. |
-| `GET /targets/new` | Create form. Posts JSON to `/api/v1/targets`. Detection (open-incident-after-N-fails, region quorum) and Notifications (channel bindings, remind-while-down cadence, notify-on-recovery) are separate sections; the notification controls only render when the org has channels. |
-| `GET /targets/{id}/edit` | Edit form. Same template as `new` but `data-mode="edit"`; credential fields land in `redacted` mode and the operator must explicitly toggle "Replace credentials" before new values are sent. |
-| `GET /web/targets/list` | HTMX partial (`<tbody>` fragment) for filter/paginate swaps on the targets list. |
-| `GET /settings/notifications` | Notification-channel list. Send-test / edit / delete are HTMX row actions against `/api/v1/notification-channels`; the table body polls `/web/partials/settings/notifications` every 60 s. |
-| `GET /settings/notifications/new`, `…/{id}/edit` | Channel create/edit form (Slack / Discord / Teams / Google Chat / generic webhook / Telegram / WhatsApp / SMS; the provider-branded cards take just the provider's webhook URL, host-checked on create; the SMS card carries a gateway sub-selector — Twilio / Vonage / Telnyx / Plivo / Sinch — and takes that gateway's own credentials). With provider OAuth configured, the slack/discord panel grows an "add to Slack" / "add to Discord" button (plus a QR variant for a signed-in phone): the provider's consent screen picks the destination channel and the callback lands on the ready-made channel's edit page; cancelling, a failed exchange, or the plan's channel limit bounce back to the form with a quiet note. On deployments running the central Telegram bot, a one-tap **telegram** card joins the lineup (the BYO card reads **telegram bot**): "connect telegram" mints a single-use code, shows it as a t.me link + QR with a private-chat/group toggle, polls until the chat presses Start, then opens the channel the webhook created. Linked channels are display-only (chat title + id, no secrets, no replace toggle); unlink = delete. If the chat side unlinks first (bot removed, `/stop`), the channel is disabled with a visible "unlinked from the Telegram side" note that re-enabling clears. The Telegram panel has a setup helper: a t.me QR for the bot (scan, press Start) and a one-click chat-id probe, both talking to the Bot API straight from the browser. "Test now" delivers a synthetic alert before saving (create posts the form config to `…/test`; a locked edit tests the stored channel by id). On edit the stored secret stays masked behind a "Replace transport config" toggle — leaving it off omits `config` from the PATCH and locks the type cards (the kind rides the config). The edit page also lists the monitors bound to the channel, lets a "+ add monitor" picker bind more (it updates the monitor's alert bindings through `PATCH /api/v1/targets/{id}`), and offers delete with that blast radius spelled out — deleting a channel also removes its bindings from every monitor. |
-| `GET /settings/pages` | Status-pages list — create / rename / publish / delete pages (free plan: one). Create posts to `/api/v1/status-pages`; the list body refreshes via `/web/partials/settings/pages`. |
-| `GET /settings/pages/{id}` | Per-page editor: URL slug (own save — a rename is a hard cutover), branding, logo, and the component curation list (per-monitor on-page toggle, public name/group). Each edit autosaves via the `/api/v1/status-pages/{id}` + `/components` endpoints. |
-| `GET /settings/team` | Team management (owner-only): invite by email + role, pending-invitation revoke, member remove / leave, owner⇄member role toggle — all row actions confirm via modal and hit `/api/v1/orgs/{id}/members` + `/api/v1/orgs/{id}/invitations`. Non-owner members see a read-only note. |
-| `GET /web/partials/settings/team` | HTMX partial — seats line + members + pending-invitations tables; re-pins the target org id on every refresh. |
-| `GET /web/partials/settings/pages` | HTMX partial — the page rows for the list above. |
-| `GET /web/partials/dashboard` | HTMX partial — chrome-free dashboard region; self-rearms so each refresh still carries `hx-trigger="every 5s"`. |
-| `GET /m/{token}` | Public read-only share of one monitor — same detail dashboard, no operator chrome, credentials redacted, no login. Sub-resources (`/live`, `/incidents`, `/latency`, `/results`) are twinned under the token so the page never calls an operator URL. See [Share links](share-links.md). |
-| `GET /docs` | Swagger UI generated from `/api/openapi.json`. |
-| `GET /static/{path}` | Embedded assets (`css/`, `js/`, `img/`). |
+| **Notifications** | Add and test alert channels: Slack, Discord, Teams, Google Chat, Telegram, WhatsApp, SMS, email, PagerDuty, ntfy, Pushover, or any webhook. Send a test before saving, and see which monitors a channel is bound to before deleting it. |
+| **Status pages** | Create and publish your public pages, set branding and logo, and choose which monitors appear under which names. See [Per-org status pages](per-org-status.md). |
+| **Variables** | Org-scoped values and write-only secrets that monitors reference as `{{key}}`. See [Variables and secrets](variables.md). |
+| **Team** | Invite people by email, set roles, revoke pending invitations, and remove members. Owner-only; other members see it read-only. |
+| **Usage** | Current versus limit for every quota on your plan, as progress bars. The numbers here are the numbers you are enforced at. See [Plans and limits](hosted/plans-and-limits.md). |
+| **Account** | Export your data as JSON, or delete your account. Deletion is reversible for 30 days by signing back in. |
 
-Every mutation goes through `/api/v1/*`. There are **no** `/web/*` write routes — the JSON API stays the single source of truth, which means a future SvelteKit port is a templates-only rewrite. The `/m/{token}` share surface is read-only and serves no write method.
+On-call schedules and escalation policies get their own screens where the feature is enabled.
 
-## Build pipeline
+## Sharing a single monitor
 
-```
-cargo build [--release]
-   └─► build.rs
-         ├─► (first build only) scripts/fetch-tailwind.sh — downloads the Tailwind
-         │     standalone CLI (~30 MB, not committed) for the host platform into bin/
-         └─► ./bin/tailwindcss --minify
-                --input  static/css/input.css
-                --output static/css/app.css
-   └─► rustc
-         └─► rust-embed bakes static/ + templates/ into the binary
-```
+A share link opens one monitor's full dashboard for anyone holding the URL, with no account and no operator controls. Credentials are redacted and the view is read-only. Useful for a chat channel or a customer who needs to watch one endpoint. See [Share links](share-links.md).
 
-`build.rs` declares `rerun-if-changed` on `templates/`, `src/`, `static/css/input.css`, and `scripts/fetch-tailwind.sh`. Editing any of them triggers a Tailwind rebuild on the next `cargo build`.
+## Notes
 
-Tailwind 4 scans both `templates/**/*.html` and `src/**/*.rs` for utility class names (declared via `@source` in `input.css`), so utility classes written inside Rust strings are preserved through tree-shaking.
+The UI polls rather than holding a socket open, so leaving a dashboard on a wall display costs one cached query set per refresh regardless of how many screens are watching.
 
-## Styling: the semantic layer
-
-`static/css/input.css` is layered: design tokens (`@theme`, e.g. `--color-ink`) → primitives (`.sticker-card`, `.sticker-btn`, `.sticker-pill`) → **semantic classes** (`.page-title`, `.panel-label`, `.kpi-value`, `.stat-tile`, `.status-badge--*`, `.btn-ghost`, `.sticker-btn--primary/--danger`, `.nav-link`, `.day-cell`). Templates reference **only** the semantic names — no raw colour/shape utility clusters. State is one `--modifier` (`.status-badge--down`, `.stat-tile--ok`). Result: re-skinning the internal app is an `input.css`-only edit, no template touched. When adding UI, reuse/extend a semantic class rather than inlining `bg-*`/`rounded-*`/heading-scale clusters. The public status page is deliberately exempt — it's a flat, brand-themed surface with its own view-supplied palette (`public_status.rs`), not the cartoon sticker system.
-
-## Dashboard refresh model
-
-The dashboard splits into three regions:
-
-1. **Chrome** (nav, page header) — rendered once.
-2. **Auto-refresh region** (`<div id="dashboard-region">`) — KPI cards + system-health card. Polls `/web/partials/dashboard` every 5 s and swaps its own outer HTML so the trigger remains armed.
-3. **Charts** (donut + 24h composition bar) — placed *outside* the refresh region so the ECharts instances persist across polls. The chart wrapper listens for `htmx:afterSettle` on the region and re-fetches `/api/v1/dashboard/summary` once per cycle, fanning out to both charts (single network round-trip, not one per chart).
-
-The `dashboard_summary` handler caches its result in `state.dashboard_cache` for 5 s, so the polling load on Postgres + ClickHouse is bounded to one query set per 5 s regardless of how many tabs are open.
-
-## Credentials
-
-The form has no inline credential inputs. HTTP `basic_auth` and `bearer_token` are set through request headers that reference org secret variables, chosen via the secret-variable auth picker (`data-var-auth-picker`) and the insert-variable helper.
-
-Stored credentials never render into the edit form. The API rejects the `***` redaction sentinel on write; on PATCH an omitted credential keeps the stored value, an empty value clears it, and a real value replaces it. End-to-end coverage in `tests/web_e2e_test.rs::edit_form_renders_existing_target_without_leaking_credentials` asserts that real credentials never appear in the rendered edit form.
-
-Flow monitors are the exception. A `fill` step's value renders in the edit form (an authenticated, owner-only surface) so the login script can be adjusted without re-typing, and it is masked on every other surface: the detail config panel and API through `redact_check`, the public share view through `redact_check_for_public`. Reference an org secret as `{{name}}` in a fill value to keep the literal out of the stored config entirely.
-
-## Tests
-
-| Layer | What |
-|---|---|
-| Unit (template render) | Every view in `src/web/views/` ships a `#[test]` that renders the template with a fixtures struct and asserts on the output: HTMX hooks, redaction sentinels, chart `data-endpoint`s, table scaffolding. |
-| End-to-end | `tests/web_e2e_test.rs` drives the merged api+web router via `tower::ServiceExt::oneshot`, covering dashboard (full + partial), list (full + partial), forms (create + edit), target detail with chart anchors + time-range nav, 404 paths, and the immutable cache header on `/static/*`. |
-| Build-time | `cargo build` rejects template type mismatches — askama checks templates against the corresponding Rust struct at compile time. |
-
-```bash
-cargo test --lib web::          # unit render tests
-cargo test --test web_e2e_test  # end-to-end
-```
-
-## Adding a new page
-
-1. Add a template under `templates/` extending `base.html`.
-2. Add a `#[derive(Template, WebTemplate)]` struct and an axum handler in `src/web/views/`.
-3. Register the route in `src/web/routes.rs`.
-4. Tailwind picks up new utility classes automatically (the `@source` directive scans `templates/**/*.html` + `src/**/*.rs`).
-5. Add a render test next to the view and, if there's a route worth covering end-to-end, append a case to `tests/web_e2e_test.rs`.
-
-## Troubleshooting
-
-| Symptom | Likely cause |
-|---|---|
-| `failed to spawn ./bin/tailwindcss` during `cargo build` | First-build fetch failed. Run `bash scripts/fetch-tailwind.sh` manually and confirm `bin/tailwindcss` is executable. |
-| Page renders unstyled HTML | `static/css/app.css` empty or stale. Touch `static/css/input.css` and rebuild; the build script runs Tailwind with `--minify`. |
-| Charts render blank | Open DevTools console. Most likely a fetch to `/api/v1/dashboard/summary` or `/api/v1/targets/{id}/results` failed — the chart module logs `chart load failed` with the URL and status. |
-| Dashboard never refreshes | Confirm `<script defer src="/static/js/htmx.min.js">` is in the page source. The HTMX bundle is loaded from `base.html`. |
-| Edit form submitted credentials despite the toggle being off | Look for a console error from `auth_field.js`. The submit handler reads `data-mode` from the credential `<fieldset>` — if the fieldset is missing the data attributes, it will fall back to "include". |
-
-## Migrating to a SPA later
-
-The design keeps a SPA port cheap. Every `templates/*.html` maps one-to-one to a Svelte (or React) component, every chart module under `static/js/charts/` is already a pure `(element, endpoint) → disposer` function that imports unchanged into `onMount`, and there are zero `/web/*` write endpoints to refactor — only read partials. To swap frameworks:
-
-1. Generate a typed JSON client from `/api/openapi.json`.
-2. Port the templates page-by-page; keep `/api/v1/*` unchanged.
-3. Drop `src/web/views/` (keep `src/web/assets.rs` pointing at the new bundle).
-4. Delete `templates/` and `static/js/{htmx,json-enc,ui}` — no longer needed.
-
-The backend (`src/api/`, `src/storage/`, `src/scheduler/`, `src/worker/`) stays untouched.
+Times render in your browser's timezone, not the server's.

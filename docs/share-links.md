@@ -31,17 +31,20 @@ From the API (member-level `targets:write`):
 
 ```bash
 # Mint a link (optionally labelled, optionally expiring)
-curl -X POST https://app.example.com/api/v1/targets/$ID/shares \
+curl -X POST https://app.uptimepage.dev/api/v1/targets/$ID/shares \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"label":"Slack #ops","expires_at":"2026-12-31T00:00:00Z"}'
 # → { "id": "...", "label": "Slack #ops", "token": "…", "view_count": 0, ... }
 # build the link as /m/{token}
 
 # List the monitor's live links (each carries its token for re-copy)
-curl https://app.example.com/api/v1/targets/$ID/shares
+curl https://app.uptimepage.dev/api/v1/targets/$ID/shares \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN"
 
 # Revoke one
-curl -X DELETE https://app.example.com/api/v1/targets/$ID/shares/$SHARE_ID
+curl -X DELETE https://app.uptimepage.dev/api/v1/targets/$ID/shares/$SHARE_ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN"
 ```
 
 The same actions are available from the monitor's detail page in the UI. See the [REST API](api.md#operator-endpoints-share-links) for the endpoint contract.

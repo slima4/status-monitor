@@ -2,37 +2,48 @@
 
 Every organization is bound to a **plan**. The plan is the single source of
 truth for resource quotas and per-minute rate budgets — the number a request
-is enforced at is the same number the API reports back. Adding a paid tier
-later is one row in the `plans` table plus a UI page; nothing in the
-enforcement path changes.
+is enforced at is the same number the API reports back. A new tier is one row
+in the `plans` table; nothing in the enforcement path changes.
 
-## The free plan
+## The seeded plans
 
-Shipped and seeded on first migration. Generous for a small team, bounded
-enough to keep abuse on a small VM cheap.
+Three plans ship in the first migration: `free`, `founding` (a more generous
+free tier granted to early accounts and kept for life), and `pro`. Only
+`free` is listed; the other two are assigned by signup or billing. The hosted
+service's public names for these are on the
+[pricing page](https://uptimepage.dev/pricing).
 
-| Quota | Free | Meaning |
-|---|---|---|
-| `max_targets` | 10 | Monitored targets in the org |
-| `min_check_interval_secs` | 60 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 3600 for `tls_cert` / `domain_expiry`, 300 for `flow`, and 10 for `http` / `tcp` / `dns`. |
-| `max_flow_checks` | 1 | Browser flow monitors the org can create; runs only where a browser engine is available. Founding and Pro plans allow more. |
-| `retention_days` | 90 | Informational — actual check-result retention is the flat ClickHouse table TTL (90d for every org), not this column |
-| `max_members` | 5 | Active members in the org |
-| `max_pending_invitations` | 10 | Outstanding (unaccepted) invitations |
-| `max_api_tokens_per_user` | 5 | API tokens a single user may hold |
-| `max_status_pages` | 1 | Public status pages the org can run |
-| `max_public_components` | 10 | Distinct monitors published across all of the org's pages (a monitor on several pages counts once) |
-| `max_maintenance_windows` | 20 | Scheduled maintenance windows |
-| `max_notification_channels` | 20 | Notification channels (Slack/webhook/Telegram/WhatsApp/SMS/…) in the org |
-| `max_logo_size_bytes` | 1048576 | Status-page logo upload ceiling (1 MiB) |
+| Quota | free | founding | pro | Meaning |
+|---|---|---|---|---|
+| `max_targets` | 20 | 50 | 150 | Monitored targets in the org |
+| `min_check_interval_secs` | 180 | 60 | 30 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 3600 for `tls_cert` / `domain_expiry`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `dns` / `ping`. |
+| `retention_days` | 30 | 90 | 395 | History window the UI and API will read |
+| `raw_days` | 30 | 30 | 30 | Per-check detail retention, stamped onto each ClickHouse row at write time |
+| `max_flow_checks` | 0 | 0 | 0 | Browser flow monitors the org can create; 0 doubles as the feature gate, and every plan stays there until launch sets real caps |
+| `max_regions` | 3 | ∞ | ∞ | Regions a single monitor can be assigned to |
+| `max_members` | 3 | 5 | 15 | Active members in the org |
+| `max_pending_invitations` | 10 | 15 | 25 | Outstanding (unaccepted) invitations |
+| `max_api_tokens_per_user` | 5 | 7 | 10 | API tokens a single user may hold |
+| `max_status_pages` | 1 | 2 | 5 | Public status pages the org can run |
+| `max_public_components` | 15 | 30 | 75 | Distinct monitors published across all of the org's pages (a monitor on several pages counts once) |
+| `max_share_links_per_monitor` | 1 | 3 | 5 | Live share links on one monitor |
+| `max_shared_monitors` | 2 | 5 | 10 | Monitors with at least one share link |
+| `max_maintenance_windows` | 20 | 30 | 50 | Scheduled maintenance windows |
+| `max_notification_channels` | 20 | 30 | 50 | Notification channels (Slack/webhook/Telegram/WhatsApp/SMS/…) in the org |
+| `max_escalation_policies` | 10 | 10 | 50 | Escalation policies |
+| `max_on_call_schedules` | 5 | 5 | 25 | On-call schedules |
+| `max_logo_size_bytes` | 1048576 | 1048576 | 1048576 | Status-page logo upload ceiling (1 MiB) |
 
-| Rate budget (per minute) | Free | Category |
-|---|---|---|
-| `api_writes_per_minute` | 600 | POST/PATCH/DELETE on `/api/v1/*` |
-| `api_reads_per_minute` | 6000 | GET/HEAD/OPTIONS on `/api/v1/*` |
-| `bulk_ops_per_minute` | 30 | `/api/v1/targets/bulk*` |
-| `test_now_per_minute` | 60 | `POST /api/v1/targets/test` + the notification-channel test endpoints |
-| `check_now_per_minute` | 60 | `POST /api/v1/targets/{id}/check-now` |
+Feature flags ride on the same row: `custom_domain_enabled`, `white_label_enabled`,
+`sms_alerts_enabled`, `incident_narration_enabled`, `on_call_enabled`.
+
+| Rate budget (per minute) | free | founding | pro | Category |
+|---|---|---|---|---|
+| `api_writes_per_minute` | 600 | 900 | 1200 | POST/PATCH/DELETE on `/api/v1/*` |
+| `api_reads_per_minute` | 6000 | 9000 | 12000 | GET/HEAD/OPTIONS on `/api/v1/*` |
+| `bulk_ops_per_minute` | 30 | 45 | 60 | `/api/v1/targets/bulk*` |
+| `test_now_per_minute` | 60 | 90 | 120 | `POST /api/v1/targets/test` + the notification-channel test endpoints |
+| `check_now_per_minute` | 60 | 90 | 120 | `POST /api/v1/targets/{id}/check-now` |
 
 ## How quotas are enforced
 
@@ -62,9 +73,9 @@ Exceeding a resource quota returns **422**:
 {
   "error": {
     "code": "QUOTA_EXCEEDED",
-    "message": "max_targets limit reached: 10 of 10 used on the free plan.",
+    "message": "max_targets limit reached: 20 of 20 used on the free plan.",
     "field": null,
-    "details": { "quota": "max_targets", "current": 10, "limit": 10, "plan": "free" },
+    "details": { "quota": "max_targets", "current": 20, "limit": 20, "plan": "free" },
     "trace_id": null
   }
 }
@@ -77,9 +88,9 @@ enforced identically (atomic, never overshoot).
 A sub-minimum check interval is its own 422, `MIN_CHECK_INTERVAL`, enforced
 on create and PATCH, single and bulk — a target created at the floor cannot
 be edited below it. The floor is `max(plan.min_check_interval_secs, kind_min)`:
-the per-kind value (3600 for `tls_cert` / `domain_expiry`, 10 for the rest)
-applies regardless of plan tier — polling an expiry probe faster than once an
-hour yields no signal.
+the per-kind value (3600 for `tls_cert` / `domain_expiry`, 300 for `flow`,
+60 for `heartbeat`, 10 for the rest) applies regardless of plan tier —
+polling an expiry probe faster than once an hour yields no signal.
 
 ## Rate limiting
 

@@ -317,14 +317,80 @@ embedded via `rust-embed`.
 | `GET /targets` | targets list + filters |
 | `GET /targets/{id}` | target detail with charts and time-range nav |
 | `GET /targets/new`, `/targets/{id}/edit` | forms posting JSON to `/api/v1/targets` |
+| `GET /incidents`, `/incidents/{id}` | responder views; declare + update + close |
+| `GET /settings/*` | notifications, pages, variables, team, usage, account |
 | `GET /web/targets/list` | tbody fragment for filter/paginate swaps |
-| `GET /web/partials/dashboard` | chrome-free fragment for the 5 s refresh region |
+| `GET /web/partials/*` | chrome-free fragments for the polling regions |
+| `GET /m/{token}` | read-only share of one monitor, sub-resources twinned under the token |
 | `GET /docs` | Swagger UI generated from `/api/openapi.json` |
 | `GET /static/*` | embedded assets (`css/`, `js/`, `img/`) |
 
 Every UI mutation hits an existing `/api/v1/*` endpoint — there are no
 `/web/*` write routes, which keeps the API the single source of truth and
-makes a future SvelteKit port a templates-only rewrite.
+makes a future SvelteKit port a templates-only rewrite. The `/m/{token}`
+share surface is read-only and serves no write method.
+
+The user-facing tour of these screens is [Web UI](ui.md); this section is
+the implementation.
+
+### Styling: the semantic layer
+
+`static/css/input.css` is layered: design tokens (`@theme`, e.g.
+`--color-ink`) → primitives (`.sticker-card`, `.sticker-btn`,
+`.sticker-pill`) → **semantic classes** (`.page-title`, `.panel-label`,
+`.kpi-value`, `.stat-tile`, `.status-badge--*`, `.btn-ghost`,
+`.sticker-btn--primary/--danger`, `.nav-link`, `.day-cell`). Templates
+reference **only** the semantic names — no raw colour/shape utility
+clusters. State is one `--modifier` (`.status-badge--down`,
+`.stat-tile--ok`). Re-skinning the internal app is then an `input.css`-only
+edit with no template touched. When adding UI, reuse or extend a semantic
+class rather than inlining `bg-*`/`rounded-*`/heading-scale clusters.
+
+The public status page is deliberately exempt — it is a flat, brand-themed
+surface with its own view-supplied palette (`public_status.rs`), not the
+sticker system.
+
+Tailwind 4 scans `templates/**/*.html` **and** `src/**/*.rs` for class names
+(declared via `@source` in `input.css`), so utility classes written inside
+Rust strings survive tree-shaking.
+
+### Dashboard refresh model
+
+Three regions, split so the polling never disturbs the charts:
+
+1. **Chrome** (nav, page header) — rendered once.
+2. **Auto-refresh region** (`<div id="dashboard-region">`) — KPI cards +
+   system-health card. Polls `/web/partials/dashboard` every 5 s and swaps
+   its own outer HTML so the trigger stays armed.
+3. **Charts** — placed *outside* the refresh region so the ECharts
+   instances persist across polls. The wrapper listens for
+   `htmx:afterSettle` on the region and re-fetches
+   `/api/v1/dashboard/summary` once per cycle, fanning out to both charts
+   (one round-trip, not one per chart).
+
+`dashboard_summary` caches its result in `state.dashboard_cache` for 5 s, so
+polling load on Postgres + ClickHouse is bounded to one query set per 5 s
+regardless of how many tabs are open.
+
+### Credentials in forms
+
+The monitor form has no inline credential inputs. HTTP `basic_auth` and
+`bearer_token` are set through request headers referencing org secret
+variables, chosen via the secret-variable auth picker
+(`data-var-auth-picker`).
+
+Stored credentials never render into the edit form. The API rejects the
+`***` redaction sentinel on write; on PATCH an omitted credential keeps the
+stored value, an empty value clears it, and a real value replaces it.
+`tests/web_e2e_test.rs::edit_form_renders_existing_target_without_leaking_credentials`
+pins this.
+
+Flow monitors are the exception: a `fill` step's value renders in the edit
+form (an authenticated, owner-only surface) so a login script can be
+adjusted without re-typing, and is masked everywhere else — the detail
+config panel and API through `redact_check`, the public share view through
+`redact_check_for_public`. Referencing an org secret as `{{name}}` keeps the
+literal out of the stored config entirely.
 
 ### Adding a new page
 
@@ -334,6 +400,19 @@ makes a future SvelteKit port a templates-only rewrite.
 3. Register the route in `src/web/routes.rs`.
 4. Tailwind picks up new utility classes automatically via the
    `@source "../../templates/**/*.html"` directive.
+5. Add a render test next to the view, and a case in
+   `tests/web_e2e_test.rs` if the route is worth covering end to end.
+
+### Migrating to a SPA later
+
+Every `templates/*.html` maps one-to-one onto a component, every chart
+module under `static/js/charts/` is already a pure
+`(element, endpoint) → disposer` function, and there are zero `/web/*`
+write endpoints to refactor. To swap frameworks: generate a typed client
+from `/api/openapi.json`, port the templates page by page keeping
+`/api/v1/*` unchanged, drop `src/web/views/` (keeping `src/web/assets.rs`
+pointed at the new bundle), and delete `templates/` plus
+`static/js/{htmx,json-enc,ui}`. The backend stays untouched.
 
 ### UI tests
 
@@ -355,5 +434,10 @@ cargo test --test web_e2e_test  # e2e
 | Symptom | Likely cause |
 |---|---|
 | `503 STATUS_DATA_UNAVAILABLE` | Aggregator's first compute failed. Check `uptimepage::public_status::cache` ERROR log for the actual SQL/CH error. |
+| `failed to spawn ./bin/tailwindcss` during `cargo build` | First-build fetch failed. Run `bash scripts/fetch-tailwind.sh` and confirm `bin/tailwindcss` is executable. |
+| Page renders unstyled HTML | `static/css/app.css` empty or stale. Touch `static/css/input.css` and rebuild. |
+| Charts render blank | A fetch to `/api/v1/dashboard/summary` or `/api/v1/targets/{id}/results` failed; the chart module logs `chart load failed` with the URL and status. |
+| Dashboard never refreshes | `<script defer src="/static/js/htmx.min.js">` missing from the page source. It is loaded from `base.html`. |
+| Edit form submitted credentials despite the toggle being off | Console error from `auth_field.js`. The submit handler reads `data-mode` off the credential `<fieldset>`; without those data attributes it falls back to "include". |
 | `docker compose up --build` takes 5 min on every change | You're on the pre-cargo-chef Dockerfile. Pull latest. |
 | Native `cargo run` fails with `Connection refused` | `compose.dev.yml` isn't up, or you forgot to release port 8080 from a running container. |

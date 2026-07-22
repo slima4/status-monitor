@@ -48,7 +48,7 @@ static/              rust-embed bundle
 └── js/              HTMX 2 + json-enc + ECharts 6 + tiny UI/chart modules under ui/ and charts/
 ```
 
-The web layer is a thin server-rendered surface on top of the existing JSON API: every UI mutation hits `/api/v1/*` (forms post JSON, list/detail uses HTMX swaps of partials). See [`ui.md`](ui.md) for operator-level details.
+The web layer is a thin server-rendered surface on top of the existing JSON API: every UI mutation hits `/api/v1/*` (forms post JSON, list/detail uses HTMX swaps of partials). See [Development](development.md#web-ui) for the stack and route map, and [Web UI](ui.md) for what the screens do.
 
 ## Data flow
 

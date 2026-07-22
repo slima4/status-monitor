@@ -68,20 +68,24 @@ The endpoints are gated on the `variables:read` and `variables:write` scopes and
 
 ```bash
 # Create a secret
-curl -X POST https://app.example.com/api/v1/variables \
+curl -X POST https://app.uptimepage.dev/api/v1/variables \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"key":"api_key","is_secret":true,"value":"sk-live-..."}'
 # → { "id": "...", "key": "api_key", "is_secret": true, "value": null, "used_by": 0 }
 
 # List (secret values come back null)
-curl https://app.example.com/api/v1/variables
+curl https://app.uptimepage.dev/api/v1/variables \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN"
 
 # Rotate a value
-curl -X PATCH https://app.example.com/api/v1/variables/$ID \
+curl -X PATCH https://app.uptimepage.dev/api/v1/variables/$ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
   -H 'Content-Type: application/json' -d '{"value":"sk-live-new"}'
 
 # Delete (409 while still referenced by a monitor)
-curl -X DELETE https://app.example.com/api/v1/variables/$ID
+curl -X DELETE https://app.uptimepage.dev/api/v1/variables/$ID \
+  -H "Authorization: Bearer $UPTIMEPAGE_TOKEN"
 ```
 
 See the [REST API](api.md#operator-endpoints-variables) for the full endpoint contract.

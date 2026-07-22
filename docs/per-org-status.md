@@ -1,6 +1,6 @@
 # Per-org status pages
 
-Each org owns one or more public status pages. A page lives at `{slug}.{base_domain}` in SaaS mode (`acme.example.com`, `status.acme.example.com`, …, apex-wildcard shape) and renders **only** the monitors that org has curated onto it, with that page's branding, incidents, and maintenance. A new org starts with one default page (slug = the org slug) created at signup; the owner can rename it, add more pages, or take any page offline.
+Each org owns one or more public status pages. A page lives at `{slug}.{base_domain}` in SaaS mode (`acme.uptimepage.dev`, `status.acme.uptimepage.dev`, …, apex-wildcard shape) and renders **only** the monitors that org has curated onto it, with that page's branding, incidents, and maintenance. A new org starts with one default page (slug = the org slug) created at signup; the owner can rename it, add more pages, or take any page offline.
 
 The number of pages an org can run is plan-capped (`max_status_pages`); the free plan gets one. Multiple pages let an org split surfaces — e.g. a public page and a separate internal-stakeholder page — each showing a different subset of monitors under a different URL.
 
@@ -23,11 +23,11 @@ A page is resolved from the request `Host` header, not the path. The slug names 
 
 | Host | Result |
 |---|---|
-| `acme.example.com`, page enabled | that page |
-| `acme.example.com`, page disabled (draft) or org soft-deleted | **404** |
-| `nope.example.com`, no such page slug | **404** |
-| `a.b.example.com` (extra label) | **404** |
-| `example.com` (no slug label, bare base) | **404** |
+| `acme.uptimepage.dev`, page enabled | that page |
+| `acme.uptimepage.dev`, page disabled (draft) or org soft-deleted | **404** |
+| `nope.uptimepage.dev`, no such page slug | **404** |
+| `a.b.uptimepage.dev` (extra label) | **404** |
+| `uptimepage.dev` (no slug label, bare base) | **404** |
 | missing `Host` header | **404** |
 
 A page slug is globally unique (it routes a subdomain), so two orgs can never claim the same slug. `base_domain` must be a multi-label domain (it needs at least one dot); the boot assertion refuses an empty or single-label value, because a loose base would let the slug extractor match arbitrary `Host` headers.
@@ -111,7 +111,7 @@ Unpublishing a page (`enabled` → false) makes the host resolver stop resolving
 
 ## Configuration
 
-The `[public_status]` block and the split tenancy flags are documented in [Configuration → Public status page](configuration.md#public-status-page) and [Configuration → Multi-tenancy mode](configuration.md#multi-tenancy-mode).
+The `[public_status]` block and the split tenancy flags are documented in [Configuration → Public status page](configuration.md#public-status-page) and [Configuration → Public status routing](configuration.md#public-status-routing).
 
 ## Coming later: custom domains
 
