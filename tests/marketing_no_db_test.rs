@@ -520,6 +520,28 @@ async fn sitemap_and_llms_list_every_doc() {
 }
 
 #[tokio::test]
+async fn llms_full_inlines_product_docs_but_not_self_hosting() {
+    let (status, body, _) = get("/llms-full.txt").await;
+    assert_eq!(status, StatusCode::OK);
+    for doc in uptimepage::marketing::docs::DOCS {
+        let heading = format!("## Docs: {}", doc.title);
+        let self_hosting = doc.section == uptimepage::marketing::docs::Section::SelfHosting;
+        assert_eq!(
+            body.contains(&heading),
+            !self_hosting,
+            "{}: unexpected llms-full inlining",
+            doc.slug
+        );
+    }
+    // A distinctive line from a guide body, proving the source is inlined
+    // rather than just the heading.
+    assert!(
+        body.contains("A monitor going down is only useful if it reaches someone"),
+        "llms-full must carry doc bodies"
+    );
+}
+
+#[tokio::test]
 async fn cookie_does_not_change_response_body() {
     // Cookie isolation: marketing serves identical bytes whether or not
     // a `_sm_session` cookie tags along. No Vary: Cookie, no

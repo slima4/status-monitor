@@ -767,6 +767,23 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
         }
     }
 
+    // Docs answer product questions better than any other page, so they are
+    // inlined verbatim. Self-hosting pages are skipped: they are the bulkiest
+    // section and the least useful for answering "how do I do X in the
+    // product" — the index in llms.txt still lists them.
+    for doc in crate::marketing::docs::DOCS
+        .iter()
+        .filter(|d| d.section != crate::marketing::docs::Section::SelfHosting)
+    {
+        s.push_str(&format!("---\n\n## Docs: {}\n", doc.title));
+        s.push_str(&format!("URL: {origin}{}\n", doc.path()));
+        s.push_str(&format!(
+            "Updated: {}\n\n{}\n\n",
+            doc.lastmod,
+            doc.body_md()
+        ));
+    }
+
     if cfg.blog_enabled {
         for p in list_published() {
             s.push_str(&format!("---\n\n## Blog: {}\n", p.title));

@@ -121,6 +121,11 @@ impl DocPage {
     pub fn path(&self) -> String {
         format!("{DOCS_INDEX_PATH}/{}", self.slug)
     }
+
+    /// Source Markdown, pre-render — inlined verbatim into `llms-full.txt`.
+    pub fn body_md(&self) -> &'static str {
+        self.source
+    }
 }
 
 /// Single source of truth for the documentation. Order within a section is
