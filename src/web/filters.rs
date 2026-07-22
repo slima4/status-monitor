@@ -38,6 +38,15 @@ mod static_refs {
         Ok(env!("SM_SOURCE_COMMIT"))
     }
 
+    /// Product documentation. Absolute and upstream on purpose: docs are
+    /// served by the marketing router on the apex host, which an app-only
+    /// deployment does not run, so a relative `/docs` would land on the
+    /// app's Swagger UI or 404. Invoked as `{{ ""|docs_url }}`.
+    #[askama::filter_fn]
+    pub fn docs_url(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
+        Ok("https://uptimepage.dev/docs")
+    }
+
     /// Crate version baked at compile time. Public build string, safe to
     /// show pre-auth — no host/tenant data. Invoked as `{{ ""|version }}`.
     #[askama::filter_fn]

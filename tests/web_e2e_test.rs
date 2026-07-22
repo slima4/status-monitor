@@ -88,6 +88,29 @@ async fn dashboard_renders_with_kpi_cards_and_chart_anchors() {
     assert!(html.contains(r#"href="/targets/new""#));
 }
 
+/// Docs live on the marketing host, which an app-only deployment does not
+/// run, so the app must link out absolutely rather than to its own `/docs`
+/// (that path is the Swagger UI here).
+#[tokio::test]
+async fn app_chrome_links_out_to_the_docs() {
+    let resp = app()
+        .oneshot(Request::get("/").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let html = body_text(resp).await;
+    // The account popover renders twice (desktop + mobile), plus the footer.
+    assert_eq!(
+        html.matches(r#"href="https://uptimepage.dev/docs""#)
+            .count(),
+        3,
+        "expected the docs link in both nav popovers and the footer"
+    );
+    assert!(
+        !html.contains(r#"href="/docs""#),
+        "a relative /docs on the app host is the Swagger UI, not the docs"
+    );
+}
+
 #[tokio::test]
 async fn dashboard_partial_returns_chrome_free_fragment() {
     let resp = app()

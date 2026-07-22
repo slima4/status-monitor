@@ -20,6 +20,9 @@
 <a href="/settings/account" role="menuitem"
    class="monitors-popover__item"{% if active_tab == "account" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-user" /></svg>account</a>
 <div class="monitors-popover__sep"></div>
+<a href="{{ ""|docs_url }}" role="menuitem" target="_blank" rel="noopener"
+   class="monitors-popover__item"><svg class="mp-icon" aria-hidden="true"><use href="#i-book" /></svg>docs</a>
+<div class="monitors-popover__sep"></div>
 <button type="button" role="menuitem"
         hx-post="/auth/logout"
         hx-headers='{"X-Requested-With":"uptimepage"}'
