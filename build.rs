@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::path::Path;
 use std::process::Command;
 
@@ -158,6 +159,10 @@ fn main() {
             .expect("failed to invoke scripts/fetch-tailwind.sh");
         assert!(fetch.success(), "fetch-tailwind.sh exited non-zero");
     }
+
+    // Serialize the shared app.css write; concurrent tailwind writers wedge.
+    let lock = File::create("static/css/.tailwind.lock").expect("create tailwind lock");
+    lock.lock().expect("acquire tailwind lock");
 
     let status = Command::new("./bin/tailwindcss")
         .args([
