@@ -363,10 +363,17 @@ function hot(i, on){
 }
 
 function filterByNode(id){
-  nodeFilter = (nodeFilter === id) ? null : id;
   const hits = FLOWS.filter(f=>f.steps.some(s=>s.f===id||s.t===id)).map(f=>f.id);
-  for (const f of FLOWS) flowEl[f.id].classList.toggle('hide', !!nodeFilter && !hits.includes(f.id));
-  if (nodeFilter && (!current || !hits.includes(current.id))) select(hits[0] || null);
+  if (!hits.length) return;
+  if (nodeFilter === id){                          // re-click same node: cycle the flows it touches
+    if (hits.length === 1) return;                 // only one flow, nothing to cycle
+    const idx = current ? hits.indexOf(current.id) : -1;
+    select(hits[(idx + 1) % hits.length]);
+    return;
+  }
+  nodeFilter = id;                                 // new node: filter the list, select the first
+  for (const f of FLOWS) flowEl[f.id].classList.toggle('hide', !hits.includes(f.id));
+  select(hits[0]);
 }
 
 document.getElementById('clear').addEventListener('click', ()=>{
