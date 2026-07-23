@@ -225,6 +225,16 @@ test-ch:
     CLICKHOUSE_URL=http://127.0.0.1:8123 \
         cargo test --test clickhouse_aggregator_test -- --ignored
 
+# One integration-test binary, scoped compile; a bare `-E` still builds all ~48.
+test-one BIN *ARGS:
+    cargo nextest run --test {{BIN}} {{ARGS}}
+
+# Same against the dev stack, #[ignore] PG+CH tests enabled (`just up` first).
+test-one-db BIN *ARGS:
+    DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/monitor \
+    CLICKHOUSE_URL=http://127.0.0.1:8123 \
+        cargo nextest run --test {{BIN}} --run-ignored all {{ARGS}}
+
 # ── Benchmarks ──────────────────────────────────────────────────────────────
 
 # Uses a throwaway `ci_verify` DB so the dev DB is untouched (harness
