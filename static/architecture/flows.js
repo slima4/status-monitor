@@ -318,6 +318,7 @@ for (const f of FLOWS){
 }
 
 const svg = document.getElementById('wires');
+const badges = document.getElementById('badges');
 const stepListEl = document.getElementById('stepList');
 const title = id => (NODES.find(n=>n.id===id)||{t:id}).t;
 let current = null, nodeFilter = null;
@@ -384,8 +385,12 @@ document.getElementById('clear').addEventListener('click', ()=>{
 
 /* ── wires ────────────────────────────────────────── */
 const NS='http://www.w3.org/2000/svg';
+const bezierPoint=(p0,p1,p2,p3,t)=>{
+  const u=1-t, a=u*u*u, b=3*u*u*t, c=3*u*t*t, e=t*t*t;
+  return {x:a*p0.x+b*p1.x+c*p2.x+e*p3.x, y:a*p0.y+b*p1.y+c*p2.y+e*p3.y};
+};
 function draw(){
-  svg.innerHTML='';
+  svg.innerHTML=''; badges.innerHTML='';
   if (!current) return;
   const host = svg.getBoundingClientRect();
   const box = el => { const r = el.getBoundingClientRect();
@@ -395,28 +400,27 @@ function draw(){
   current.steps.forEach((s,i)=>{
     const a = box(nodeEl[s.f]), b = box(nodeEl[s.t]);
     const lane = 8 + (i%3)*7;                      // fan out overlapping wires
-    let d, mid;
+    let p0, c1, c2, p3;
     if (b.l - a.r > 12){                            // left → right
       const x1=a.r, y1=a.cy, x2=b.l-4, y2=b.cy, dx=Math.max(34,(x2-x1)*0.45);
-      d=`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
-      mid={x:(x1+x2)/2, y:(y1+y2)/2};
+      p0={x:x1,y:y1}; c1={x:x1+dx,y:y1}; c2={x:x2-dx,y:y2}; p3={x:x2,y:y2};
     } else if (a.l - b.r > 12){                     // right → left, route under
       const x1=a.l, y1=a.cy, x2=b.r+4, y2=b.cy, dip=Math.max(a.b,b.b)+lane+10;
-      d=`M${x1},${y1} C${x1-60},${dip} ${x2+60},${dip} ${x2},${y2}`;
-      mid={x:(x1+x2)/2, y:dip-4};
+      p0={x:x1,y:y1}; c1={x:x1-60,y:dip}; c2={x:x2+60,y:dip}; p3={x:x2,y:y2};
     } else {                                        // same column
       const side = a.r + lane + 14, y1=a.cy, y2=b.cy;
-      d=`M${a.r},${y1} C${side+30},${y1} ${side+30},${y2} ${b.r},${y2}`;
-      mid={x:side+22, y:(y1+y2)/2};
+      p0={x:a.r,y:y1}; c1={x:side+30,y:y1}; c2={x:side+30,y:y2}; p3={x:b.r,y:y2};
     }
+    const d=`M${p0.x},${p0.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p3.x},${p3.y}`;
+    const mid=bezierPoint(p0,c1,c2,p3,0.5);         // badge rides the actual curve
     const p=document.createElementNS(NS,'path'); p.setAttribute('d',d); svg.appendChild(p);
     const c=document.createElementNS(NS,'circle');
-    c.setAttribute('cx',mid.x); c.setAttribute('cy',mid.y); c.setAttribute('r',8); svg.appendChild(c);
+    c.setAttribute('cx',mid.x); c.setAttribute('cy',mid.y); c.setAttribute('r',8); badges.appendChild(c);
     const tx=document.createElementNS(NS,'text');
-    tx.setAttribute('x',mid.x); tx.setAttribute('y',mid.y+0.5); tx.textContent=i+1; svg.appendChild(tx);
+    tx.setAttribute('x',mid.x); tx.setAttribute('y',mid.y+0.5); tx.textContent=i+1; badges.appendChild(tx);
   });
 }
 
 new ResizeObserver(draw).observe(document.getElementById('map'));
 window.addEventListener('resize', draw);
-select(FLOWS[0].id);
+select(null);

@@ -87,8 +87,9 @@
 .archmap #wires path{fill:none;stroke:var(--path);stroke-width:1.4;opacity:.85}
 .archmap #wires path.dim{opacity:.28}
 .archmap #wires path.hot{stroke-width:2.4;opacity:1}
-.archmap #wires circle{fill:var(--path)}
-.archmap #wires text{fill:var(--surface);font:500 9px var(--mono);text-anchor:middle;dominant-baseline:central}
+.archmap #badges{position:absolute;inset:14px;z-index:3;pointer-events:none;overflow:visible}
+.archmap #badges circle{fill:var(--path)}
+.archmap #badges text{fill:var(--surface);font:500 9px var(--mono);text-anchor:middle;dominant-baseline:central}
 
 /* ── side ──────────────────────────────────────────── */
 .archmap aside{position:sticky;top:78px;display:flex;flex-direction:column;gap:14px;max-height:calc(100dvh - 90px)}
