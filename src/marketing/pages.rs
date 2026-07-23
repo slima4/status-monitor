@@ -82,6 +82,7 @@ struct LandingPage {
     founding_total: u32,
     founding_left: u32,
     faqs: &'static [(&'static str, &'static str)],
+    show_gallery: bool,
     shots: Vec<ShotView>,
 }
 
@@ -181,6 +182,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         founding_total: FOUNDING_TOTAL,
         founding_left: FOUNDING_TOTAL.saturating_sub(FOUNDING_CLAIMED),
         faqs: FAQS,
+        show_gallery: false,
         shots: shot_views(),
     };
     let body = page

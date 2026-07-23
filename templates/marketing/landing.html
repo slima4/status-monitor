@@ -51,6 +51,7 @@
 
     {# Product gallery — the shot list lives in src/marketing/gallery.rs so the
        sitemap and SoftwareApplication.screenshot stay in step with the markup. #}
+    {% if show_gallery %}
     <section id="see" aria-labelledby="mk-see-title" class="space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
             <h2 id="mk-see-title" class="mk-h2">Inside the app.</h2>
@@ -88,6 +89,7 @@
             {% endfor %}
         </ul>
     </section>
+    {% endif %}
 
     {# ── Integrations ──────────────────────────────────────────── #}
     <section aria-label="Works with" class="space-y-4 text-center">
