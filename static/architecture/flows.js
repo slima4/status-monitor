@@ -1,0 +1,415 @@
+const COLUMNS = [
+  {id:'actor',   label:'Actors / ingress',  color:'var(--c-actor)'},
+  {id:'edge',    label:'Edge + routing',    color:'var(--c-edge)'},
+  {id:'handler', label:'HTTP handlers',     color:'var(--c-handler)'},
+  {id:'core',    label:'Core services',     color:'var(--c-core)'},
+  {id:'probe',   label:'Probe engine',      color:'var(--c-probe)'},
+  {id:'store',   label:'Stores',            color:'var(--c-store)'},
+  {id:'ext',     label:'External',          color:'var(--c-ext)'},
+];
+
+const NODES = [
+  // actors
+  {id:'op-ui',    col:'actor', t:'Operator browser',      s:'app.{domain} · htmx + fetch'},
+  {id:'api-cli',  col:'actor', t:'API client / Terraform', s:'Bearer sm_live_'},
+  {id:'llm',      col:'actor', t:'LLM client',            s:'MCP over OAuth 2.1'},
+  {id:'visitor',  col:'actor', t:'Status page visitor',   s:'{org}.{domain}'},
+  {id:'cron',     col:'actor', t:'Customer cron job',     s:'GET /ping/{token}'},
+  {id:'agent',    col:'actor', t:'Region agent process',  s:'stateless probe, no DB'},
+  {id:'reader',   col:'actor', t:'Reader / crawler / LLM',s:'apex + www'},
+
+  // edge
+  {id:'caddy',    col:'edge', t:'Caddy',              s:'TLS · per-IP limits · headers'},
+  {id:'rbh',      col:'edge', t:'RouteByHost',        s:'HostShape → HostClass'},
+  {id:'mkt',      col:'edge', t:'marketing::router',  s:'cached Bytes + ETag, no state'},
+  {id:'layers',   col:'edge', t:'cross-cutting layers', s:'metrics → tenant fence → CSRF'},
+  {id:'tokauth',  col:'edge', t:'token auth + limits', s:'sm_live_ · org tier then user tier'},
+
+  // handlers
+  {id:'web',      col:'handler', t:'web::views',            s:'askama pages + /web/partials'},
+  {id:'h-tgt',    col:'handler', t:'handlers/targets',      s:'CRUD · test · check-now'},
+  {id:'h-inc',    col:'handler', t:'handlers/incidents',    s:'lifecycle · updates · postmortem'},
+  {id:'h-me',     col:'handler', t:'handlers/me · account', s:'export · soft delete'},
+  {id:'h-pub',    col:'handler', t:'/api/public/v1',        s:'status · badge · rss'},
+  {id:'h-agent',  col:'handler', t:'/api/agent',            s:'targets · results · dispatch'},
+  {id:'mcp',      col:'handler', t:'mcp::server',           s:'10 read + 6 write tools'},
+  {id:'oauth',    col:'handler', t:'oauth AS',              s:'PKCE S256 · DCR · rotation'},
+  {id:'w-auth',   col:'handler', t:'auth routes',           s:'OAuth · magic link · invites'},
+  {id:'w-ping',   col:'handler', t:'/ping/{token}',         s:'heartbeat ingest'},
+  {id:'w-sub',    col:'handler', t:'/subscribe',            s:'double opt-in'},
+
+  // core
+  {id:'stores',   col:'core', t:'storage traits',        s:'Pg* / InMemory*, OrgId-scoped'},
+  {id:'quota',    col:'core', t:'QuotaService',          s:'plans + overrides + rate limits'},
+  {id:'abuse',    col:'core', t:'AbuseGuard + SsrfGuard',s:'deny-lists · IP filtering'},
+  {id:'cipher',   col:'core', t:'Cipher',                s:'AES-GCM $enc envelope'},
+  {id:'adhoc',    col:'core', t:'AdHocDispatch',         s:'long-poll claim, single process'},
+  {id:'incw',     col:'core', t:'incident_writer',       s:'30 s poll · region quorum'},
+  {id:'escal',    col:'core', t:'EscalationEngine',      s:'ladder · on-call · retries'},
+  {id:'notif',    col:'core', t:'notifier transports',   s:'14 kinds · 12 transport modules'},
+  {id:'pcache',   col:'core', t:'aggregator + PageCache',s:'single-flight + last-good'},
+  {id:'subd',     col:'core', t:'subscriber_dispatch',   s:'claim by insert, 20 s tick'},
+  {id:'jobs',     col:'core', t:'periodic jobs',         s:'retention · purge, advisory-locked'},
+
+  // probe
+  {id:'reg',      col:'probe', t:'TargetRegistry',   s:'diff added / updated / removed'},
+  {id:'sched',    col:'probe', t:'Scheduler heap',   s:'seq tombstones · jitter'},
+  {id:'pool',     col:'probe', t:'WorkerPool',       s:'semaphore · breaker · throttle'},
+  {id:'e-http',   col:'probe', t:'http_check',       s:'dns/connect/tls/ttfb timings'},
+  {id:'e-hb',     col:'probe', t:'heartbeat',        s:'anchor vs period + grace'},
+  {id:'e-rdap',   col:'probe', t:'domain_expiry',    s:'singleflight · sticky last-good'},
+  {id:'e-flow',   col:'probe', t:'flow (CDP)',       s:'scripted browser steps'},
+  {id:'httpc',    col:'probe', t:'HttpClients',      s:'poolless · happy eyeballs'},
+  {id:'batch',    col:'probe', t:'ResultBatcher',    s:'size / timeout flush, bounded'},
+
+  // stores
+  {id:'pg',       col:'store', t:'PostgreSQL',    s:'config · tenancy · incidents'},
+  {id:'ch',       col:'store', t:'check_results', s:'MergeTree, per-row TTL'},
+  {id:'ch1m',     col:'store', t:'check_results_1m', s:'minute rollup · 30 d'},
+  {id:'ch1h',     col:'store', t:'check_results_1h', s:'hour rollup · 13 mo'},
+  {id:'purgeq',   col:'store', t:'purge queue',   s:'PG → CH erasure outbox'},
+
+  // external
+  {id:'target',   col:'ext', t:'Monitored endpoint', s:'customer URL / host'},
+  {id:'rdap',     col:'ext', t:'RDAP registry',      s:'IANA bootstrap'},
+  {id:'lp',       col:'ext', t:'Lightpanda',         s:'CDP browser engine'},
+  {id:'chat',     col:'ext', t:'Slack / PagerDuty / …', s:'14 channel kinds'},
+  {id:'resend',   col:'ext', t:'Resend',             s:'transactional email'},
+  {id:'idp',      col:'ext', t:'GitHub / Google',    s:'OAuth login providers'},
+  {id:'otlp',     col:'ext', t:'Grafana Cloud',      s:'OTLP traces + metrics'},
+];
+
+const FLOWS = [
+  {
+    id:'sched-http', name:'Scheduled HTTP check', desc:'Control plane probes a monitor in its own region',
+    steps:[
+      {f:'pg',    t:'reg',    h:'refresh()',        d:'Full re-list of enabled targets for this region, diffed into added / updated (by updated_at) / removed.'},
+      {f:'reg',   t:'sched',  h:'RegistryDiff',     d:'Sent over a bounded mpsc(8) so a slow Postgres query can never stall dispatch.'},
+      {f:'sched', t:'pool',   h:'due target',       d:'Min-heap pop at interval ± hash(uuid) jitter. Paused monitors stay in the heap and are tombstoned by seq.'},
+      {f:'pool',  t:'e-http', h:'gates passed',     d:'in-flight set → semaphore try_acquire (fail-fast) → circuit breaker → per-tenant (org, host, port) bulkhead.'},
+      {f:'e-http',t:'httpc',  h:'timed_connect',    d:'No connection pool: connecting fresh is what makes DNS, TCP and TLS separately timeable.'},
+      {f:'httpc', t:'target', h:'probe',            d:'Resolve → SSRF filter → happy eyeballs (250 ms stagger) → TLS → request over h1/h2 by ALPN.'},
+      {f:'e-http',t:'batch',  h:'CheckResult',      d:'Status + duration + dns/connect/tls/ttfb ms. Unexpected 429/503 classify as Degraded, not Down.'},
+      {f:'batch', t:'ch',     h:'write_batch',      d:'Flush on size or timeout; retries re-send the identical block so the CH dedup window collapses duplicates.'},
+      {f:'ch',    t:'ch1m',   h:'materialized view',d:'Minute rollup, 30 day TTL — the source for sparklines and buckets under 30 days.'},
+      {f:'ch',    t:'ch1h',   h:'materialized view',d:'Hour rollup, 13 month TTL — day strips and anything older than 30 days.'},
+    ]
+  },
+  {
+    id:'agent', name:'Regional agent probe', desc:'A stateless agent pulls config, probes, and posts results back',
+    steps:[
+      {f:'agent',  t:'h-agent', h:'GET /api/agent/targets', d:'Bearer sm_agent_ token plus If-None-Match. A 401/403 is terminal: the agent clears its cache and stops probing.'},
+      {f:'h-agent',t:'stores',  h:'targets for region',     d:'Region and agent id come from the token, never from the payload.'},
+      {f:'stores', t:'cipher',  h:'open credentials',       d:'Sealed check credentials are decrypted only for the agent that owns the region.'},
+      {f:'h-agent',t:'agent',   h:'AgentTargetDto list',    d:'304 when unchanged. Variables are resolved here — a target whose vars fail to resolve is dropped, not probed with literal braces.'},
+      {f:'agent',  t:'target',  h:'probe in-region',        d:'Same executors as the control plane; the agent runs its own scheduler, pool and batcher.'},
+      {f:'agent',  t:'h-agent', h:'POST /results',          d:'Stable batch_id reused across internal retries so a lost ack is deduped rather than double-counted.'},
+      {f:'h-agent',t:'ch',      h:'ingest',                 d:'Batch cap 10k, 300 s future-skew guard; org_id is stamped from the region assignment, and rows for unassigned targets are dropped, not rejected.'},
+    ]
+  },
+  {
+    id:'incident', name:'Detection → incident → page', desc:'Failing checks become a confirmed incident and page on-call',
+    steps:[
+      {f:'ch',    t:'incw',  h:'poll, 30 s tick',    d:'Keyset-paginates enabled targets cross-tenant and reads per lookback tier. This is a poller, not an event listener.'},
+      {f:'incw',  t:'pg',    h:'insert_open',        d:'decide_multi applies the region quorum (Any / Majority / All / Count). insert_open returns Option<Uuid> — only the race winner pages.'},
+      {f:'incw',  t:'escal', h:'IncidentSignal',     d:'The single push edge in detection. try_send drops with a metric rather than stalling the writer.'},
+      {f:'escal', t:'pg',    h:'resolve ladder',     d:'Policy steps → targets (user / schedule / channel). Who is on call is computed at page time and never stored.'},
+      {f:'escal', t:'notif', h:'page rung',          d:'Deduped per channel; a per-incident sharded mutex stops the sweep and an inbound signal double-paging.'},
+      {f:'notif', t:'chat',  h:'deliver',            d:'Delivery errors have every URL reduced to scheme://host before persisting — Slack’s secret is in the path, Telegram’s token in /bot<token>/.'},
+      {f:'escal', t:'pg',    h:'notification row',   d:'Retry base×2^n capped, vendor retry_after hints honoured, then dead-letter. Acknowledge silences further paging.'},
+    ]
+  },
+  {
+    id:'status', name:'Public status page render', desc:'Anonymous visitor on a tenant subdomain, cache miss',
+    steps:[
+      {f:'visitor',t:'caddy', h:'TLS + per-IP limit', d:'Wildcard cert for *.{domain}; the operator host keeps its own cert to cap blast radius.'},
+      {f:'caddy',  t:'rbh',   h:'classify host',      d:'{slug}.{domain} parses to Subdomain → TenantPublic.'},
+      {f:'rbh',    t:'layers',h:'tenant fence',       d:'Default-deny: only /, /status, /subscribe, /.well-known/security.txt and four prefixes survive. Login and operator API 404 here.'},
+      {f:'layers', t:'web',   h:'public_status view', d:'Host resolves the page; a verified custom domain wins over the slug host for link building.'},
+      {f:'web',    t:'pcache',h:'try_get_with',       d:'Single-flight per page. On compute failure a last-good layer serves stale rather than erroring.'},
+      {f:'pcache', t:'stores',h:'aggregator',         d:'Six loads in one try_join! so the snapshot is atomic: maintenance, active + recent incidents, markers, paint windows, day presence.'},
+      {f:'stores', t:'pg',    h:'confirmed incidents',d:'Outage paint comes from confirmed incident windows only — a blip that never confirmed leaves the day green.'},
+      {f:'stores', t:'ch1h',  h:'day presence',       d:'The hour rollup answers "did we check at all", which is what separates NoData from Operational.'},
+    ]
+  },
+  {
+    id:'badge', name:'Badge / JSON status poll', desc:'The machine twin of the status page, shared cache',
+    steps:[
+      {f:'visitor',t:'caddy', h:'GET /api/public/v1/badge.svg', d:'Same anonymous surface as the HTML page; per-IP limits are the edge’s job.'},
+      {f:'caddy',  t:'rbh',   h:'TenantPublic',        d:'/api/public/v1/ is one of the four prefixes the tenant fence lets through.'},
+      {f:'rbh',    t:'layers',h:'public cache-control',d:'public, max-age=10, stale-while-revalidate=30 — different policy from the private operator API.'},
+      {f:'layers', t:'h-pub', h:'public handler',      d:'Narrower error envelope: code and message only, no field, details or trace_id.'},
+      {f:'h-pub',  t:'pcache',h:'shared snapshot',     d:'A JSON hit and an HTML hit inside the same window share one aggregator run.'},
+      {f:'h-pub',  t:'visitor', h:'SVG or JSON',       d:'The badge is a hand-rolled ~600 B SVG whose width is capped so a pathological site name cannot blow up the attribute.'},
+    ]
+  },
+  {
+    id:'subscribe', name:'Subscribe to a status page', desc:'Double opt-in, no account required',
+    steps:[
+      {f:'visitor',t:'w-sub',  h:'POST /subscribe',   d:'One of the few state-changing routes the web layer owns, because possession of the inbox is the proof.'},
+      {f:'w-sub',  t:'pg',     h:'pending row + token',d:'Response is uniform "check your inbox" whether or not the address already exists — no enumeration oracle.'},
+      {f:'w-sub',  t:'resend', h:'confirm mail',      d:'Links are built off the page origin, so a white-labelled page never leaks the app host.'},
+      {f:'visitor',t:'w-sub',  h:'GET /subscribe/confirm', d:'HMAC-keyed token, independent of the fingerprint salt so rotating that salt cannot void mailed links.'},
+      {f:'w-sub',  t:'pg',     h:'confirmed',         d:'Only confirmed subscribers enter the dispatch fan-out. Unsubscribe is a POST for RFC 8058 one-click.'},
+    ]
+  },
+  {
+    id:'create', name:'Create a monitor over REST', desc:'Terraform or an API client adds a target',
+    steps:[
+      {f:'api-cli',t:'caddy',  h:'HTTPS',            d:'Per-IP limits live at the edge; per-tenant limits are the app’s job.'},
+      {f:'caddy',  t:'layers', h:'guards',           d:'Bearer requests are CSRF-exempt by design; cookie requests must carry X-Requested-With.'},
+      {f:'layers', t:'tokauth',h:'authenticate',     d:'sm_live_ prefix narrows the row, argon2 verifies. Token requests must name the org via X-Uptimepage-Org.'},
+      {f:'tokauth',t:'h-tgt',  h:'targets:write',    d:'Scope check: full_access, exact scope, or same-resource write implying read.'},
+      {f:'h-tgt',  t:'abuse',  h:'inspect spec',     d:'Compiled URL patterns + hierarchical domain deny-list; the platform’s own domains and role mailboxes are blocked walking the parent chain.'},
+      {f:'h-tgt',  t:'quota',  h:'friendly check',   d:'Advisory only — it exists so the user sees a clean error, not to guarantee the cap.'},
+      {f:'h-tgt',  t:'cipher', h:'seal credentials', d:'Basic auth, headers and secret variables are sealed before they reach the row.'},
+      {f:'h-tgt',  t:'stores', h:'create(org, …)',   d:'The store takes the limit as a parameter — no check-then-act between handler and INSERT.'},
+      {f:'stores', t:'pg',     h:'guarded INSERT',   d:'(count)+1 <= max_targets inside the statement, under advisory_xact_lock(org_lock_key(org)). This is the real quota guarantee.'},
+      {f:'pg',     t:'reg',    h:'next refresh',     d:'No push: the registry picks the new target up on its next full re-list.'},
+    ]
+  },
+  {
+    id:'checknow', name:'Check now (interactive)', desc:'Operator clicks “check now” on a monitor in a remote region',
+    steps:[
+      {f:'op-ui',  t:'h-tgt',  h:'POST /check-now',  d:'Rate-limited on its own category so an impatient operator cannot drown the fleet.'},
+      {f:'h-tgt',  t:'adhoc',  h:'enqueue + wait',   d:'Per-region queue capped at 256, oldest evicted. Single process by construction: the claim and the waiting request must share a brain.'},
+      {f:'adhoc',  t:'h-agent',h:'hand to holder',   d:'An agent parked on the 25 s long-poll claims the batch; no live holder means 503 PROBE_UNAVAILABLE.'},
+      {f:'h-agent',t:'agent',  h:'DispatchBatch',    d:'Returned immediately to the holder rather than waiting out the hold window.'},
+      {f:'agent',  t:'target', h:'probe now',        d:'Same executor as a scheduled run, plus a header preview and body snippet for the UI.'},
+      {f:'agent',  t:'h-agent',h:'POST /dispatch/results', d:'Reported back with the check id the brain issued.'},
+      {f:'h-agent',t:'adhoc',  h:'wake the waiter',  d:'Pending map TTL outlives the 30 s request wait so a late result still persists.'},
+      {f:'agent',  t:'ch',     h:'persist',          d:'check-now results are stored; /targets/test results are returned but never written.'},
+    ]
+  },
+  {
+    id:'heartbeat', name:'Heartbeat (dead-man switch)', desc:'A customer cron pings us, and silence becomes a failure',
+    steps:[
+      {f:'cron',  t:'w-ping', h:'GET|POST /ping/{token}', d:'Capability token in the path — scrubbed from access logs and exported spans before anything is written.'},
+      {f:'w-ping',t:'stores', h:'resolve + limit',        d:'GCRA limiter at 1/s with burst 10, keyed on the token hash.'},
+      {f:'stores',t:'pg',     h:'record anchor',          d:'Last-ping timestamp per heartbeat monitor.'},
+      {f:'pg',    t:'e-hb',   h:'sync_anchors',           d:'Anchors are max-merged into an in-memory runtime on each registry refresh, so the store and the executor cannot diverge.'},
+      {f:'sched', t:'e-hb',   h:'passive evaluation',     d:'Evaluated inline: no task spawn, no permit, no circuit breaker, no host throttle. Heartbeats never run on agents.'},
+      {f:'e-hb',  t:'batch',  h:'verdict',                d:'now − anchor vs period + grace. A missing anchor is Error, not Down — never having pinged is not the same as failing.'},
+      {f:'batch', t:'ch',     h:'write_batch',            d:'Same result stream as active checks, so uptime maths is identical.'},
+    ]
+  },
+  {
+    id:'mcp', name:'MCP write tool from an LLM', desc:'An agent acknowledges an incident through the MCP server',
+    steps:[
+      {f:'llm',  t:'oauth', h:'discover + consent', d:'401 with WWW-Authenticate → protected-resource metadata → AS metadata → dynamic registration → PKCE S256 authorize.'},
+      {f:'oauth',t:'pg',    h:'mint token',         d:'Audience-bound sm_live_ token; write scopes are never implicit and are flagged separately on the consent screen.'},
+      {f:'llm',  t:'mcp',   h:'tool call',          d:'Org comes from the credential and must have a live membership. Uncredentialed callers get protocol discovery only.'},
+      {f:'mcp',  t:'llm',   h:'elicitation',        d:'Confirmation is requested out of band of the tool arguments, so an injected instruction inside a monitor name cannot forge consent.'},
+      {f:'mcp',  t:'quota', h:'scope + rate limit', d:'The same limiter as the REST surface; MCP counts as reads.'},
+      {f:'mcp',  t:'stores',h:'perform write',      d:'Decline, cancel, an unsupported client or an unparseable answer all fail closed with NOT_CONFIRMED.'},
+      {f:'mcp',  t:'pg',    h:'mcp_audit row',      d:'Durable audit with outcome Success | Error | Denied. Reads are not audited.'},
+    ]
+  },
+  {
+    id:'subscribers', name:'Status page subscriber fan-out', desc:'A published incident update reaches subscribers',
+    steps:[
+      {f:'op-ui',t:'h-inc',  h:'POST /incidents/{id}/updates', d:'Public narration is a separate track from the internal incident state.'},
+      {f:'h-inc',t:'pg',     h:'incident_updates',   d:'Publishing is explicit — internal notes never reach the public page.'},
+      {f:'h-inc',t:'pcache', h:'invalidate',         d:'Both cache layers for that page are dropped so the next read recomputes.'},
+      {f:'subd', t:'pg',     h:'claim',              d:'The claim is an INSERT into subscriber_deliveries, so a crash or a second replica cannot double-send.'},
+      {f:'subd', t:'resend', h:'email fan-out',      d:'Confirm and unsubscribe links are built off the page origin, so a white-labelled page never leaks the app host.'},
+      {f:'subd', t:'chat',   h:'webhook subscribers',d:'HMAC-signed with a timestamp header, same scheme as alert webhooks.'},
+      {f:'subd', t:'pg',     h:'mark outcome',       d:'Each send records its own result; RFC 8058 one-click unsubscribe is a POST.'},
+    ]
+  },
+  {
+    id:'rdap', name:'Domain expiry with sticky last-good', desc:'Registry flakiness must not flip a monitor red',
+    steps:[
+      {f:'sched', t:'pool',   h:'daily-ish tick',   d:'Minimum interval for this kind is an hour; the plan may widen it.'},
+      {f:'pool',  t:'e-rdap', h:'dispatch',         d:'Circuit-breaker key is rdap:{tld} so one slow registry cannot correlate failures across every customer.'},
+      {f:'e-rdap',t:'rdap',   h:'query',            d:'Cross-tenant singleflight collapses concurrent probes for the same domain — registry data is public, so coalescing is safe and IANA-friendly.'},
+      {f:'e-rdap',t:'pg',     h:'upsert last-good', d:'On success, (expiry_at, registrar, last_success_at) are written to domain_expiry_state.'},
+      {f:'e-rdap',t:'pg',     h:'read cache',       d:'On timeout, throttle drop or 5xx, the cached verdict is served with a served_stale: annotation instead of flipping the monitor.'},
+      {f:'e-rdap',t:'batch',  h:'verdict',          d:'Rows older than 7 days measured from last_success_at escalate to Error, which is alert-eligible.'},
+    ]
+  },
+  {
+    id:'login', name:'OAuth login → session', desc:'A user signs in with GitHub or Google',
+    steps:[
+      {f:'op-ui', t:'w-auth', h:'/auth/github/login', d:'Enabled methods gate both the route mounting and the login form.'},
+      {f:'w-auth',t:'pg',     h:'oauth_states row',   d:'32 random bytes, only the sha256 stored, 10 minute TTL. Carries redirect_after, invitation and link-code context.'},
+      {f:'w-auth',t:'idp',    h:'redirect',           d:'Provider halves are split so the shared phases stay identical across providers.'},
+      {f:'idp',   t:'w-auth', h:'callback',           d:'State is consumed with an atomic DELETE … RETURNING, so replay is impossible and unknown state is indistinguishable from expired.'},
+      {f:'w-auth',t:'idp',    h:'exchange + profile', d:'Response capped at 256 KiB. verified_email stays None unless the provider attested it — that is the account-takeover guard.'},
+      {f:'w-auth',t:'pg',     h:'upsert identity',    d:'One transaction: find-or-create user, link identity, create the signup org with an owner membership, and un-delete a soft-deleted account.'},
+      {f:'w-auth',t:'op-ui',  h:'_sm_session cookie', d:'Opaque token, only its sha256 stored; 30 day idle and 90 day absolute expiry, last-used writes debounced.'},
+    ]
+  },
+  {
+    id:'erasure', name:'Account deletion → cross-store erasure', desc:'The 30-day claim has to hold in both databases',
+    steps:[
+      {f:'op-ui',t:'h-me',  h:'DELETE /me',        d:'Blocked with OWNS_SHARED_ORGS if the user solely owns an org with other members.'},
+      {f:'h-me', t:'pg',    h:'soft delete',        d:'Tombstones plus a hashed recovery row, all inside one locked transaction.'},
+      {f:'h-me', t:'resend',h:'confirmation mail',  d:'Sent after commit, never inside the transaction.'},
+      {f:'jobs', t:'pg',    h:'daily purge tick',   d:'Runs under a job advisory lock so only one replica executes; owner rows are locked in id order to stay deadlock-free.'},
+      {f:'jobs', t:'purgeq',h:'enqueue',            d:'Deleting in PG then CH would orphan rows if the worker died between them — invisible to queries, resident on disk forever.'},
+      {f:'jobs', t:'ch',    h:'ALTER … DELETE',     d:'Runs with mutations_sync=2 so it returns only once applied. Replay-safe by construction.'},
+      {f:'jobs', t:'purgeq',h:'settle',             d:'The queue row clears only after count() proves zero rows across the raw table and both rollups.'},
+    ]
+  },
+  {
+    id:'flowcheck', name:'Browser flow check', desc:'A scripted login journey run in a real engine',
+    steps:[
+      {f:'sched',  t:'pool',  h:'due',            d:'Minimum interval 300 s; the whole kind is gated by plans.max_flow_checks.'},
+      {f:'pool',   t:'e-flow',h:'dispatch',       d:'The engine bounds its own concurrency; the clock starts only once a permit is held.'},
+      {f:'stores', t:'e-flow',h:'resolved steps', d:'{{vars}} were substituted at config-serve time, single-pass. Secrets are allowed in step values but never in URLs or assertions.'},
+      {f:'e-flow', t:'lp',    h:'spawn + CDP',    d:'Fresh process on a free port with private-network and CIDR blocking, heap and response caps. Fresh process means a fresh cookie jar.'},
+      {f:'lp',     t:'target',h:'drive steps',    d:'Goto / Click / Fill / WaitFor / AssertText / AssertUrl, executed as JS because CDP key-typing does not populate input.value here.'},
+      {f:'e-flow', t:'batch', h:'verdict',        d:'Passed → Up. Failed → Down carrying "step i/n op: reason". Engine trouble → Error, so a broken runner never reads as a customer outage.'},
+    ]
+  },
+  {
+    id:'marketing', name:'Marketing / docs request', desc:'The apex host serves bytes with no database at all',
+    steps:[
+      {f:'reader',t:'caddy', h:'HTTPS',          d:'Same process, same port — only the Host header differs.'},
+      {f:'caddy', t:'rbh',   h:'classify',       d:'Apex and www classify as Marketing; an unknown host lands here too and gets a branded 404.'},
+      {f:'rbh',   t:'mkt',   h:'marketing router',d:'Hard-isolated: it may not import storage, domain or tenancy, and tests assert every route returns 2xx with no database.'},
+      {f:'mkt',   t:'reader',h:'cached bytes',   d:'Rendered once at startup into Bytes with an ETag. Accept: text/markdown serves the authored source, not an HTML round-trip.'},
+    ]
+  },
+  {
+    id:'observability', name:'Telemetry + dead-man', desc:'What leaves the process so an outage is visible',
+    steps:[
+      {f:'pool',  t:'otlp', h:'check metrics',   d:'uptimepage_checks_total, check_duration_ms and the phase histograms — explicit buckets, because agents emit across regions where quantile-of-quantiles is wrong.'},
+      {f:'batch', t:'otlp', h:'drop counters',   d:'Every dropped result is labelled queue_full, target_in_flight, pool_saturated, buffer_overflow or retries_exhausted.'},
+      {f:'layers',t:'otlp', h:'request spans',   d:'Route label is the matched path so cardinality stays bounded; one INFO access line carries the trace id for the log-to-trace pivot.'},
+      {f:'jobs',  t:'pg',   h:'agent liveness',  d:'A 30 s sweep recomputes agents_enabled_down every pass, so a frozen per-agent series cannot hide a dead region.'},
+      {f:'jobs',  t:'chat', h:'no-data notices', d:'Monitors whose covering regions all went dark notify once per episode — but above a quarter of the fleet it is treated as one infra outage and per-customer notices are suppressed.'},
+    ]
+  },
+];
+
+/* ── render ───────────────────────────────────────── */
+const root = document.querySelector('.archmap');
+const colsEl = document.getElementById('cols');
+const nodeEl = {};
+for (const c of COLUMNS){
+  const d = document.createElement('div');
+  d.className = 'col';
+  d.innerHTML = `<h2>${c.label}</h2>`;
+  for (const n of NODES.filter(n=>n.col===c.id)){
+    const b = document.createElement('div');
+    b.className='node'; b.style.setProperty('--nc', c.color); b.dataset.id=n.id;
+    b.tabIndex = 0; b.setAttribute('role','button');
+    b.innerHTML = `<b>${n.t}</b><span>${n.s}</span>`;
+    b.addEventListener('click', ()=>filterByNode(n.id));
+    b.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();filterByNode(n.id);} });
+    d.appendChild(b); nodeEl[n.id]=b;
+  }
+  colsEl.appendChild(d);
+}
+
+const flowListEl = document.getElementById('flowList');
+const flowEl = {};
+for (const f of FLOWS){
+  const d = document.createElement('div');
+  d.className='flow'; d.dataset.id=f.id;
+  d.tabIndex = 0; d.setAttribute('role','button');
+  d.innerHTML = `<b>${f.name}</b><span>${f.desc}</span>`;
+  d.addEventListener('click', ()=>select(f.id));
+  d.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();select(f.id);} });
+  d.addEventListener('focus', ()=>d.scrollIntoView({block:'nearest'}));
+  flowListEl.appendChild(d); flowEl[f.id]=d;
+}
+
+const svg = document.getElementById('wires');
+const stepListEl = document.getElementById('stepList');
+const title = id => (NODES.find(n=>n.id===id)||{t:id}).t;
+let current = null, nodeFilter = null;
+
+function select(id){
+  current = FLOWS.find(f=>f.id===id) || null;
+  root.classList.toggle('sel', !!current);
+  for (const f of FLOWS) flowEl[f.id].classList.toggle('on', !!current && f.id===current.id);
+  const live = new Set();
+  if (current) current.steps.forEach(s=>{live.add(s.f); live.add(s.t);});
+  for (const n of NODES) nodeEl[n.id].classList.toggle('on', live.has(n.id));
+  renderSteps();
+  draw();
+}
+
+function renderSteps(){
+  stepListEl.innerHTML = '';
+  if (!current){
+    stepListEl.innerHTML = '<div class="empty">No flow selected. Pick one above — the map will show the ordered hops, and hovering a step thickens its wire.</div>';
+    return;
+  }
+  current.steps.forEach((s,i)=>{
+    const d = document.createElement('div');
+    d.className='step';
+    d.innerHTML = `<div class="n">${i+1}</div><div>
+      <div class="hop"><b>${title(s.f)}</b> → <b>${title(s.t)}</b></div>
+      <div class="t">${s.h}</div><div class="d">${s.d}</div></div>`;
+    d.addEventListener('mouseenter', ()=>hot(i,true));
+    d.addEventListener('mouseleave', ()=>hot(i,false));
+    stepListEl.appendChild(d);
+  });
+}
+
+function hot(i, on){
+  svg.querySelectorAll('path').forEach((p,j)=>{
+    p.classList.toggle('hot', on && j===i);
+    p.classList.toggle('dim', on && j!==i);
+  });
+  if (!current) return;
+  const s = current.steps[i];
+  nodeEl[s.f].classList.toggle('focus', on);
+  nodeEl[s.t].classList.toggle('focus', on);
+}
+
+function filterByNode(id){
+  nodeFilter = (nodeFilter === id) ? null : id;
+  const hits = FLOWS.filter(f=>f.steps.some(s=>s.f===id||s.t===id)).map(f=>f.id);
+  for (const f of FLOWS) flowEl[f.id].classList.toggle('hide', !!nodeFilter && !hits.includes(f.id));
+  if (nodeFilter && (!current || !hits.includes(current.id))) select(hits[0] || null);
+}
+
+document.getElementById('clear').addEventListener('click', ()=>{
+  nodeFilter = null;
+  for (const f of FLOWS) flowEl[f.id].classList.remove('hide');
+  select(null);
+});
+
+/* ── wires ────────────────────────────────────────── */
+const NS='http://www.w3.org/2000/svg';
+function draw(){
+  svg.innerHTML='';
+  if (!current) return;
+  const host = svg.getBoundingClientRect();
+  const box = el => { const r = el.getBoundingClientRect();
+    return {l:r.left-host.left, r:r.right-host.left, t:r.top-host.top, b:r.bottom-host.top,
+            cx:(r.left+r.right)/2-host.left, cy:(r.top+r.bottom)/2-host.top}; };
+
+  current.steps.forEach((s,i)=>{
+    const a = box(nodeEl[s.f]), b = box(nodeEl[s.t]);
+    const lane = 8 + (i%3)*7;                      // fan out overlapping wires
+    let d, mid;
+    if (b.l - a.r > 12){                            // left → right
+      const x1=a.r, y1=a.cy, x2=b.l-4, y2=b.cy, dx=Math.max(34,(x2-x1)*0.45);
+      d=`M${x1},${y1} C${x1+dx},${y1} ${x2-dx},${y2} ${x2},${y2}`;
+      mid={x:(x1+x2)/2, y:(y1+y2)/2};
+    } else if (a.l - b.r > 12){                     // right → left, route under
+      const x1=a.l, y1=a.cy, x2=b.r+4, y2=b.cy, dip=Math.max(a.b,b.b)+lane+10;
+      d=`M${x1},${y1} C${x1-60},${dip} ${x2+60},${dip} ${x2},${y2}`;
+      mid={x:(x1+x2)/2, y:dip-4};
+    } else {                                        // same column
+      const side = a.r + lane + 14, y1=a.cy, y2=b.cy;
+      d=`M${a.r},${y1} C${side+30},${y1} ${side+30},${y2} ${b.r},${y2}`;
+      mid={x:side+22, y:(y1+y2)/2};
+    }
+    const p=document.createElementNS(NS,'path'); p.setAttribute('d',d); svg.appendChild(p);
+    const c=document.createElementNS(NS,'circle');
+    c.setAttribute('cx',mid.x); c.setAttribute('cy',mid.y); c.setAttribute('r',8); svg.appendChild(c);
+    const tx=document.createElementNS(NS,'text');
+    tx.setAttribute('x',mid.x); tx.setAttribute('y',mid.y+0.5); tx.textContent=i+1; svg.appendChild(tx);
+  });
+}
+
+new ResizeObserver(draw).observe(document.getElementById('map'));
+window.addEventListener('resize', draw);
+select(FLOWS[0].id);

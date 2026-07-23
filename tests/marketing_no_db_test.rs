@@ -87,6 +87,57 @@ async fn pricing_renders_without_db() {
 }
 
 #[tokio::test]
+async fn architecture_page_renders_and_is_csp_clean() {
+    let (status, body, headers) = get("/architecture").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("How Uptimepage is built"),
+        "architecture page must render its hero"
+    );
+    assert!(
+        body.contains(r#"id="cols""#) && body.contains(r#"id="wires""#),
+        "architecture page must render the map skeleton the script populates"
+    );
+    assert!(
+        body.contains("/static/architecture/flows.js")
+            && body.contains("/static/architecture/flows.css"),
+        "map styles and script must be external assets, not inline"
+    );
+    // The prod marketing CSP forbids inline styles and scripts. Guard it here
+    // so a future edit that inlines either fails the build, not production.
+    assert!(
+        !body.contains("<script>"),
+        "no inline script (CSP: script-src 'self')"
+    );
+    assert!(
+        !body.contains("<style"),
+        "no inline style block (CSP: style-src 'self')"
+    );
+    assert!(
+        !body.contains("style="),
+        "no inline style attributes (CSP: style-src 'self')"
+    );
+    assert!(
+        body.contains(
+            r#"property="og:image" content="https://uptimepage.dev/static/marketing/og-architecture.png""#
+        ),
+        "og:image must be the dedicated architecture card, rooted at the origin"
+    );
+    assert!(
+        body.contains(r#"href="https://app.uptimepage.dev""#),
+        "the Start free CTA must link to app_url"
+    );
+    assert!(
+        !body.contains("render failed"),
+        "must not serve the render-error fallback"
+    );
+    assert!(
+        headers.contains_key(header::ETAG),
+        "architecture page must set a strong ETag"
+    );
+}
+
+#[tokio::test]
 async fn blog_index_renders_without_db() {
     let (status, body, _) = get("/blog").await;
     assert_eq!(status, StatusCode::OK);

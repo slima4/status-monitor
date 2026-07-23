@@ -230,6 +230,48 @@ pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
         .into_response()
 }
 
+pub(crate) const ARCHITECTURE_PATH: &str = "/architecture";
+pub(crate) const ARCHITECTURE_LASTMOD: &str = "2026-07-23";
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/architecture.html")]
+struct ArchitecturePage {
+    app_url: String,
+    canonical_url: String,
+    og: OpenGraph,
+    version: &'static str,
+}
+
+static ARCH_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_architecture(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}{ARCHITECTURE_PATH}", cfg.canonical_origin);
+    let mut og = OpenGraph::default_for(
+        &format!("How {BRAND} is built: architecture and flows"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
+    og.description = "An interactive map of Uptimepage, the open-source uptime monitor: click a runtime flow and watch it light up across every process, surface, service and store.".to_string();
+    og.image = format!(
+        "{}/static/marketing/og-architecture.png",
+        cfg.canonical_origin
+    );
+    let body = ArchitecturePage {
+        app_url: cfg.app_url.clone(),
+        canonical_url,
+        og,
+        version: env!("CARGO_PKG_VERSION"),
+    }
+    .render()
+    .unwrap_or_else(|e| format!("<!-- architecture render failed: {e} -->"));
+    cached_render(body)
+}
+
+pub async fn architecture(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = ARCH_CACHED.get_or_init(|| render_architecture(&cfg));
+    serve_cached(&headers, cached, &PAGE_CACHE_CONTROL)
+}
+
 const PRICING_CREATED: &str = "2026-06-23";
 const PRICING_LASTMOD: &str = "2026-06-23";
 
@@ -350,6 +392,7 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     LANDING_CACHED.get_or_init(|| render_landing(cfg));
     LANDING_MD.get_or_init(|| render_landing_markdown(cfg));
     PRICING_CACHED.get_or_init(|| render_pricing(cfg));
+    ARCH_CACHED.get_or_init(|| render_architecture(cfg));
     NF_CACHED.get_or_init(|| render_not_found(cfg));
 }
 

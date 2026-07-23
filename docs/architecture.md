@@ -2,6 +2,8 @@
 
 uptimepage is one Rust binary that runs multi-tenant uptime monitoring and public status pages. Postgres holds configuration and control-plane state, ClickHouse holds check results, and extra regions are optional stateless probe processes. This page is the map: what the pieces are, how a request and a check flow through them, and which invariants every feature must respect. Deep dives live in the linked chapters.
 
+For an interactive companion to this page, open the [flow map](/architecture): pick any runtime path and watch it light up across every process, surface, service, and store.
+
 ## Goals
 
 - Run periodic checks of eight kinds (HTTP, TCP, ping, heartbeat, DNS, TLS certificate, domain expiry, browser flow) against an arbitrary, mutable set of targets. See [Monitor types](monitor-types.md).

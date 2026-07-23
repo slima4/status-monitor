@@ -1686,6 +1686,26 @@ html:has(.marketing-shell) {
     margin-top: clamp(1rem, 2vw, 1.5rem);
 }
 
+/* Architecture hero: a translucent flow-schema backdrop, same layering as the
+   region map — copy on top, ornament behind. Desktop flourish only. */
+.arch-schema {
+    grid-area: 1 / 1;
+    align-self: center;
+    justify-self: end;
+    z-index: -1;
+    width: 70%;
+    pointer-events: none;
+    display: none;
+}
+.arch-schema__svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+@media (min-width: 1024px) {
+    .arch-schema { display: block; }
+}
+
 /* ── Region map ───────────────────────────────────────────────────── */
 .mk-map {
     margin: 0;

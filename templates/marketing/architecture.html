@@ -1,0 +1,66 @@
+{% extends "marketing/base.html" %}
+
+{% block title %}{{ og.title }}{% endblock %}
+{% block description %}{{ og.description }}{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ "architecture/flows.css"|asset }}">
+{% endblock %}
+
+{% block content %}
+<section class="mk-hero">
+  <div class="mk-hero__copy space-y-6">
+    <h1 class="mk-display">How Uptimepage is built</h1>
+    <p class="mk-lede">Open-source uptime monitoring and public status pages, one Rust binary. This is the live map of how a request and a check move through it, from the edge to the databases. Pick a flow to trace its path.</p>
+    <div class="mk-hero__cta">
+      <a href="{{ app_url }}" class="mk-cta mk-cta--primary">
+        Start free
+        <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
+        </svg>
+      </a>
+      <a href="/docs/architecture" class="mk-cta mk-cta--ghost">Read the reference</a>
+    </div>
+  </div>
+
+  <div class="arch-schema" aria-hidden="true">
+    {% include "marketing/_arch_schema.html" %}
+  </div>
+</section>
+
+<div class="archmap">
+  <header class="map-intro">
+    <p class="lede">Pick a flow on the right to light up the path through the system and read what is passed at each hop. Click any node to filter the flow list to the ones that touch it.</p>
+    <div class="legend">
+      <span><i class="lg-actor"></i>Actor / ingress</span>
+      <span><i class="lg-edge"></i>Edge + routing</span>
+      <span><i class="lg-handler"></i>HTTP handler</span>
+      <span><i class="lg-core"></i>Core service</span>
+      <span><i class="lg-probe"></i>Probe engine</span>
+      <span><i class="lg-store"></i>Store</span>
+      <span><i class="lg-ext"></i>External</span>
+    </div>
+  </header>
+
+  <div class="shell">
+    <div id="map">
+      <svg id="wires"></svg>
+      <div id="cols"></div>
+    </div>
+
+    <aside>
+      <div class="panel" id="flows">
+        <h2>Flows</h2>
+        <div class="scroll" id="flowList"></div>
+        <button id="clear">Clear selection</button>
+      </div>
+      <div class="panel" id="stepsPanel">
+        <h2>Steps</h2>
+        <div class="scroll" id="stepList"><div class="empty">No flow selected. Pick one above — the map will show the ordered hops, and hovering a step thickens its wire.</div></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script defer src="{{ "architecture/flows.js"|asset }}"></script>
+{% endblock %}

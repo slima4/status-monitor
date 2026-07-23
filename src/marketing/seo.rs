@@ -649,6 +649,10 @@ fn build_llms(cfg: &MarketingCfg) -> Bytes {
         "- [Homepage]({origin}): Product overview, features and pricing.\n"
     ));
     s.push_str(&format!(
+        "- [Architecture]({origin}{arch}): Interactive map of how a request and a check move through the system.\n",
+        arch = crate::marketing::pages::ARCHITECTURE_PATH,
+    ));
+    s.push_str(&format!(
         "- [Start free]({app}): Sign in and add your first monitor.\n\n",
         app = cfg.app_url,
     ));
@@ -871,6 +875,10 @@ fn build_sitemap(cfg: &MarketingCfg) -> String {
     let mut urls: Vec<SitemapUrl> = vec![
         SitemapUrl::new(origin.clone(), None).with_images(gallery_images),
         SitemapUrl::new(format!("{origin}/pricing"), None),
+        SitemapUrl::new(
+            format!("{origin}{}", crate::marketing::pages::ARCHITECTURE_PATH),
+            Some(crate::marketing::pages::ARCHITECTURE_LASTMOD.to_string()),
+        ),
         SitemapUrl::new(format!("{origin}/blog"), blog_lastmod),
     ];
     if cfg.blog_enabled {
