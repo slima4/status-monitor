@@ -27,7 +27,7 @@
     <nav aria-label="Related notes">
         <div class="mk-terminal">
             <div class="mk-terminal__chrome"><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__dot"></span><span class="mk-terminal__tag">~/notes</span></div>
-            <div class="mk-terminal__body"><span class="mk-terminal__line mk-terminal__line--prompt">ls --related</span><span class="mk-terminal__line mk-terminal__line--blank"></span>{% for r in related %}<a href="/blog/{{ r.slug }}" class="mk-terminal__item"><span class="mk-terminal__date">{{ r.date }}</span>{{ r.title }}</a>{% endfor %}</div>
+            <div class="mk-terminal__body"><span class="mk-terminal__line mk-terminal__line--prompt">ls --related</span><span class="mk-terminal__line mk-terminal__line--blank"></span>{% for r in related %}<a href="/blog/{{ r.slug }}" class="mk-terminal__item" data-umami-event="related-post" data-umami-event-to="{{ r.slug }}"><span class="mk-terminal__date">{{ r.date }}</span>{{ r.title }}</a>{% endfor %}</div>
         </div>
     </nav>
     {% endif %}

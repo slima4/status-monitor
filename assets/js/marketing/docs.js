@@ -8,7 +8,7 @@ import { addCopyButtons } from "./_copy_code.js";
     const body = document.querySelector(".mk-doc-body");
     if (!body) return;
 
-    addCopyButtons(body);
+    addCopyButtons(body, "docs");
 
     const links = new Map();
     for (const a of document.querySelectorAll(".mk-doc-toc a")) {
