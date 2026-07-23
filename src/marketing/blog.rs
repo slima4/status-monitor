@@ -219,6 +219,10 @@ pub fn render(markdown: &str) -> String {
         .link_rel(Some("noopener noreferrer"))
         .add_allowed_classes("div", &["mk-table-scroll"])
         .add_tag_attributes("div", &["tabindex"])
+        // Keep pulldown's `language-*` class so a language-tagged block reads as
+        // code (scroll) and a plain fence reads as prose (wrap). A class cannot
+        // execute, so this widens nothing dangerous.
+        .add_tag_attributes("code", &["class"])
         .clean(&html)
         .to_string()
 }

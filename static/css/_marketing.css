@@ -1304,6 +1304,13 @@ html:has(.marketing-shell) {
     padding: 0;
     color: inherit;
 }
+/* A plain fence (no language) is prose: prompts, commands, output. It wraps so
+   nothing hides behind a scrollbar. A language-tagged block keeps its shape and
+   scrolls. The fence language is the wrap switch. */
+.mk-article pre code:not([class]) {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
 /* Callout: blog posts use blockquote only for TL;DR / Key-takeaways boxes.
    First paragraph is the label, rendered as a `// LABEL` mono eyebrow. */
 .mk-article blockquote {
@@ -1862,9 +1869,10 @@ html:has(.marketing-shell) {
 .mk-doc-body > h1:first-child { margin-top: 0; }
 .mk-doc-body h2,
 .mk-doc-body h3 { scroll-margin-top: 5.5rem; }
-.mk-doc-body pre { position: relative; }
+.mk-doc-body pre,
+.mk-article pre { position: relative; }
 
-.mk-doc-copy {
+.mk-code-copy {
     position: absolute;
     top: 0.5rem;
     right: 0.5rem;
@@ -1884,9 +1892,10 @@ html:has(.marketing-shell) {
        button's label into the copied snippet. */
     user-select: none;
 }
-.mk-doc-body pre:hover .mk-doc-copy,
-.mk-doc-copy:focus-visible { opacity: 1; }
-.mk-doc-copy:hover { color: oklch(0.95 0.005 240); }
+.mk-doc-body pre:hover .mk-code-copy,
+.mk-article pre:hover .mk-code-copy,
+.mk-code-copy:focus-visible { opacity: 1; }
+.mk-code-copy:hover { color: oklch(0.95 0.005 240); }
 
 .mk-doc-foot {
     display: flex;

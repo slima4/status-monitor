@@ -1,3 +1,5 @@
+import { addCopyButtons } from "./_copy_code.js";
+
 // Progressive enhancement for a documentation page: copy buttons on code
 // blocks and an on-page contents list that tracks the heading you are
 // reading. Without this script the page keeps its code, its anchors, and a
@@ -6,23 +8,7 @@
     const body = document.querySelector(".mk-doc-body");
     if (!body) return;
 
-    for (const pre of body.querySelectorAll("pre")) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "mk-doc-copy";
-        button.textContent = "copy";
-        button.addEventListener("click", async () => {
-            const code = pre.querySelector("code");
-            try {
-                await navigator.clipboard.writeText((code || pre).innerText);
-                button.textContent = "copied";
-            } catch {
-                button.textContent = "press ctrl+c";
-            }
-            setTimeout(() => { button.textContent = "copy"; }, 1600);
-        });
-        pre.appendChild(button);
-    }
+    addCopyButtons(body);
 
     const links = new Map();
     for (const a of document.querySelectorAll(".mk-doc-toc a")) {
