@@ -78,11 +78,22 @@ pub fn publishes_no_expiry(tld: &str) -> bool {
 }
 
 #[derive(Default)]
-pub struct WhoisClient;
+pub struct WhoisClient {
+    /// Test-only: forces every lookup at a fixed address instead of the static
+    /// table's server on port 43, so a mock server can stand in.
+    addr_override: Option<(String, u16)>,
+}
 
 impl WhoisClient {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    #[doc(hidden)]
+    pub fn with_addr_override(host: impl Into<String>, port: u16) -> Self {
+        Self {
+            addr_override: Some((host.into(), port)),
+        }
     }
 
     pub async fn lookup_expiration(
@@ -97,19 +108,30 @@ impl WhoisClient {
             }
             .into());
         }
-        let server = whois_server(tld).ok_or_else(|| {
-            AppError::from(RegistrationError::TldUnsupported {
-                tld: tld.to_owned(),
-            })
-        })?;
+        let (host, port) = match &self.addr_override {
+            Some((h, p)) => (h.as_str(), *p),
+            None => (
+                whois_server(tld).ok_or_else(|| {
+                    AppError::from(RegistrationError::TldUnsupported {
+                        tld: tld.to_owned(),
+                    })
+                })?,
+                WHOIS_PORT,
+            ),
+        };
 
-        let body = query(server, registrable, clients).await?;
+        let body = query(host, port, registrable, clients).await?;
         parse_answer(&body)
     }
 }
 
-async fn query(server: &str, registrable: &str, clients: &HttpClients) -> Result<String> {
-    let mut stream: TcpStream = connect_via_guard(server, WHOIS_PORT, clients)
+async fn query(
+    server: &str,
+    port: u16,
+    registrable: &str,
+    clients: &HttpClients,
+) -> Result<String> {
+    let mut stream: TcpStream = connect_via_guard(server, port, clients)
         .await
         .with_context(|| format!("connecting to WHOIS server {server}"))?;
 

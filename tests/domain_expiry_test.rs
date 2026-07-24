@@ -19,6 +19,7 @@ use uptimepage::worker::host_throttle::HostThrottle;
 use uptimepage::worker::rdap::RdapClient;
 use uptimepage::worker::rdap_singleflight::RdapSingleflight;
 use uptimepage::worker::registration::RegistrationClient;
+use uptimepage::worker::whois::WhoisClient;
 use uuid::Uuid;
 
 mod common;
@@ -135,6 +136,69 @@ async fn classify_one(
         &common::test_client(),
     )
     .await
+}
+
+/// Minimal port-43 server: reads the query line, writes `body`, closes.
+async fn spawn_whois_fixture(body: String) -> SocketAddr {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let body = body.clone();
+            tokio::spawn(async move {
+                let mut scratch = [0u8; 256];
+                let _ = sock.read(&mut scratch).await;
+                let _ = sock.write_all(body.as_bytes()).await;
+            });
+        }
+    });
+    addr
+}
+
+/// End-to-end fallback: RDAP has no server for `.co`, so the coordinator must
+/// query WHOIS and classify from the parsed registry answer. Guards the whole
+/// transport + parse + fallback path in CI, which the ignored live test cannot.
+#[tokio::test]
+async fn domain_expiry_falls_back_to_whois_when_rdap_lacks_tld() {
+    // Bootstrap advertises only `.example`, so a `.co` RDAP lookup is
+    // TldUnsupported and the coordinator drops to WHOIS.
+    let (rdap_addr, _) =
+        spawn_rdap_fixture(Utc::now() + chrono::Duration::days(200), None, false).await;
+
+    let expiry = Utc::now() + chrono::Duration::days(20);
+    let body = format!(
+        "Domain Name: FOO.CO\r\nRegistry Expiry Date: {}\r\nRegistrar: Test Registrar\r\n",
+        expiry.to_rfc3339()
+    );
+    let whois_addr = spawn_whois_fixture(body).await;
+
+    let state: Arc<dyn DomainExpiryStateStore> = Arc::new(InMemoryDomainExpiryStateStore::new());
+    let runtime = DomainExpiryRuntime::new(
+        Arc::new(RegistrationClient::with_whois(
+            Arc::new(client_for(rdap_addr)),
+            WhoisClient::with_addr_override(whois_addr.ip().to_string(), whois_addr.port()),
+        )),
+        Arc::new(RdapSingleflight::with_default_ttl()),
+        state,
+        HostThrottle::permissive(),
+        DEFAULT_MAX_STALENESS,
+    );
+
+    let r = execute_domain_expiry_check(
+        Uuid::now_v7(),
+        Uuid::now_v7(),
+        &make_check("foo.co", 30, 7),
+        &runtime,
+        &common::test_client(),
+    )
+    .await;
+
+    assert_eq!(r.status, CheckStatus::Degraded);
+    let details: Value =
+        serde_json::from_str(r.error.as_deref().expect("degraded carries details")).unwrap();
+    assert_eq!(details["registrar"], "Test Registrar");
+    assert!(details["days_remaining"].as_i64().unwrap() < 30);
 }
 
 #[tokio::test]

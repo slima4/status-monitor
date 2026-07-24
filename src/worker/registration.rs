@@ -59,6 +59,11 @@ impl RegistrationClient {
         }
     }
 
+    #[doc(hidden)]
+    pub fn with_whois(rdap: Arc<RdapClient>, whois: WhoisClient) -> Self {
+        Self { rdap, whois }
+    }
+
     pub async fn lookup_expiration(
         &self,
         domain: &str,
