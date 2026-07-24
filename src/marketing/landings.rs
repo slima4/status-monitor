@@ -3560,7 +3560,10 @@ static BETTER_STACK_MATRIX: Matrix = Matrix {
     rows: &[
         MatrixRow {
             label: "fastest check interval",
-            cells: &[("60s hosted · 10s self", "yes"), ("30s", "yes")],
+            cells: &[
+                ("60s hosted · 10s self", "yes"),
+                ("3 min free · 30s paid", "part"),
+            ],
         },
         MatrixRow {
             label: "check types",
@@ -3595,7 +3598,7 @@ static BETTER_STACK_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "multi-region probes",
-            cells: &[("yes", "yes"), ("4 regions", "")],
+            cells: &[("yes", "yes"), ("4 regions", "yes")],
         },
         MatrixRow {
             label: "config-as-code",
@@ -3618,7 +3621,7 @@ static BETTER_STACK_MATRIX: Matrix = Matrix {
         },
     ],
     notes: &[
-        "Better Stack's free plan covers 10 monitors at 30-second checks with 1 status page; paid plans start around $29/month. It is a hosted service, not open-source or self-hostable.",
+        "Better Stack's free plan covers 10 monitors at 3-minute checks with 1 status page; 30-second checks and other paid features start around $29/month. It is a hosted service, not open-source or self-hostable.",
         "Better Stack has 1-second heartbeat monitors and broader check types that Uptimepage does not have yet. Uptimepage is AGPL and self-hostable, adds an MCP server, and starts free with no card.",
         "Verified against betterstack.com/pricing in July 2026. SaaS plans change, so check their current pricing before you decide.",
     ],
