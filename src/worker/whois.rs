@@ -325,10 +325,15 @@ mod tests {
         assert_eq!(field(body, "registrar").as_deref(), Some("Real Registrar"));
     }
 
-    /// Ignored so the suite stays offline; run when changing the table or parser.
+    /// Hits live third-party registries; run when changing the table or parser
+    /// with `WHOIS_LIVE_TEST=1`. CI runs ignored tests, so it no-ops without the
+    /// env var rather than depending on 21 registries answering from the runner.
     #[tokio::test]
-    #[ignore]
+    #[ignore = "set WHOIS_LIVE_TEST=1: reaches live WHOIS registries"]
     async fn live_lookup_returns_expiry_for_every_supported_tld() {
+        if std::env::var_os("WHOIS_LIVE_TEST").is_none() {
+            return;
+        }
         let clients = crate::http_client::build_clients(
             &crate::config::HttpClientConfig {
                 tcp_keepalive_secs: 30,
