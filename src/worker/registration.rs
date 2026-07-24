@@ -102,10 +102,10 @@ mod tests {
 
     #[test]
     fn expiryless_registries_are_not_monitorable() {
-        for tld in ["de", "eu", "gg"] {
+        for tld in ["de", "eu", "gg", "at", "be", "ch", "jp"] {
             assert!(!is_monitorable(tld), ".{tld} publishes no expiry");
         }
-        for tld in ["co", "com", "it", "nu"] {
+        for tld in ["co", "com", "it", "nu", "se", "dk", "ie", "hk"] {
             assert!(is_monitorable(tld), ".{tld} is monitorable");
         }
     }

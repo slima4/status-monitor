@@ -23,21 +23,36 @@ const READ_TIMEOUT: Duration = Duration::from_secs(10);
 /// Caps a hostile or broken server that would otherwise stream until timeout.
 const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 
-/// Add a TLD only after confirming its live WHOIS carries a parseable expiry.
+/// Add a TLD only after confirming its live WHOIS carries a parseable expiry,
+/// and that `parse_timestamp` handles its date format.
 const WHOIS_SERVERS: &[(&str, &str)] = &[
     ("co", "whois.registry.co"),
+    ("dk", "whois.punktum.dk"),
+    ("ee", "whois.tld.ee"),
+    ("hk", "whois.hkirc.hk"),
+    ("hr", "whois.dns.hr"),
+    ("ie", "whois.weare.ie"),
+    ("is", "whois.isnic.is"),
     ("it", "whois.nic.it"),
     ("la", "whois.nic.la"),
+    ("lt", "whois.domreg.lt"),
     ("me", "whois.nic.me"),
+    ("mx", "whois.mx"),
     ("nu", "whois.iis.nu"),
+    ("pt", "whois.dns.pt"),
+    ("se", "whois.iis.se"),
     ("sh", "whois.nic.sh"),
+    ("si", "whois.register.si"),
+    ("sk", "whois.sk-nic.sk"),
     ("so", "whois.nic.so"),
     ("st", "whois.nic.st"),
     ("us", "whois.nic.us"),
 ];
 
 /// These registries omit expiry by policy, so the check can never succeed.
-const NO_PUBLIC_EXPIRY: &[&str] = &["de", "eu", "gg"];
+const NO_PUBLIC_EXPIRY: &[&str] = &[
+    "ae", "at", "be", "bg", "ch", "de", "eu", "gg", "hu", "jp", "lu", "lv", "nz", "ro",
+];
 
 /// Ordered by preference: the registry's value beats the registrar's copy.
 const EXPIRY_LABELS: &[&str] = &[
@@ -48,6 +63,7 @@ const EXPIRY_LABELS: &[&str] = &[
     "registrar registration expiration date",
     "expires",
     "expire",
+    "valid until",
 ];
 
 pub fn whois_server(tld: &str) -> Option<&'static str> {
@@ -147,19 +163,34 @@ fn field(body: &str, label: &str) -> Option<String> {
 }
 
 fn parse_timestamp(raw: &str) -> Option<DateTime<Utc>> {
+    let raw = raw.trim().trim_end_matches('.');
     if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
         return Some(dt.with_timezone(&Utc));
     }
-    // Registries that omit the zone designator publish UTC.
-    for format in ["%Y-%m-%dT%H:%M:%S%.f", "%Y-%m-%d %H:%M:%S"] {
-        if let Ok(naive) = NaiveDateTime::parse_from_str(raw, format) {
+    // Collapse runs of whitespace so month-name forms like "September  5 2027"
+    // match a single-space format.
+    let squeezed: String = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // Registries that omit the zone designator publish UTC. Year-first formats
+    // come first: they are unambiguous, so a day-first pattern never reaches an
+    // ISO value. The day-first `-`/`/` forms assume day-before-month, which
+    // holds for the European ccTLDs that use them; a value whose leading field
+    // exceeds 12 fails loudly rather than parsing as the wrong month.
+    for format in [
+        "%Y-%m-%dT%H:%M:%S%.f",
+        "%Y-%m-%d %H:%M:%S",
+        "%d/%m/%Y %H:%M:%S",
+    ] {
+        if let Ok(naive) = NaiveDateTime::parse_from_str(&squeezed, format) {
             return Some(Utc.from_utc_datetime(&naive));
         }
     }
-    NaiveDate::parse_from_str(raw, "%Y-%m-%d")
-        .ok()
-        .and_then(|d| d.and_hms_opt(0, 0, 0))
-        .map(|naive| Utc.from_utc_datetime(&naive))
+    for format in ["%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%B %d %Y"] {
+        if let Ok(date) = NaiveDate::parse_from_str(&squeezed, format) {
+            return date.and_hms_opt(0, 0, 0).map(|n| Utc.from_utc_datetime(&n));
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -190,6 +221,28 @@ mod tests {
         assert!(parse_answer("expire: 2027-01-02\n").is_ok());
     }
 
+    #[test]
+    fn day_first_value_reads_day_before_month() {
+        // 16-11-2035 is 16 Nov, not an invalid 16th month.
+        let ts = parse_timestamp("16-11-2035").expect("day-first parses");
+        assert_eq!(ts.to_rfc3339(), "2035-11-16T00:00:00+00:00");
+        let ts = parse_timestamp("31/12/2026 23:59:00").expect("day-first datetime parses");
+        assert_eq!(ts.to_rfc3339(), "2026-12-31T23:59:00+00:00");
+    }
+
+    #[test]
+    fn month_name_value_with_padding_parses() {
+        let ts = parse_timestamp("September  5 2027").expect("month name parses");
+        assert_eq!(ts.to_rfc3339(), "2027-09-05T00:00:00+00:00");
+    }
+
+    #[test]
+    fn month_first_value_with_day_over_twelve_fails_loudly() {
+        // A US-style 08-22-2026 must not be misread as day-first: month 22 is
+        // invalid, so it returns None rather than a wrong date.
+        assert!(parse_timestamp("08-22-2026").is_none());
+    }
+
     /// An unparseable authoritative value must fail loudly. Falling through to
     /// the registrar's copy would report a different date as if it were the
     /// registry's.
@@ -215,6 +268,21 @@ mod tests {
             ("nu", "expires:          2032-01-17"),
             ("me", "Registry Expiry Date: 2034-04-29T17:53:02Z"),
             ("us", "Registry Expiry Date: 2027-04-17T23:59:59Z"),
+            ("se", "expires:                       2031-03-09"),
+            ("dk", "Expires: 2027-01-31"),
+            ("ie", "Registry Expiry Date: 2027-01-01T14:45:44Z"),
+            (
+                "hr",
+                "Registrar Registration Expiration Date: 2050-11-15T23:00:00Z",
+            ),
+            ("si", "expire:  2026-10-28"),
+            ("lt", "Expires:    2026-10-17"),
+            ("ee", "expire:      2030-02-05"),
+            ("mx", "Expiration Date: 2027-01-14"),
+            ("pt", "Expiration Date: 31/12/2026 23:59:00"),
+            ("hk", "Expiry Date: 16-11-2035"),
+            ("is", "expires:      September  5 2027"),
+            ("sk", "Valid Until: 2027-06-10"),
         ];
         for (tld, line) in samples {
             assert!(
@@ -279,6 +347,18 @@ mod tests {
             ("iis.nu", "nu"),
             ("about.me", "me"),
             ("about.us", "us"),
+            ("iis.se", "se"),
+            ("punktum.dk", "dk"),
+            ("weare.ie", "ie"),
+            ("dns.hr", "hr"),
+            ("register.si", "si"),
+            ("domreg.lt", "lt"),
+            ("internet.ee", "ee"),
+            ("nic.mx", "mx"),
+            ("dns.pt", "pt"),
+            ("hkirc.hk", "hk"),
+            ("isnic.is", "is"),
+            ("sk-nic.sk", "sk"),
         ] {
             let answer = client
                 .lookup_expiration(domain, tld, &clients)
@@ -292,10 +372,11 @@ mod tests {
     fn server_table_covers_known_gaps_and_excludes_expiryless_registries() {
         assert_eq!(whois_server("co"), Some("whois.registry.co"));
         assert_eq!(whois_server("nu"), Some("whois.iis.nu"));
-        for tld in ["de", "eu", "gg"] {
+        for tld in ["de", "eu", "gg", "at", "ch", "jp"] {
             assert!(whois_server(tld).is_none(), ".{tld} must have no server");
             assert!(publishes_no_expiry(tld), ".{tld} publishes no expiry");
         }
         assert!(!publishes_no_expiry("co"));
+        assert!(!publishes_no_expiry("se"));
     }
 }
