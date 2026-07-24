@@ -3491,7 +3491,7 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
             label: "check types",
             cells: &[
                 ("HTTP · TCP · DNS · TLS · ping", ""),
-                ("HTTP · TCP · DNS · UDP · keyword", ""),
+                ("HTTP · TCP · ping · keyword", ""),
             ],
         },
         MatrixRow {
@@ -3504,11 +3504,11 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "TLS + domain expiry",
-            cells: &[("yes", "yes"), ("yes", "")],
+            cells: &[("yes", "yes"), ("paid only", "part")],
         },
         MatrixRow {
             label: "branded status page",
-            cells: &[("yes", "yes"), ("yes", "")],
+            cells: &[("yes", "yes"), ("basic free · full paid", "part")],
         },
         MatrixRow {
             label: "status-page subscribers",
@@ -3516,7 +3516,14 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "multi-region probes",
-            cells: &[("yes", "yes"), ("4 regions", "")],
+            cells: &[("yes", "yes"), ("1 free · 4 paid", "part")],
+        },
+        MatrixRow {
+            label: "alert channels",
+            cells: &[
+                ("Slack · Telegram · PagerDuty · SMS · webhook", "yes"),
+                ("email/SMS free · webhook + PagerDuty on Team", "part"),
+            ],
         },
         MatrixRow {
             label: "config-as-code",
@@ -3535,11 +3542,11 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "price to start",
-            cells: &[("$0", "yes"), ("paid from $7/mo", "")],
+            cells: &[("$0", "yes"), ("$0", "yes")],
         },
     ],
     notes: &[
-        "UptimeRobot's free plan allows 50 monitors but at a 5-minute interval with no login seats for teammates; 60-second checks, more status pages and team seats start on paid plans.",
+        "UptimeRobot's free plan covers 50 monitors from a single region at 5-minute checks, with email and SMS alerts and basic integrations. Multi-region probes, 60-second checks, DNS, UDP and API checks, SSL and domain-expiry monitoring, Slack, webhook and PagerDuty alerts, full-featured status pages and team seats are all paid-tier features.",
         "UptimeRobot is a hosted service, not open-source or self-hostable. Its Terraform provider ships from its own GitHub organization though it carries the registry's community badge, and it added a hosted MCP server. Uptimepage has no heartbeat monitor yet.",
         "Verified against uptimerobot.com/pricing in July 2026. SaaS plans change, so check their current pricing before you decide.",
     ],
