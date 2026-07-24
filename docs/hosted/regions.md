@@ -29,7 +29,7 @@ Each monitor carries a region policy that says how many regions have to agree be
 
 `majority` is the default because it absorbs the common case of one probe path having a bad minute without waking anybody. Use `any` when you want the earliest possible signal and can tolerate more noise, and `all` for a monitor that is only meaningful when it is globally unreachable.
 
-Region agreement is separate from the consecutive-failure threshold. A monitor with `alert_confirmations = 2` still needs two consecutive failing rounds before it alerts, and each of those rounds is judged by the region policy.
+Region agreement and the consecutive-failure threshold are two separate gates, applied in that order. A region counts as failing only after `alert_confirmations` failures in a row from that region alone (default 2), and then the region policy decides whether enough failing regions have agreed to open an incident. Recovery works the same way in reverse: the incident closes once the failing regions drop back below the policy and some region has a matching run of passing checks.
 
 ## Practical notes
 

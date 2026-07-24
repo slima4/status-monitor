@@ -18,6 +18,8 @@ Acknowledging an incident stops escalation and records who took it — it posts 
 
 A background writer scans every enabled monitor (not only status-page components). When a monitor sustains a bad state — `down`, `error`, or `degraded` — it opens one incident; a sustained recovery to `up` resolves it automatically (with no human resolver recorded). One open incident per monitor at a time; duplicate failures fold into it.
 
+"Sustains" is two gates, not one. A region counts as failing only after `alert_confirmations` failures in a row from that region alone (default 2), and then the monitor's region policy decides how many failing regions have to agree before the incident opens. The default is majority, meaning more than half of the regions that monitor is assigned. Under that default, a monitor probed from several regions does not open an incident because one location had a bad minute. See [Multi-region probes](multi-region.md) for the policy list, or [Probe regions](hosted/regions.md) on the hosted service.
+
 Visibility is derived at open time: if the monitor is a component of an enabled status page the incident opens `public`, otherwise `internal`. A monitor on no page still gets a fully tracked internal incident.
 
 You can also declare an incident by hand from the console (`/incidents/declare`) — for a problem a monitor can't see, like a customer report or a partner outage. A manual incident may stand alone or link to a monitor, and opens `internal`.

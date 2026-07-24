@@ -1,10 +1,19 @@
 +++
 title = "Why your uptime monitor should be boring"
 date = "2026-05-20"
+updated = "2026-07-24"
 slug = "boring-uptime"
 excerpt = "A monitor that surprises you is doing the wrong job. What changes when you treat the watchdog like a smoke detector: cheap, dumb, unmissable when it matters."
 tags = ["monitoring", "incidents", "status-pages", "on-call"]
 draft = false
+
+[[faqs]]
+q = "How many probe regions have to agree before an incident opens?"
+a = "By default, more than half of the regions that monitor runs in. It is two separate gates. First, a region only counts as failing after it fails a set number of checks in a row on its own, with two in a row as the default, so a single bad sample is never enough. Then the failing regions are counted against the monitor's region policy: any, majority, all, or an explicit count. A monitor assigned three regions therefore needs two of them to agree. Majority is the default because one probe location having a bad network day is the most common false alarm there is."
+
+[[faqs]]
+q = "Does waiting for agreement make outage detection slower?"
+a = "Slightly, and it is a trade worth making. Two confirmations at the monitor's check interval means you hear about a real outage one interval later than a monitor that pages on the first failed check. The alternative is not faster alerts, it is alerts your on-call has learned to swipe away. Set the policy to any on the few monitors where the earliest possible signal beats the noise, such as a payment callback, and leave the rest on majority."
 +++
 
 ## Why your uptime monitor should be boring
@@ -91,6 +100,12 @@ neighbour.
 In every case, the right answer is the same. The monitor should do
 one thing. It should keep doing that one thing while everything else
 is on fire.
+
+## Common questions
+
+**How many probe regions have to agree before an incident opens?** By default, more than half of the regions that monitor runs in. It is two separate gates. First, a region only counts as failing after it fails a set number of checks in a row on its own, with two in a row as the default, so a single bad sample is never enough. Then the failing regions are counted against the monitor's region policy: any, majority, all, or an explicit count. A monitor assigned three regions therefore needs two of them to agree. Majority is the default because one probe location having a bad network day is the most common false alarm there is.
+
+**Does waiting for agreement make outage detection slower?** Slightly, and it is a trade worth making. Two confirmations at the monitor's check interval means you hear about a real outage one interval later than a monitor that pages on the first failed check. The alternative is not faster alerts, it is alerts your on-call has learned to swipe away. Set the policy to any on the few monitors where the earliest possible signal beats the noise, such as a payment callback, and leave the rest on majority.
 
 ## The reward
 
