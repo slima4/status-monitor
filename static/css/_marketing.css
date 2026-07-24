@@ -1076,6 +1076,23 @@ html:has(.marketing-shell) {
     margin-bottom: 0.625rem;
 }
 .mk-footer__heading::before { content: "// "; color: var(--mk-faint); }
+/* Link-dense column flows sideways so it does not set the footer height. */
+.mk-footer-cols { column-count: 2; column-gap: 1.5rem; }
+.mk-footer-cols .mk-footer-link { break-inside: avoid; }
+.mk-social { display: flex; gap: 0.5rem; }
+.mk-social__link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    color: var(--mk-quiet);
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    transition: color 160ms ease, border-color 160ms ease;
+}
+.mk-social__link:hover { color: var(--mk-ok); border-color: var(--mk-ok); }
+.mk-social__link svg { width: 1.0625rem; height: 1.0625rem; fill: currentColor; }
 
 /* ── Integrations strip ──────────────────────────────────────────── */
 .mk-integration {
@@ -1449,7 +1466,8 @@ html:has(.marketing-shell) {
     .mk-mega__item-title,
     .mk-faq summary,
     .mk-faq summary::after,
-    .mk-footer-link { transition: none; }
+    .mk-footer-link,
+    .mk-social__link { transition: none; }
 }
 
 /* Marketing focus ring — ok-green, sharp corners */
