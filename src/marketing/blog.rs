@@ -217,7 +217,9 @@ pub fn render(markdown: &str) -> String {
     pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(parser(markdown)));
     ammonia::Builder::default()
         .link_rel(Some("noopener noreferrer"))
-        .add_allowed_classes("div", &["mk-table-scroll"])
+        .add_tags(["details", "summary"])
+        .add_allowed_classes("div", &["mk-table-scroll", "mk-faq__body"])
+        .add_allowed_classes("details", &["mk-faq"])
         .add_tag_attributes("div", &["tabindex"])
         // Keep pulldown's `language-*` class so a language-tagged block reads as
         // code (scroll) and a plain fence reads as prose (wrap). A class cannot
@@ -576,6 +578,22 @@ mod tests {
         assert!(open.is_some() && table_end.is_some(), "got: {html}");
         assert!(open < table_end, "got: {html}");
         assert!(html[table_end.unwrap()..].contains("</div>"), "got: {html}");
+    }
+
+    #[test]
+    fn renderer_keeps_faq_accordion_and_parses_inner_links() {
+        let md = "<details class=\"mk-faq\">\n<summary>Q</summary>\n<div class=\"mk-faq__body\">\n\nAnswer [ref](https://example.com/x).\n\n</div>\n</details>";
+        let html = render(md);
+        assert!(
+            html.contains("<details class=\"mk-faq\">"),
+            "details dropped: {html}"
+        );
+        assert!(html.contains("<summary>"), "summary dropped: {html}");
+        assert!(html.contains("mk-faq__body"), "body class dropped: {html}");
+        assert!(
+            html.contains("href=\"https://example.com/x\""),
+            "inner markdown link not parsed: {html}"
+        );
     }
 
     #[test]
