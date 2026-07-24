@@ -1294,6 +1294,13 @@ html:has(.marketing-shell) {
     border-radius: 2px;
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
+/* Image caption: the fully-italic line directly under an image. */
+.mk-article p:has(> img) + p:has(> em:only-child) {
+    margin-top: -0.75rem;
+    text-align: center;
+    font-size: 0.8125rem;
+    color: var(--mk-quiet);
+}
 .mk-article code {
     font-family: var(--mk-font-mono);
     font-size: 0.875em;
