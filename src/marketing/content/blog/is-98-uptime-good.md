@@ -107,10 +107,38 @@ Run your own numbers in the [uptime SLA calculator](/tools/uptime-sla-calculator
 
 ## Common questions
 
-**How much downtime is 98% uptime?** 98% uptime allows 28.8 minutes of downtime per day, 14.4 hours per 30-day month, or 7.3 days per year. Multiply any window by 0.02.
+<details class="mk-faq">
+<summary>How much downtime is 98% uptime?</summary>
+<div class="mk-faq__body">
 
-**Is 98% uptime good for a website?** Not for a public website or an API that customers pay for. It is fine for internal tools, staging, and hobby projects where downtime costs nothing.
+98% uptime allows 28.8 minutes of downtime per day, 14.4 hours per 30-day month, or 7.3 days per year. Multiply any window by 0.02.
 
-**What uptime should I aim for?** 99.9% is the common target for customer-facing services. It allows 43 minutes per 30-day month. Each extra nine costs roughly ten times more.
+</div>
+</details>
 
-**What is the difference between uptime and an SLA?** Uptime is the measured number: how much of the time your service actually worked. An SLA is a contract promise with a penalty, usually a service credit. The credit refunds part of your bill, not your customers' time.
+<details class="mk-faq">
+<summary>Is 98% uptime good for a website?</summary>
+<div class="mk-faq__body">
+
+Not for a public website or an API that customers pay for. It is fine for internal tools, staging, and hobby projects where downtime costs nothing.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What uptime should I aim for?</summary>
+<div class="mk-faq__body">
+
+99.9% is the common target for customer-facing services. It allows 43 minutes per 30-day month. Each extra nine costs roughly ten times more.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What is the difference between uptime and an SLA?</summary>
+<div class="mk-faq__body">
+
+Uptime is the measured number: how much of the time your service actually worked. An SLA is a contract promise with a penalty, usually a service credit. The credit refunds part of your bill, not your customers' time.
+
+</div>
+</details>

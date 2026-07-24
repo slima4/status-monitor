@@ -103,9 +103,23 @@ is on fire.
 
 ## Common questions
 
-**How many probe regions have to agree before an incident opens?** By default, more than half of the regions that monitor runs in. It is two separate gates. First, a region only counts as failing after it fails a set number of checks in a row on its own, with two in a row as the default, so a single bad sample is never enough. Then the failing regions are counted against the monitor's region policy: any, majority, all, or an explicit count. A monitor assigned three regions therefore needs two of them to agree. Majority is the default because one probe location having a bad network day is the most common false alarm there is.
+<details class="mk-faq">
+<summary>How many probe regions have to agree before an incident opens?</summary>
+<div class="mk-faq__body">
 
-**Does waiting for agreement make outage detection slower?** Slightly, and it is a trade worth making. Two confirmations at the monitor's check interval means you hear about a real outage one interval later than a monitor that pages on the first failed check. The alternative is not faster alerts, it is alerts your on-call has learned to swipe away. Set the policy to any on the few monitors where the earliest possible signal beats the noise, such as a payment callback, and leave the rest on majority.
+By default, more than half of the regions that monitor runs in. It is two separate gates. First, a region only counts as failing after it fails a set number of checks in a row on its own, with two in a row as the default, so a single bad sample is never enough. Then the failing regions are counted against the monitor's region policy: any, majority, all, or an explicit count. A monitor assigned three regions therefore needs two of them to agree. Majority is the default because one probe location having a bad network day is the most common false alarm there is.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Does waiting for agreement make outage detection slower?</summary>
+<div class="mk-faq__body">
+
+Slightly, and it is a trade worth making. Two confirmations at the monitor's check interval means you hear about a real outage one interval later than a monitor that pages on the first failed check. The alternative is not faster alerts, it is alerts your on-call has learned to swipe away. Set the policy to any on the few monitors where the earliest possible signal beats the noise, such as a payment callback, and leave the rest on majority.
+
+</div>
+</details>
 
 ## The reward
 

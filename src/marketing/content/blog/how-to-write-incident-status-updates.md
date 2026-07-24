@@ -111,12 +111,47 @@ The message still needs somewhere to live. A status page is where customers look
 
 ## Common questions
 
-**What are the stages of an incident status update?** Most status pages use four: investigating (you know something is wrong but not why), identified (you found the cause and are fixing it), monitoring (the fix is live and you are watching it), and resolved (the service is back and stable). Planned maintenance uses scheduled, in progress, and completed.
+<details class="mk-faq">
+<summary>What are the stages of an incident status update?</summary>
+<div class="mk-faq__body">
 
-**What should the first incident update say?** Say what the customer feels, say you are looking into it, and give a time for the next update. You do not need the cause yet. A first message like "some payments are failing, we are investigating, next update by 15:00 UTC" is enough.
+Most status pages use four: investigating (you know something is wrong but not why), identified (you found the cause and are fixing it), monitoring (the fix is live and you are watching it), and resolved (the service is back and stable). Planned maintenance uses scheduled, in progress, and completed.
 
-**How often should you update a status page during an outage?** Set the time in your first message and keep it. Every 30 to 60 minutes is a good starting point for a serious outage. The exact number matters less than posting on time.
+</div>
+</details>
 
-**What is the difference between investigating and identified?** Investigating means the cause is not confirmed. Identified means you have confirmed the cause and are working on a fix. Do not move to identified based on a hunch.
+<details class="mk-faq">
+<summary>What should the first incident update say?</summary>
+<div class="mk-faq__body">
 
-**Should you apologize in an incident update?** One short, honest line is fine. Skip the long apology. A clear next-update time does more for trust than three sentences of sorry.
+Say what the customer feels, say you are looking into it, and give a time for the next update. You do not need the cause yet. A first message like "some payments are failing, we are investigating, next update by 15:00 UTC" is enough.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>How often should you update a status page during an outage?</summary>
+<div class="mk-faq__body">
+
+Set the time in your first message and keep it. Every 30 to 60 minutes is a good starting point for a serious outage. The exact number matters less than posting on time.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What is the difference between investigating and identified?</summary>
+<div class="mk-faq__body">
+
+Investigating means the cause is not confirmed. Identified means you have confirmed the cause and are working on a fix. Do not move to identified based on a hunch.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Should you apologize in an incident update?</summary>
+<div class="mk-faq__body">
+
+One short, honest line is fine. Skip the long apology. A clear next-update time does more for trust than three sentences of sorry.
+
+</div>
+</details>

@@ -108,21 +108,41 @@ From the same JSON, build one self-contained interactive HTML page. Show the par
 
 ## Common questions
 
-**Can an AI model read a whole codebase?**
+<details class="mk-faq">
+<summary>Can an AI model read a whole codebase?</summary>
+<div class="mk-faq__body">
 
 Not all at once, and not perfectly. A large codebase does not fit in one prompt. The trick is to let several agents read different parts at the same time, then join their notes. The model is good at finding structure and explaining it in plain words. It is weak at exact numbers, so you still have to check those against the code.
 
-**Why write a file for an AI agent and not just for people?**
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Why write a file for an AI agent and not just for people?</summary>
+<div class="mk-faq__body">
 
 Every time an AI agent starts work on your code, it reads a lot of files to learn how things fit together. That costs time and money, and it starts from zero each time. A short map file gives the next agent the rules, the common tasks, and the traps up front, so it can start work instead of re-learning the whole system.
 
-**Can I trust the numbers an AI gives about my code?**
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Can I trust the numbers an AI gives about my code?</summary>
+<div class="mk-faq__body">
 
 No. Treat every count as a guess until you check it. In my run the model said 13 alert channels when the real number was 14, and about 80 error codes when the real number was 155. It gets the shape right and the numbers wrong. Ask it to verify each number against the source, and then check the important ones yourself.
 
-**What are the three files you made?**
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What are the three files you made?</summary>
+<div class="mk-faq__body">
 
 A one-page HTML summary for me, a JSON file for the next AI agent, and an interactive flow map that anyone can click. The map is public. You can open it and trace how a request moves through the system.
+
+</div>
+</details>
 
 ## Why this is worth doing
 

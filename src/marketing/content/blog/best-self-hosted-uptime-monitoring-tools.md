@@ -139,10 +139,38 @@ There is no single best tool here, only the one that matches your three answers.
 
 ## Common questions
 
-**What is the best Uptime Kuma alternative?** Depends on which edge you hit. If it is the single shared login and the missing REST API, Uptimepage and OpenStatus both give you teams and monitoring as code; [OpenStatus and Kuma compared](/compare/openstatus-vs-uptime-kuma) covers that choice. If you want config in Git, Gatus. If you want a fresher UI doing the same job, Checkmate. If you want host metrics and middleware in the same tool, HertzBeat.
+<details class="mk-faq">
+<summary>What is the best Uptime Kuma alternative?</summary>
+<div class="mk-faq__body">
 
-**Which open-source uptime monitor is best for developers?** If you want everything in Git and reviewed in a pull request, Gatus and Uptimepage both fit the developer workflow, Gatus with a YAML file and Uptimepage with a Terraform provider and a REST API. Uptime Kuma is friendlier to click through, but its API is the internal Socket.io interface rather than a supported REST API for managing monitors, so it is the weaker pick when you want monitoring as code.
+Depends on which edge you hit. If it is the single shared login and the missing REST API, Uptimepage and OpenStatus both give you teams and monitoring as code; [OpenStatus and Kuma compared](/compare/openstatus-vs-uptime-kuma) covers that choice. If you want config in Git, Gatus. If you want a fresher UI doing the same job, Checkmate. If you want host metrics and middleware in the same tool, HertzBeat.
 
-**What is external uptime monitoring?** It means checking your service from outside your own network, the way a real user reaches it, rather than from a process on the same box. External checks catch DNS, TLS and edge failures that an internal healthcheck never sees. Every tool on this list does external monitoring; the ones with multi-region probes, like Uptimepage, let you check from more than one place at once.
+</div>
+</details>
 
-**Can I white-label the status page?** Some can. If you run an agency or resell monitoring and need your own logo, colours and domain in front of clients, look for a tool built for it. That is the slice we cover on [white-label uptime monitoring](/white-label-uptime-monitoring), where each client gets a branded page with no vendor name shown.
+<details class="mk-faq">
+<summary>Which open-source uptime monitor is best for developers?</summary>
+<div class="mk-faq__body">
+
+If you want everything in Git and reviewed in a pull request, Gatus and Uptimepage both fit the developer workflow, Gatus with a YAML file and Uptimepage with a Terraform provider and a REST API. Uptime Kuma is friendlier to click through, but its API is the internal Socket.io interface rather than a supported REST API for managing monitors, so it is the weaker pick when you want monitoring as code.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What is external uptime monitoring?</summary>
+<div class="mk-faq__body">
+
+It means checking your service from outside your own network, the way a real user reaches it, rather than from a process on the same box. External checks catch DNS, TLS and edge failures that an internal healthcheck never sees. Every tool on this list does external monitoring; the ones with multi-region probes, like Uptimepage, let you check from more than one place at once.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Can I white-label the status page?</summary>
+<div class="mk-faq__body">
+
+Some can. If you run an agency or resell monitoring and need your own logo, colours and domain in front of clients, look for a tool built for it. That is the slice we cover on [white-label uptime monitoring](/white-label-uptime-monitoring), where each client gets a branded page with no vendor name shown.
+
+</div>
+</details>

@@ -155,15 +155,50 @@ The moment somebody pays you, or depends on you, the answer changes.
 
 ## Common questions
 
-**Do I really need an uptime monitor?** You need one if money, users, or your reputation depend on the service staying up. Without a monitor, your detection time is however long it takes a customer to notice and write to you, which at night is often hours. With one it is a minute or two.
+<details class="mk-faq">
+<summary>Do I really need an uptime monitor?</summary>
+<div class="mk-faq__body">
 
-**How much does downtime cost?** Take your monthly revenue and divide it by 730 to get your revenue per hour, then multiply by the hours you were down. Add the ad budget you kept spending on a broken page, the support time, the refunds, and the customers who never came back.
+You need one if money, users, or your reputation depend on the service staying up. Without a monitor, your detection time is however long it takes a customer to notice and write to you, which at night is often hours. With one it is a minute or two.
 
-**Is a free uptime monitor enough?** For one or two sites, often yes. Free tiers differ most in how often they check: some give you five minutes, ours gives 60 seconds on 50 monitors. You outgrow free when you need several regions, a database or a background job watched, or an alert that reaches a phone at 3 a.m.
+</div>
+</details>
 
-**What should I monitor besides my website?** Watch every part that can fail on its own: the API, the database port, the TLS certificate, the domain registration, your DNS records, your background jobs, and the login or checkout flow. A homepage check passes while any of these are broken.
+<details class="mk-faq">
+<summary>How much does downtime cost?</summary>
+<div class="mk-faq__body">
 
-**Does downtime hurt SEO?** A short outage does not. Google retries and forgets it. Repeated or long outages are different, because crawling slows down and pages can drop out of the index, and getting them back takes weeks.
+Take your monthly revenue and divide it by 730 to get your revenue per hour, then multiply by the hours you were down. Add the ad budget you kept spending on a broken page, the support time, the refunds, and the customers who never came back.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Is a free uptime monitor enough?</summary>
+<div class="mk-faq__body">
+
+For one or two sites, often yes. Free tiers differ most in how often they check: some give you five minutes, ours gives 60 seconds on 50 monitors. You outgrow free when you need several regions, a database or a background job watched, or an alert that reaches a phone at 3 a.m.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What should I monitor besides my website?</summary>
+<div class="mk-faq__body">
+
+Watch every part that can fail on its own: the API, the database port, the TLS certificate, the domain registration, your DNS records, your background jobs, and the login or checkout flow. A homepage check passes while any of these are broken.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Does downtime hurt SEO?</summary>
+<div class="mk-faq__body">
+
+A short outage does not. Google retries and forgets it. Repeated or long outages are different, because crawling slows down and pages can drop out of the index, and getting them back takes weeks.
+
+</div>
+</details>
 
 ## Start with one check
 

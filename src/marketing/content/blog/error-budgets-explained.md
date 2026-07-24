@@ -80,10 +80,38 @@ Run the numbers for your own SLO in the [error budget calculator](/tools/error-b
 
 ## Common questions
 
-**What is an error budget?** An error budget is the amount of downtime a service is allowed before it misses its SLO. A 99.9% SLO over 30 days gives 43 minutes 12 seconds.
+<details class="mk-faq">
+<summary>What is an error budget?</summary>
+<div class="mk-faq__body">
 
-**How do you calculate burn rate?** Burn rate is your real failure rate divided by the allowed one. A measured 99.8% against a 99.9% SLO is 2x.
+An error budget is the amount of downtime a service is allowed before it misses its SLO. A 99.9% SLO over 30 days gives 43 minutes 12 seconds.
 
-**What burn rate should trigger an alert?** A fast alert usually fires at about 14.4x, which spends 2% of a 30-day budget in one hour. Slower alerts watch for a steady 3x to 6x.
+</div>
+</details>
 
-**What happens when the error budget runs out?** When the budget runs out, risky launches stop and the team works on reliability until the budget grows back.
+<details class="mk-faq">
+<summary>How do you calculate burn rate?</summary>
+<div class="mk-faq__body">
+
+Burn rate is your real failure rate divided by the allowed one. A measured 99.8% against a 99.9% SLO is 2x.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What burn rate should trigger an alert?</summary>
+<div class="mk-faq__body">
+
+A fast alert usually fires at about 14.4x, which spends 2% of a 30-day budget in one hour. Slower alerts watch for a steady 3x to 6x.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What happens when the error budget runs out?</summary>
+<div class="mk-faq__body">
+
+When the budget runs out, risky launches stop and the team works on reliability until the budget grows back.
+
+</div>
+</details>

@@ -60,12 +60,47 @@ You should not be able to fake your uptime. You should not be able to fake it by
 
 ## Common questions
 
-**Can you fake a status page?** You can write anything you want in the incident notes. But a good status page does not let you fake the uptime bar. The bar comes from real checks and one confirmation rule, not from what a person chooses to publish.
+<details class="mk-faq">
+<summary>Can you fake a status page?</summary>
+<div class="mk-faq__body">
 
-**Should people be able to set uptime by hand?** No. People should control the incident notes, not the measured timeline. If a person can turn a red day green by hand, the uptime number stops meaning anything.
+You can write anything you want in the incident notes. But a good status page does not let you fake the uptime bar. The bar comes from real checks and one confirmation rule, not from what a person chooses to publish.
 
-**What is the difference between an incident and downtime?** Downtime is what the checks measured. An incident is what the team writes about it. The timeline should come from the checks, and the story from the notes.
+</div>
+</details>
 
-**Why does my status page show 100% uptime after an outage?** Usually because the bar is built from published incidents, not from real checks. If no public incident covers the outage, the bar stays green. A bar built from checks would show the red day.
+<details class="mk-faq">
+<summary>Should people be able to set uptime by hand?</summary>
+<div class="mk-faq__body">
 
-**How is uptime measured on a status page?** A good status page counts downtime from its own checks, using a confirmation rule so one short blip does not count. The same rule should feed both the alerts and the bar, so they always agree.
+No. People should control the incident notes, not the measured timeline. If a person can turn a red day green by hand, the uptime number stops meaning anything.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What is the difference between an incident and downtime?</summary>
+<div class="mk-faq__body">
+
+Downtime is what the checks measured. An incident is what the team writes about it. The timeline should come from the checks, and the story from the notes.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Why does my status page show 100% uptime after an outage?</summary>
+<div class="mk-faq__body">
+
+Usually because the bar is built from published incidents, not from real checks. If no public incident covers the outage, the bar stays green. A bar built from checks would show the red day.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>How is uptime measured on a status page?</summary>
+<div class="mk-faq__body">
+
+A good status page counts downtime from its own checks, using a confirmation rule so one short blip does not count. The same rule should feed both the alerts and the bar, so they always agree.
+
+</div>
+</details>

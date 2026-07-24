@@ -107,10 +107,38 @@ Ask which third of Pingdom you actually use. If it is uptime checks and alerts, 
 
 ## Common questions
 
-**Is there a free Pingdom alternative?** Yes, several. UptimeRobot gives you 50 monitors at five-minute intervals for free, StatusCake gives ten plus single allowances of its page speed, domain and SSL checks, and Better Stack starts with ten monitors and one status page. Uptimepage gives 50 monitors at 60-second checks free with no card, and because it is open source you can also self-host it. Uptime Kuma is free too, but only if you self-host it, since there is no hosted plan.
+<details class="mk-faq">
+<summary>Is there a free Pingdom alternative?</summary>
+<div class="mk-faq__body">
 
-**Why do teams leave Pingdom?** Usually the pricing model. Pingdom has no free tier, and after the 30-day trial its uptime checks, transaction checks and RUM pageviews are each priced on their own scale, so the bill grows on three axes at once. The SolarWinds acquisition also turned a focused tool into one line of a large portfolio, and the product has moved slowly since.
+Yes, several. UptimeRobot gives you 50 monitors at five-minute intervals for free, StatusCake gives ten plus single allowances of its page speed, domain and SSL checks, and Better Stack starts with ten monitors and one status page. Uptimepage gives 50 monitors at 60-second checks free with no card, and because it is open source you can also self-host it. Uptime Kuma is free too, but only if you self-host it, since there is no hosted plan.
 
-**What replaces Pingdom's RUM and browser transactions?** Checkly is the closest match. Its browser checks are Playwright scripts you keep in your own repository, which is more work than Pingdom's recorder and much more powerful. Most of the simpler tools here, including our own Uptimepage, replace the uptime checks and the status page rather than the synthetics, so be clear about which parts of Pingdom you actually use before you migrate.
+</div>
+</details>
 
-**Which Pingdom alternative has a Terraform provider?** Six do: Better Stack, Checkly, Uptime.com, UptimeRobot, OneUptime and Uptimepage all maintain their own providers. Pingdom has nothing in a namespace it owns, and the community provider most people find is archived, last released in 2020.
+<details class="mk-faq">
+<summary>Why do teams leave Pingdom?</summary>
+<div class="mk-faq__body">
+
+Usually the pricing model. Pingdom has no free tier, and after the 30-day trial its uptime checks, transaction checks and RUM pageviews are each priced on their own scale, so the bill grows on three axes at once. The SolarWinds acquisition also turned a focused tool into one line of a large portfolio, and the product has moved slowly since.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>What replaces Pingdom's RUM and browser transactions?</summary>
+<div class="mk-faq__body">
+
+Checkly is the closest match. Its browser checks are Playwright scripts you keep in your own repository, which is more work than Pingdom's recorder and much more powerful. Most of the simpler tools here, including our own Uptimepage, replace the uptime checks and the status page rather than the synthetics, so be clear about which parts of Pingdom you actually use before you migrate.
+
+</div>
+</details>
+
+<details class="mk-faq">
+<summary>Which Pingdom alternative has a Terraform provider?</summary>
+<div class="mk-faq__body">
+
+Six do: Better Stack, Checkly, Uptime.com, UptimeRobot, OneUptime and Uptimepage all maintain their own providers. Pingdom has nothing in a namespace it owns, and the community provider most people find is archived, last released in 2020.
+
+</div>
+</details>
