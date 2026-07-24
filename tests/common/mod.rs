@@ -45,7 +45,9 @@ pub fn test_domain_expiry_runtime() -> Arc<DomainExpiryRuntime> {
     let state_store: Arc<dyn DomainExpiryStateStore> =
         Arc::new(InMemoryDomainExpiryStateStore::new());
     Arc::new(DomainExpiryRuntime::new(
-        rdap_client,
+        Arc::new(uptimepage::worker::registration::RegistrationClient::new(
+            rdap_client,
+        )),
         Arc::new(RdapSingleflight::with_default_ttl()),
         state_store,
         HostThrottle::permissive(),

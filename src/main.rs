@@ -256,7 +256,9 @@ async fn main() -> Result<()> {
     );
     let domain_expiry_runtime =
         Arc::new(uptimepage::worker::domain_expiry::DomainExpiryRuntime::new(
-            rdap_client,
+            Arc::new(uptimepage::worker::registration::RegistrationClient::new(
+                rdap_client,
+            )),
             Arc::new(uptimepage::worker::rdap_singleflight::RdapSingleflight::with_default_ttl()),
             domain_expiry_state,
             host_throttle.clone(),

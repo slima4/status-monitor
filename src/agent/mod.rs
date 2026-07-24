@@ -371,7 +371,9 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
     let domain_state: Arc<dyn DomainExpiryStateStore> =
         Arc::new(InMemoryDomainExpiryStateStore::new());
     let domain_runtime = Arc::new(DomainExpiryRuntime::new(
-        rdap_client,
+        Arc::new(crate::worker::registration::RegistrationClient::new(
+            rdap_client,
+        )),
         Arc::new(RdapSingleflight::with_default_ttl()),
         domain_state,
         host_throttle.clone(),

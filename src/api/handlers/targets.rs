@@ -1878,6 +1878,19 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     "check.domain",
                 ));
             }
+            // Accepting a check that can never succeed would alert forever.
+            if let Some(tld) = d.domain.rsplit('.').next()
+                && !crate::worker::registration::is_monitorable(&tld.to_ascii_lowercase())
+            {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_DOMAIN_PARAMS,
+                    format!(
+                        "the .{} registry does not publish domain expiry dates, so this domain cannot be monitored for expiry",
+                        tld.to_ascii_lowercase()
+                    ),
+                    "check.domain",
+                ));
+            }
             validate_timeout(d.timeout)?;
             validate_cert_days(d.warn_days, d.critical_days, codes::INVALID_DOMAIN_PARAMS)?;
         }
@@ -2260,6 +2273,30 @@ mod tests {
         .unwrap();
         let err = validate_check(&spec, &SsrfGuard::strict()).expect_err("zero days must reject");
         assert_bad_request_with_field(err, "check.warn_days");
+    }
+
+    #[test]
+    fn validate_check_rejects_domain_expiry_for_registry_without_public_expiry() {
+        use crate::security::ssrf::SsrfGuard;
+        for domain in ["denic.DE", "europa.eu"] {
+            let spec: crate::domain::CheckSpec = serde_json::from_str(&format!(
+                r#"{{"type":"domain_expiry","domain":"{domain}","warn_days":30,"critical_days":7,"timeout":5000}}"#
+            ))
+            .unwrap();
+            let err = validate_check(&spec, &SsrfGuard::strict())
+                .expect_err("registry without public expiry must reject");
+            assert_bad_request_with_field(err, "check.domain");
+        }
+    }
+
+    #[test]
+    fn validate_check_accepts_domain_expiry_for_whois_only_tld() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"domain_expiry","domain":"postyourstartup.co","warn_days":30,"critical_days":7,"timeout":5000}"#,
+        )
+        .unwrap();
+        validate_check(&spec, &SsrfGuard::strict()).expect("whois-only TLD is monitorable");
     }
 
     fn http_auth(basic: Option<(&str, &str)>, bearer: Option<&str>) -> crate::domain::HttpCheck {

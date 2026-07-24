@@ -18,7 +18,10 @@ use uptimepage::worker::domain_expiry::{
 use uptimepage::worker::host_throttle::HostThrottle;
 use uptimepage::worker::rdap::RdapClient;
 use uptimepage::worker::rdap_singleflight::RdapSingleflight;
+use uptimepage::worker::registration::RegistrationClient;
 use uuid::Uuid;
+
+mod common;
 
 #[derive(Clone)]
 struct ServerState {
@@ -111,7 +114,7 @@ fn client_for(addr: SocketAddr) -> RdapClient {
 fn runtime_with_client(client: RdapClient) -> DomainExpiryRuntime {
     let state: Arc<dyn DomainExpiryStateStore> = Arc::new(InMemoryDomainExpiryStateStore::new());
     DomainExpiryRuntime::new(
-        Arc::new(client),
+        Arc::new(RegistrationClient::new(Arc::new(client))),
         Arc::new(RdapSingleflight::with_default_ttl()),
         state,
         HostThrottle::permissive(),
@@ -124,7 +127,14 @@ async fn classify_one(
     check: DomainExpiryCheck,
 ) -> uptimepage::domain::CheckResult {
     let runtime = runtime_with_client(client_for(addr));
-    execute_domain_expiry_check(Uuid::now_v7(), Uuid::now_v7(), &check, &runtime).await
+    execute_domain_expiry_check(
+        Uuid::now_v7(),
+        Uuid::now_v7(),
+        &check,
+        &runtime,
+        &common::test_client(),
+    )
+    .await
 }
 
 #[tokio::test]
@@ -174,7 +184,11 @@ async fn domain_expiry_errors_on_unknown_tld() {
     let (addr, _) = spawn_rdap_fixture(Utc::now() + chrono::Duration::days(100), None, false).await;
     let r = classify_one(addr, make_check("foo.unknowntld", 30, 7)).await;
     assert_eq!(r.status, CheckStatus::Error);
-    assert!(r.error.as_deref().unwrap().to_lowercase().contains("rdap"));
+    let err = r.error.as_deref().unwrap();
+    assert!(
+        err.contains("no registration lookup available") && err.contains("unknowntld"),
+        "unexpected error: {err}"
+    );
 }
 
 #[tokio::test]
@@ -207,15 +221,21 @@ async fn domain_expiry_serves_last_good_on_rdap_failure() {
         .unwrap();
 
     let runtime = DomainExpiryRuntime::new(
-        Arc::new(client_for(addr)),
+        Arc::new(RegistrationClient::new(Arc::new(client_for(addr)))),
         Arc::new(RdapSingleflight::with_default_ttl()),
         state,
         HostThrottle::permissive(),
         DEFAULT_MAX_STALENESS,
     );
 
-    let r = execute_domain_expiry_check(target, org.0, &make_check("foo.example", 30, 7), &runtime)
-        .await;
+    let r = execute_domain_expiry_check(
+        target,
+        org.0,
+        &make_check("foo.example", 30, 7),
+        &runtime,
+        &common::test_client(),
+    )
+    .await;
 
     assert_eq!(r.status, CheckStatus::Up, "60-day cached answer is Up");
     // Up cached verdicts must not carry the served_stale annotation —

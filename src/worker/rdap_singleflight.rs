@@ -24,7 +24,7 @@ use dashmap::DashMap;
 use tokio::sync::Mutex;
 
 use crate::error::Result;
-use crate::worker::rdap::RdapAnswer;
+use crate::worker::registration::RegistrationAnswer;
 
 /// Default in-process cache window for a successful RDAP answer.
 pub const DEFAULT_CACHE_TTL: Duration = Duration::from_secs(60);
@@ -41,7 +41,7 @@ struct Slot {
 enum SlotState {
     Empty,
     Ready {
-        value: Arc<RdapAnswer>,
+        value: Arc<RegistrationAnswer>,
         fetched_at: Instant,
     },
 }
@@ -70,10 +70,10 @@ impl RdapSingleflight {
         &self,
         domain: Arc<str>,
         fetcher: F,
-    ) -> Result<(Arc<RdapAnswer>, FetchOutcome)>
+    ) -> Result<(Arc<RegistrationAnswer>, FetchOutcome)>
     where
         F: FnOnce() -> Fut,
-        Fut: Future<Output = Result<RdapAnswer>>,
+        Fut: Future<Output = Result<RegistrationAnswer>>,
     {
         let slot = self
             .slots
@@ -142,8 +142,8 @@ mod tests {
     use chrono::Utc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    fn answer() -> RdapAnswer {
-        RdapAnswer {
+    fn answer() -> RegistrationAnswer {
+        RegistrationAnswer {
             expiration: Utc::now() + chrono::Duration::days(90),
             registrar: Some("Test Registrar".into()),
         }
@@ -215,7 +215,7 @@ mod tests {
         let domain: Arc<str> = Arc::from("example.com");
         let err = sf
             .lookup(domain.clone(), || async {
-                Err::<RdapAnswer, _>(crate::error::AppError::Other(anyhow::anyhow!("boom")))
+                Err::<RegistrationAnswer, _>(crate::error::AppError::Other(anyhow::anyhow!("boom")))
             })
             .await;
         assert!(err.is_err());
@@ -291,7 +291,7 @@ mod tests {
         let sf = RdapSingleflight::new(Duration::from_secs(60));
         let err = sf
             .lookup(Arc::<str>::from("example.com"), || async {
-                Err::<RdapAnswer, _>(crate::error::AppError::Other(anyhow::anyhow!("boom")))
+                Err::<RegistrationAnswer, _>(crate::error::AppError::Other(anyhow::anyhow!("boom")))
             })
             .await;
         assert!(err.is_err());

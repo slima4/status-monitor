@@ -37,11 +37,14 @@ static STATE_WRITE_FAILED: LazyLock<Counter> =
     LazyLock::new(|| counter!(names::DOMAIN_EXPIRY_STATE_WRITE_FAILED));
 
 use crate::domain::{CheckResult, CheckStatus, DomainExpiryCheck, OrgId, SERVED_STALE_PREFIX};
+use crate::http_client::HttpClients;
 use crate::observability::metrics::names;
 use crate::storage::DomainExpiryStateStore;
 use crate::worker::host_throttle::{HostThrottle, Throttled};
-use crate::worker::rdap::{RdapAnswer, RdapClient};
 use crate::worker::rdap_singleflight::{FetchOutcome, RdapSingleflight};
+use crate::worker::registration::{
+    RegistrationAnswer, RegistrationClient, RegistrationError, tld_verdict,
+};
 
 /// Default ceiling on how old a cached last-good answer may be while still
 /// being served. Past this, the executor escalates to `CheckStatus::Error`
@@ -51,7 +54,7 @@ pub const DEFAULT_MAX_STALENESS: Duration = Duration::from_secs(7 * 24 * 60 * 60
 /// Bundle of dependencies the domain-expiry executor needs at dispatch
 /// time. Built once and shared across every probe via `Arc`.
 pub struct DomainExpiryRuntime {
-    pub rdap_client: Arc<RdapClient>,
+    pub registry_client: Arc<RegistrationClient>,
     pub singleflight: Arc<RdapSingleflight>,
     pub state_store: Arc<dyn DomainExpiryStateStore>,
     pub host_throttle: Arc<HostThrottle>,
@@ -60,7 +63,7 @@ pub struct DomainExpiryRuntime {
 
 impl DomainExpiryRuntime {
     pub fn new(
-        rdap_client: Arc<RdapClient>,
+        registry_client: Arc<RegistrationClient>,
         singleflight: Arc<RdapSingleflight>,
         state_store: Arc<dyn DomainExpiryStateStore>,
         host_throttle: Arc<HostThrottle>,
@@ -69,7 +72,7 @@ impl DomainExpiryRuntime {
         let max_staleness_chrono = chrono::Duration::from_std(max_staleness)
             .expect("max_staleness fits chrono::Duration (caller passes a sane bound)");
         Self {
-            rdap_client,
+            registry_client,
             singleflight,
             state_store,
             host_throttle,
@@ -87,11 +90,12 @@ pub async fn execute_domain_expiry_check(
     org_id: Uuid,
     check: &DomainExpiryCheck,
     runtime: &DomainExpiryRuntime,
+    clients: &HttpClients,
 ) -> CheckResult {
     let started_at = Utc::now();
     let start = Instant::now();
 
-    let probe = fresh_probe(check, runtime).await;
+    let probe = fresh_probe(check, runtime, clients).await;
     let duration_ms = start.elapsed().as_millis() as u32;
 
     match probe {
@@ -138,6 +142,8 @@ enum ProbeFailure {
     Throttled,
     Timeout,
     Lookup(anyhow::Error),
+    /// Retrying cannot change it, so the message names the cause.
+    Permanent(RegistrationError),
 }
 
 impl ProbeFailure {
@@ -146,6 +152,7 @@ impl ProbeFailure {
             Self::Throttled => "throttled",
             Self::Timeout => "timeout",
             Self::Lookup(_) => "lookup_error",
+            Self::Permanent(_) => "unsupported_tld",
         }
     }
     fn message(&self) -> String {
@@ -153,6 +160,7 @@ impl ProbeFailure {
             Self::Throttled => "rdap throttled".into(),
             Self::Timeout => "rdap timeout".into(),
             Self::Lookup(e) => e.to_string(),
+            Self::Permanent(e) => e.to_string(),
         }
     }
 }
@@ -160,7 +168,8 @@ impl ProbeFailure {
 async fn fresh_probe(
     check: &DomainExpiryCheck,
     runtime: &DomainExpiryRuntime,
-) -> std::result::Result<Arc<RdapAnswer>, ProbeFailure> {
+    clients: &HttpClients,
+) -> std::result::Result<Arc<RegistrationAnswer>, ProbeFailure> {
     // Canonicalise both the singleflight key AND the upstream lookup target
     // — `Bähn.de`, `BÄHN.de`, and `xn--bhn-qla.de` must share one slot, one
     // outbound RDAP call, and one per-TLD permit. Without this, the
@@ -174,7 +183,7 @@ async fn fresh_probe(
     // consumes a per-TLD permit and never bumps the wait counter — the
     // bulkhead exists to protect registries from outbound traffic, and a
     // hit makes no outbound traffic.
-    let client = runtime.rdap_client.clone();
+    let client = runtime.registry_client.clone();
     let lookup_domain = domain.clone();
     let host_throttle = runtime.host_throttle.clone();
     let lookup = runtime.singleflight.lookup(domain, move || async move {
@@ -190,7 +199,9 @@ async fn fresh_probe(
             }
             None => None,
         };
-        client.lookup_expiration(lookup_domain.as_ref()).await
+        client
+            .lookup_expiration(lookup_domain.as_ref(), clients)
+            .await
     });
 
     let outcome = timeout(check.timeout, lookup).await;
@@ -203,7 +214,9 @@ async fn fresh_probe(
         Ok(Err(crate::error::AppError::Other(e))) => {
             // The throttle path encodes itself as "rdap throttled"; everything
             // else is a lookup error from the registry transport.
-            if e.to_string() == "rdap throttled" {
+            if let Some(verdict) = tld_verdict(&e) {
+                Err(ProbeFailure::Permanent(verdict.clone()))
+            } else if e.to_string() == "rdap throttled" {
                 Err(ProbeFailure::Throttled)
             } else {
                 Err(ProbeFailure::Lookup(e))
@@ -384,6 +397,7 @@ mod tests {
     use super::*;
     use crate::storage::InMemoryDomainExpiryStateStore;
     use crate::worker::host_throttle::HostThrottle;
+    use crate::worker::rdap::RdapClient;
     use std::time::Duration as StdDuration;
 
     fn check(domain: &str) -> DomainExpiryCheck {
@@ -421,9 +435,9 @@ mod tests {
         }
 
         let runtime = DomainExpiryRuntime::new(
-            Arc::new(RdapClient::new(
+            Arc::new(RegistrationClient::new(Arc::new(RdapClient::new(
                 crate::http_outbound::build_outbound_client(crate::security::SsrfGuard::strict()),
-            )),
+            )))),
             Arc::new(RdapSingleflight::with_default_ttl()),
             store,
             HostThrottle::permissive(),
@@ -450,9 +464,9 @@ mod tests {
         let store: Arc<InMemoryDomainExpiryStateStore> =
             Arc::new(InMemoryDomainExpiryStateStore::new());
         let runtime = DomainExpiryRuntime::new(
-            Arc::new(RdapClient::new(
+            Arc::new(RegistrationClient::new(Arc::new(RdapClient::new(
                 crate::http_outbound::build_outbound_client(crate::security::SsrfGuard::strict()),
-            )),
+            )))),
             Arc::new(RdapSingleflight::with_default_ttl()),
             store,
             HostThrottle::permissive(),

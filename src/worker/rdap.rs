@@ -8,16 +8,14 @@ use url::Url;
 
 use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, get_json};
+use crate::worker::registration::{RegistrationAnswer, RegistrationError};
 
 /// IANA-published RDAP bootstrap registry for DNS. Maps TLDs to one or more
 /// RDAP server base URLs. Public and rarely changes.
 const IANA_BOOTSTRAP_URL: &str = "https://data.iana.org/rdap/dns.json";
 
-#[derive(Debug, Clone)]
-pub struct RdapAnswer {
-    pub expiration: DateTime<Utc>,
-    pub registrar: Option<String>,
-}
+/// Checked before the bootstrap, so a gap there cannot strand a live TLD.
+const RDAP_OVERRIDES: &[(&str, &str)] = &[("io", "https://rdap.identitydigital.services/rdap/")];
 
 pub struct RdapClient {
     http: OutboundHttpClient,
@@ -47,22 +45,27 @@ impl RdapClient {
         }
     }
 
-    pub async fn lookup_expiration(&self, domain: &str) -> Result<RdapAnswer> {
-        let map = self.bootstrap().await?;
-        // Registration and expiry are properties of the registrable domain, not
-        // a subdomain: `app.example.co.uk` is reduced to `example.co.uk` before
-        // the query.
-        let registrable = crate::domain::registered_domain(domain);
-        let tld = registrable
-            .rsplit('.')
-            .next()
-            .filter(|t| !t.is_empty())
-            .ok_or_else(|| anyhow!("domain '{domain}' missing TLD"))?;
-        let base = map
-            .by_tld
-            .get(tld)
-            .ok_or_else(|| anyhow!("no RDAP server for TLD '.{tld}'"))?
-            .clone();
+    /// `registrable` is the public suffix plus one label: expiry is a property
+    /// of that name, not of a subdomain. The caller reduces it.
+    pub async fn lookup_expiration(
+        &self,
+        registrable: &str,
+        tld: &str,
+    ) -> Result<RegistrationAnswer> {
+        let base = match rdap_override(tld) {
+            Some(base) => base.to_owned(),
+            None => self
+                .bootstrap()
+                .await?
+                .by_tld
+                .get(tld)
+                .cloned()
+                .ok_or_else(|| {
+                    crate::error::AppError::from(RegistrationError::TldUnsupported {
+                        tld: tld.to_owned(),
+                    })
+                })?,
+        };
         let mut url =
             Url::parse(&base).with_context(|| format!("invalid RDAP base url '{base}'"))?;
         // RDAP base URLs are typically registered with a trailing slash; the
@@ -86,6 +89,13 @@ impl RdapClient {
             .get_or_try_init(|| async { fetch_bootstrap(&self.http, &self.bootstrap_url).await })
             .await
     }
+}
+
+fn rdap_override(tld: &str) -> Option<&'static str> {
+    RDAP_OVERRIDES
+        .iter()
+        .find(|(t, _)| *t == tld)
+        .map(|(_, base)| *base)
 }
 
 #[derive(Debug)]
@@ -137,7 +147,7 @@ struct RdapEntity {
     vcard_array: Option<serde_json::Value>,
 }
 
-fn parse_answer(resp: &RdapDomainResponse) -> Option<RdapAnswer> {
+fn parse_answer(resp: &RdapDomainResponse) -> Option<RegistrationAnswer> {
     let expiration_raw = resp
         .events
         .iter()
@@ -150,7 +160,7 @@ fn parse_answer(resp: &RdapDomainResponse) -> Option<RdapAnswer> {
         .iter()
         .find(|e| e.roles.iter().any(|r| r.eq_ignore_ascii_case("registrar")))
         .and_then(|e| registrar_name(e.vcard_array.as_ref()?));
-    Some(RdapAnswer {
+    Some(RegistrationAnswer {
         expiration,
         registrar,
     })

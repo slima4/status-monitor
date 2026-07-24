@@ -10,8 +10,10 @@ pub mod ping;
 pub mod pool;
 pub mod rdap;
 pub mod rdap_singleflight;
+pub mod registration;
 pub mod tcp_check;
 pub mod tls_cert;
+pub mod whois;
 
 pub use http_check::execute_http_check;
 pub(crate) use http_check::{HttpProbe, execute_http_check_probe};
@@ -160,6 +162,7 @@ pub async fn execute(
                 org_id,
                 domain,
                 deps.domain_expiry,
+                deps.http,
             )
             .await
         }

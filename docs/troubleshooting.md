@@ -33,7 +33,7 @@ The fresh RDAP probe failed (throttle, timeout, registry 5xx, network blip) but 
 
 Inspect the failure kind via `uptimepage_domain_expiry_stale_served_total{kind}`:
 
-- `kind="throttled"` — per-TLD RDAP bulkhead rejected this probe. Raise `checker.rdap_max_inflight` if rampant, but the cap is also the IANA-friendliness lever.
+- `kind="throttled"` — per-TLD registry bulkhead rejected this probe (gates RDAP and WHOIS alike). Raise `checker.rdap_max_inflight` if rampant, but the cap is also the IANA-friendliness lever.
 - `kind="timeout"` — the registry took longer than `check.timeout` (per-target). Either bump the per-check timeout or wait — most registries recover in minutes.
 - `kind="lookup_error"` — registry returned a non-2xx (often 404 or 5xx). If a specific TLD is stuck on 5xx, the registry is having an incident; rows keep streaming as `served_stale` until 7 days have passed.
 - `kind="fresh_error"` — no usable last-good (first probe, or the cached row is older than 7d). A real `CheckStatus::Error` is emitted and is alert-eligible.
