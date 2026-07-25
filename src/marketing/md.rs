@@ -33,7 +33,7 @@ pub struct TocEntry {
     pub text: String,
 }
 
-/// Give every `h2`/`h3` a stable id and return the matching contents list.
+/// Give every `h2`/`h3`/`h4` a stable id and return the matching contents list.
 /// The id has to be derived from the heading's *text*, which only arrives
 /// after the opening event, so the stream is buffered rather than mapped
 /// lazily — one pass over an already-materialised document at boot. Ids
@@ -50,6 +50,7 @@ pub fn anchor_headings(mut events: Vec<Event<'_>>) -> (Vec<Event<'_>>, Vec<TocEn
         let level = match level {
             HeadingLevel::H2 => 2,
             HeadingLevel::H3 => 3,
+            HeadingLevel::H4 => 4,
             _ => continue,
         };
         let text = heading_text(&events[i + 1..]);

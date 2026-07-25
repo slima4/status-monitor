@@ -137,7 +137,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Sign in, add a monitor, get alerted, and publish a status page in about ten minutes.",
         section: Section::Start,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/getting-started.md"),
         dir: "",
     },
@@ -157,7 +157,7 @@ pub const DOCS: &[DocPage] = &[
         description: "How checks are scheduled, executed, batched, and stored across Postgres and ClickHouse.",
         section: Section::Start,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/architecture.md"),
         dir: "",
     },
@@ -167,7 +167,7 @@ pub const DOCS: &[DocPage] = &[
         description: "A tour of the app: dashboard, monitors, incidents, settings, and sharing a monitor.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/ui.md"),
         dir: "",
     },
@@ -177,7 +177,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Acknowledgement, ownership, on-call, escalation, and the retrospective around a failing check.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-24",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/incidents.md"),
         dir: "",
     },
@@ -187,7 +187,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The eight check kinds, what each one actually proves, and which to reach for.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/monitor-types.md"),
         dir: "",
     },
@@ -197,7 +197,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Alert channels, how a monitor binds them, and what decides when an alert fires.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/notifications.md"),
         dir: "",
     },
@@ -207,7 +207,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The customer-facing surface: components, incidents, maintenance, badges, JSON and RSS.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/public-status.md"),
         dir: "",
     },
@@ -217,7 +217,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Running one or more branded status pages per organization, each on its own subdomain.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/per-org-status.md"),
         dir: "",
     },
@@ -227,7 +227,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Read-only capability URLs that open one monitor's full dashboard without an account.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/share-links.md"),
         dir: "",
     },
@@ -247,7 +247,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Reusable org-scoped values and write-only secrets referenced from monitor request fields.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/variables.md"),
         dir: "",
     },
@@ -257,7 +257,7 @@ pub const DOCS: &[DocPage] = &[
         description: "OAuth sign-in, magic links, API tokens, and the scopes that bound them.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-06-26",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/authentication.md"),
         dir: "",
     },
@@ -267,7 +267,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The /api/v1 surface: monitors, incidents, channels, status pages, and the public endpoints.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/api.md"),
         dir: "",
     },
@@ -277,7 +277,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Managing monitors, channels, and status pages as code with the official provider.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/terraform.md"),
         dir: "",
     },
@@ -287,7 +287,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Letting an LLM client answer operational questions and take guarded actions on one org.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-07-21",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/mcp.md"),
         dir: "",
     },
@@ -297,7 +297,7 @@ pub const DOCS: &[DocPage] = &[
         description: "How plans bound resources and request budgets, and how each limit is enforced.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/quotas.md"),
         dir: "",
     },
@@ -307,7 +307,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The org model, how the active org is resolved, and how tenant isolation is enforced.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-06-12",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/multi-tenancy.md"),
         dir: "",
     },
@@ -317,7 +317,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The quotas and rate budgets each hosted plan carries, and what happens at the ceiling.",
         section: Section::Hosted,
         scope: Scope::Hosted,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/hosted/plans-and-limits.md"),
         dir: "hosted",
     },
@@ -327,7 +327,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Where the hosted service checks from, and how to pick regions for a monitor.",
         section: Section::Hosted,
         scope: Scope::Hosted,
-        lastmod: "2026-07-24",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/hosted/regions.md"),
         dir: "hosted",
     },
@@ -337,7 +337,7 @@ pub const DOCS: &[DocPage] = &[
         description: "How long raw checks, rollups, incidents, and audit records are kept on the hosted service.",
         section: Section::Hosted,
         scope: Scope::Hosted,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/hosted/data-retention.md"),
         dir: "hosted",
     },
@@ -357,7 +357,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Every configuration key, its default, and the environment variable that overrides it.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-07-14",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/configuration.md"),
         dir: "",
     },
@@ -367,7 +367,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Running the production stack: Caddy, TLS, the public status surface, and email.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-05-30",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/deployment.md"),
         dir: "",
     },
@@ -377,7 +377,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Running probe agents in more than one region, and the operator surface that manages them.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-07-08",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/multi-region.md"),
         dir: "",
     },
@@ -397,7 +397,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Symptoms you are likely to hit while operating an instance, and what they mean.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-05-30",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/troubleshooting.md"),
         dir: "",
     },
@@ -407,7 +407,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Local setup for working on the service itself: toolchain, workflows, and the test gates.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-07-22",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/development.md"),
         dir: "",
     },
@@ -427,7 +427,7 @@ pub const DOCS: &[DocPage] = &[
         description: "The end-to-end harness that drives the real check executor against in-process mock servers.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-05-14",
+        lastmod: "2026-07-25",
         source: include_str!("../../docs/loadtest.md"),
         dir: "",
     },
@@ -444,8 +444,8 @@ pub fn index_lastmod() -> Option<&'static str> {
 }
 
 /// Sanitising render. The allowlist adds exactly what this module's own
-/// transforms emit — the heading ids the contents list points at — and
-/// nothing else.
+/// transforms emit: ids on h2–h4. The visible sidebar keeps the h2/h3
+/// subset; an h4 id exists only as a deep-link target.
 fn render(markdown: &str, dir: &str) -> (String, Vec<TocEntry>) {
     let mut opts = pulldown_cmark::Options::empty();
     opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
@@ -461,6 +461,7 @@ fn render(markdown: &str, dir: &str) -> (String, Vec<TocEntry>) {
         .add_tag_attributes("div", &["tabindex"])
         .add_tag_attributes("h2", &["id"])
         .add_tag_attributes("h3", &["id"])
+        .add_tag_attributes("h4", &["id"])
         .clean(&html)
         .to_string();
     (clean, toc)
@@ -562,7 +563,9 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 &cfg.canonical_origin,
             );
             og.description = doc.description.to_string();
-            let (body_html, toc) = render(doc.source, doc.dir);
+            let (body_html, mut toc) = render(doc.source, doc.dir);
+            // h4 carries an id so deep links resolve; the visible contents stay h2/h3.
+            toc.retain(|t| t.level < 4);
             let page = DocsPage {
                 article_ld: json_ld_tech_article(
                     &cfg.canonical_origin,
