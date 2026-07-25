@@ -1025,6 +1025,9 @@ pub struct CircuitBreakerConfig {
 pub struct StorageConfig {
     pub postgres: PostgresConfig,
     pub clickhouse: ClickhouseConfig,
+    /// Opt-in for a local stack running on the shipped `monitor` credentials.
+    #[serde(default)]
+    pub allow_default_credentials: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -1543,6 +1546,35 @@ impl AppConfig {
         }
         Ok(())
     }
+
+    /// Reject the published `monitor` credentials; unoverridden they expose every tenant row.
+    pub fn validate_storage(&self) -> Result<()> {
+        const SHIPPED: &str = "monitor";
+        const OPT_IN: &str = "set UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
+                              for a local stack";
+        fn err(msg: &str) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg.to_string()))
+        }
+        if self.storage.allow_default_credentials {
+            return Ok(());
+        }
+        let pg = url::Url::parse(&self.storage.postgres.url)
+            .map_err(|_| err("storage.postgres.url is not a valid URL"))?;
+        if pg.username() == SHIPPED && pg.password() == Some(SHIPPED) {
+            return Err(err(&format!(
+                "storage.postgres.url still carries the shipped credentials; \
+                 set UPTIMEPAGE_STORAGE__POSTGRES__URL, or {OPT_IN}"
+            )));
+        }
+        let ch = self.storage.clickhouse.password.expose_secret();
+        if ch.is_empty() || ch == SHIPPED {
+            return Err(err(&format!(
+                "storage.clickhouse.password is empty or still the shipped value; \
+                 set UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD, or {OPT_IN}"
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -1595,5 +1627,58 @@ mod tests {
         cfg.security.allow_private_targets = true;
         cfg.validate_runtime()
             .expect("cleartext ok when private opted in");
+    }
+
+    fn storage_cfg() -> AppConfig {
+        let mut cfg = AppConfig::load().expect("load");
+        cfg.storage.allow_default_credentials = false;
+        cfg.storage.postgres.url = "postgres://monitor:monitor@localhost:5432/monitor".into();
+        cfg.storage.clickhouse.password = SecretString::from("monitor".to_string());
+        cfg
+    }
+
+    #[test]
+    fn shipped_postgres_credentials_rejected() {
+        let err = storage_cfg()
+            .validate_storage()
+            .expect_err("shipped pg credentials rejected");
+        assert!(err.to_string().contains("storage.postgres.url"), "{err}");
+    }
+
+    #[test]
+    fn shipped_clickhouse_password_rejected() {
+        let mut cfg = storage_cfg();
+        cfg.storage.postgres.url = "postgres://monitor:s3cret@localhost:5432/monitor".into();
+        let err = cfg
+            .validate_storage()
+            .expect_err("shipped ch password rejected");
+        assert!(
+            err.to_string().contains("storage.clickhouse.password"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn empty_clickhouse_password_rejected() {
+        let mut cfg = storage_cfg();
+        cfg.storage.postgres.url = "postgres://monitor:s3cret@localhost:5432/monitor".into();
+        cfg.storage.clickhouse.password = SecretString::from(String::new());
+        cfg.validate_storage()
+            .expect_err("empty ch password rejected");
+    }
+
+    #[test]
+    fn overridden_credentials_pass() {
+        let mut cfg = storage_cfg();
+        cfg.storage.postgres.url = "postgres://monitor:s3cret@localhost:5432/monitor".into();
+        cfg.storage.clickhouse.password = SecretString::from("s3cret".to_string());
+        cfg.validate_storage().expect("overridden credentials pass");
+    }
+
+    #[test]
+    fn opt_in_allows_shipped_credentials() {
+        let mut cfg = storage_cfg();
+        cfg.storage.allow_default_credentials = true;
+        cfg.validate_storage().expect("opt-in bypasses the guard");
     }
 }

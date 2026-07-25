@@ -121,6 +121,8 @@ async fn main() -> Result<()> {
     // Operator subcommands run against Postgres only, then exit — before any
     // server-only validation or the brain/agent split.
     if std::env::args().nth(1).as_deref() == Some("bootstrap-owner") {
+        // Seeds an owner and a full-access token in PG, so it needs the same guard.
+        cfg.validate_storage()?;
         let args = uptimepage::bootstrap::parse_args(std::env::args().skip(2))?;
         let result = uptimepage::bootstrap::run_owner(&cfg, &args).await;
         drop(tracing_guard);
@@ -161,6 +163,9 @@ async fn main() -> Result<()> {
     if cfg.agent.enabled {
         return uptimepage::agent::run(cfg).await;
     }
+
+    // Agents open no PG/CH, so the guard runs after the agent branch.
+    cfg.validate_storage()?;
 
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),

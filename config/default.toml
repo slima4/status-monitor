@@ -50,6 +50,10 @@ success_threshold = 2
 open_duration_secs = 60
 half_open_max_calls = 3
 
+[storage]
+# The credentials below are published; boot refuses them unless a local stack opts in.
+allow_default_credentials = false
+
 [storage.postgres]
 url = "postgres://monitor:monitor@localhost:5432/monitor"
 max_connections = 16

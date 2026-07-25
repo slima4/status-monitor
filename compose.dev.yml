@@ -68,6 +68,7 @@ services:
       UPTIMEPAGE_STORAGE__CLICKHOUSE__URL: http://clickhouse:8123
       UPTIMEPAGE_STORAGE__CLICKHOUSE__USER: monitor
       UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD: monitor
+      UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS: "true"
       # Dev mirrors the prod deployment: per-subdomain public pages.
       # Seed a session with `just dev-login` (scripts/seed-dev-session.sh).
       # lvh.me resolves *.lvh.me -> 127.0.0.1 so {slug}.lvh.me:8080 hits the

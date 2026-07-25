@@ -96,6 +96,7 @@ watch-js:
 # export RUST_LOG to override. Mirrors the dev-app container's filter so
 # native and in-container logs match.
 run:
+    UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
     RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
         cargo run --bin uptimepage
 
@@ -103,6 +104,7 @@ run:
 # prod. Pair with `just dev-regions` so a real agent covers eu-helsinki;
 # otherwise nothing probes. (The dev-app container already runs this mode.)
 run-dashboard:
+    UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
     UPTIMEPAGE_SCHEDULER__ENABLED=false \
     UPTIMEPAGE_SCHEDULER__REGION=eu-helsinki \
     UPTIMEPAGE_SCHEDULER__DEFAULT_REGION=eu-helsinki \
@@ -124,6 +126,7 @@ flow-dev:
       echo "then set LIGHTPANDA_BIN=/abs/path or drop it at ./lightpanda." >&2
       exit 1
     fi
+    UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
     UPTIMEPAGE_TENANCY__PATH_BASED_PUBLIC_ROUTES=false \
     UPTIMEPAGE_TENANCY__SUBDOMAIN_PUBLIC_ROUTES=true \
     UPTIMEPAGE_PUBLIC_STATUS__BASE_DOMAIN=lvh.me \

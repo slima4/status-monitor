@@ -30,11 +30,10 @@ docker compose -f compose.dev.yml up -d
 Run the binary natively:
 
 ```bash
-cargo run --bin uptimepage
+UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true cargo run --bin uptimepage
 ```
 
-`config/default.toml` already points at `localhost:5432` and `localhost:8123`,
-so no env overrides are needed. Edit code → Ctrl-C → `cargo run` again.
+`config/default.toml` already points at `localhost:5432` and `localhost:8123`, so those need no override. The dev stack runs on the shipped `monitor` credentials, which boot refuses unless you opt in as above, and `just run` sets it for you. Edit code → Ctrl-C → `cargo run` again.
 
 Tear down (keeps DB volumes):
 

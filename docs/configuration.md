@@ -25,6 +25,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `rate_limits` | `per_ip.*`, `janitor.*` | Mirrors of the per-IP numbers the reverse proxy enforces, plus the in-process limiter-map janitor cadence. Per-org/per-user limits come from the plans table |
 | `abuse` | `url_patterns_denied`, `domain_denylist_path`, `reputation_source_path`, `hot_reload_enabled` | Deny-list of attack-recon URL patterns and domains checked at target creation. `hot_reload_enabled` lets SIGHUP swap the rules in without a restart |
 | `circuit_breaker` | `failure_threshold`, `success_threshold`, `open_duration_secs`, `half_open_max_calls` | per-host breaker state machine |
+| `storage` | `allow_default_credentials` | the shipped `monitor` database credentials are published in a public repo, so boot refuses them. Off by default; the local dev stacks turn it on. Set your own `storage.postgres.url` and `storage.clickhouse.password` anywhere else |
 | `storage.postgres` | `url`, `max_connections`, `min_connections`, `acquire_timeout_secs` | target metadata store |
 | `storage.clickhouse` | `url`, `database`, `user`, `password`, `batch_size`, `batch_timeout_ms`, `buffer_size` | result sink and pipeline back-pressure |
 | `storage.clickhouse` | `async_insert` | coalesces the batcher's inserts into larger parts server-side. On by default; `wait_for_async_insert` stays on so the retry/dedup durability ack still holds |
