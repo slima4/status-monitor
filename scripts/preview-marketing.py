@@ -23,7 +23,7 @@ WRAPPER = '<div class="space-y-24 sm:space-y-28">'
 # Opening tag of each section to lift, in page order.
 SECTIONS = [
     '<section id="features"',
-    '<section id="how-it-works"',
+    '<section id="checks"',
     '<section class="space-y-8">',
     '<section id="pricing"',
     '<section id="faq"',

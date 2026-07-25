@@ -512,7 +512,7 @@ html:has(.marketing-shell) {
     transform: translateY(-1px);
     box-shadow: var(--mk-shadow-card-hover);
 }
-/* ── Hairline grid (features, steps, use cases) ───────────────────── */
+/* ── Hairline grid (features, use cases) ──────────────────────────── */
 /* Rules are the gap showing the container through, so an item count that
    doesn't divide the column count leaves a filled cell-shaped hole. */
 .mk-grid {
@@ -553,56 +553,161 @@ html:has(.marketing-shell) {
     stroke-linejoin: round;
 }
 
-/* ── Steps (how it works) ─────────────────────────────────────────── */
-/* The connector derives its offset and insets from these two, so both the
-   badge and the grid must keep reading them rather than repeating a value. */
-.mk-steps {
-    --mk-steps-badge: 3.5rem;
-    --mk-steps-gap: 3rem;
-    display: grid;
-    gap: 2.5rem;
+/* ── Check tape ───────────────────────────────────────────────────── */
+/* Full-bleed printout of sample probe output: one continuous band, one
+   cell per check kind, split by hairlines — the horizontal cut of
+   .mk-grid. The shell clips horizontally (see .mk-hero), so 100vw adds
+   no page scroll. */
+.mk-tape {
+    margin-inline: calc(50% - 50vw);
 }
-.mk-step { text-align: center; }
-/* Block-level, not inline: an inline badge sits on a baseline, which would
-   put its midline somewhere the connector can't derive. */
-.mk-step__badge {
+.mk-tape__viewport {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    /* Headroom for the junction marks that overshoot the band rules; the
+       rules and fill sit on the track so the marks can cross them. */
+    padding-block: 10px;
+    cursor: grab;
+    scrollbar-width: none;
+    /* The whole band, rules included, dissolves into the page at both ends. */
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 5rem, black calc(100% - 5rem), transparent);
+            mask-image: linear-gradient(90deg, transparent, black 5rem, black calc(100% - 5rem), transparent);
+}
+.mk-tape__viewport::-webkit-scrollbar { display: none; }
+.mk-tape__viewport:focus-visible {
+    outline: 2px solid var(--mk-ok);
+    outline-offset: -2px;
+}
+.mk-tape.is-dragging .mk-tape__viewport { cursor: grabbing; }
+.mk-tape__track {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--mk-steps-badge);
-    height: var(--mk-steps-badge);
-    margin: 0 auto 1.25rem;
-    border: 1px solid var(--mk-rule);
-    border-radius: 2px;
-    /* Opaque: masks the connector running behind the row. */
-    background: var(--mk-surface);
-    position: relative;
+    width: max-content;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--mk-rule);
+    border-bottom: 1px solid var(--mk-rule);
+    background: var(--mk-bg-2);
     font-family: var(--mk-font-mono);
-    font-weight: 600;
-    font-size: 1.125rem;
-    line-height: 1;
+    /* The tape is dragged, not clicked into: text selection would fight it. */
+    user-select: none;
+}
+.mk-tape__cell {
+    position: relative;
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    width: min(80vw, 21rem);
+    padding: 1.1rem 1.375rem 1.2rem;
+    border-right: 1px solid var(--mk-rule);
+    transition: background-color 140ms ease;
+}
+.mk-tape__cell:hover { background: var(--mk-surface); }
+/* Junction marks where a separator meets a band rule: the separator
+   overshoots the rule by 9px, with a 7px node square on the crossing —
+   grey frame, light core. Layers top-down: core, frame, overshoot line. */
+.mk-tape__cell::before,
+.mk-tape__cell::after {
+    content: "";
+    position: absolute;
+    /* Above the neighbouring cell, whose hover fill would otherwise cover
+       the part of the mark that reaches across the separator. */
+    z-index: 1;
+    right: -4px;
+    width: 7px;
+    height: 19px;
+    background:
+        linear-gradient(var(--mk-surface), var(--mk-surface)) 50% 7px / 5px 5px no-repeat,
+        linear-gradient(var(--mk-faint), var(--mk-faint)) 50% 6px / 7px 7px no-repeat,
+        linear-gradient(var(--mk-faint), var(--mk-faint)) 50% 50% / 1px 100% no-repeat;
+    pointer-events: none;
+}
+.mk-tape__cell::before { top: -10px; }
+.mk-tape__cell::after  { bottom: -10px; }
+.mk-tape__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.55rem;
+}
+.mk-tape__kind {
+    font-size: 0.6875rem;
+    font-weight: 650;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--mk-quiet);
+}
+.mk-tape__kind::before { content: "// "; color: var(--mk-faint); }
+.mk-tape__verdict {
+    font-size: 0.6875rem;
+    font-weight: 650;
+    letter-spacing: 0.06em;
     color: var(--mk-ok);
 }
-.mk-step__title { text-wrap: balance; }
-
-@media (min-width: 768px) {
-    .mk-steps {
-        position: relative;
-        grid-template-columns: repeat(3, 1fr);
-        column-gap: var(--mk-steps-gap);
-    }
-    /* Joins badge centre to badge centre; the insets are one half-column. */
-    .mk-steps::before {
-        content: "";
-        position: absolute;
-        top: calc(var(--mk-steps-badge) / 2);
-        left: calc((100% - 2 * var(--mk-steps-gap)) / 6);
-        right: calc((100% - 2 * var(--mk-steps-gap)) / 6);
-        height: 1px;
-        background: var(--mk-rule);
-    }
+.mk-tape__verdict::before { content: "["; color: var(--mk-faint); margin-right: 0.35em; }
+.mk-tape__verdict::after  { content: "]"; color: var(--mk-faint); margin-left: 0.35em; }
+.mk-tape__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
 }
-
+.mk-tape__line {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+}
+.mk-tape__line--cmd  { color: var(--mk-ink); }
+.mk-tape__line--cmd::before { content: "$ "; color: var(--mk-ok); font-weight: 600; }
+.mk-tape__line--out  { color: var(--mk-ink-soft); font-variant-numeric: tabular-nums; }
+/* The dashboard latency sparkline, marketing-toned: soft area fill under
+   a hairline series. */
+.mk-tape__spark {
+    display: block;
+    width: 100%;
+    height: 1.375rem;
+    margin-top: 0.6rem;
+}
+.mk-tape__spark-line {
+    fill: none;
+    stroke: var(--mk-ok);
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    /* preserveAspectRatio=none would scale the stroke into a wedge. */
+    vector-effect: non-scaling-stroke;
+}
+.mk-tape__spark-fill {
+    fill: var(--mk-ok);
+    fill-opacity: 0.1;
+    stroke: none;
+}
+/* The strip's caption row: window edges and the uptime figure between. */
+.mk-tape__span {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+    font-size: 0.625rem;
+    letter-spacing: 0.02em;
+    color: var(--mk-faint);
+}
+.mk-tape__span b {
+    color: var(--mk-quiet);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+/* Bottom-pinned so the ruled edge lines up across cells of uneven copy. */
+.mk-tape__line--meta {
+    margin-top: auto;
+    padding-top: 0.55rem;
+    border-top: 1px solid var(--mk-rule-soft);
+    color: var(--mk-quiet);
+    font-size: 0.75rem;
+    line-height: 1.55;
+    text-wrap: pretty;
+}
 /* ── FAQ ──────────────────────────────────────────────────────────── */
 .mk-faq {
     border-top: 1px solid var(--mk-rule);

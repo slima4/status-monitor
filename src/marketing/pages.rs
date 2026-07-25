@@ -17,7 +17,7 @@ use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 
 use crate::marketing::seo::{
-    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_howto, json_ld_organization,
+    JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_organization,
     json_ld_software_application, json_ld_software_source_code, json_ld_webpage, json_ld_website,
 };
 use crate::web::filters;
@@ -77,7 +77,6 @@ struct LandingPage {
     software_json_ld: JsonLd,
     source_code_json_ld: JsonLd,
     faq_json_ld: JsonLd,
-    howto_json_ld: JsonLd,
     version: &'static str,
     founding_total: u32,
     founding_left: u32,
@@ -85,24 +84,6 @@ struct LandingPage {
     show_gallery: bool,
     shots: Vec<ShotView>,
 }
-
-const HOWTO_NAME: &str = "Set up uptime monitoring and a status page";
-// Plain-text mirror of the visible steps in landing.html; the HowTo schema
-// reads these, so edit both together.
-const HOWTO_STEPS: &[(&str, &str)] = &[
-    (
-        "Sign in",
-        "One click with GitHub, Google or a magic link. No password, no email opt-in. Your org gets a slug and the free tier.",
-    ),
-    (
-        "Add a monitor",
-        "Paste a URL, pick an interval, pick alert channels. Monitored in under a minute, or declare it in Terraform.",
-    ),
-    (
-        "Share the page",
-        "Flip a monitor public and point customers at your-org.uptimepage.dev.",
-    ),
-];
 
 /// One source for the rendered FAQ and its `FAQPage` schema, so they can't drift.
 const FAQS: &[(&str, &str)] = &[
@@ -176,7 +157,6 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         software_json_ld: json_ld_software_application(&cfg.canonical_origin),
         source_code_json_ld: json_ld_software_source_code(&cfg.canonical_origin),
         faq_json_ld: json_ld_faqpage(FAQS),
-        howto_json_ld: json_ld_howto(HOWTO_NAME, HOWTO_STEPS),
         og,
         version: env!("CARGO_PKG_VERSION"),
         founding_total: FOUNDING_TOTAL,

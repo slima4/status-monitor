@@ -499,29 +499,6 @@ pub fn json_ld_blog(canonical_origin: &str, posts: &[(&str, &str, &str)]) -> Jso
     JsonLd::from_value(payload)
 }
 
-/// `HowTo` for the homepage steps, one `HowToStep` per `(name, text)` pair.
-pub fn json_ld_howto(name: &str, steps: &[(&str, &str)]) -> JsonLd {
-    let step_list: Vec<_> = steps
-        .iter()
-        .enumerate()
-        .map(|(i, (title, text))| {
-            serde_json::json!({
-                "@type": "HowToStep",
-                "position": i + 1,
-                "name": title,
-                "text": text,
-            })
-        })
-        .collect();
-    let payload = serde_json::json!({
-        "@context": "https://schema.org",
-        "@type": "HowTo",
-        "name": name,
-        "step": step_list,
-    });
-    JsonLd::from_value(payload)
-}
-
 /// Landing that carries the author's `Person` node; the `@id` fragment
 /// resolves here rather than to a page that never describes the entity.
 pub const AUTHOR_PAGE: &str = "/about";
