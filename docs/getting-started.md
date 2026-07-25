@@ -18,7 +18,7 @@ Signing in for the first time creates your organization, makes you its owner, an
 
 Two things are worth setting deliberately even on the first one:
 
-- **Interval.** How often to check. A minute is right for something customer-facing.
+- **Interval.** How often to check. For something customer-facing, pick the fastest interval your plan allows; the form shows your plan's floor.
 - **Regions.** Where to check from. Picking more than one means a single network path having a bad minute does not read as an outage, because the default policy needs most regions to agree. See [Probe regions](hosted/regions.md).
 
 Point it at a health endpoint rather than the homepage if you have one. A homepage can render perfectly while the database behind it is gone.

@@ -273,7 +273,8 @@ DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/ci_verify \
   cargo test -- --ignored
 
 # One suite (fast — scope to a binary; bare `nextest run` rebuilds +
-# enumerates all ~48 test binaries and looks frozen for minutes):
+# enumerates every integration test binary (about a hundred) and looks
+# frozen for minutes):
 DATABASE_URL=postgres://monitor:monitor@127.0.0.1:5432/ci_verify \
   cargo test --test status_page_settings_test -- --ignored --nocapture
 ```

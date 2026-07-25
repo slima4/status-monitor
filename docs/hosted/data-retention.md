@@ -16,7 +16,9 @@ There are three layers, and a chart reads whichever one covers the range you ask
 
 The raw window is stamped on each row when it is written, from your plan. That means a plan change applies to data written after it, and nothing already stored is retroactively shortened or extended.
 
-Your plan's history window is what the UI and API will show you, and it sits on top of these layers. Standard shows 30 days, Founding shows 90 days, and the top paid plan goes to 13 months; the [pricing page](https://uptimepage.dev/pricing) carries the current figure per plan. The hourly rollup is what makes the longer windows cheap: a year of history is hours, not hundreds of millions of raw rows.
+Your plan's history window is what the operator UI and API will show you, and it sits on top of these layers. Standard shows 30 days, Founding shows 90 days, and Pro goes to 13 months; the [pricing page](https://uptimepage.dev/pricing) carries the current figure per plan. The hourly rollup is what makes the longer windows cheap: a year of history is hours, not hundreds of millions of raw rows.
+
+The public status page is separate: its per-component history strip always covers 90 days on every plan, painted from confirmed incident windows and the hourly rollup, not from your plan's history window.
 
 Uptime over a window that has no data at all is reported as unknown rather than as 100 percent. A gap is not a success.
 
@@ -40,6 +42,8 @@ Deleting a monitor removes it from the UI and the API immediately. Its check his
 
 Deleting your account suspends it immediately and purges it permanently after 30 days. Signing back in during those 30 days restores the account as it was. See [Account settings](../ui.md) for where both actions live.
 
+One blocker to know about: you cannot delete your account while you are the sole owner of an organization that still has other members (the API answers `422 OWNS_SHARED_ORGS`). Transfer ownership or remove the members first; an org where you are the only member is deleted along with the account.
+
 ## Getting your data out
 
-**Settings → Account → Export My Data** returns a JSON file covering your account. Per-monitor and per-incident JSON exports are available from the API, public incidents have an RSS feed, and status pages expose an SVG badge. Nothing here is a paid add-on, and there is no export you have to ask us for.
+**Settings → Account → Export My Data** returns a JSON file covering your account: profile, sessions and tokens metadata, and the organizations you own with their monitors and settings. Organizations where you are a member but not the owner are not included; ask that org's owner for its data. Per-monitor and per-incident JSON exports are available from the API, public incidents have an RSS feed, and status pages expose an SVG badge. Nothing here is a paid add-on, and there is no export you have to ask us for.

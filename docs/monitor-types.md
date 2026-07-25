@@ -54,7 +54,7 @@ The direction is reversed. Instead of us probing you, your system calls a URL we
 
 This is how you monitor things that have no endpoint to poll: nightly backups, cron jobs, queue workers, data pipelines. Creating one mints a ping URL; call it at the end of each successful run, typically by appending `curl -fsS $URL` to the job.
 
-You set a **period** (how often you expect the ping) and a **grace** (how late it may be before it counts as failed). A job that runs hourly with a ten-minute grace alerts eleven minutes after a missed run. A fresh or re-enabled monitor gets a full period plus grace before it can go down, so creating one at an awkward moment does not page you immediately.
+You set a **period** (how often you expect the ping) and a **grace** (how late it may be before it counts as failed). A job that runs hourly with a ten-minute grace flips to failing ten minutes after the missed run, and the alert follows once the monitor's confirmation count is met (default 2 consecutive failing evaluations). A fresh or re-enabled monitor gets a full period plus grace before it can go down, so creating one at an awkward moment does not page you immediately.
 
 Pick grace with your deployment in mind. A ping sent while the control plane is unreachable is lost, so on a single-node self-host keep grace comfortably above your restart window.
 
@@ -90,7 +90,7 @@ Drives a real headless browser through a scripted sequence, so it verifies that 
 
 Steps run in order: navigate, fill a field, click, wait for a selector, assert text, assert URL. At least one assertion is required, so a broken login fails instead of quietly passing. Up to 30 steps, with a whole-run budget and a per-step selector timeout.
 
-This is the check that catches what nothing else does: an expired OAuth secret, a broken JavaScript bundle, a session cookie that stopped being set. It is also the heaviest, so the minimum interval is five minutes and the number of flow monitors is capped by plan.
+This is the check that catches what nothing else does: an expired OAuth secret, a broken JavaScript bundle, a session cookie that stopped being set. It is also the heaviest, so the minimum interval is five minutes and the number of flow monitors is capped by plan. On the hosted service no current plan includes flow monitors yet; the cap is 0 everywhere until launch.
 
 Use a dedicated low-privilege account, never a real or admin login. Put the password in an org secret and reference it as `{{key}}` in the fill step, so the stored config holds the reference rather than the credential. See [Variables and secrets](variables.md).
 

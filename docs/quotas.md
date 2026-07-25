@@ -7,11 +7,11 @@ in the `plans` table; nothing in the enforcement path changes.
 
 ## The seeded plans
 
-Three plans ship in the first migration: `free`, `founding` (a more generous
+Three plans ship seeded: `free`, `founding` (a more generous
 free tier granted to early accounts and kept for life), and `pro`. Only
-`free` is listed; the other two are assigned by signup or billing. The hosted
-service's public names for these are on the
-[pricing page](https://uptimepage.dev/pricing).
+`free` is listed; the other two are assigned by signup or billing. On the
+hosted service `free` is sold as **Standard**, `founding` as **Founding**, and
+`pro` as **Pro**; see the [pricing page](https://uptimepage.dev/pricing).
 
 | Quota | free | founding | pro | Meaning |
 |---|---|---|---|---|
@@ -36,6 +36,8 @@ service's public names for these are on the
 
 Feature flags ride on the same row: `custom_domain_enabled`, `white_label_enabled`,
 `sms_alerts_enabled`, `incident_narration_enabled`, `on_call_enabled`.
+`white_label_enabled` is what makes the status-page "powered by" toggle real:
+on a plan without it the badge always renders, whatever the page setting says.
 
 | Rate budget (per minute) | free | founding | pro | Category |
 |---|---|---|---|---|
@@ -61,9 +63,9 @@ guarantee is in the store:
 - **Pending invitations** — dedupe and the pending cap are enforced in one
   transaction under the same per-org lock; parallel duplicate-email invites
   yield exactly one row.
-- **Public components** — flipping a target public is gated on `create`,
-  `bulk`, **and** `PATCH` (so "create private, then edit public" cannot
-  bypass the cap).
+- **Public components** — the cap is enforced when a monitor is added as a
+  status-page component, counting distinct monitors across all of the org's
+  pages in the same transaction as the insert.
 - **API tokens** — count-in-`INSERT`, scoped per user, handed
   `max_api_tokens_per_user`.
 
@@ -103,6 +105,7 @@ path and method:
 - path contains `/bulk` → `bulk_ops`
 - path ends `/test` → `test_now`
 - path ends `/check-now` → `check_now`
+- any path under `/mcp` → `api_reads`, whatever the method (the JSON-RPC body hides the tool name from the middleware; probe-spawning and write tools re-check the stricter category inside the tool)
 - otherwise `GET`/`HEAD`/`OPTIONS` → `api_reads`, else → `api_writes`
 
 Exceeding a budget returns **429** with a `Retry-After` header:
@@ -166,9 +169,10 @@ test-run. A block is a **400**, audited to `quota_events` with
   multi-tenant status-page hosts are listed narrowly so legitimate
   vendor-status checks are not over-blocked.
 
-The list loads once at startup; changes need a restart in this release.
-A bad regex or malformed YAML is a clean startup *config error*, never a
-crash loop.
+The lists load at startup. With `abuse.hot_reload_enabled` set, sending
+SIGHUP re-reads and validates them and swaps them in atomically; a bad edit
+keeps the old rules. Without it, changes need a restart. A bad regex or
+malformed YAML at startup is a clean *config error*, never a crash loop.
 
 ## Configuration
 

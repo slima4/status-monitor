@@ -19,7 +19,7 @@ Minting a link returns a 256-bit random token; the URL is `/m/{token}`. The toke
 
 The link is **re-copyable**, like a Google Docs or Dropbox share link: open the Share modal (or the list endpoint) any time to copy the same URL again. Lost the chat you posted it in? Copy it again — you only get a new token when you revoke and create one.
 
-Limits come from the org's plan (`plans` columns, overridable per-org): the free plan allows **1 active link per monitor** and shares on at most **2 distinct monitors** per org. Revoke a link to free a slot.
+Limits come from the org's plan (`plans` columns, overridable per-org): the free (Standard) plan allows **1 active link per monitor** and shares on at most **2 distinct monitors** per org. Revoke a link to free a slot.
 
 To make that possible the token is stored **encrypted at rest** with the app KEK (the same `Cipher` that protects `basic_auth`/`bearer_token`), so a raw database or backup dump without the key yields nothing usable. The public lookup matches on a separate one-way hash, so a hot link never triggers a decrypt. With no KEK configured the token is stored in plaintext (same fallback as target credentials); if a token was sealed under a key that is later removed, the link shows as un-copyable rather than broken.
 

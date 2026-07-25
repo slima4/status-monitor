@@ -14,7 +14,7 @@ organizations ── memberships ── users
                      └── role: 'owner' | 'member'
 ```
 
-Every tenant-scoped table (`targets`, `incidents`, `incident_updates`, `maintenance_windows`, `maintenance_window_components`, `notification_channels`, …) carries `org_id NOT NULL` and an `ON DELETE CASCADE` foreign key to `organizations`. ClickHouse `check_results` and `check_results_1m` are partitioned by `(org_id, target_id, ts)` so single-org queries never full-scan the table.
+Every tenant-scoped table (`targets`, `incidents`, `incident_updates`, `maintenance_windows`, `maintenance_window_components`, `notification_channels`, …) carries `org_id NOT NULL` and an `ON DELETE CASCADE` foreign key to `organizations`. ClickHouse `check_results` and `check_results_1m` are ordered by `(org_id, target_id, region, timestamp)` so single-org queries never full-scan the table.
 
 ### Slugs
 
@@ -38,7 +38,7 @@ Deletion is two-phase to give operators a recovery window and to keep ClickHouse
    - Drains pending queue rows by issuing `ALTER TABLE check_results DELETE WHERE org_id = ?` against ClickHouse for each. The mutation is idempotent; a process restart between halves replays cleanly.
    - Then hard-deletes up to 10 soft-deleted users past the grace window that hold no live (unexpired, unused) recovery token. The `users` `ON DELETE CASCADE` erases memberships, oauth_identities, api_tokens, invitations, sessions and recovery tokens; rows referencing the user as an actor (`login_attempts`, `org_audit_log`, `quota_events`, `plan_overrides`) are kept with the actor nulled.
 
-The same daily job then enforces long-horizon data retention from the `[retention]` config: it deletes `login_attempts`, `quota_events` and `org_audit_log` rows past their windows and reaps sessions that are absolute-expired **or** idle past `auth.session.idle_timeout_days`. ClickHouse `check_results` retention is the table's own `TTL` (background merge), kept equal to `retention.check_results_days`. Short-cadence security sweeps (OAuth-state, magic-link) keep their own faster loops — their frequency is the property.
+The same daily job then enforces long-horizon data retention from the `[retention]` config: it deletes `login_attempts`, `quota_events` and `org_audit_log` rows past their windows and reaps sessions that are absolute-expired **or** idle past `auth.session.idle_timeout_days`. ClickHouse `check_results` retention is the table's own `TTL` (background merge), but the window is a per-row `ttl_days` stamped from the writing org's plan (`raw_days`, 30 by default) at insert time, not a single table-wide constant. Short-cadence security sweeps (OAuth-state, magic-link) keep their own faster loops — their frequency is the property.
 
 The outbox table is the load-bearing piece. A naive "DELETE in PG, then DELETE in CH" sequence leaves CH rows orphaned if the worker dies between calls — invisible to queries but on disk forever, breaking the "data fully erased within 30 days" privacy claim.
 

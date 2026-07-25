@@ -30,7 +30,6 @@ The container sets `net.core.somaxconn=8192`, `net.ipv4.tcp_tw_reuse=1`, `net.ip
 | `TIMEOUT_MS` | `5000` | per-check request timeout |
 | `MOCK_PORTS` | `16` | parallel in-process mock listeners — spreads 4-tuple load to avoid loopback ephemeral-port exhaustion |
 | `RAMP_SECS` | `2` | worker start stagger window — avoids thundering-herd SYN bursts at `listen()` backlog |
-| `HTTP2` | `0` | when `1`, client speaks HTTP/2 with prior knowledge (RFC 7540 §3.4). Single TCP connection multiplexes many streams; necessary to drive 50k workers on macOS where ephemeral src ports cap at ~16k |
 
 ## What it does
 
@@ -42,7 +41,7 @@ Spawns `MOCK_PORTS` axum servers returning `200 ok`, then drives workers in a ti
 - Ephemeral src port range: `49152–65535` = **16,384 ports**
 - `TIME_WAIT` lingers 30 s, holding closed ports
 
-For 50k-concurrency runs use `HTTP2=1` to fold many streams onto a few TCP connections. Linux defaults (ephemeral 32-61k, tunable `somaxconn`) handle 50k HTTP/1 natively.
+Linux defaults (ephemeral 32-61k, tunable `somaxconn`) handle 50k HTTP/1 natively.
 
 ## Reference numbers
 
@@ -88,4 +87,4 @@ VM) when you actually need a Linux number.
 
 ## HTTP/1 vs h2c trade-off
 
-HTTP/1 exercises connect / pool churn — closer to "monitor checks N legacy endpoints" reality. h2c stresses HTTP/2 framing and flow control — closer to "monitor checks N gRPC / modern HTTPS endpoints with ALPN". Production monitors hit both. Default is HTTP/1; flip `HTTP2=1` when ephemeral exhaustion masks signal you actually care about.
+HTTP/1 exercises connect / pool churn — closer to "monitor checks N legacy endpoints" reality. h2c stresses HTTP/2 framing and flow control — closer to "monitor checks N gRPC / modern HTTPS endpoints with ALPN". Production monitors hit both.

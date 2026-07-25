@@ -4,14 +4,16 @@ This page covers the hosted service at `uptimepage.dev`. A self-hosted instance 
 
 ## The plans
 
-| Plan | Who gets it | Price |
-|---|---|---|
-| Standard | Every new account | Free, no card |
-| Founding | The first 1,000 accounts, granted at signup and kept for life | Free |
-| Pro | Coming | $9 per month |
-| Team | Coming | $19 per month |
+| Plan | Who gets it |
+|---|---|
+| Standard | Every new account, free, no card |
+| Founding | The first 1,000 accounts, granted at signup and kept for life, free |
+| Pro | Coming |
+| Team | Coming |
 
-The current monitor counts, check intervals, history windows, seats, and status-page limits are on the [pricing page](https://uptimepage.dev/pricing), which is the number you are actually enforced at.
+Prices, monitor counts, check intervals, history windows, seats, and status-page limits are on the [pricing page](https://uptimepage.dev/pricing), which is the number you are actually enforced at.
+
+Browser flow monitors are not included in any current plan; the per-plan cap sits at zero until they launch.
 
 Founding is granted automatically while spots remain. There is nothing to claim and no code to enter. Once an account holds it, it keeps those limits for as long as the account is open, at no cost, and we do not downgrade it later.
 
@@ -21,7 +23,7 @@ Resource quotas (monitors, seats, status pages, channels, tokens) are enforced a
 
 Request budgets are per minute, per organization and per user, split into reads, writes, bulk operations, test runs, and check-now. Crossing one returns `429` with a `Retry-After` header. Checks themselves are never rate limited: the scheduler does not pass through that middleware, so a busy API does not slow your monitoring.
 
-Two limits behave slightly differently. Pending invitations return `409 INVITATIONS_LIMIT`. A check interval below your plan floor returns `422 MIN_CHECK_INTERVAL`, and the floor is the higher of your plan's interval and the minimum for that monitor kind (an hour for TLS and domain expiry, ten seconds for the rest).
+Two limits behave slightly differently. Pending invitations return `409 INVITATIONS_LIMIT`. A check interval below your plan floor returns `422 MIN_CHECK_INTERVAL`, and the floor is the higher of your plan's interval and the minimum for that monitor kind (an hour for TLS and domain expiry, five minutes for flow, a minute for heartbeat, ten seconds for the rest).
 
 ## Seeing where you stand
 

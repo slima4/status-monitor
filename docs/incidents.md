@@ -1,6 +1,6 @@
 # Incident management
 
-uptimepage turns a failing check into a first-class operational incident: a tracked lifecycle with acknowledgement, ownership, paging, on-call rotations, escalation, and a retrospective — not just a banner on a status page. This chapter is for operators running incident response. For the customer-facing surface it publishes to, see [Public status page](public-status.md); for the wire-level endpoints see [REST API](api.md).
+uptimepage turns a failing check into a first-class operational incident: a tracked lifecycle with acknowledgement, ownership, paging, on-call rotations, escalation, and a retrospective — not just a banner on a status page. This page is for operators running incident response. For the customer-facing surface it publishes to, see [Public status page](public-status.md); for the wire-level endpoints see [REST API](api.md).
 
 ## The core idea: internal state is not public phase
 
@@ -18,7 +18,7 @@ Acknowledging an incident stops escalation and records who took it — it posts 
 
 A background writer scans every enabled monitor (not only status-page components). When a monitor sustains a bad state — `down`, `error`, or `degraded` — it opens one incident; a sustained recovery to `up` resolves it automatically (with no human resolver recorded). One open incident per monitor at a time; duplicate failures fold into it.
 
-"Sustains" is two gates, not one. A region counts as failing only after `alert_confirmations` failures in a row from that region alone (default 2), and then the monitor's region policy decides how many failing regions have to agree before the incident opens. The default is majority, meaning more than half of the regions that monitor is assigned. Under that default, a monitor probed from several regions does not open an incident because one location had a bad minute. See [Multi-region probes](multi-region.md) for the policy list, or [Probe regions](hosted/regions.md) on the hosted service.
+"Sustains" is two gates, not one. A region counts as failing only after `alert_confirmations` failures in a row from that region alone (default 2), and then the monitor's region policy decides how many failing regions have to agree before the incident opens. The default is majority, meaning more than half of the regions currently reporting results for that monitor; a region that stops reporting drops out of the vote instead of counting as down. Under that default, a monitor probed from several regions does not open an incident because one location had a bad minute. See [Multi-region probes](multi-region.md) for the policy list, or [Probe regions](hosted/regions.md) on the hosted service.
 
 Visibility is derived at open time: if the monitor is a component of an enabled status page the incident opens `public`, otherwise `internal`. A monitor on no page still gets a fully tracked internal incident.
 
@@ -48,7 +48,7 @@ Every lifecycle action writes an append-only event to the incident's internal ti
 
 ## Paging and escalation
 
-When an incident opens, the escalation engine pages the responsible channels. Paging reuses the existing Slack / Discord / Teams / Google Chat / Telegram (one-tap linked or bring-your-own bot) / WhatsApp / Webhook transports (see [Configuration](configuration.md)); email and SMS are not wired yet. Telegram rate-limit responses are honoured: a 429 with `retry_after` pushes the retry out at least that far.
+When an incident opens, the escalation engine pages the responsible channels. Paging reuses the same transports as regular notifications, every channel kind included: Slack, Discord, Teams, Google Chat, Telegram (one-tap linked or bring-your-own bot), WhatsApp, email, SMS, PagerDuty, ntfy, Pushover, and webhooks (see [Notifications](notifications.md)). Pushover emergency-priority pages are receipt-tracked and cancelled on resolve. Telegram rate-limit responses are honoured: a 429 with `retry_after` pushes the retry out at least that far.
 
 An **escalation policy** is an ordered ladder of levels. Each level waits a delay, then pages its targets; if no one acknowledges, the engine advances to the next level, and can repeat the ladder a configured number of times before giving up. Acknowledging the incident halts the walk.
 

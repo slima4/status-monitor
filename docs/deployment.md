@@ -22,11 +22,7 @@ docker compose up -d
 
 ### Authentication boundary
 
-The Rust service ships an in-binary auth stack (GitHub OAuth + opaque
-API tokens; magic-link sign-in is gated by config). The native auth is
-the boundary; a basic-auth layer in front of Caddy would double-prompt.
-Single-tenant deploys behave the same way — sign up as the first user
-and the operator surface is yours.
+The Rust service ships an in-binary auth stack (GitHub and Google OAuth, opaque API tokens, and magic-link sign-in, all enabled by default and each individually configurable). The native auth is the boundary; a basic-auth layer in front of Caddy would double-prompt. Single-tenant deploys behave the same way — sign up as the first user and the operator surface is yours.
 
 `/healthz` and `/readyz` are intentionally exposed without auth so
 uptime probes, load balancers, and orchestrators can hit them.
@@ -103,7 +99,7 @@ For the operator workflow (enabling components, narrating incidents, scheduling 
 
 ## Docker
 
-`docker compose up -d` brings up Postgres 17, ClickHouse 26.3, and the monitor on the same network. Compose env vars wire the monitor to the stack:
+`docker compose up -d` brings up Postgres 18, ClickHouse 26.3, and the monitor on the same network. Compose env vars wire the monitor to the stack:
 
 ```yaml
 UPTIMEPAGE_STORAGE__POSTGRES__URL: postgres://monitor:monitor@postgres:5432/monitor

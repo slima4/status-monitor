@@ -5,12 +5,12 @@ HTML page at `/status` plus a small JSON + RSS API under
 `/api/public/v1/*`. It's the only part of uptimepage that's safe to
 expose on the open internet without basic auth in front of it.
 
-This chapter is for operators: how to publish a component, narrate an
+This page is for operators: how to publish a component, narrate an
 incident, and schedule a maintenance window. For the wire-level details
 of the underlying endpoints see [REST API](api.md#public-status-endpoints).
 For Caddy + the rate-limit plugin see [Deployment](deployment.md#public-status-surface).
 
-> **Multi-tenant operators read this first.** This chapter describes the
+> **Multi-tenant operators read this first.** This page describes the
 > page itself; the workflow is identical on every page. In a multi-tenant
 > deployment each org runs one or more pages at `{slug}.{base_domain}` — set
 > `tenancy.subdomain_public_routes = true` and leave
@@ -194,6 +194,8 @@ Validation rules:
 For audit, prefer PATCHing a cancelled window's title (e.g. `"[cancelled]
 PG cutover"`) over hard-deleting historical entries.
 
+Maintenance windows are managed through the API only in this release; there is no editor screen for them yet, so do not go hunting for one under Settings.
+
 ## What the public page renders
 
 - **Banner** — one of `All Systems Operational`, `Maintenance in
@@ -210,6 +212,19 @@ PG cutover"`) over hard-deleting historical entries.
 - **Maintenance** — active + the next 7 days of upcoming windows.
 - **RSS feed** — `/api/public/v1/incidents.rss`. RSS 2.0; each item is
   a public incident with the latest update as the description.
+- **Subscribe** — a header button that lets any visitor follow the page; see below.
+
+## Subscriptions
+
+Visitors can subscribe to a status page and get told about incidents and maintenance without polling the page. Two delivery channels ship today: email and webhook.
+
+**Email** is double opt-in. Subscribing sends a confirmation link that expires after 24 hours; nothing is delivered until it is clicked. Confirmation mail is rate-capped per subscriber, per page, and per address per day, so the form cannot be used to bombard an inbox. Every email carries a one-click unsubscribe link (RFC 8058), no login needed.
+
+**Webhook** verifies at subscribe time: the page sends a verification POST to the URL, and the subscription is created only if the endpoint answers 2xx. The response then shows a signing secret exactly once; store it. Every delivery is signed with the same scheme as notification-channel webhooks: an `X-Uptimepage-Timestamp` header and an `X-Uptimepage-Signature` HMAC over the timestamp and body, so the receiver can verify origin and freshness (see [REST API](api.md#notification-channels)).
+
+Subscribers receive public incident updates as they are posted (payload `type` `incident_update`) and upcoming maintenance announcements (`type` `maintenance`). Internal incident activity is never sent; the feed carries exactly what the public page shows.
+
+The page owner sees the subscriber list, with counts per channel, in the status-page editor, and can remove any subscriber there or via `DELETE /api/v1/status-pages/{id}/subscribers/{subscriber_id}`.
 
 ## Refresh behaviour
 

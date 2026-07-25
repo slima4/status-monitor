@@ -1,6 +1,6 @@
 # REST API
 
-Mounted under `/api/v1` on the configured API bind. JSON in, JSON out. Every `/api/v1/*` endpoint is authenticated: a session cookie from the operator UI, or an `Authorization: Bearer` API token bound to one org and carrying its own scopes. The health probes and the OpenAPI document are the exception and stay open. See [Authentication](authentication.md#api-token-auth).
+Mounted under `/api/v1` on the configured API bind. JSON in, JSON out. Every `/api/v1/*` endpoint is authenticated: a session cookie from the operator UI, or an `Authorization: Bearer` API token bound to one org and carrying its own scopes. The health probes, the OpenAPI document, and `POST /api/v1/invitations/decline` (token in body, not a session or API token) are the exceptions and stay open. See [Authentication](authentication.md#api-token-auth).
 
 OpenAPI 3.1 document at `GET /api/openapi.json`; Swagger UI at `GET /docs` on the app host (<https://app.uptimepage.dev/docs> on the hosted service).
 
@@ -28,7 +28,7 @@ Documentation pages, blog posts and the homepage also answer `Accept: text/markd
 |--------|------|---------|
 | `POST` | `/api/v1/targets` | create one target |
 | `POST` | `/api/v1/targets/bulk` | bulk-create up to 10,000 targets |
-| `POST` | `/api/v1/targets/bulk-action` | enable / disable / delete / tag-add / tag-remove on many ids |
+| `POST` | `/api/v1/targets/bulk-action` | enable / disable / delete / tag-add / tag-remove / set-group on many ids |
 | `POST` | `/api/v1/targets/test` | run a one-shot check against a `CheckSpec` without persisting |
 | `POST` | `/api/v1/targets/{id}/check-now` | run an immediate check using the target's stored credentials |
 | `GET` | `/api/v1/targets` | list targets (`limit`, `offset`, `tag`, `enabled`, `q`) — paginated |
@@ -41,7 +41,7 @@ Documentation pages, blog posts and the homepage also answer `Accept: text/markd
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range (`from`, `to`, `region`) |
 | `GET` | `/api/v1/targets/{id}/regions` | list the regions a monitor probes from |
 | `PUT` | `/api/v1/targets/{id}/regions` | set the regions a monitor probes from |
-| `GET` | `/api/v1/regions` | list the enabled probe-region catalog (`id`, `name`, `location`) |
+| `GET` | `/api/v1/regions` | list the enabled probe-region catalog: `{ "regions": [...] }`, each entry `id`, `name`, `city`, `country_code`, `continent`, `latitude`, `longitude` |
 | `GET` | `/api/v1/targets/{id}/incidents` | coalesced incident periods (`from`, `to`, `ongoing_only`) — paginated |
 | `POST` | `/api/v1/targets/{id}/shares` | mint a read-only share link; returns the share (token included) |
 | `GET` | `/api/v1/targets/{id}/shares` | list a monitor's live share links (token included, re-copyable) |
@@ -116,7 +116,7 @@ sensitive target fields (`url`, `headers`, `basic_auth`, `bearer_token`).
 | `GET` | `/status` | server-rendered HTML status page (`?fragment=1` returns the dynamic region only) |
 | `GET` | `/status/incidents/{id}` | per-incident detail page |
 | `GET` | `/api/public/v1/status` | the same data as `/status` in JSON |
-| `GET` | `/api/public/v1/components/{id}/history` | per-component 90-day history (`days` query, default 90, max 90) |
+| `GET` | `/api/public/v1/components/{id}/history` | per-component history (`days` query, 1..365, default 90) |
 | `GET` | `/api/public/v1/incidents` | recent public incidents (paginated) |
 | `GET` | `/api/public/v1/incidents/{id}` | one public incident with its update timeline |
 | `GET` | `/api/public/v1/incidents.rss` | RSS 2.0 feed of recent incidents |
@@ -129,7 +129,7 @@ the per-page component fields (`public_name`, `public_description`,
 
 ### Operator endpoints (share links)
 
-A share link is a capability URL that renders one monitor's full read-only detail view to anyone who has it, no account. Managing share links — mint, list, revoke — is a monitor action gated on member-level `targets:write` (not owner-only); listing returns the live token so a read-only caller can't harvest working public links. Scoped to the caller's active org (a foreign monitor id is 404). `expires_at` is optional; omit it for a link that never expires. The public surface those tokens unlock is documented in [Share links](share-links.md).
+A share link is a capability URL that renders one monitor's full read-only detail view to anyone who has it, no account. Managing share links — mint, list, revoke — is a monitor action gated on member-level `targets:write` (not owner-only): a read-only member can't call list, so can't harvest a working link that way; a member who can write already has the run of the monitor, so the list response returns the live token too, keeping an existing link re-copyable instead of forcing a new mint. Scoped to the caller's active org (a foreign monitor id is 404). `expires_at` is optional; omit it for a link that never expires. The public surface those tokens unlock is documented in [Share links](share-links.md).
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -181,7 +181,7 @@ The `url`, `headers`, `body`, and `expected_body_contains` fields may carry `{{k
 
 #### Credential redaction
 
-`GET`, `POST`, `PATCH`, and `bulk` responses replace populated `basic_auth` / `bearer_token` fields with the sentinel `"***"`. A `null` field stays `null`, so clients can distinguish "auth is configured" from "no auth". When you `PATCH` a target's `check`, you must re-supply the real credential — a body that contains `"***"` is rejected with `400 Bad Request`. If you only need to change other fields (`name`, `tags`, `enabled`, `interval`), omit `check` from the `PATCH` body. Encryption at rest is gated on [`security.credentials_kek_base64`](configuration.md); the redaction behavior applies in either mode.
+`GET`, `POST`, `PATCH`, and `bulk` responses replace populated `basic_auth` / `bearer_token` fields, and every flow-check `fill` step's `value`, with the sentinel `"***"`. A `null` field stays `null`, so clients can distinguish "auth is configured" from "no auth". When you `PATCH` a target's `check`, you must re-supply the real credential — a body whose `basic_auth`, `bearer_token`, or a flow `fill` value contains `"***"` is rejected with `400 Bad Request` (`REDACTION_SENTINEL`). If you only need to change other fields (`name`, `tags`, `enabled`, `interval`), omit `check` from the `PATCH` body. Encryption at rest is gated on [`security.credentials_kek_base64`](configuration.md); the redaction behavior applies in either mode.
 
 `expected_status` variants:
 
@@ -329,7 +329,10 @@ Use a dedicated low-privilege test account, never a real or admin credential: th
                               // max(plan.min_check_interval_secs, kind_min).
                               // kind_min is 10 for http/tcp/ping/dns, 60 for
                               // heartbeat, 300 for flow, and 3600 for
-                              // tls_cert/domain_expiry. Plan-free min = 60.
+                              // tls_cert/domain_expiry. Free plan floor is 180;
+                              // a DB-less deployment has no plans table, so
+                              // only kind_min and the schema's own
+                              // `interval_secs >= 10` check apply.
   "enabled": true,
   "tags": ["prod", "tier1"],
   "alerts": { /* optional, see below */ }
@@ -394,9 +397,10 @@ available regions is `422 INVALID_REGION_POLICY`.
 
 - Unsupported URL scheme (`url scheme '...' not allowed` — only `http` and `https`)
 - Missing URL host, empty TCP host, or TCP/TLS port `0`
-- `tls_cert warn_days must be > critical_days`
-- `domain_expiry domain must contain a TLD label` (no dot in `domain`)
-- `domain_expiry warn_days must be > critical_days`
+- `tls_cert warn_days must be > critical_days` (each must also be in `1..=365`)
+- `domain_expiry domain must be of the form 'name.tld'` (no dot, or an empty label on either side of it)
+- `domain_expiry warn_days must be > critical_days` (each must also be in `1..=365`)
+- `domain_expiry` create is refused when the domain's TLD registry publishes no expiry data: the check could never succeed
 - **SSRF guard** — `target address ... is in a blocked range`. Triggered when the URL or TCP host is an IP literal that resolves to loopback / private / link-local / reserved space (see [Configuration → `security.allow_private_targets`](configuration.md)). Hostname literals are checked again at connect time after DNS resolution, so DNS rebinding cannot bypass the guard.
 - **Redaction sentinel** — `basic_auth contains redaction sentinel — re-supply the real credential` or the equivalent for `bearer_token`. Rejected to prevent a `GET` → `PATCH` round-trip from silently overwriting the stored credential with `"***"`.
 - **TLS verification + credentials** — `verify_tls = false cannot be combined with basic_auth or bearer_token over https`. When verification is disabled any host presenting a forged certificate can collect the stored credential on every check interval. Set `verify_tls = true` (recommended) or remove the credential from the target.
@@ -439,7 +443,7 @@ never read, mutate, or test another's channels.
 - `whatsapp_app` — `{ "type": "whatsapp_app", "phone": "…", "profile_name": "…" }` — linked through the platform's WhatsApp number. **Not creatable from request bodies** (`422 CHANNEL_KIND_MANAGED`, same rationale as `telegram_app`); created only by the WhatsApp link-code flow below.
 - `pagerduty` — `{ "type": "pagerduty", "routing_key": "…" }` (the 32-character Events API v2 integration key of a PagerDuty service). The only transport that drives the destination's own incident lifecycle: opens/reopens/escalations send `trigger` and resolution sends `resolve`, all correlated by `dedup_key` = the incident id, so one uptimepage incident maps to exactly one PagerDuty alert that opens and closes with it. Severity maps Critical→`critical`, Major→`error`, Minor→`warning`. A test send fires a `trigger`+`resolve` pair on a throwaway dedup key and never leaves an open PagerDuty incident
 - `ntfy` — `{ "type": "ntfy", "server_url": "https://ntfy.sh", "topic": "…", "access_token": "tk_…" }` (JSON publish to the server root; `server_url` optional, defaults to ntfy.sh, must be the bare server root; `access_token` optional, sent as a Bearer token). High-urgency opens publish at priority 4, the rest at 3; resolves tag `white_check_mark`, opens `rotating_light`. On ntfy.sh an unprotected topic's name is its only access control
-- `pushover` — `{ "type": "pushover", "token": "…", "user": "…", "device": "…" }` (30-character application token and user/group key, both treated as secrets; `device` optional). High-urgency alerts go out at priority 1 (bypasses quiet hours), low at 0, resolves at −1 (no sound). Emergency priority 2 is not used
+- `pushover` — `{ "type": "pushover", "token": "…", "user": "…", "device": "…", "emergency": false }` (30-character application token and user/group key, both treated as secrets; `device` optional). High-urgency alerts go out at priority 1 (bypasses quiet hours), low at 0, resolves at −1 (no sound). With `emergency: true`, a live high-urgency open instead sends priority 2: Pushover re-alerts every 60 s for up to 3600 s until acknowledged, and the repeat is cancelled the moment the incident resolves. Low-urgency alerts and resolves are unaffected by the flag
 - `sms` — `{ "type": "sms", "provider": "twilio", "to": "+15551234567", "from": "…", … }` — bring-your-own SMS gateway; one text message per alert, body trimmed to a few segments to bound per-segment cost. `to` is E.164; `from` is an E.164 number or sender id. The provider-specific credentials are: `twilio` → `account_sid` + `auth_token`; `telnyx` → `api_key` (+ optional `messaging_profile_id`); `vonage` → `api_key` + `api_secret`; `plivo` → `auth_id` + `auth_token`; `sinch` → `service_plan_id` + `api_token` + `region` (`us`/`eu`/`au`/`br`/`ca`, default `us`). Only the gateway secret is treated as a secret (Twilio/Plivo `auth_token`, Telnyx `api_key`, Vonage `api_secret`, Sinch `api_token`); account identifiers stay visible
 - `email` — `{ "type": "email", "to": "oncall@example.com" }` — one lowercase address per channel, delivered through the platform's transactional sender. **Verification-gated**: the channel is created unverified and a mail with a single-use 24 h link is sent to the address; until the link is confirmed every delivery (incident page or test send) fails with `email address not verified`. Replacing the config resets the gate and re-sends the mail. `POST /api/v1/notification-channels/{id}/resend-verification` re-sends it (capped per channel and per org per day — `422 CHANNEL_VERIFICATION_LIMIT`; on a non-email channel — `422 CHANNEL_NOT_VERIFIABLE`); a test against an unverified or unsaved email config is `422 CHANNEL_UNVERIFIED`.
 
@@ -451,6 +455,41 @@ HMAC-SHA256(`secret`, `"{timestamp}.{body}"`) over the exact bytes sent.
 Receivers should recompute the digest and reject stale timestamps (e.g.
 older than 5 minutes) to block replays. Channels without a secret deliver
 unsigned.
+
+**Webhook payload.** The body is the incident notice serialized as-is, no transport-specific wrapping:
+
+```jsonc
+{
+  "incident_id": "0192a1ce-89b1-7c3a-9e21-4b6e2a9d9f10",
+  "reason": "opened",
+  "monitor_name": "api-prod",
+  "title": null,
+  "severity": "major",
+  "urgency": "high",
+  "started_at": "2026-05-13T11:30:00Z",
+  "ended_at": null,
+  "error_sample": "connection refused",
+  "regions_down": ["eu-west", "us-east"],
+  "regions_up": ["ap-south"],
+  "url": "https://app.uptimepage.dev/i/0192a1ce-89b1-7c3a-9e21-4b6e2a9d9f10"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `incident_id` | string (UUID) | |
+| `reason` | string | see the enum values below |
+| `monitor_name` | string \| null | `null` for a manual incident not tied to a monitor |
+| `title` | string \| null | set on a manual incident that has no monitor |
+| `severity` | string | `minor` \| `major` \| `critical` |
+| `urgency` | string | `high` (pages) \| `low` (records, doesn't page) |
+| `started_at` | string (RFC 3339) | |
+| `ended_at` | string (RFC 3339) \| null | set only once the incident resolves |
+| `error_sample` | string \| null | |
+| `regions_down` / `regions_up` | string[] | empty on both sides for a single-region monitor |
+| `url` | string \| null | deep link to the incident detail page, when a base URL is configured |
+
+`reason` is one of: `opened`, `escalated`, `reopened`, `resolved`, `nodata` (the monitor's probes went silent, no incident, orthogonal to up/down), `dataresumed` (probing recovered after a `nodata` notice).
 
 **WhatsApp templates.** Create a one-parameter utility template (body
 `{{1}}`) in the WhatsApp Business Manager and set `template_name` (plus
@@ -544,13 +583,21 @@ See [Quotas & rate limits](quotas.md) for the quota model, the per-minute catego
 
 ## Pagination envelope
 
-Every list endpoint returns:
+Every `/api/v1` list endpoint returns:
 
 ```jsonc
-{ "items": [ /* ... */ ], "total": 1240, "limit": 50, "offset": 0 }
+{ "items": [ /* ... */ ], "limit": 50, "offset": 0, "has_more": true }
 ```
 
-`limit` defaults to 50 for `/targets` and `/tags`, 1000 for `/results`, 100 for `/incidents`. `limit` is silently capped server-side (10,000 for results, 1,000 for incidents/tags). `total` reflects rows matching the filters, ignoring `limit`/`offset`.
+There is no `total`. `has_more` is `true` when rows exist past this page; the server fetches one extra row to decide it, so listing never pays for a parallel `count(*)`. `limit` defaults to 50 for `/targets`, 100 for `/tags`, 1000 for `/results`, 100 for `/incidents`. `limit` is silently capped server-side: 10,000 for `/targets` and `/results`, 1,000 for `/tags` and `/incidents`.
+
+`GET /api/public/v1/incidents` uses a separate cursor envelope instead, since a parallel `count(*)` over an unbounded public range is too expensive and offset pagination is unstable under inserts:
+
+```jsonc
+{ "items": [ /* ... */ ], "next_cursor": "opaque-token-or-null" }
+```
+
+Pass the previous page's `next_cursor` as `?cursor=...` to fetch the next page; it's `null` once nothing is left. There is no `limit`/`offset`/`has_more` on this endpoint.
 
 ## Results query
 
@@ -632,7 +679,7 @@ Returns coalesced down / error periods. A contiguous run of bad statuses becomes
       "error_sample": "connection refused"
     }
   ],
-  "total": 1, "limit": 100, "offset": 0
+  "limit": 100, "offset": 0, "has_more": false
 }
 ```
 
@@ -644,7 +691,7 @@ Returns every tag currently in use across the caller's targets (enabled or disab
 
 ```jsonc
 { "items": [ { "name": "prod", "count": 12 }, { "name": "staging", "count": 4 } ],
-  "total": 2, "limit": 100, "offset": 0 }
+  "limit": 100, "offset": 0, "has_more": false }
 ```
 
 ## Dashboard summary
@@ -672,7 +719,8 @@ Returns every tag currently in use across the caller's targets (enabled or disab
   "action": { "type": "disable" }
   // alternatives: { "type": "enable" }, { "type": "delete" },
   //   { "type": "tag_add",    "tags": ["frozen"] },
-  //   { "type": "tag_remove", "tags": ["frozen"] }
+  //   { "type": "tag_remove", "tags": ["frozen"] },
+  //   { "type": "set_group",  "group": "tier1" } // null clears the group
 }
 ```
 

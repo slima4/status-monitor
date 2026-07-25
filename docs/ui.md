@@ -39,8 +39,12 @@ What responders see here is deliberately separate from what customers see on a s
 | **Team** | Invite people by email, set roles, resend or revoke pending invitations, and remove members. See [Team](team.md). |
 | **Usage** | Current versus limit for every quota on your plan, as progress bars. The numbers here are the numbers you are enforced at. See [Plans and limits](hosted/plans-and-limits.md). |
 | **Account** | Export your data as JSON, or delete your account. Deletion is reversible for 30 days by signing back in. |
+| **Sessions** | See every device signed in to your account, revoke a single session, or sign out everywhere. |
+| **API tokens** | Create and revoke personal API tokens for the REST API and Terraform. See [Managing tokens](authentication.md#managing-tokens). |
 
 On-call schedules and escalation policies get their own screens where the feature is enabled.
+
+Theme and 12- or 24-hour time format are per-user display preferences, not org settings, and follow you to every screen.
 
 ## Sharing a single monitor
 

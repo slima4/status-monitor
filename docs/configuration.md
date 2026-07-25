@@ -15,34 +15,43 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `checker` | `max_concurrent_checks` | global concurrency cap enforced by worker pool semaphore |
 | `checker` | `default_timeout_ms`, `connect_timeout_ms` | client-side timeouts applied to outbound checks |
 | `checker` | `default_check_interval_secs` | fallback interval when target spec omits it |
-| `checker` | `per_host_max_inflight`, `rdap_max_inflight` | per-(org, host, port) and per-TLD RDAP concurrency caps. Fail-fast bulkhead — over-cap checks return a `degraded` result instead of queueing |
+| `checker` | `per_host_max_inflight`, `rdap_max_inflight` | per-(org, host, port) and per-TLD RDAP concurrency caps. `per_host_max_inflight` is fail-fast: an over-cap tick is dropped, no `CheckResult` written. `rdap_max_inflight` falls through to the sticky last-good cached verdict instead |
 | `http_client` | `tcp_keepalive_secs`, `user_agent` | per-check connection keep-alive (one request's lifetime — checks connect fresh, no pool) and the outbound `User-Agent`, which defaults to the crate version and only needs setting to override it |
 | `dns` | `cache_size`, `positive_ttl_secs`, `negative_ttl_secs`, `servers` | hickory resolver — point at internal resolvers when needed |
 | `security` | `allow_private_targets` | SSRF guard: when `false` (default) any target resolving to loopback / private / link-local / reserved IPs is rejected |
 | `security` | `credentials_kek_base64` | 32-byte base64 key encrypting `basic_auth` / `bearer_token` at rest. Empty (default) stores plaintext — dev only |
+| `security` | `trusted_proxies` | CIDR ranges whose `X-Forwarded-For` is honoured for client-IP extraction. Empty means no reverse proxy: the TCP peer is trusted as-is |
+| `flow` | `enabled`, `lightpanda_path`, `max_concurrency`, `mem_limit_mb`, `block_private_networks`, `block_cidrs`, `max_response_mb`, `user_agent_suffix` | Browser-driven flow monitors (Lightpanda engine). Off by default |
+| `rate_limits` | `per_ip.*`, `janitor.*` | Mirrors of the per-IP numbers the reverse proxy enforces, plus the in-process limiter-map janitor cadence. Per-org/per-user limits come from the plans table |
+| `abuse` | `url_patterns_denied`, `domain_denylist_path`, `reputation_source_path`, `hot_reload_enabled` | Deny-list of attack-recon URL patterns and domains checked at target creation. `hot_reload_enabled` lets SIGHUP swap the rules in without a restart |
 | `circuit_breaker` | `failure_threshold`, `success_threshold`, `open_duration_secs`, `half_open_max_calls` | per-host breaker state machine |
 | `storage.postgres` | `url`, `max_connections`, `min_connections`, `acquire_timeout_secs` | target metadata store |
 | `storage.clickhouse` | `url`, `database`, `user`, `password`, `batch_size`, `batch_timeout_ms`, `buffer_size` | result sink and pipeline back-pressure |
-| `scheduler` | `target_refresh_interval_secs`, `jitter_pct` | how often the registry is reconciled against Postgres, and how much jitter is applied to each target's tick |
+| `storage.clickhouse` | `async_insert` | coalesces the batcher's inserts into larger parts server-side. On by default; `wait_for_async_insert` stays on so the retry/dedup durability ack still holds |
+| `scheduler` | `enabled` | off = this process probes nothing in-process (pure dashboard/brain); on = the in-process scheduler probes `region`. Defaults to `true` |
+| `scheduler` | `target_refresh_interval_secs` | how often the registry is reconciled against Postgres |
 | `scheduler` | `region`, `default_region` | this control plane's own region id (a normal region row, default `"default"`) and the region new targets are assigned to (empty falls back to `region`). See [Multi-region probes](multi-region.md) |
 | `agent` | `enabled`, `control_plane_url`, `region`, `pull_interval_secs`, `flush_interval_secs`, `buffer_capacity` | run this process as a stateless regional probe instead of a control plane. `token` is **env-only** (`UPTIMEPAGE_AGENT__TOKEN`). Off by default. See [Multi-region probes](multi-region.md) |
 | `operator` | `admin_token` | static bearer secret for the instance-admin `/operator/*` surface (regions + agents). **Env-only** (`UPTIMEPAGE_OPERATOR__ADMIN_TOKEN`); empty disables the surface (404s) |
+| `operator` | `agent_stale_after_secs` | how long since an agent's last check-in before it's shown stale on the `/operator/*` surface |
 | `observability` | `log_level`, `log_format` | tracing-subscriber filter + JSON vs pretty output |
 | `observability` | `metrics_enabled`, `gauge_sample_interval_ms` | Prometheus exporter toggle and sampler cadence |
 | `observability` | `tracing_enabled` | Master on/off for OTLP trace export. Export is active only when this **and** `observability.grafana.enabled` are true |
 | `observability.grafana` | `enabled`, `otlp_endpoint`, `instance_id`, `api_key`, `trace_sample_ratio` | OTLP/HTTP trace export to Grafana Cloud / any OTLP collector. `api_key` is env-only. See [Trace export](#trace-export) below |
-| `api.rate_limit` | `enabled`, `per_second`, `burst` | per-IP token-bucket rate limiter on `/api/v1/*`. Disabled by default |
+| `observability.heartbeat` | `enabled`, `url`, `interval_seconds` | external dead-man's-switch: pings `url` on an interval while every critical dependency is reachable, so an independent watcher can alert when the pings stop. `url` is env-only |
 | `api.cors` | `enabled`, `allowed_origins`, `allowed_methods`, `allow_any_origin` | browser CORS for `/api/v1/*`. Disabled by default. Wildcard only via `allow_any_origin = true` |
+| `api` | — | Per-IP API rate limiting is not in-process; it's enforced by the reverse proxy. In-process limiting is per-org / per-user, driven by `[rate_limits]` and the plans table |
+| `escalation` | `retry_backoff_base_secs`, `retry_backoff_cap_secs` | exponential backoff for re-paging a failed channel: attempt n waits `base * 2^(n-1)`, capped |
 | _notification channels_ | — | Not a config block. Channels are **per-org runtime resources** managed via the [`/api/v1/notification-channels` API](api.md#notification-channels); secrets are sealed at rest with the credentials KEK |
 | `tenancy` | `path_based_public_routes`, `subdomain_public_routes`, `free_tier_owner_org_limit`, `deletion_grace_period_days` | Public-status routing shape + org limits. See [Public status routing](#public-status-routing) below and [docs/multi-tenancy.md](multi-tenancy.md) for the full model |
-| `retention` | `check_results_days`, `login_attempts_days`, `quota_events_days`, `audit_log_days` | Long-horizon data-retention windows for the daily 03:00-UTC purge job. Every key is bound by the job — no decorative knobs |
-| `public_status` | `base_domain`, `cache_max_orgs`, `cache_ttl_secs`, `last_good_ttl_secs`, `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px`, `default_brand_color`, `default_show_powered_by`, `public_per_ip_rate_limit_per_min` | Per-org public status pages at `{slug}.{base_domain}`. See [Public status page](#public-status-page) below and [Per-org status pages](per-org-status.md) |
+| `retention` | `login_attempts_days`, `quota_events_days`, `audit_log_days`, `api_tokens_post_expiry_days` | Long-horizon data-retention windows for the daily 03:00-UTC purge job. Every key is bound by the job — no decorative knobs |
+| `public_status` | `base_domain`, `cache_max_orgs`, `cache_ttl_secs`, `last_good_ttl_secs`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px`, `default_brand_color`, `default_show_powered_by`, `public_per_ip_rate_limit_per_min` | Per-org public status pages at `{slug}.{base_domain}`. Logo bytes live in the Postgres `page_assets` table, not on disk. See [Public status page](#public-status-page) below and [Per-org status pages](per-org-status.md) |
 | `auth` | `enabled_methods`, `fingerprint_salt`, `public_base_url` | Sign-in methods, HMAC salt for IP/UA hashes, base URL embedded in invitation + magic-link emails. See [Auth configuration](#auth-configuration) below |
 | `auth.session` | `idle_timeout_days`, `absolute_timeout_days`, `cookie_name`, `cookie_secure`, `cookie_domain`, `renew_on_use` | Session cookie shape + lifetime. `cookie_secure = true` in production |
 | `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes` | GitHub OAuth client. The button renders on `/login` only when client_id, client_secret, and redirect_url are all set |
 | `auth.google` | `client_id`, `client_secret`, `redirect_url`, `scopes` | Google OAuth client, same gating as `auth.github`. Email is trusted only with Google's `email_verified` attestation |
-| `auth.api_tokens` | `max_per_user`, `prefix_visible_chars` | Cap per user, indexed prefix length for token lookup |
-| `auth.invitations` | `expiry_hours`, `max_pending_per_org` | Invitation lifetime and per-org pending cap |
+| `auth.api_tokens` | `prefix_visible_chars` | Indexed prefix length for token lookup. The per-user token cap is a plan quota (`plans.max_api_tokens_per_user`), not a config key |
+| `auth.invitations` | `expiry_hours` | Invitation lifetime. The per-org pending cap is a plan quota (`plans.max_pending_invitations`), not a config key |
 | `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
 | `mcp` | `enabled`, `oauth_enabled`, `resource_uri`, `allowed_origins`, `access_token_ttl_secs` | LLM connector (MCP) server at `/mcp`. Off by default; OAuth requires real HTTPS `resource_uri` + `auth.public_base_url`. See [MCP server](mcp.md) |
 | `email` | `provider`, `from_name`, `from_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"` |
@@ -55,7 +64,7 @@ uptimepage ships from one binary as a multi-tenant SaaS. The active org is alway
 
 The public status surface is gated by **two** independent flags because path-based and subdomain routing have opposite safety profiles:
 
-- `tenancy.path_based_public_routes` — serve `/status` and `/api/public/v1/*` on the operator host, scoped to the single live org. Useful for a single-tenant deploy (one org, one page). Defaults to `true`. **Must be set to `false` once you have more than one tenant — otherwise every visitor sees the lone org's data regardless of which slug they expected.**
+- `tenancy.path_based_public_routes` — serve `/status` and `/api/public/v1/*` on the operator host, scoped to the single live org. Useful for a single-tenant deploy (one org, one page). Defaults to `true`. Safe by construction once you have more than one tenant: the lookup only resolves when exactly one live org exists, so a second org doesn't leak the first org's data, it 404s the path-based surface for everyone. Turn it off once you're on subdomain routing so the operator host doesn't 404 on every visit.
 - `tenancy.subdomain_public_routes` — serve one page per org at `{slug}.{public_status.base_domain}` (apex wildcard). Defaults to `false`; requires a well-formed `base_domain`.
 
 | Shape | Recommended flags | Public surface |
@@ -71,7 +80,7 @@ The binary refuses to boot in the dangerous combinations: `subdomain_public_rout
 - `deletion_grace_period_days` (default `30`) is how long a soft-deleted org's slug is held and how long the original deleter has to restore it.
 - The soft-delete purge now runs inside the daily retention job (`src/jobs/retention.rs`) at a fixed 03:00 UTC, not on a configurable interval. Each run cascades up to 10 past-grace orgs, drains any pending entries from `clickhouse_purge_queue` (the outbox between PG cascade and ClickHouse `ALTER TABLE DELETE`), hard-purges past-grace users, then enforces the `[retention]` windows. See [Soft delete and the 30-day purge](multi-tenancy.md#soft-delete-and-the-30-day-purge) for the full implementation and failure-recovery guarantees.
 
-The `[retention]` section sets the long-horizon windows. Defaults: `login_attempts_days = 180`, `quota_events_days = 90`, `audit_log_days = 730`. Check-result retention is **not** a config knob — the physical `TTL`s are baked into the ClickHouse tables at migration time (a value here would be silently ignored, since the TTL is never re-issued as an `ALTER` on boot): raw per-check rows in `check_results` keep 90 days, and the hourly rollup `check_results_1h` keeps 13 months. Those are the widest-tier ceilings; what a given plan actually sees is narrowed at read time by a per-plan window clamp (separate windows for raw forensics and chart history), so a plan change is an instant tag flip with no data rewrite. The public status page's daily history strip still shows 90 days, and the Privacy Policy's retention table pins these same physical windows. Session idle/absolute reaping uses `[auth.session]`; soft-deleted org/user grace uses `tenancy.deletion_grace_period_days`; OAuth-state and magic-link tokens are swept by their own short-cadence jobs.
+The `[retention]` section sets the long-horizon windows. Defaults: `login_attempts_days = 180`, `quota_events_days = 90`, `audit_log_days = 730`, `api_tokens_post_expiry_days = 30`. Check-result retention is **not** a config knob. Each `check_results` row carries its own `ttl_days` (ClickHouse `UInt16 DEFAULT 30`), stamped at write time from the writing org's plan `raw_days`; every seeded plan currently sets `raw_days = 30`, so raw per-check rows keep 30 days. The hourly rollup `check_results_1h` keeps a fixed 13 months, set at migration time. A plan's `raw_days` change takes effect on the next write, not retroactively, since the TTL is stamped per row rather than re-issued as an `ALTER` on boot. The public status page's daily history strip still shows 90 days, drawn from the rollup table, not the raw one. Session idle/absolute reaping uses `[auth.session]`; soft-deleted org/user grace uses `tenancy.deletion_grace_period_days`; OAuth-state and magic-link tokens are swept by their own short-cadence jobs.
 
 See [Multi-tenancy](multi-tenancy.md) for the full model, slug rules, and the storage-layer isolation invariants the CI checks enforce.
 
@@ -104,12 +113,10 @@ redirect_url = "https://status.example.test/auth/google/callback"
 scopes = ["openid", "email", "profile"]
 
 [auth.invitations]
-expiry_hours = 168                   # 7 days
-max_pending_per_org = 50
+expiry_hours = 168                   # 7 days; pending-invite cap is plans.max_pending_invitations
 
 [auth.api_tokens]
-max_per_user = 25
-prefix_visible_chars = 16            # floor; lower values fail boot
+prefix_visible_chars = 16            # floor; lower values fail boot; per-user cap is plans.max_api_tokens_per_user
 
 [auth.magic_link]
 expiry_minutes = 15
@@ -208,7 +215,6 @@ base_domain = ""                       # REQUIRED when subdomain_public_routes =
 cache_max_orgs = 1000                  # hot + last-good cache bound
 cache_ttl_secs = 10                    # per-org rendered-page TTL
 last_good_ttl_secs = 3600              # idle eviction for the stale-fallback layer
-logo_dir = "/var/lib/uptimepage/logos"
 max_logo_size_bytes = 1048576          # 1 MiB byte ceiling (pre-decode)
 allowed_logo_mime_types = ["image/png", "image/jpeg", "image/webp"]
 max_logo_dimension_px = 1200           # larger uploads are downscaled; decode
@@ -223,7 +229,7 @@ public_per_ip_rate_limit_per_min = 60  # in-app limit behind the Caddy-side one
 | `base_domain` | parent domain for `{slug}.{base_domain}`. Must be multi-label; boot fails on empty/single-label when subdomain routing is on |
 | `cache_max_orgs` / `cache_ttl_secs` | per-org page cache size and freshness window |
 | `last_good_ttl_secs` | how long an idle org's last-known-good snapshot is retained before eviction |
-| `logo_dir`, `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px` | logo upload storage and limits |
+| `max_logo_size_bytes`, `allowed_logo_mime_types`, `max_logo_dimension_px` | logo upload limits. The bytes themselves are stored in the Postgres `page_assets` table, not on disk |
 | `default_brand_color`, `default_show_powered_by` | fallbacks when an org leaves branding unset |
 | `public_per_ip_rate_limit_per_min` | second-layer rate limit behind the reverse proxy's |
 
@@ -259,7 +265,7 @@ enabled = false                        # second switch; both must be true
 otlp_endpoint = ""                     # OTLP base, no /v1/traces suffix; e.g.
                                        # https://otlp-gateway-<zone>.grafana.net/otlp
 instance_id = ""                       # Grafana Cloud numeric instance / stack id
-trace_sample_ratio = 0.05              # parent-based head sampling, [0.0, 1.0]
+trace_sample_ratio = 0.05              # example override; shipped default is 1.0 (keep-all)
 # api_key                              # NEVER in TOML — env var only (below)
 ```
 
@@ -283,11 +289,11 @@ key, or an out-of-range ratio) are a clean startup config error.
 ## Tuning notes
 
 - **`max_concurrent_checks`** caps simultaneous in-flight checks. Per-check memory is small (a tokio task plus an in-flight hyper request), so the practical ceiling is set by file descriptors and ephemeral ports rather than RAM.
-- **`per_host_max_inflight`** (default `2`) is the per-tenant per-`(host, port)` in-flight cap. One tenant fanning a burst of checks at the same upstream looks like a probe; this cap keeps that fingerprint flat. Tenant-scoped — one customer's burst never starves another customer's monitor of the same host. Fail-fast: a check that would exceed the cap is recorded as `degraded` with `error="throttled: host concurrency cap"` and skipped (no alert fired — the upstream is fine, the back-pressure is operator-side). Counters: `uptimepage_host_throttle_waits_total{kind="host"}` (attempts) and `uptimepage_host_throttle_drops_total` (rejections).
-- **`rdap_max_inflight`** (default `1`) is the process-wide per-TLD registry-lookup concurrency cap (across all tenants), covering RDAP and the WHOIS fallback. Daily check cadence + per-TLD slot means deep queues drain quickly without bursting any registry. Same fail-fast behavior + counters as the per-host cap.
-- **`storage.clickhouse.buffer_size`** is the mpsc capacity between worker pool and batcher. Sized for ~1 s of bursts at peak RPS. Drops increment `storage_dropped_total{reason="queue_full"}` — that metric is your back-pressure signal.
+- **`per_host_max_inflight`** (default `2`) is the per-tenant per-`(host, port)` in-flight cap. One tenant fanning a burst of checks at the same upstream looks like a probe; this cap keeps that fingerprint flat. Tenant-scoped — one customer's burst never starves another customer's monitor of the same host. Fail-fast: a check that would exceed the cap is dropped, not queued, no `CheckResult` is written, so it never counts as a failure and no alert fires (the upstream is fine, the back-pressure is operator-side). Counters: `uptimepage_host_throttle_waits_total{kind="host"}` (attempts) and `uptimepage_host_throttle_drops_total` (rejections).
+- **`rdap_max_inflight`** (default `1`) is the process-wide per-TLD registry-lookup concurrency cap (across all tenants), covering RDAP and the WHOIS fallback. Daily check cadence + per-TLD slot means deep queues drain quickly without bursting any registry. Unlike the per-host cap, an over-cap RDAP lookup is not dropped: it falls through to the sticky last-good cached verdict, the same path a transient probe failure takes (see below).
+- **`storage.clickhouse.buffer_size`** is the mpsc capacity between worker pool and batcher. Sized for ~1 s of bursts at peak RPS. Drops increment `uptimepage_storage_dropped_results_total{reason="queue_full"}` — that metric is your back-pressure signal.
 - **`storage.clickhouse.batch_size` vs `batch_timeout_ms`** trade tail latency for throughput. `1000 / 500ms` is a good starting point at ~20k rps.
-- **`scheduler.jitter_pct`** prevents synchronized fleet-wide ticks. Default 10% is enough to spread N targets across an interval without making individual schedules unpredictable.
+- **`scheduler.enabled`** (default `true`) turns the in-process scheduler on. Off makes the process a pure dashboard/brain with no local probing, useful once regional agents cover all check traffic.
 - **`dns.servers`** accepts either bare IPs (`"1.1.1.1"`) or `ip:port` form. Used as is — no system resolver fallback.
 - **`security.allow_private_targets`** is the SSRF guard. Default `false` blocks:
   - Loopback (`127.0.0.0/8`, `::1`)
@@ -299,7 +305,7 @@ key, or an out-of-range ratio) are a clean startup config error.
   - IPv6 transition mechanisms: `2002::/16` (6to4) and `64:ff9b::/96` (NAT64) are decoded to their embedded IPv4 and rejected when the inner IPv4 falls in any blocked range
   The guard runs both at API submission (rejects IP-literal URLs synchronously) and after DNS resolution at connect time (catches DNS rebinding). Flip to `true` for internal monitoring where private targets are the goal — operators are then responsible for network segmentation.
 - **`security.credentials_kek_base64`** enables AES-256-GCM encryption of HTTP `basic_auth` and `bearer_token` values inside the `targets.check_spec` JSONB column. Generate with `openssl rand -base64 32`. Each write produces a fresh 12-byte random nonce; the on-disk shape is `{"$enc":"v1:<nonce>:<ciphertext>"}`. When the key is unset the service logs a startup warning and stores credentials plaintext (dev-friendly upgrade path — existing plaintext rows continue to read after a key is provisioned). Rotation and KMS integration are out of scope for the current version; treat the KEK as long-lived and protect it via your secret-management of choice (env file with restricted mode, container secret, etc.). A malformed KEK fails the process at startup.
-- **`api.rate_limit`** applies a per-peer-IP token bucket only to `/api/v1/*` routes (`/healthz` and `/readyz` are excluded so liveness probes never see `429`). `per_second` is the refill rate; `burst` is the bucket capacity. Excess requests get `429 Too Many Requests` with a `Retry-After` header. The bucket key is the TCP peer IP — when the service sits behind a reverse proxy, every client appears as the proxy IP, so prefer doing rate limiting at the proxy in that topology. Disabled by default; leave it off and let your reverse proxy enforce limits unless you bind the API directly to the internet.
+- **Per-IP rate limiting** on `/api/v1/*` is the reverse proxy's job, not an in-process config block. In-process limiting is per-org and per-user, driven by `[rate_limits]` and the plan's per-minute budgets: see [docs/api.md](api.md#rate-limiting).
 - **TLS cert checks** (`type = "tls_cert"`) open a dedicated TCP+TLS handshake per probe — separate from the HTTP check path. Recommended `interval >= 3600` so probe traffic stays light. The check accepts any cert chain (the goal is to *report* expiry status, not enforce trust), so an expired or self-signed cert still produces a structured result rather than a generic handshake error.
 - **Domain expiry checks** (`type = "domain_expiry"`) query RDAP via a process-shared outbound HTTPS client. The IANA bootstrap registry (`https://data.iana.org/rdap/dns.json`) is fetched lazily on first use and cached for process lifetime — a registry update or a transient bootstrap failure persists until restart. Registries rate-limit clients, so `interval >= 3600` is enforced server-side and daily is typical. The user-supplied domain is never a connection target: it travels as a path segment to a server chosen from the IANA bootstrap, a static RDAP override table, or a static WHOIS table. The resolved addresses of those servers are still filtered by the SSRF guard at connect time, because a hijacked or misconfigured DNS answer can point a trusted hostname at a private address.
   - **WHOIS fallback.** Several ccTLDs publish no RDAP server. When the bootstrap and the override table both miss, the check falls back to WHOIS on port 43 against a static per-TLD server table. Only a missing server triggers the fallback: an RDAP transport failure is returned as-is, so a registry outage does not double outbound load. Some registries (`.de`, `.ch`, `.jp` and others) publish no expiry date through any transport; monitors for those are refused at creation with the reason rather than failing on every interval.

@@ -42,6 +42,10 @@ Two types need a second step:
 
 Secrets are sealed at rest and never shown again. On edit they stay masked behind a replace toggle, and leaving the toggle off keeps the stored value untouched.
 
+### Delegating the connect step
+
+When the credentials belong to someone outside the org, say the Slack workspace admin or the person who owns the shared inbox, you do not need to chase them for secrets. **Settings → Notifications → delegate the connect step** mints a single-use `/c/{code}` link. Whoever opens it can connect exactly one channel to your workspace and nothing else, with no account needed; the link expires after 7 days and can be revoked before use. The same flow is scriptable through the delegate endpoints in the [REST API](api.md#notification-channels).
+
 ## Binding a monitor
 
 The monitor form has a **Notifications** section listing your channels with a checkbox each. It only appears once the org has at least one channel, so create the channel first.
@@ -63,6 +67,8 @@ One notification when an incident opens, reminders on your interval while it sta
 
 Failed deliveries retry with exponential backoff and are dead-lettered after the attempt cap. Per-incident delivery state is visible through the API if you need to prove whether something was sent.
 
+Two more messages exist that are not incident alerts: **monitoring stopped** and **monitoring resumed**. They fire when every probe covering a monitor has gone silent longer than expected and when results start flowing again. They mean the service is unwatched, not that it is down: no incident opens, and the webhook payload carries the distinct reasons `nodata` and `dataresumed`. A platform-wide probe outage on our side is suppressed rather than fanned out as a flood of these.
+
 Scheduled maintenance windows do **not** silence channel alerting. They repaint the public status page and notify status-page subscribers, but a monitor that fails during a window still opens an incident and still pages its channels. To stay quiet through planned work, disable the monitor or unbind its channels for the duration.
 
 ## On-call
@@ -74,6 +80,8 @@ Where on-call schedules are enabled, paging works differently: an incident targe
 Deleting removes it from every monitor bound to it. The edit page lists those monitors so the blast radius is visible before you confirm. Monitors that lose their last channel keep running and keep opening incidents; they simply stop telling anyone.
 
 A channel linked through a central Telegram bot can also be disabled from the other side. If the bot is removed from the chat or the chat sends `/stop`, the channel is disabled with a note explaining why, and re-enabling it clears the note.
+
+Email channels have the same property through the one-click stop link (RFC 8058) that every alert mail carries. **Anyone who receives the mail can use it, and it disables that email channel for the whole org**, not just for the person who clicked; the channel shows a "recipient stopped delivery" note, and re-enabling clears it. Worth knowing before you forward alert mail around: a recipient tired of the noise can switch the channel off for everyone.
 
 ## Limits
 

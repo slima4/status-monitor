@@ -1,6 +1,6 @@
 # Architecture
 
-uptimepage is one Rust binary that runs multi-tenant uptime monitoring and public status pages. Postgres holds configuration and control-plane state, ClickHouse holds check results, and extra regions are optional stateless probe processes. This page is the map: what the pieces are, how a request and a check flow through them, and which invariants every feature must respect. Deep dives live in the linked chapters.
+uptimepage is one Rust binary that runs multi-tenant uptime monitoring and public status pages. Postgres holds configuration and control-plane state, ClickHouse holds check results, and extra regions are optional stateless probe processes. This page is the map: what the pieces are, how a request and a check flow through them, and which invariants every feature must respect. Deep dives live in the linked pages.
 
 For an interactive companion to this page, open the [flow map](/architecture): pick any runtime path and watch it light up across every process, surface, service, and store.
 
@@ -118,7 +118,7 @@ On-demand checks (`POST /targets/{id}/check-now` and `POST /targets/test`) are d
 Results do not page directly. A separate follower turns them into confirmed incidents:
 
 - **Incident writer** (`src/public_status/incident_writer.rs`) is a poller, not an event listener. On a default 30-second tick it keyset-paginates enabled targets across tenants, reads each target's recent results per a lookback tier, and applies the target's region quorum policy (Any, Majority, All, or Count) to decide up or down. Insert-open and close are race-safe, so exactly one writer pages. This confirmation step is why public status derives from confirmed incidents and never from raw samples.
-- **Escalation engine** (`src/escalation/engine.rs`) is feature-flagged and off by default. When on it is the single source of down and up notifications: it opens a paging episode, walks the escalation ladder, renotifies, retries with backoff into a dead-letter, and resolves only to the channels paged this episode. On-call is never stored; who is on call is a pure function resolved at page time. When off, incidents still open and display but page nobody, and a monitor's directly bound channels are notified once as a fallback.
+- **Escalation engine** (`src/escalation/engine.rs`) is feature-flagged and off by default. When on it is the single source of down and up notifications: it opens a paging episode, walks the escalation ladder, renotifies, retries with backoff into a dead-letter, and resolves only to the channels paged this episode. On-call is never stored; who is on call is a pure function resolved at page time. The `escalation.enabled` switch gates only the ladder machinery: on, a policy walks levels and renotifies; off, a monitor's directly bound channels are still paged, just without the ladder.
 - **No-data detection** (`src/observability/silence.rs`) handles monitors whose covering regions all went dark, notifying bound channels once per episode. Above a fraction of the fleet it is treated as one infra outage and per-customer notices are suppressed.
 
 Internal incident state (Triggered, Acknowledged, Resolved) and the public communication phase are orthogonal tracks and never share a field. See [Incident management](incidents.md) and [Notifications](notifications.md).
@@ -155,6 +155,6 @@ Every tenant-facing storage method takes `org: OrgId` as its first parameter, ev
 
 Region assignment is not in the scheduler. It lives in the `EnabledTargetSource` implementation in `src/storage/admin.rs` (`RegionTargetSource`, `HeartbeatTargetSource`, `AgentPullSource`), and the assignment table is `target_regions`. Results carry their region as a low-cardinality column through both ClickHouse rollups, so reads can slice by region and quorum policies can require agreement across regions. See [Multi-region probes](multi-region.md).
 
-## Related chapters
+## Related pages
 
 [Multi-tenancy](multi-tenancy.md) · [Multi-region probes](multi-region.md) · [Monitor types](monitor-types.md) · [Incident management](incidents.md) · [Notifications](notifications.md) · [Public status page](public-status.md) · [Authentication](authentication.md) · [Quotas and rate limits](quotas.md) · [MCP server](mcp.md) · [Configuration](configuration.md) · [Development](development.md)

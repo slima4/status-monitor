@@ -10,7 +10,7 @@ The target store can't be reached. Check `storage.postgres.url` and that Postgre
 - Confirm `metrics_bind` isn't blocked by a local firewall
 - `uptimepage_build_info` is emitted at startup so the endpoint is never truly empty — if it's also missing, the metrics exporter never bound
 
-## Many `storage_dropped_total{reason="queue_full"}`
+## Many `uptimepage_storage_dropped_results_total{reason="queue_full"}`
 
 The result channel between worker pool and batcher is back-pressured.
 
@@ -83,4 +83,4 @@ Almost always a Row-derive mismatch on UUID, Enum8, or DateTime64 column types:
 
 ## Loadtest reports `connect` errors at high concurrency
 
-Loopback ephemeral port exhaustion or kernel SYN backlog overflow. See [loadtest.md](loadtest.md) — set `MOCK_PORTS=64`, `RAMP_SECS=30`, or enable `HTTP2=1`.
+Loopback ephemeral port exhaustion or kernel SYN backlog overflow. See [loadtest.md](loadtest.md) — set `MOCK_PORTS=64` or `RAMP_SECS=30`.

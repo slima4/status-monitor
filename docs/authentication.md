@@ -1,8 +1,8 @@
 # Authentication
 
-uptimepage ships with an in-binary auth stack: GitHub OAuth for the
-operator UI, opaque per-user API tokens for the REST surface, and
-optional magic-link sign-in for users without a GitHub identity. The
+uptimepage ships with an in-binary auth stack: GitHub and Google OAuth
+for the operator UI, opaque per-user API tokens for the REST surface, and
+magic-link sign-in (enabled by default) for users without an OAuth identity. The
 binary always runs as multi-tenant SaaS — single-tenant deployments are
 just SaaS with one signed-up user; see [Multi-tenancy](multi-tenancy.md)
 for the full model.
@@ -85,10 +85,11 @@ Every token carries a set of `resource:action` scopes. A request is rejected wit
 |---|---|---|---|---|
 | `targets` | list / get / results / uptime / latency / incident history | create / update / bulk | delete, bulk-delete | run a check now, test-probe a config |
 | `channels` | list / get | create / update | delete | send a test notification |
-| `incidents` | — (target incident history is under `targets:read`; the public timeline needs no token) | narrate / post update | — | — |
+| `incidents` | incident list / detail / delivery log / metrics / postmortem (the public timeline needs no token) | narrate / post update, acknowledge / resolve | — | — |
 | `maintenance` | list / get | create / update | delete | — |
 | `status_page` | read settings | update settings, upload logo | remove logo | — |
 | `variables` | list / get (secret values redacted) | create / rotate | delete (blocked while referenced) | — |
+| `oncall` | view escalation policies and on-call schedules | manage them (owner-only) | — | — |
 
 `write` implies `read` for the same resource. `delete` and `execute` are **independent** — they are *not* granted by `write`, so a config-management token (`*:write`) can change resources but cannot destroy them or trigger side effects. Grant `delete`/`execute` explicitly when you need them.
 

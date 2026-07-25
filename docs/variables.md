@@ -8,7 +8,7 @@ Manage variables under **Settings → Variables**, or through the [REST API](api
 
 ## References
 
-A reference is the variable key wrapped in double braces, for example `{{api_key}}`. A key is lowercase, starts with a letter, and uses only letters, digits, and underscores (`api_key`, `base_url`, `region2`). Inner spaces are trimmed, so `{{ api_key }}` and `{{api_key}}` mean the same thing.
+A reference is the variable key wrapped in double braces, for example `{{api_key}}`. A key's first character must be a lowercase letter, and the rest may be lowercase letters, digits, and underscores (`api_key`, `base_url`, `region2`). Inner spaces are trimmed, so `{{ api_key }}` and `{{api_key}}` mean the same thing.
 
 References resolve in these HTTP request fields:
 
@@ -65,7 +65,7 @@ Repointing a URL variable: if a monitor builds its URL from a plain variable and
 
 Redirects: when a monitor follows a redirect to a different origin, the probe strips the standard sensitive headers (`Authorization`, cookies, `x-api-key`, and similar) so a credential cannot follow a hostile `Location`. The authentication picker writes its credential into `Authorization` or `x-api-key`, both of which are covered. If you place a secret in a non-standard header name of your own and your monitor follows redirects to hosts you do not control, that header is not on the strip list and could follow the redirect; prefer the picker's headers for credentials.
 
-Agent hosts hold credentials: because resolution happens before the request reaches the agent, a probe agent holds decrypted secret values in memory for the duration of each check. Today agents run alongside the control plane; when they run on separate hosts, treat those hosts as credential-bearing.
+Agent hosts hold credentials: because resolution happens before the request reaches the agent, a probe agent holds decrypted secret values in memory for the duration of each check. Regional agents run on separate hosts from the control plane; treat those hosts as credential-bearing.
 
 ## Managing variables over the API
 

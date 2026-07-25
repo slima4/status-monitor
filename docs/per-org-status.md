@@ -2,9 +2,9 @@
 
 Each org owns one or more public status pages. A page lives at `{slug}.{base_domain}` in SaaS mode (`acme.uptimepage.dev`, `status.acme.uptimepage.dev`, …, apex-wildcard shape) and renders **only** the monitors that org has curated onto it, with that page's branding, incidents, and maintenance. An org starts with no pages; the owner creates one from the settings screen, which mints it published at a temporary slug and opens the editor to set the real one. Pages can be renamed, added to, or taken offline at any time.
 
-The number of pages an org can run is plan-capped (`max_status_pages`); the free plan gets one. Multiple pages let an org split surfaces — e.g. a public page and a separate internal-stakeholder page — each showing a different subset of monitors under a different URL.
+The number of pages an org can run is plan-capped (`max_status_pages`); the free (Standard) plan gets one. Multiple pages let an org split surfaces — e.g. a public page and a separate internal-stakeholder page — each showing a different subset of monitors under a different URL.
 
-This chapter is the per-org / per-page model. For the component, incident, and maintenance workflow (identical on every page) see [Public status page](public-status.md). For the wildcard cert and reverse-proxy setup see [Deployment](deployment.md#public-status-surface) and the full runbook in [`deployment/README.md`](https://github.com/uptimepage/uptimepage/tree/main/deployment).
+This page is the per-org / per-page model. For the component, incident, and maintenance workflow (identical on every page) see [Public status page](public-status.md). For the wildcard cert and reverse-proxy setup see [Deployment](deployment.md#public-status-surface) and the full runbook in [`deployment/README.md`](https://github.com/uptimepage/uptimepage/tree/main/deployment).
 
 ## When it applies
 
@@ -66,7 +66,7 @@ Every route is scoped to the caller's active org: a page id that isn't in that o
 | `public_brand_color` | `#RRGGBB` (6-digit hex) | `#3b82f6` |
 | `public_about` | Markdown, ≤ 500 chars, rendered to sanitised HTML | omitted |
 | `public_style` | one of the named themes | `default` |
-| `public_show_powered_by` | footer attribution toggle | on |
+| `public_show_powered_by` | footer attribution toggle. Honoured only on plans with `white_label_enabled`; on any other hosted plan the badge always renders, whatever this is set to | on |
 | logo | PNG / JPEG / WebP, ≤ 1 MB, ≤ 1200 px; larger images are downscaled. Format is sniffed from the bytes (declared content-type ignored — a script/SVG can't masquerade as an image) and the decoder is allocation- and dimension-bounded against decompression bombs | header shows the display name as text |
 
 A `PATCH` with a `branding` object replaces the display fields wholesale; `name`, `slug`, and `enabled` are independent partial fields. The logo has its own endpoints and is never touched by a branding edit. The editor shows the live URL so the owner can preview exactly what visitors see.

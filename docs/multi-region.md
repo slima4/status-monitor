@@ -40,6 +40,7 @@ The agent must reference a region and a token that already exist (see the operat
 
 - **Pull** (`GET /api/agent/targets`) — `401`/`403` is terminal: the agent clears its cached config and pauses, so revoking or disabling the agent stops the probe. `5xx`/timeout is transient: it keeps serving the last-known config. Responses are content-hashed with an ETag, so a credential re-encrypt invalidates the cache even without a config change.
 - **Ingest** (`POST /api/agent/results`) — region and agent id are taken from the token, never trusted from the body. Rows that are clock-skewed or belong to a region the agent isn't assigned are dropped per-row (the rest of the batch still lands) and counted, rather than rejecting the whole batch. Cross-process de-duplication is authoritative in ClickHouse; a re-sent identical batch is idempotent.
+- **Dispatch** (`GET /api/agent/dispatch`, `POST /api/agent/dispatch/results`) — a long-poll surface for on-demand runs ("check now" and channel tests), so a manual check reaches the agent in the right region instead of running centrally.
 
 ## Operator surface
 
@@ -56,7 +57,7 @@ Authorization: Bearer <that-secret>
 | Method | Path | Purpose |
 |--------|------|---------|
 | `GET` | `/operator/regions` | list regions |
-| `POST` | `/operator/regions` | create a region (`id` is a `[a-z0-9-]` slug, `name`, optional `location`) |
+| `POST` | `/operator/regions` | create a region (`id` is a `[a-z0-9-]` slug, `name`, optional geo fields: `city`, `country_code`, `continent`, `latitude`/`longitude`) |
 | `PATCH` | `/operator/regions/{id}` | rename / relocate, or enable / disable a region (`enabled`) |
 | `DELETE` | `/operator/regions/{id}` | delete a region — `409` while it still holds agents or assigned targets |
 | `GET` | `/operator/agents` | list agents |
@@ -87,10 +88,12 @@ Detection evaluates each region's recent run **independently** and then combines
 How the per-region verdicts combine is a **per-monitor policy**, set on the monitor form (default **majority**):
 
 - **any** — open as soon as a single region is sustained-unhealthy.
-- **majority** — open once more than half the regions agree it's down (the standard defence against a single-location false positive).
+- **majority** — open once more than half the reporting regions agree it's down (the standard defence against a single-location false positive).
 - **all** — open only when every region is down.
 - **count: N** — open once at least *N* regions are down.
 
 A monitor probed from a single region behaves the same under every policy.
+
+The policy counts regions that delivered results inside the evaluation window, not regions merely assigned. Agents push their results to the control plane, so an agent that goes quiet takes its region out of the vote: no results means no down vote and no recovery evidence. A silent region can neither open nor close an incident, and the threshold recomputes over the regions still reporting.
 
 See [Configuration](configuration.md) for the `[scheduler]`, `[agent]`, and `[operator]` keys, and [Architecture](architecture.md) for where the pieces sit.

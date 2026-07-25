@@ -1,7 +1,6 @@
 # Operational Runbook (Tier 1)
 
-> **Private operator document.** Not served by the app, not in the docs
-> book. It references real hosts, paths and credentials once filled in —
+> **Operator document, not rendered on the docs site.** It references real hosts, paths and credentials once filled in —
 > keep it out of any public artefact. Replace every `your-server` /
 > `your-domain.com` / `<…>` placeholder with the production values before
 > first use.
@@ -103,7 +102,7 @@ ssh test-vm "docker exec postgres psql -U monitor -c 'SELECT COUNT(*) FROM organ
 
 ### Step 3 — Document
 
-Append a line to `docs/internal/backup-verification.md`:
+Record the result in the ops repo, in the same form as prior entries:
 
 ```
 2026-05-15: postgres backup verified. ClickHouse skipped (too large for test).
@@ -168,12 +167,8 @@ is actually needed.
 **DANGER.** Rotating this without re-encrypting existing credentials makes
 all stored target credentials unreadable.
 
-1. Add the new KEK alongside the old one as
-   `UPTIMEPAGE_SECURITY__SECONDARY_KEK_BASE64`
-2. Deploy a version that decrypts with either key and re-encrypts with the
-   new one
-3. Wait until all data is re-encrypted (monitor the metric)
-4. Remove the old key, restart
-
-Not rotating annually is acceptable unless compromise is suspected. Only
-rotate with a clear plan.
+Online rotation (dual-key decrypt, background re-encrypt) is not
+implemented yet. Rotating the KEK today means writing and running a
+one-off migration that decrypts every stored credential with the old key
+and re-encrypts it with the new one before the old key is removed. Only
+rotate with a clear plan, and only if compromise is suspected.
