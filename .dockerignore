@@ -15,3 +15,7 @@ claude.md
 !THIRD-PARTY-LICENSES.md
 !docs/**/*.md
 tests/
+# Deploy credentials: keep them out of the build context, not just the image.
+.env*
+hetzner
+hetzner.pub
