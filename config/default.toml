@@ -165,11 +165,10 @@ deletion_grace_period_days = 30
 #   - expired invitations              : invitations janitor (auth.invitations)
 #   - session idle / absolute timeout  : [auth.session]
 #   - soft-deleted org/user grace      : tenancy.deletion_grace_period_days
-#   - check_results in ClickHouse      : the table's own TTL (background
-#                                        merge), kept == check_results_days
+#   - check_results in ClickHouse      : per-row ttl_days stamped from the
+#                                        org plan's raw_days at write time
 #   - server / app log retention       : Docker log driver
 [retention]
-check_results_days = 30
 login_attempts_days = 180
 quota_events_days = 90
 audit_log_days = 730              # 2 years
