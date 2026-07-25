@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last updated:** 2026-07-21
+**Last updated:** 2026-07-25
 
 ## 1. About these Terms
 
@@ -126,12 +126,12 @@ these Terms, after notice where reasonable.
 
 ## 13. Governing Law and Disputes
 
-These Terms are governed by the laws of Germany, without regard to
-conflict-of-laws principles.
+These Terms are governed by the laws of the Republic of Cyprus, without
+regard to conflict-of-laws principles.
 
 We prefer to resolve disputes informally. Email hello@uptimepage.dev first;
 we will respond within 30 days. If we cannot resolve a dispute that way,
-exclusive jurisdiction lies with the courts of Germany.
+exclusive jurisdiction lies with the courts of the Republic of Cyprus.
 
 Nothing in this section deprives you of consumer-protection rights you
 may have under the law of your country of residence.

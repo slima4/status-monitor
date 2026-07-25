@@ -1,6 +1,6 @@
 # Security Incident Response
 
-> **Private operator document.** This is the playbook for a *security*
+> **Operator document, not rendered on the docs site.** This is the playbook for a *security*
 > incident (compromise, data exposure) — distinct from the availability
 > runbook. When in doubt about whether something is a security incident,
 > treat it as one.
@@ -27,8 +27,9 @@ Identify the threat vector and stop further damage:
 
 If personal data was breached:
 
-- Notify the German supervisory authority (Bundesbeauftragte für den
-  Datenschutz, https://www.bfdi.bund.de/) — they have a web form
+- Notify the Cyprus supervisory authority (Office of the Commissioner
+  for Personal Data Protection, https://www.dataprotection.gov.cy/);
+  the controller is established in Cyprus, so it is the competent authority
 - Notify affected users by email if there is a "high risk to their rights
   and freedoms" (GDPR Article 34) — typically: passwords, financial data
   or identifiers leaked

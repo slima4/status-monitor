@@ -84,7 +84,7 @@ We use these third-party processors:
 
 | Processor | Purpose | Location | Safeguard |
 |---|---|---|---|
-| Hetzner Online GmbH | Hosting and DNS | Germany | DPA in place |
+| Hetzner Online GmbH | Hosting and DNS | Finland (data centre); Germany (HQ) | DPA in place |
 | Resend | Transactional emails | USA | Standard Contractual Clauses |
 | GitHub | OAuth authentication | USA | Standard Contractual Clauses |
 | Google | OAuth authentication | USA | Standard Contractual Clauses |
@@ -99,12 +99,12 @@ We may disclose data:
 
 ## 6. International Transfers
 
-Data is primarily stored in Germany (Hetzner data centre, Nürnberg).
+Data is primarily stored in Finland (Hetzner data centre, Helsinki).
 Resend, GitHub, and Google are based in the United States; transfers to them are
 protected by Standard Contractual Clauses adopted by the European
 Commission.
 
-Monitoring checks can run from probe regions outside the EU. Those probes receive the check configuration they need to run (URL, headers, resolved credentials) and produce technical results (status codes, latencies, error text) that are sent back to our EU infrastructure; long-term storage stays in Germany.
+Monitoring checks can run from probe regions outside the EU. Those probes receive the check configuration they need to run (URL, headers, resolved credentials) and produce technical results (status codes, latencies, error text) that are sent back to our EU infrastructure; long-term storage stays in Finland.
 
 ## 7. Security
 
@@ -134,7 +134,9 @@ Under GDPR, you have the right to:
   contact us
 - **Withdraw consent** (Article 7(3)) — applies only if we relied on
   consent for processing
-- **Lodge a complaint** with your local supervisory authority
+- **Lodge a complaint** with your local supervisory authority. Our
+  supervisory authority is the Office of the Commissioner for Personal
+  Data Protection, Cyprus (https://www.dataprotection.gov.cy/)
 
 ## 9. Cookies
 

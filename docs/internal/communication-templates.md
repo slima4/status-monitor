@@ -1,8 +1,8 @@
 # Communication Templates
 
-> **Private operator document.** Fill the bracketed placeholders per
-> incident. The data-breach template must only be used after coordinating
-> with the German supervisory authority.
+> **Operator document, not rendered on the docs site.** Fill the bracketed
+> placeholders per incident. The data-breach template must only be used
+> after coordinating with the Cyprus supervisory authority.
 
 ## A. Incident notification (mid-outage)
 
@@ -32,7 +32,7 @@ Subject: `Scheduled maintenance — YYYY-MM-DD HH:MM UTC`
 
 ## C. Data breach notification (GDPR Article 34)
 
-**Use only if data was actually exposed.** Coordinate with the German
+**Use only if data was actually exposed.** Coordinate with the Cyprus
 supervisory authority before sending.
 
 Subject: `Important security notice about your uptimepage account`

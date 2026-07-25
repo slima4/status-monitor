@@ -1,6 +1,6 @@
 # Impressum
 
-(Required under §5 TMG / German Telemedia Act)
+(Provider identification / legal notice)
 
 ## Operator
 
@@ -14,16 +14,14 @@ registered.
 
 Email: hello@uptimepage.dev
 
-## Responsible Editor
-
-(per §55 Abs. 2 RStV)
+## Responsible for Content
 
 Artem Senenko, Nicosia, Cyprus (as above)
 
 ## Hosting
 
 The Service is hosted by Hetzner Online GmbH in their data centre in
-Nürnberg, Germany.
+Helsinki, Finland.
 
 ## Disclaimer
 

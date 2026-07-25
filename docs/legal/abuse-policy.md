@@ -1,6 +1,6 @@
 # Abuse Policy
 
-**Last updated:** 2026-05-15
+**Last updated:** 2026-07-25
 
 We take reports of abuse seriously. This page describes what counts as
 abuse, how to report it, and what we'll do.
@@ -41,7 +41,7 @@ legal claim that requires verification (e.g., trademark infringement).
 
 We aim to:
 
-- **Acknowledge your report within 48 hours**
+- **Acknowledge your report within two business days**
 - **Complete initial investigation within 7 days**
 - **Take action and notify you within 14 days**
 

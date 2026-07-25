@@ -1,14 +1,14 @@
 # Abuse Triage
 
-> **Private operator document.** Workflow for handling reports that arrive
+> **Operator document, not rendered on the docs site.** Workflow for handling reports that arrive
 > at the abuse mailbox. The public-facing rules live in
 > `docs/legal/abuse-policy.md`; this is how you action them.
 
 ## Intake
 
 Abuse reports arrive by email to the published abuse address. Triage each
-within the SLA stated in the public Abuse Policy (acknowledge within a few
-working days; act faster on active harm — phishing, malware, ongoing
+within the SLA stated in the public Abuse Policy (acknowledge within two
+business days; act faster on active harm — phishing, malware, ongoing
 attack traffic).
 
 For every report, open a private note with:
