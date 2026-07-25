@@ -17,7 +17,7 @@ Local setup for iterating on the service. For production deployment see
 |---|---|---|---|
 | Host workflow | ~2 min | **~3 s** | `cargo run` natively; only deps in Docker. Best for iteration. |
 | Docker dev (cargo-watch) | ~3 min | ~3 s | Source bind-mounted, rebuilds happen inside the container with a cached `target/`. Live reload. |
-| Docker prod-shape | ~5 min | ~30 s | Rebuilds image. Matches the prod build. Use for CI-shaped smoke tests. |
+| Docker prod-shape | ~5 min | ~30 s | Rebuilds image via the `compose.build.yml` overlay. Matches the prod build. Use for CI-shaped smoke tests. |
 
 ### Host workflow (recommended for day-to-day)
 
@@ -74,8 +74,10 @@ docker compose -f compose.dev.yml stop uptimepage
 
 ### Docker prod-shape workflow (full stack via Dockerfile)
 
+The root stack pulls the published image by default, so building from this checkout needs the build overlay:
+
 ```bash
-docker compose up -d --build uptimepage
+docker compose -f docker-compose.yml -f compose.build.yml up -d --build uptimepage
 ```
 
 The `Dockerfile` uses [`cargo-chef`](https://github.com/LukeMathWalker/cargo-chef)
@@ -439,5 +441,5 @@ cargo test --test web_e2e_test  # e2e
 | Charts render blank | A fetch to `/api/v1/dashboard/summary` or `/api/v1/targets/{id}/results` failed; the chart module logs `chart load failed` with the URL and status. |
 | Dashboard never refreshes | `<script defer src="/static/js/htmx.min.js">` missing from the page source. It is loaded from `base.html`. |
 | Edit form submitted credentials despite the toggle being off | Console error from `auth_field.js`. The submit handler reads `data-mode` off the credential `<fieldset>`; without those data attributes it falls back to "include". |
-| `docker compose up --build` takes 5 min on every change | You're on the pre-cargo-chef Dockerfile. Pull latest. |
+| `docker compose up --build` rebuilds nothing | The root stack has no build stanza; add `-f compose.build.yml`. Once built, that local tag is reused, so `docker compose pull` is needed to go back to the published image. |
 | Native `cargo run` fails with `Connection refused` | `compose.dev.yml` isn't up, or you forgot to release port 8080 from a running container. |

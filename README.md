@@ -208,6 +208,14 @@ docker compose up -d
 
 Brings up Postgres 18, ClickHouse 26.3, and the monitor. Migrations for both databases run at process startup — no init-script wiring, no external migrator.
 
+This pulls the published image `ghcr.io/uptimepage/uptimepage:latest`, so there is no Rust toolchain and no compile step. Pin a release with `UPTIMEPAGE_IMAGE=ghcr.io/uptimepage/uptimepage:v1.0.0`.
+
+Automatic builds publish `linux/amd64`. On an ARM host (Apple silicon, Ampere) build from this checkout instead, which compiles natively with no emulation:
+
+```bash
+docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+```
+
 Create the first owner account (the sign-in providers all assume an account already exists, so seed one out of band):
 
 ```bash
@@ -234,11 +242,13 @@ curl -X POST http://127.0.0.1:8080/api/v1/targets \
       "headers": {},
       "verify_tls": true
     },
-    "interval": 60,
+    "interval": 180,
     "enabled": true,
     "tags": []
   }'
 ```
+
+`interval` is seconds and must be at least the plan minimum, 180 on the free plan a fresh self-host starts on. A lower value returns `422 MIN_CHECK_INTERVAL`.
 
 Read uptime, scrape metrics:
 

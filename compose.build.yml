@@ -1,0 +1,10 @@
+# Build the image from this checkout instead of pulling the published one.
+#   docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+services:
+  uptimepage:
+    build:
+      context: .
+
+  loadtest:
+    build:
+      context: .

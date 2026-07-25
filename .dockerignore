@@ -4,6 +4,7 @@ target/
 .dockerignore
 Dockerfile
 docker-compose.yml
+compose.build.yml
 specs/
 CLAUDE.md
 claude.md

@@ -1,7 +1,11 @@
-# Local development only. Ports are published to the host and there is no
+# Try-it and local development. Ports are published to the host and there is no
 # auth in front of the API. For production (TLS + basic auth + internal-only
 # databases), see ./deployment/.
+#
+# Pulls the published image. To build from this checkout instead:
+#   docker compose -f docker-compose.yml -f compose.build.yml up -d --build
 name: uptimepage
+x-app-image: &app-image ${UPTIMEPAGE_IMAGE:-ghcr.io/uptimepage/uptimepage:latest}
 services:
   postgres:
     image: postgres:18-alpine
@@ -41,8 +45,7 @@ services:
       retries: 20
 
   uptimepage:
-    build:
-      context: .
+    image: *app-image
     depends_on:
       postgres:
         condition: service_healthy
@@ -64,12 +67,11 @@ services:
 
   # Mock-server + client live in the same process; nothing external is needed.
   # Linux container exposes the kernel knobs macOS loopback can't (ephemeral
-  # range, somaxconn, tw_reuse), unlocking the §10.7 50k-concurrent acceptance.
+  # range, somaxconn, tw_reuse), unlocking the 50k-concurrent target.
   # Run: docker compose --profile loadtest run --rm loadtest
   loadtest:
     profiles: ["loadtest"]
-    build:
-      context: .
+    image: *app-image
     entrypoint: ["/usr/local/bin/loadtest"]
     environment:
       CONCURRENCY: "50000"
