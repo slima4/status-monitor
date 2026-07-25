@@ -1,7 +1,7 @@
 // Auto-running horizontal tape of check kinds. The cell run is cloned so
 // scrolling wraps into identical content; holding the pointer down stops it,
-// releasing lets it run again. Without this script the viewport stays a
-// plain scroller.
+// releasing lets it run again. Clicking a cell flips it to a docs-side back.
+// Without this script the viewport stays a plain scroller of front faces.
 (() => {
     const tape = document.querySelector("[data-tape]");
     if (!tape) return;
@@ -21,6 +21,8 @@
         for (const card of originals) {
             const clone = card.cloneNode(true);
             clone.setAttribute("aria-hidden", "true");
+            // No phantom tab stops inside aria-hidden nodes.
+            for (const el of clone.querySelectorAll("a, button")) el.tabIndex = -1;
             track.append(clone);
         }
     };
@@ -44,6 +46,8 @@
     let pointerHeld = false;
     let last = 0;
     let settleUntil = 0;
+    // Index within the original run of the cell showing its back.
+    let flippedIdx = null;
     // Own float position. A frame's worth of travel is sub-pixel, and browsers
     // that round scrollLeft would swallow it on every write, so the fraction has
     // to accumulate here rather than in the element.
@@ -51,8 +55,10 @@
     let applied = pos;
 
     // :focus-visible rather than focus: a mouse click focuses the tabindex
-    // viewport too, and that must not stop the tape — only keyboard focus does.
-    const running = () => !calm.matches && !pointerHeld && !viewport.matches(":focus-visible");
+    // viewport too, and that must not stop the tape — only keyboard focus
+    // does, whether on the viewport itself or on a cell link inside it.
+    const running = () => !calm.matches && !pointerHeld && flippedIdx === null
+        && !viewport.matches(":focus-visible") && !viewport.querySelector(":focus-visible");
 
     const step = (now) => {
         const dt = last ? Math.min((now - last) / 1000, 0.1) : 0;
@@ -84,41 +90,109 @@
         viewport.scrollBy({ left: dir * width, behavior: "smooth" });
     };
 
+    // Every copy of a cell flips in step so the wrap seam never shows a
+    // split pair.
+    const applyFlip = (idx, on) => {
+        const cells = track.children;
+        for (let k = idx; k < cells.length; k += originals.length) {
+            cells[k].classList.toggle("is-flipped", on);
+            cells[k].querySelector("[data-tape-flip]").setAttribute("aria-expanded", String(on));
+        }
+    };
+    const unflip = () => {
+        if (flippedIdx === null) return;
+        applyFlip(flippedIdx, false);
+        flippedIdx = null;
+    };
+
+    viewport.addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-tape-flip]");
+        if (!btn) return;
+        const raw = [...track.children].indexOf(btn.closest(".mk-tape__cell"));
+        const idx = raw % originals.length;
+        const opening = flippedIdx !== idx;
+        // A clone's button can take mouse focus; shed it before its face
+        // hides, or the focusout unflip snaps the card straight back.
+        if (raw >= originals.length && document.activeElement === btn) btn.blur();
+        unflip();
+        if (opening) { flippedIdx = idx; applyFlip(idx, true); }
+        // The pressed button hides with its face; unhanded, focus drops to body.
+        if (raw < originals.length && document.activeElement === btn) {
+            const cell = originals[idx];
+            (opening ? cell.querySelector(".mk-tape__docs") : cell.querySelector("[data-tape-flip]"))
+                .focus({ preventScroll: true });
+        }
+    });
+
+    // A card left flipped would park the motor for good, so leaving the
+    // tape flips it home.
+    document.addEventListener("click", (e) => {
+        if (!tape.contains(e.target)) unflip();
+    });
+    viewport.addEventListener("focusout", (e) => {
+        if (!viewport.contains(e.relatedTarget)) unflip();
+    });
+
     viewport.addEventListener("keydown", (e) => {
         if (e.key === "ArrowRight") { e.preventDefault(); nudge(1); }
         else if (e.key === "ArrowLeft") { e.preventDefault(); nudge(-1); }
+        else if (e.key === "Escape" && flippedIdx !== null) {
+            const cell = originals[flippedIdx];
+            const hadFocus = cell.contains(document.activeElement);
+            unflip();
+            if (hadFocus) cell.querySelector("[data-tape-flip]").focus({ preventScroll: true });
+        }
     });
 
     // Mouse drags scrub the tape; touch and pen already scroll it natively, so
     // they only park the motor until the fling has died down.
     let dragFrom = null;
+    let suppressClick = false;
 
     viewport.addEventListener("pointerdown", (e) => {
         if (e.pointerType !== "mouse") { pointerHeld = true; return; }
         if (e.button !== 0) return;
         pointerHeld = true;
-        dragFrom = { x: e.clientX, scroll: viewport.scrollLeft };
+        suppressClick = false;
+        dragFrom = { x: e.clientX, scroll: viewport.scrollLeft, id: e.pointerId, live: false };
         settleUntil = 0;
-        viewport.setPointerCapture(e.pointerId);
     });
 
     viewport.addEventListener("pointermove", (e) => {
         if (!dragFrom) return;
         const dx = e.clientX - dragFrom.x;
-        if (Math.abs(dx) > DRAG_SLOP) tape.classList.add("is-dragging");
-        viewport.scrollLeft = norm(dragFrom.scroll - dx);
+        // Capture only once real dragging starts: capturing on press would
+        // retarget the eventual click away from the cell controls.
+        if (!dragFrom.live && Math.abs(dx) > DRAG_SLOP) {
+            dragFrom.live = true;
+            tape.classList.add("is-dragging");
+            viewport.setPointerCapture(dragFrom.id);
+        }
+        if (dragFrom.live) viewport.scrollLeft = norm(dragFrom.scroll - dx);
     });
 
     const release = (e) => {
         if (!pointerHeld) return;
         if (e.pointerType !== "mouse") settleUntil = performance.now() + FLING_MS;
+        // Only a completed press emits a click; pointercancel never does, and
+        // a suppress armed for it would swallow the next real click instead.
+        suppressClick = e.type === "pointerup" && dragFrom !== null && dragFrom.live;
         pointerHeld = false;
         dragFrom = null;
         tape.classList.remove("is-dragging");
         if (viewport.hasPointerCapture?.(e.pointerId)) viewport.releasePointerCapture(e.pointerId);
     };
-    viewport.addEventListener("pointerup", release);
-    viewport.addEventListener("pointercancel", release);
+    // On window: capture is deferred until the drag goes live, so a press
+    // can end off-viewport; missing that release would park the motor.
+    window.addEventListener("pointerup", release);
+    window.addEventListener("pointercancel", release);
+
+    // A drag that ends over a cell must not flip it, navigate, or count as a
+    // click for analytics; native link-dragging would hijack the scrub outright.
+    viewport.addEventListener("click", (e) => {
+        if (suppressClick) { suppressClick = false; e.preventDefault(); e.stopPropagation(); }
+    }, true);
+    viewport.addEventListener("dragstart", (e) => e.preventDefault());
 
     requestAnimationFrame(step);
 })();

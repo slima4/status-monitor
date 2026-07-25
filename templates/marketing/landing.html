@@ -310,9 +310,10 @@
     </section>
 
     {# ── Check tape ────────────────────────────────────────────────
-       Sample probe output per check kind. The rail auto-runs and stops
-       while a pointer is down or keyboard focus rests on it; without JS
-       it stays a plain horizontal scroller. #}
+       Sample probe output per check kind; clicking a cell flips it to
+       a pitch + docs-link back. The rail auto-runs and stops while a
+       pointer is down, keyboard focus rests on it, or a cell is
+       flipped; without JS it stays a plain horizontal scroller. #}
     <section id="checks" class="space-y-8">
         <header class="mx-auto max-w-2xl space-y-3 text-center">
             <h2 class="mk-h2">Eight ways to ask <em class="mk-h2-em">is it up</em>.</h2>
@@ -326,131 +327,227 @@
             <div class="mk-tape__viewport" data-tape-viewport tabindex="0" role="group" aria-label="Check types, scrollable">
                 <ul class="mk-tape__track" data-tape-track>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">http</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">GET acme.com/health</p>
-                            <p class="mk-tape__line mk-tape__line--out">200 &middot; 118 ms &middot; eu-helsinki</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 12.6 L5.5 12.9 L11.0 14.4 L16.6 13.9 L22.1 12.8 L27.6 15.6 L33.1 13.7 L38.6 14.4 L44.1 15.2 L49.7 8.5 L55.2 13.5 L60.7 14.3 L66.2 14.3 L71.7 13.2 L77.2 12.2 L82.8 14.5 L88.3 13.8 L93.8 12.0 L99.3 11.6 L104.8 12.1 L110.3 14.4 L115.9 9.5 L121.4 11.4 L126.9 14.6 L132.4 14.0 L137.9 13.7 L143.4 13.0 L149.0 13.2 L154.5 13.5 L160.0 12.2 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 12.6 L5.5 12.9 L11.0 14.4 L16.6 13.9 L22.1 12.8 L27.6 15.6 L33.1 13.7 L38.6 14.4 L44.1 15.2 L49.7 8.5 L55.2 13.5 L60.7 14.3 L66.2 14.3 L71.7 13.2 L77.2 12.2 L82.8 14.5 L88.3 13.8 L93.8 12.0 L99.3 11.6 L104.8 12.1 L110.3 14.4 L115.9 9.5 L121.4 11.4 L126.9 14.6 L132.4 14.0 L137.9 13.7 L143.4 13.0 L149.0 13.2 L154.5 13.5 L160.0 12.2"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">expect 200, body holds "ok". headers, auth, redirect rules.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about http checks" data-umami-event="tape-flip" data-umami-event-kind="http"><span class="mk-tape__kind">http</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">GET acme.com/health</p>
+                                    <p class="mk-tape__line mk-tape__line--out">200 &middot; 118 ms &middot; eu-helsinki</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 12.6 L5.5 12.9 L11.0 14.4 L16.6 13.9 L22.1 12.8 L27.6 15.6 L33.1 13.7 L38.6 14.4 L44.1 15.2 L49.7 8.5 L55.2 13.5 L60.7 14.3 L66.2 14.3 L71.7 13.2 L77.2 12.2 L82.8 14.5 L88.3 13.8 L93.8 12.0 L99.3 11.6 L104.8 12.1 L110.3 14.4 L115.9 9.5 L121.4 11.4 L126.9 14.6 L132.4 14.0 L137.9 13.7 L143.4 13.0 L149.0 13.2 L154.5 13.5 L160.0 12.2 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 12.6 L5.5 12.9 L11.0 14.4 L16.6 13.9 L22.1 12.8 L27.6 15.6 L33.1 13.7 L38.6 14.4 L44.1 15.2 L49.7 8.5 L55.2 13.5 L60.7 14.3 L66.2 14.3 L71.7 13.2 L77.2 12.2 L82.8 14.5 L88.3 13.8 L93.8 12.0 L99.3 11.6 L104.8 12.1 L110.3 14.4 L115.9 9.5 L121.4 11.4 L126.9 14.6 L132.4 14.0 L137.9 13.7 L143.4 13.0 L149.0 13.2 L154.5 13.5 L160.0 12.2"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">expect 200, body holds "ok". headers, auth, redirect rules.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the http sample"><span class="mk-tape__kind">http</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>Reads the whole response.</b> It checks status, headers and body text from every region you picked.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#http" data-umami-event="tape-click" data-umami-event-kind="http">read the http docs</a>
+                            </div>
                         </div>
                     </li>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">tcp</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">dial db.acme.com:5432</p>
-                            <p class="mk-tape__line mk-tape__line--out">connected &middot; 24 ms</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 14.7 L5.5 14.8 L11.0 15.2 L16.6 15.9 L22.1 15.3 L27.6 15.7 L33.1 16.0 L38.6 15.7 L44.1 15.6 L49.7 14.1 L55.2 15.1 L60.7 15.9 L66.2 16.1 L71.7 14.4 L77.2 15.4 L82.8 14.4 L88.3 13.8 L93.8 13.6 L99.3 15.1 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.6 L132.4 14.7 L137.9 14.0 L143.4 14.5 L149.0 15.2 L154.5 16.0 L160.0 15.0 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 14.7 L5.5 14.8 L11.0 15.2 L16.6 15.9 L22.1 15.3 L27.6 15.7 L33.1 16.0 L38.6 15.7 L44.1 15.6 L49.7 14.1 L55.2 15.1 L60.7 15.9 L66.2 16.1 L71.7 14.4 L77.2 15.4 L82.8 14.4 L88.3 13.8 L93.8 13.6 L99.3 15.1 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.6 L132.4 14.7 L137.9 14.0 L143.4 14.5 L149.0 15.2 L154.5 16.0 L160.0 15.0"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">the port answers. no payload sent, nothing to break.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about tcp checks" data-umami-event="tape-flip" data-umami-event-kind="tcp"><span class="mk-tape__kind">tcp</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">dial db.acme.com:5432</p>
+                                    <p class="mk-tape__line mk-tape__line--out">connected &middot; 24 ms</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 14.7 L5.5 14.8 L11.0 15.2 L16.6 15.9 L22.1 15.3 L27.6 15.7 L33.1 16.0 L38.6 15.7 L44.1 15.6 L49.7 14.1 L55.2 15.1 L60.7 15.9 L66.2 16.1 L71.7 14.4 L77.2 15.4 L82.8 14.4 L88.3 13.8 L93.8 13.6 L99.3 15.1 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.6 L132.4 14.7 L137.9 14.0 L143.4 14.5 L149.0 15.2 L154.5 16.0 L160.0 15.0 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 14.7 L5.5 14.8 L11.0 15.2 L16.6 15.9 L22.1 15.3 L27.6 15.7 L33.1 16.0 L38.6 15.7 L44.1 15.6 L49.7 14.1 L55.2 15.1 L60.7 15.9 L66.2 16.1 L71.7 14.4 L77.2 15.4 L82.8 14.4 L88.3 13.8 L93.8 13.6 L99.3 15.1 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.6 L132.4 14.7 L137.9 14.0 L143.4 14.5 L149.0 15.2 L154.5 16.0 L160.0 15.0"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">the port answers. no payload sent, nothing to break.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the tcp sample"><span class="mk-tape__kind">tcp</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>Anything with a port.</b> Postgres, redis, smtp, game servers: if you can name the host and the port, you can monitor it.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#tcp" data-umami-event="tape-click" data-umami-event-kind="tcp">read the tcp docs</a>
+                            </div>
                         </div>
                     </li>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">dns</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">A api.acme.com @1.1.1.1</p>
-                            <p class="mk-tape__line mk-tape__line--out">203.0.113.24 &middot; matches</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 15.4 L5.5 14.3 L11.0 14.4 L16.6 15.3 L22.1 14.3 L27.6 14.4 L33.1 14.2 L38.6 14.3 L44.1 15.0 L49.7 14.3 L55.2 14.5 L60.7 14.7 L66.2 14.5 L71.7 13.4 L77.2 14.7 L82.8 13.6 L88.3 13.5 L93.8 2.0 L99.3 7.0 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.5 L132.4 15.3 L137.9 13.2 L143.4 13.6 L149.0 13.5 L154.5 15.1 L160.0 15.5 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 15.4 L5.5 14.3 L11.0 14.4 L16.6 15.3 L22.1 14.3 L27.6 14.4 L33.1 14.2 L38.6 14.3 L44.1 15.0 L49.7 14.3 L55.2 14.5 L60.7 14.7 L66.2 14.5 L71.7 13.4 L77.2 14.7 L82.8 13.6 L88.3 13.5 L93.8 2.0 L99.3 7.0 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.5 L132.4 15.3 L137.9 13.2 L143.4 13.6 L149.0 13.5 L154.5 15.1 L160.0 15.5"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>99.97% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">answer checked against 203.0.113.x. resolving is not the same as resolving right.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about dns checks" data-umami-event="tape-flip" data-umami-event-kind="dns"><span class="mk-tape__kind">dns</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">A api.acme.com @1.1.1.1</p>
+                                    <p class="mk-tape__line mk-tape__line--out">203.0.113.24 &middot; matches</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 15.4 L5.5 14.3 L11.0 14.4 L16.6 15.3 L22.1 14.3 L27.6 14.4 L33.1 14.2 L38.6 14.3 L44.1 15.0 L49.7 14.3 L55.2 14.5 L60.7 14.7 L66.2 14.5 L71.7 13.4 L77.2 14.7 L82.8 13.6 L88.3 13.5 L93.8 2.0 L99.3 7.0 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.5 L132.4 15.3 L137.9 13.2 L143.4 13.6 L149.0 13.5 L154.5 15.1 L160.0 15.5 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 15.4 L5.5 14.3 L11.0 14.4 L16.6 15.3 L22.1 14.3 L27.6 14.4 L33.1 14.2 L38.6 14.3 L44.1 15.0 L49.7 14.3 L55.2 14.5 L60.7 14.7 L66.2 14.5 L71.7 13.4 L77.2 14.7 L82.8 13.6 L88.3 13.5 L93.8 2.0 L99.3 7.0 L104.8 15.5 L110.3 15.2 L115.9 15.4 L121.4 14.5 L126.9 14.5 L132.4 15.3 L137.9 13.2 L143.4 13.6 L149.0 13.5 L154.5 15.1 L160.0 15.5"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>99.97% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">answer checked against 203.0.113.x. resolving is not the same as resolving right.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the dns sample"><span class="mk-tape__kind">dns</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>A wrong answer is an outage too.</b> A hijacked or stale record pages you as fast as a dead resolver.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#dns" data-umami-event="tape-click" data-umami-event-kind="dns">read the dns docs</a>
+                            </div>
                         </div>
                     </li>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">ping</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">icmp echo gw.acme.com</p>
-                            <p class="mk-tape__line mk-tape__line--out">rtt 12.4 ms</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 11.7 L5.5 12.6 L11.0 12.6 L16.6 14.9 L22.1 12.7 L27.6 12.7 L33.1 10.0 L38.6 11.1 L44.1 12.5 L49.7 15.2 L55.2 11.8 L60.7 13.0 L66.2 14.5 L71.7 14.1 L77.2 12.6 L82.8 12.3 L88.3 13.8 L93.8 13.9 L99.3 14.5 L104.8 11.5 L110.3 14.5 L115.9 12.3 L121.4 12.4 L126.9 13.2 L132.4 11.3 L137.9 14.6 L143.4 12.9 L149.0 13.0 L154.5 15.0 L160.0 15.6 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 11.7 L5.5 12.6 L11.0 12.6 L16.6 14.9 L22.1 12.7 L27.6 12.7 L33.1 10.0 L38.6 11.1 L44.1 12.5 L49.7 15.2 L55.2 11.8 L60.7 13.0 L66.2 14.5 L71.7 14.1 L77.2 12.6 L82.8 12.3 L88.3 13.8 L93.8 13.9 L99.3 14.5 L104.8 11.5 L110.3 14.5 L115.9 12.3 L121.4 12.4 L126.9 13.2 L132.4 11.3 L137.9 14.6 L143.4 12.9 L149.0 13.0 L154.5 15.0 L160.0 15.6"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">for routers, gateways and hosts that open no port at all.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about ping checks" data-umami-event="tape-flip" data-umami-event-kind="ping"><span class="mk-tape__kind">ping</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">icmp echo gw.acme.com</p>
+                                    <p class="mk-tape__line mk-tape__line--out">rtt 12.4 ms</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 11.7 L5.5 12.6 L11.0 12.6 L16.6 14.9 L22.1 12.7 L27.6 12.7 L33.1 10.0 L38.6 11.1 L44.1 12.5 L49.7 15.2 L55.2 11.8 L60.7 13.0 L66.2 14.5 L71.7 14.1 L77.2 12.6 L82.8 12.3 L88.3 13.8 L93.8 13.9 L99.3 14.5 L104.8 11.5 L110.3 14.5 L115.9 12.3 L121.4 12.4 L126.9 13.2 L132.4 11.3 L137.9 14.6 L143.4 12.9 L149.0 13.0 L154.5 15.0 L160.0 15.6 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 11.7 L5.5 12.6 L11.0 12.6 L16.6 14.9 L22.1 12.7 L27.6 12.7 L33.1 10.0 L38.6 11.1 L44.1 12.5 L49.7 15.2 L55.2 11.8 L60.7 13.0 L66.2 14.5 L71.7 14.1 L77.2 12.6 L82.8 12.3 L88.3 13.8 L93.8 13.9 L99.3 14.5 L104.8 11.5 L110.3 14.5 L115.9 12.3 L121.4 12.4 L126.9 13.2 L132.4 11.3 L137.9 14.6 L143.4 12.9 L149.0 13.0 L154.5 15.0 L160.0 15.6"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">for routers, gateways and hosts that open no port at all.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the ping sample"><span class="mk-tape__kind">ping</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>Is the box even there?</b> When ping answers but http fails, the host is up and the app broke.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#ping" data-umami-event="tape-click" data-umami-event-kind="ping">read the ping docs</a>
+                            </div>
                         </div>
                     </li>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">heartbeat</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">expect ping every 1h</p>
-                            <p class="mk-tape__line mk-tape__line--out">last 04:12 &middot; on schedule</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 14.6 L5.5 14.3 L11.0 15.0 L16.6 15.3 L22.1 15.1 L27.6 14.7 L33.1 16.0 L38.6 14.8 L44.1 15.0 L49.7 15.5 L55.2 15.0 L60.7 15.7 L66.2 15.3 L71.7 14.1 L77.2 15.4 L82.8 15.5 L88.3 15.2 L93.8 15.5 L99.3 15.1 L104.8 14.4 L110.3 14.4 L115.9 14.5 L121.4 15.2 L126.9 14.4 L132.4 14.6 L137.9 14.2 L143.4 14.4 L149.0 15.1 L154.5 14.7 L160.0 15.3 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 14.6 L5.5 14.3 L11.0 15.0 L16.6 15.3 L22.1 15.1 L27.6 14.7 L33.1 16.0 L38.6 14.8 L44.1 15.0 L49.7 15.5 L55.2 15.0 L60.7 15.7 L66.2 15.3 L71.7 14.1 L77.2 15.4 L82.8 15.5 L88.3 15.2 L93.8 15.5 L99.3 15.1 L104.8 14.4 L110.3 14.4 L115.9 14.5 L121.4 15.2 L126.9 14.4 L132.4 14.6 L137.9 14.2 L143.4 14.4 L149.0 15.1 L154.5 14.7 L160.0 15.3"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">grace 10 min. your cron calls us, silence is the alert.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about heartbeat checks" data-umami-event="tape-flip" data-umami-event-kind="heartbeat"><span class="mk-tape__kind">heartbeat</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">expect ping every 1h</p>
+                                    <p class="mk-tape__line mk-tape__line--out">last 04:12 &middot; on schedule</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 14.6 L5.5 14.3 L11.0 15.0 L16.6 15.3 L22.1 15.1 L27.6 14.7 L33.1 16.0 L38.6 14.8 L44.1 15.0 L49.7 15.5 L55.2 15.0 L60.7 15.7 L66.2 15.3 L71.7 14.1 L77.2 15.4 L82.8 15.5 L88.3 15.2 L93.8 15.5 L99.3 15.1 L104.8 14.4 L110.3 14.4 L115.9 14.5 L121.4 15.2 L126.9 14.4 L132.4 14.6 L137.9 14.2 L143.4 14.4 L149.0 15.1 L154.5 14.7 L160.0 15.3 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 14.6 L5.5 14.3 L11.0 15.0 L16.6 15.3 L22.1 15.1 L27.6 14.7 L33.1 16.0 L38.6 14.8 L44.1 15.0 L49.7 15.5 L55.2 15.0 L60.7 15.7 L66.2 15.3 L71.7 14.1 L77.2 15.4 L82.8 15.5 L88.3 15.2 L93.8 15.5 L99.3 15.1 L104.8 14.4 L110.3 14.4 L115.9 14.5 L121.4 15.2 L126.9 14.4 L132.4 14.6 L137.9 14.2 L143.4 14.4 L149.0 15.1 L154.5 14.7 L160.0 15.3"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">grace 10 min. your cron calls us, silence is the alert.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the heartbeat sample"><span class="mk-tape__kind">heartbeat</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>Backups fail quietly.</b> The job reports in after each run; miss one report and we page you.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#heartbeat" data-umami-event="tape-click" data-umami-event-kind="heartbeat">read the heartbeat docs</a>
+                            </div>
                         </div>
                     </li>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">tls</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">cert CN=acme.com</p>
-                            <p class="mk-tape__line mk-tape__line--out">41 days left</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 15.5 L5.5 15.7 L11.0 15.9 L16.6 15.8 L22.1 15.9 L27.6 15.7 L33.1 14.9 L38.6 15.4 L44.1 16.0 L49.7 15.1 L55.2 15.1 L60.7 15.1 L66.2 15.3 L71.7 15.1 L77.2 15.4 L82.8 15.3 L88.3 14.9 L93.8 15.4 L99.3 15.5 L104.8 15.8 L110.3 15.3 L115.9 15.1 L121.4 15.9 L126.9 15.4 L132.4 15.2 L137.9 15.7 L143.4 14.8 L149.0 15.0 L154.5 15.3 L160.0 15.1 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 15.5 L5.5 15.7 L11.0 15.9 L16.6 15.8 L22.1 15.9 L27.6 15.7 L33.1 14.9 L38.6 15.4 L44.1 16.0 L49.7 15.1 L55.2 15.1 L60.7 15.1 L66.2 15.3 L71.7 15.1 L77.2 15.4 L82.8 15.3 L88.3 14.9 L93.8 15.4 L99.3 15.5 L104.8 15.8 L110.3 15.3 L115.9 15.1 L121.4 15.9 L126.9 15.4 L132.4 15.2 L137.9 15.7 L143.4 14.8 L149.0 15.0 L154.5 15.3 L160.0 15.1"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">warn at 30, down at 7. a failed renewal surfaces with time to spare.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about tls checks" data-umami-event="tape-flip" data-umami-event-kind="tls"><span class="mk-tape__kind">tls</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">cert CN=acme.com</p>
+                                    <p class="mk-tape__line mk-tape__line--out">41 days left</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 15.5 L5.5 15.7 L11.0 15.9 L16.6 15.8 L22.1 15.9 L27.6 15.7 L33.1 14.9 L38.6 15.4 L44.1 16.0 L49.7 15.1 L55.2 15.1 L60.7 15.1 L66.2 15.3 L71.7 15.1 L77.2 15.4 L82.8 15.3 L88.3 14.9 L93.8 15.4 L99.3 15.5 L104.8 15.8 L110.3 15.3 L115.9 15.1 L121.4 15.9 L126.9 15.4 L132.4 15.2 L137.9 15.7 L143.4 14.8 L149.0 15.0 L154.5 15.3 L160.0 15.1 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 15.5 L5.5 15.7 L11.0 15.9 L16.6 15.8 L22.1 15.9 L27.6 15.7 L33.1 14.9 L38.6 15.4 L44.1 16.0 L49.7 15.1 L55.2 15.1 L60.7 15.1 L66.2 15.3 L71.7 15.1 L77.2 15.4 L82.8 15.3 L88.3 14.9 L93.8 15.4 L99.3 15.5 L104.8 15.8 L110.3 15.3 L115.9 15.1 L121.4 15.9 L126.9 15.4 L132.4 15.2 L137.9 15.7 L143.4 14.8 L149.0 15.0 L154.5 15.3 L160.0 15.1"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">warn at 30, down at 7. a failed renewal surfaces with time to spare.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the tls sample"><span class="mk-tape__kind">tls</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>Nobody checks cert dates by hand.</b> We read the days left off every handshake and page you while there is time to renew.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#tls-certificate" data-umami-event="tape-click" data-umami-event-kind="tls">read the tls docs</a>
+                            </div>
                         </div>
                     </li>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">domain</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">rdap acme.com</p>
-                            <p class="mk-tape__line mk-tape__line--out">96 days left</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 15.9 L5.5 15.8 L11.0 15.8 L16.6 15.4 L22.1 15.7 L27.6 15.4 L33.1 15.5 L38.6 16.2 L44.1 16.1 L49.7 16.1 L55.2 15.8 L60.7 15.6 L66.2 15.9 L71.7 16.3 L77.2 15.9 L82.8 15.8 L88.3 15.5 L93.8 16.3 L99.3 15.8 L104.8 15.6 L110.3 16.0 L115.9 15.8 L121.4 16.0 L126.9 15.6 L132.4 15.8 L137.9 15.7 L143.4 16.1 L149.0 15.7 L154.5 15.2 L160.0 15.5 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 15.9 L5.5 15.8 L11.0 15.8 L16.6 15.4 L22.1 15.7 L27.6 15.4 L33.1 15.5 L38.6 16.2 L44.1 16.1 L49.7 16.1 L55.2 15.8 L60.7 15.6 L66.2 15.9 L71.7 16.3 L77.2 15.9 L82.8 15.8 L88.3 15.5 L93.8 16.3 L99.3 15.8 L104.8 15.6 L110.3 16.0 L115.9 15.8 L121.4 16.0 L126.9 15.6 L132.4 15.8 L137.9 15.7 L143.4 16.1 L149.0 15.7 L154.5 15.2 L160.0 15.5"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">asked at the registry. an expired cert breaks https, an expired domain is gone.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about domain checks" data-umami-event="tape-flip" data-umami-event-kind="domain"><span class="mk-tape__kind">domain</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">rdap acme.com</p>
+                                    <p class="mk-tape__line mk-tape__line--out">96 days left</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 15.9 L5.5 15.8 L11.0 15.8 L16.6 15.4 L22.1 15.7 L27.6 15.4 L33.1 15.5 L38.6 16.2 L44.1 16.1 L49.7 16.1 L55.2 15.8 L60.7 15.6 L66.2 15.9 L71.7 16.3 L77.2 15.9 L82.8 15.8 L88.3 15.5 L93.8 16.3 L99.3 15.8 L104.8 15.6 L110.3 16.0 L115.9 15.8 L121.4 16.0 L126.9 15.6 L132.4 15.8 L137.9 15.7 L143.4 16.1 L149.0 15.7 L154.5 15.2 L160.0 15.5 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 15.9 L5.5 15.8 L11.0 15.8 L16.6 15.4 L22.1 15.7 L27.6 15.4 L33.1 15.5 L38.6 16.2 L44.1 16.1 L49.7 16.1 L55.2 15.8 L60.7 15.6 L66.2 15.9 L71.7 16.3 L77.2 15.9 L82.8 15.8 L88.3 15.5 L93.8 16.3 L99.3 15.8 L104.8 15.6 L110.3 16.0 L115.9 15.8 L121.4 16.0 L126.9 15.6 L132.4 15.8 L137.9 15.7 L143.4 16.1 L149.0 15.7 L154.5 15.2 L160.0 15.5"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>100% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">asked at the registry. an expired cert breaks https, an expired domain is gone.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the domain sample"><span class="mk-tape__kind">domain</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>Companies have lost domains to one missed invoice.</b> The rdap check asks the registry for the expiry date and nags you months ahead.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#domain-expiry" data-umami-event="tape-click" data-umami-event-kind="domain">read the domain docs</a>
+                            </div>
                         </div>
                     </li>
                     <li class="mk-tape__cell">
-                        <p class="mk-tape__head">
-                            <span class="mk-tape__kind">flow</span>
-                            <span class="mk-tape__verdict">up</span>
-                        </p>
-                        <div class="mk-tape__body">
-                            <p class="mk-tape__line mk-tape__line--cmd">login flow &middot; 6 steps</p>
-                            <p class="mk-tape__line mk-tape__line--out">3.1 s &middot; saw "Dashboard"</p>
-                            <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
-                                <path class="mk-tape__spark-fill" d="M0.0 12.7 L5.5 12.1 L11.0 12.4 L16.6 12.6 L22.1 11.1 L27.6 10.3 L33.1 11.0 L38.6 10.3 L44.1 11.5 L49.7 12.9 L55.2 9.7 L60.7 10.2 L66.2 12.8 L71.7 11.5 L77.2 14.4 L82.8 12.4 L88.3 11.6 L93.8 13.1 L99.3 13.6 L104.8 10.8 L110.3 11.9 L115.9 11.4 L121.4 9.9 L126.9 3.0 L132.4 8.0 L137.9 10.0 L143.4 9.9 L149.0 13.4 L154.5 14.6 L160.0 13.7 L160.0 22.0 L0.0 22.0 Z"></path>
-                                <path class="mk-tape__spark-line" d="M0.0 12.7 L5.5 12.1 L11.0 12.4 L16.6 12.6 L22.1 11.1 L27.6 10.3 L33.1 11.0 L38.6 10.3 L44.1 11.5 L49.7 12.9 L55.2 9.7 L60.7 10.2 L66.2 12.8 L71.7 11.5 L77.2 14.4 L82.8 12.4 L88.3 11.6 L93.8 13.1 L99.3 13.6 L104.8 10.8 L110.3 11.9 L115.9 11.4 L121.4 9.9 L126.9 3.0 L132.4 8.0 L137.9 10.0 L143.4 9.9 L149.0 13.4 L154.5 14.6 L160.0 13.7"></path>
-                            </svg>
-                            <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>99.98% uptime</b><span>now</span></p>
-                            <p class="mk-tape__line mk-tape__line--meta">a real browser signs in. catches the dead oauth secret a 200 hides.</p>
+                        <div class="mk-tape__flip">
+                            <div class="mk-tape__face mk-tape__face--front">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-expanded="false" aria-label="about flow checks" data-umami-event="tape-flip" data-umami-event-kind="flow"><span class="mk-tape__kind">flow</span></button>
+                                    <span class="mk-tape__verdict">up</span>
+                                </p>
+                                <div class="mk-tape__body">
+                                    <p class="mk-tape__line mk-tape__line--cmd">login flow &middot; 6 steps</p>
+                                    <p class="mk-tape__line mk-tape__line--out">3.1 s &middot; saw "Dashboard"</p>
+                                    <svg class="mk-tape__spark" viewBox="0 0 160 22" preserveAspectRatio="none" aria-hidden="true">
+                                        <path class="mk-tape__spark-fill" d="M0.0 12.7 L5.5 12.1 L11.0 12.4 L16.6 12.6 L22.1 11.1 L27.6 10.3 L33.1 11.0 L38.6 10.3 L44.1 11.5 L49.7 12.9 L55.2 9.7 L60.7 10.2 L66.2 12.8 L71.7 11.5 L77.2 14.4 L82.8 12.4 L88.3 11.6 L93.8 13.1 L99.3 13.6 L104.8 10.8 L110.3 11.9 L115.9 11.4 L121.4 9.9 L126.9 3.0 L132.4 8.0 L137.9 10.0 L143.4 9.9 L149.0 13.4 L154.5 14.6 L160.0 13.7 L160.0 22.0 L0.0 22.0 Z"></path>
+                                        <path class="mk-tape__spark-line" d="M0.0 12.7 L5.5 12.1 L11.0 12.4 L16.6 12.6 L22.1 11.1 L27.6 10.3 L33.1 11.0 L38.6 10.3 L44.1 11.5 L49.7 12.9 L55.2 9.7 L60.7 10.2 L66.2 12.8 L71.7 11.5 L77.2 14.4 L82.8 12.4 L88.3 11.6 L93.8 13.1 L99.3 13.6 L104.8 10.8 L110.3 11.9 L115.9 11.4 L121.4 9.9 L126.9 3.0 L132.4 8.0 L137.9 10.0 L143.4 9.9 L149.0 13.4 L154.5 14.6 L160.0 13.7"></path>
+                                    </svg>
+                                    <p class="mk-tape__span" aria-hidden="true"><span>24h ago</span><b>99.98% uptime</b><span>now</span></p>
+                                    <p class="mk-tape__line mk-tape__line--meta">a real browser signs in. catches the dead oauth secret a 200 hides.</p>
+                                </div>
+                            </div>
+                            <div class="mk-tape__face mk-tape__face--back">
+                                <p class="mk-tape__head">
+                                    <button type="button" class="mk-tape__link" data-tape-flip aria-label="back to the flow sample"><span class="mk-tape__kind">flow</span></button>
+                                    <span class="mk-tape__verdict">docs</span>
+                                </p>
+                                <p class="mk-tape__pitch"><b>Login forms break more often than servers do.</b> A real browser walks yours on schedule and pages you when a step dies.</p>
+                                <a class="mk-tape__docs" href="/docs/monitor-types#flow" data-umami-event="tape-click" data-umami-event-kind="flow">read the flow docs</a>
+                            </div>
                         </div>
                     </li>
                 </ul>
