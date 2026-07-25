@@ -28,3 +28,11 @@ running instance also serves it at `/security-policy`.
 
 Good-faith security research consistent with this policy will not 
 result in legal action.
+
+## Acknowledgements
+
+Researchers who report a valid issue are credited here with the name and 
+optional link they provide. Anonymous reports are welcome and simply not 
+listed.
+
+No entries yet.

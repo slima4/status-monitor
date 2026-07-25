@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** 2026-07-21
+**Last updated:** 2026-07-25
 
 This Privacy Policy explains how the uptimepage service ("we", "us")
 collects and processes personal data. It is intended to satisfy our
@@ -24,8 +24,8 @@ the thresholds under GDPR Article 37.
 We collect data in three ways:
 
 **You provide:**
-- Email address (via GitHub OAuth)
-- Display name (via GitHub OAuth)
+- Email address (via GitHub or Google OAuth, or magic-link sign-in)
+- Display name (via GitHub or Google OAuth)
 - Organisation names, slugs, branding (display name, about text, logo)
 - Target configurations (URLs, intervals, headers, optional credentials)
 - Status-page customisation (incident narration, maintenance windows)
@@ -87,6 +87,8 @@ We use these third-party processors:
 | Hetzner Online GmbH | Hosting and DNS | Germany | DPA in place |
 | Resend | Transactional emails | USA | Standard Contractual Clauses |
 | GitHub | OAuth authentication | USA | Standard Contractual Clauses |
+| Google | OAuth authentication | USA | Standard Contractual Clauses |
+| Fly.io | Probe infrastructure for non-EU check regions | USA | Standard Contractual Clauses |
 
 We do **not** sell or rent your data. We do not share it for marketing.
 
@@ -98,9 +100,11 @@ We may disclose data:
 ## 6. International Transfers
 
 Data is primarily stored in Germany (Hetzner data centre, Nürnberg).
-Resend and GitHub are based in the United States; transfers to them are
+Resend, GitHub, and Google are based in the United States; transfers to them are
 protected by Standard Contractual Clauses adopted by the European
 Commission.
+
+Monitoring checks can run from probe regions outside the EU. Those probes receive the check configuration they need to run (URL, headers, resolved credentials) and produce technical results (status codes, latencies, error text) that are sent back to our EU infrastructure; long-term storage stays in Germany.
 
 ## 7. Security
 

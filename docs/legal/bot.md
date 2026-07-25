@@ -1,6 +1,6 @@
 # Uptimepage Bot
 
-**Last updated:** 2026-07-14
+**Last updated:** 2026-07-25
 
 If you found this page in your server logs, our bot requested a page on your site. This page explains what it is, why it happened, and how to stop it.
 
@@ -30,7 +30,7 @@ We request the exact URL that was configured. Nothing else.
 - We do not scan ports.
 - We do not probe for admin panels, config files, or vulnerabilities.
 
-A check can run as often as every 10 seconds. Most run every 60 seconds.
+How often a check runs is set by the customer within the limits of their plan. Most checks run about once a minute.
 
 ## robots.txt
 
@@ -42,23 +42,9 @@ If you do not want us requesting a URL on your site, the ways to stop it are bel
 
 ## Where the Requests Come From
 
-We probe from three regions:
+We probe from multiple regions around the world. The current region list is on our [probe regions page](/docs/hosted/regions).
 
-| Region | Location |
-| --- | --- |
-| `eu-helsinki` | Helsinki, Finland |
-| `apac-sg` | Singapore |
-| `us-east` | Secaucus, United States |
-
-Only `eu-helsinki` currently has a stable outbound IP address:
-
-```
-204.168.246.94
-```
-
-Our Singapore and United States probes run on Fly.io, whose outbound addresses are not static and can change without notice. **Do not build an IP allowlist from them.** If you allowlist only the address above, checks from the other two regions will still be blocked.
-
-If you need a full static IP allowlist for all three regions, email us and we will set one up.
+Our outbound IP addresses are not guaranteed to be static and can change without notice. **Do not build an IP allowlist from observed addresses**; checks from other regions would still be blocked. If you need a static IP allowlist, email us and we will work one out with you.
 
 ## How to Allowlist Us
 

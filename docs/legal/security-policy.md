@@ -1,6 +1,6 @@
 # Security Policy
 
-**Last updated:** 2026-05-15
+**Last updated:** 2026-07-25
 
 ## Reporting Vulnerabilities
 
@@ -51,7 +51,7 @@ welcome too.
 ## What's In Scope
 
 - The source code at https://github.com/uptimepage/uptimepage
-- The hosted Service (`app.example.com` and the public per-org pages at `*.example.com`)
+- The hosted Service (`app.uptimepage.dev` and the public per-org status pages at `*.uptimepage.dev`)
 
 ## What's Out of Scope
 
