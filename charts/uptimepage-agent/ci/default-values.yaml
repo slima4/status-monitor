@@ -1,0 +1,8 @@
+controlPlaneUrl: https://app.example.com
+region: us-east
+token: sm_agent_ci_placeholder
+metrics:
+  serviceMonitor:
+    enabled: true
+networkPolicy:
+  enabled: true

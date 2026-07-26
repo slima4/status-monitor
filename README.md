@@ -290,6 +290,27 @@ curl http://127.0.0.1:9090/metrics
 
 Anything reachable from the internet should run this stack, not the one above. It adds a Caddy edge with automatic TLS, basic auth on the operator host, internal-only Postgres and ClickHouse, per-IP rate limits, and blue/green restarts. It pulls the same published image. Setup runbook is in [`deployment/README.md`](deployment/README.md), with the architecture in [docs/deployment.md](docs/deployment.md).
 
+### Kubernetes
+
+```bash
+kubectl create namespace uptimepage
+kubectl -n uptimepage create secret generic uptimepage \
+  --from-literal=fingerprint-salt="$(openssl rand -base64 32)" \
+  --from-literal=credentials-kek-base64="$(openssl rand -base64 32)" \
+  --from-literal=postgres-url='postgres://uptimepage:pw@pg.internal:5432/uptimepage?sslmode=require' \
+  --from-literal=clickhouse-password='pw'
+
+helm install uptimepage oci://ghcr.io/uptimepage/charts/uptimepage \
+  --namespace uptimepage \
+  --set domain=status.example.com \
+  --set clickhouse.url=https://ch.internal:8443 \
+  --set secrets.existingSecret=uptimepage \
+  --set postgresql.existingSecret=uptimepage \
+  --set clickhouse.existingSecret=uptimepage
+```
+
+Bring your own Postgres 18 and ClickHouse; the chart ships neither. A second chart, `uptimepage-agent`, runs a probe on its own in another region or inside a private network, against this or the hosted service. Details in [docs/kubernetes.md](docs/kubernetes.md) and [`charts/`](charts/).
+
 ### Build from source
 
 Published images are `linux/amd64`. Build from this checkout when you are on an ARM host (Apple silicon, Ampere), or when you are changing the code:

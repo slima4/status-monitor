@@ -1,0 +1,98 @@
+# A stateless probe: pulls its region's monitors from the control plane, runs the
+# checks from this cluster, pushes results back. Outbound connections only.
+
+# Must match the version the control plane runs.
+image:
+  registry: ghcr.io
+  repository: uptimepage/uptimepage
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# https origin of the control plane. Required.
+controlPlaneUrl: ""
+
+# Required, and must already exist on the control plane.
+region: ""
+
+# Minted on the control plane. A token set here is readable via `helm get values`;
+# prefer existingSecret.
+token: ""
+existingSecret: ""
+existingSecretKey: agent-token
+
+# LOAD-BEARING: a second replica runs every check in the region twice.
+replicaCount: 1
+
+agent:
+  pullIntervalSecs: 30
+  flushIntervalSecs: 5
+  bufferCapacity: 10000
+
+# Needs an image built WITH_LIGHTPANDA=true; the stock image has no engine.
+flow:
+  enabled: false
+
+# ICMP needs the pod GID inside net.ipv4.ping_group_range, which Kubernetes does
+# not widen the way Docker does. Safe sysctl; addNetRaw is the fallback.
+ping:
+  sysctl: true
+  addNetRaw: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints: []
+priorityClassName: ""
+podAnnotations: {}
+podLabels: {}
+extraEnv: []
+
+metricsPort: 9090
+
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+networkPolicy:
+  # Egress stays open when enabled: reaching arbitrary endpoints is the job.
+  enabled: false
+
+observability:
+  logFormat: json
+  logLevel: info
+  rustLog: info
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

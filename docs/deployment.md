@@ -1,5 +1,7 @@
 # Deployment
 
+Running on Kubernetes instead? See [Kubernetes](kubernetes.md) for the Helm charts.
+
 ## Production deployment with Caddy + basic auth
 
 For real-world operation, use the production stack under `deployment/` in the repo. It puts a Caddy reverse proxy in front of the Rust service with:

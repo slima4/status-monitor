@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "uptimepage-agent chart values",
+  "type": "object",
+  "required": ["image", "controlPlaneUrl", "region", "replicaCount"],
+  "properties": {
+    "controlPlaneUrl": { "type": "string", "minLength": 1 },
+    "region": { "type": "string", "minLength": 1 },
+    "token": { "type": "string" },
+    "existingSecret": { "type": "string" },
+    "existingSecretKey": { "type": "string", "minLength": 1 },
+    "replicaCount": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Capped at 1: a second agent runs every check in the region twice"
+    },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "imagePullSecrets": { "type": "array" },
+    "metricsPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "image": {
+      "type": "object",
+      "required": ["registry", "repository", "pullPolicy"],
+      "properties": {
+        "registry": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "properties": {
+        "pullIntervalSecs": { "type": "integer", "minimum": 1 },
+        "flushIntervalSecs": { "type": "integer", "minimum": 1 },
+        "bufferCapacity": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "properties": {
+        "logFormat": { "type": "string", "enum": ["json", "pretty"] }
+      }
+    }
+  }
+}

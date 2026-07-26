@@ -1,0 +1,41 @@
+{{ .Chart.Name }} {{ .Chart.AppVersion }} installed as {{ .Release.Name }} in {{ .Release.Namespace }}.
+
+Topology: {{ .Values.mode }}{{ if eq .Values.mode "allInOne" }} - one control plane probing region "{{ .Values.app.region }}" in-process.{{ else }} - control plane in region "{{ .Values.app.region }}", probing done by {{ len .Values.probes }} agent(s).{{ end }}
+
+Reach it:
+{{- if .Values.ingress.enabled }}
+  https://{{ .Values.domain }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "uptimepage.fullname" . }} 8080:{{ .Values.service.port }}
+  open http://localhost:8080
+{{- end }}
+
+Check it came up:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "uptimepage.fullname" . }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{ if .Values.bootstrap.email -}}
+First owner seeded from bootstrap.email ({{ .Values.bootstrap.email }}). Sign in with a
+matching OAuth identity, or request a magic link.
+{{- else -}}
+No bootstrap.email set, so no owner exists yet. The first account to sign up claims the
+install. Set bootstrap.email to seed one instead.
+{{- end }}
+
+{{ if eq .Values.email.provider "log" -}}
+Email provider is "log": invitations and magic links are written to the pod log, not sent.
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "uptimepage.fullname" . }} | grep -i 'action url'
+{{- end }}
+
+{{ if eq .Values.mode "split" }}
+Each probe needs a token minted on the control plane before it can pull work. An agent
+with a bad token logs an auth failure and keeps retrying:
+  kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/component=probe --tail=20
+{{- end }}
+
+{{- if not .Values.secrets.credentialsKekBase64 }}
+{{ if not .Values.secrets.existingSecret }}
+WARNING: secrets.credentialsKekBase64 is empty. Monitor credentials and agent tokens are
+stored unencrypted. Generate one before real use: openssl rand -base64 32
+{{- end }}
+{{- end }}

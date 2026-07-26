@@ -1,0 +1,110 @@
+{{- include "uptimepage-agent.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "uptimepage-agent.fullname" . }}
+  labels:
+    {{- include "uptimepage-agent.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  # An overlapping pod would probe the region twice during the rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "uptimepage-agent.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "uptimepage-agent.selectorLabels" . | nindent 8 }}
+        uptimepage.dev/region: {{ .Values.region | quote }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "uptimepage-agent.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "uptimepage-agent.podSecurityContext" . | nindent 8 }}
+      # Long enough for a buffered batch to flush on SIGTERM.
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ include "uptimepage-agent.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "uptimepage-agent.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metricsPort }}
+          env:
+            - name: UPTIMEPAGE_AGENT__ENABLED
+              value: "true"
+            - name: UPTIMEPAGE_AGENT__CONTROL_PLANE_URL
+              value: {{ .Values.controlPlaneUrl | quote }}
+            - name: UPTIMEPAGE_AGENT__REGION
+              value: {{ .Values.region | quote }}
+            - name: UPTIMEPAGE_AGENT__TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-token" (include "uptimepage-agent.fullname" .)) .Values.existingSecret }}
+                  key: {{ .Values.existingSecretKey }}
+            - name: UPTIMEPAGE_AGENT__PULL_INTERVAL_SECS
+              value: {{ .Values.agent.pullIntervalSecs | quote }}
+            - name: UPTIMEPAGE_AGENT__FLUSH_INTERVAL_SECS
+              value: {{ .Values.agent.flushIntervalSecs | quote }}
+            - name: UPTIMEPAGE_AGENT__BUFFER_CAPACITY
+              value: {{ .Values.agent.bufferCapacity | quote }}
+            {{- if .Values.flow.enabled }}
+            - name: UPTIMEPAGE_FLOW__ENABLED
+              value: "true"
+            - name: UPTIMEPAGE_FLOW__LIGHTPANDA_PATH
+              value: /usr/local/bin/lightpanda
+            {{- end }}
+            - name: UPTIMEPAGE_SERVER__METRICS_BIND
+              value: "0.0.0.0:{{ .Values.metricsPort }}"
+            - name: UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT
+              value: {{ .Values.observability.logFormat | quote }}
+            - name: UPTIMEPAGE_OBSERVABILITY__LOG_LEVEL
+              value: {{ .Values.observability.logLevel | quote }}
+            - name: RUST_LOG
+              value: {{ .Values.observability.rustLog | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem is on; the flow engine needs scratch space.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

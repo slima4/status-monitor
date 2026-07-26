@@ -1,0 +1,33 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "uptimepage.fullname" . }}-test-readyz
+  labels:
+    {{- include "uptimepage.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: readyz
+      image: {{ .Values.preflight.curlImage }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      command: ["/bin/sh", "-ec"]
+      args:
+        - |
+          curl -sS --fail-with-body "http://{{ include "uptimepage.fullname" . }}:{{ .Values.service.port }}/readyz"
+          echo
+          curl -sS --fail-with-body -o /dev/null -w '%{http_code}\n' \
+            "http://{{ include "uptimepage.fullname" . }}:{{ .Values.service.metricsPort }}/metrics"

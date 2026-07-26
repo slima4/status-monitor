@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "uptimepage chart values",
+  "type": "object",
+  "required": ["mode", "domain", "image", "app", "postgresql", "clickhouse"],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["allInOne", "split"],
+      "description": "allInOne probes in-process; split delegates probing to agent Deployments"
+    },
+    "domain": {
+      "type": "string",
+      "minLength": 1
+    },
+    "publicBaseUrl": { "type": "string" },
+    "nameOverride": { "type": "string" },
+    "fullnameOverride": { "type": "string" },
+    "imagePullSecrets": { "type": "array" },
+    "image": {
+      "type": "object",
+      "required": ["registry", "repository", "pullPolicy"],
+      "properties": {
+        "registry": { "type": "string", "minLength": 1 },
+        "repository": { "type": "string", "minLength": 1 },
+        "tag": { "type": "string" },
+        "digest": { "type": "string" },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] }
+      }
+    },
+    "app": {
+      "type": "object",
+      "required": ["replicaCount", "region"],
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Capped at 1: the control plane has no leader election"
+        },
+        "region": { "type": "string", "minLength": 1 },
+        "defaultRegion": { "type": "string" },
+        "terminationGracePeriodSeconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "probes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "region"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+          },
+          "region": { "type": "string", "minLength": 1 },
+          "token": { "type": "string" },
+          "existingSecret": { "type": "string" },
+          "existingSecretKey": { "type": "string" },
+          "controlPlaneUrl": { "type": "string" },
+          "replicaCount": { "type": "integer", "minimum": 0, "maximum": 1 },
+          "flow": {
+            "type": "object",
+            "properties": { "enabled": { "type": "boolean" } }
+          }
+        }
+      }
+    },
+    "postgresql": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "existingSecretKey": { "type": "string" },
+        "maxConnections": { "type": "integer", "minimum": 1 },
+        "minConnections": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "clickhouse": {
+      "type": "object",
+      "required": ["database", "user"],
+      "properties": {
+        "url": { "type": "string" },
+        "database": { "type": "string", "minLength": 1 },
+        "user": { "type": "string", "minLength": 1 },
+        "password": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "existingSecretKey": { "type": "string" }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "properties": {
+        "existingSecret": { "type": "string" },
+        "fingerprintSalt": { "type": "string" },
+        "credentialsKekBase64": { "type": "string" },
+        "operatorAdminToken": { "type": "string" }
+      }
+    },
+    "email": {
+      "type": "object",
+      "properties": {
+        "provider": { "type": "string", "enum": ["log", "resend"] }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "proxyTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 60,
+          "description": "Must exceed the 25s dispatch long-poll plus its 30s result wait"
+        }
+      }
+    },
+    "observability": {
+      "type": "object",
+      "properties": {
+        "logFormat": { "type": "string", "enum": ["json", "pretty"] }
+      }
+    }
+  }
+}

@@ -372,6 +372,16 @@ pub const DOCS: &[DocPage] = &[
         dir: "",
     },
     DocPage {
+        slug: "kubernetes",
+        title: "Kubernetes",
+        description: "Installing the Helm charts: external databases, ingress timeouts, ICMP, and probe agents.",
+        section: Section::SelfHosting,
+        scope: Scope::SelfHosting,
+        lastmod: "2026-07-26",
+        source: include_str!("../../docs/kubernetes.md"),
+        dir: "",
+    },
+    DocPage {
         slug: "multi-region",
         title: "Multi-region probes",
         description: "Running probe agents in more than one region, and the operator surface that manages them.",

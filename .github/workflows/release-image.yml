@@ -36,6 +36,8 @@ on:
     # ci.yml (GHA can't share a YAML anchor across files).
     paths-ignore:
       - "*.md"
+      - "charts/**"
+      - ".github/workflows/charts.yml"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/dco.yml"
       - ".github/workflows/issue-template-guard.yml"

@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "uptimepage.fullname" . }}
+  labels:
+    {{- include "uptimepage.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+  {{- with .Values.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+    # /metrics is unauthenticated; never route it through the ingress.
+    - name: metrics
+      port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "uptimepage.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+{{- if .Values.probes }}
+---
+# Headless: exists only so a ServiceMonitor can discover probe pods.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "uptimepage.fullname" . }}-probes
+  labels:
+    {{- include "uptimepage.labels" . | nindent 4 }}
+    app.kubernetes.io/component: probe
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - name: metrics
+      port: {{ .Values.service.metricsPort }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "uptimepage.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: probe
+{{- end }}

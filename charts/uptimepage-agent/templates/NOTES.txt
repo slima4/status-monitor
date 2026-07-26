@@ -1,0 +1,18 @@
+Agent for region "{{ .Values.region }}" installed as {{ .Release.Name }} in {{ .Release.Namespace }}.
+
+It pulls work from {{ .Values.controlPlaneUrl }} and pushes results back. Nothing reaches
+it inbound, so there is no URL to open and no health endpoint to curl.
+
+Confirm it is working from the control plane: the region should stop reporting silence and
+its agent_up gauge should go to 1 within {{ .Values.agent.pullIntervalSecs }}s.
+
+Locally, the logs tell you the same thing:
+  kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "uptimepage-agent.fullname" . }} -f
+
+A rejected token shows up there as an auth failure on every pull. Mint a new one on the
+control plane and either update .Values.token or the Secret you pointed at.
+{{- if not .Values.ping.sysctl }}
+
+ping.sysctl is off, so ICMP checks in this region will report an error unless the node
+already covers the pod GID in net.ipv4.ping_group_range. Every other check type works.
+{{- end }}

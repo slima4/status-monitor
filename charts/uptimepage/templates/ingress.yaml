@@ -1,0 +1,46 @@
+{{- if .Values.ingress.enabled }}
+{{- $fullName := include "uptimepage.fullname" . }}
+{{- $hosts := concat (list .Values.domain) .Values.ingress.extraHosts }}
+{{- if .Values.ingress.wildcard.enabled }}
+{{- $hosts = append $hosts (printf "*.%s" .Values.domain) }}
+{{- end }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $fullName }}
+  labels:
+    {{- include "uptimepage.labels" . | nindent 4 }}
+  annotations:
+    # The dispatch long-poll holds 25s + 30s; a shorter read timeout kills
+    # "check now" silently. Names are ingress-nginx's.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: {{ .Values.ingress.proxyTimeoutSeconds | quote }}
+    nginx.ingress.kubernetes.io/proxy-send-timeout: {{ .Values.ingress.proxyTimeoutSeconds | quote }}
+    {{- with .Values.ingress.annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        {{- range $hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ default (printf "%s-tls" $fullName) .Values.ingress.tls.secretName }}
+  {{- end }}
+  rules:
+    {{- range $hosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $fullName }}
+                port:
+                  name: http
+    {{- end }}
+{{- end }}

@@ -10,6 +10,9 @@ on:
     # must re-run it. Keep in sync with release-image.yml.
     paths-ignore: &paths_ignore
       - "*.md"
+      # Helm charts compile into nothing; charts.yml lints and validates them.
+      - "charts/**"
+      - ".github/workflows/charts.yml"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/dco.yml"
       - ".github/workflows/issue-template-guard.yml"

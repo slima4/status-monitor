@@ -1,0 +1,25 @@
+apiVersion: v2
+name: uptimepage-agent
+description: Regional probe agent for an Uptimepage control plane, hosted or self-hosted
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+# `-0` so vendor builds (v1.31.1-gke.x) satisfy the constraint.
+kubeVersion: ">=1.29.0-0"
+home: https://uptimepage.dev
+icon: https://uptimepage.dev/static/img/org-icon.png
+sources:
+  - https://github.com/uptimepage/uptimepage
+keywords:
+  - uptime
+  - monitoring
+  - private-location
+  - probe
+  - sre
+maintainers:
+  - name: uptimepage contributors
+    url: https://github.com/uptimepage/uptimepage
+annotations:
+  artifacthub.io/license: AGPL-3.0-only
+  artifacthub.io/operator: "false"
+  artifacthub.io/prerelease: "true"

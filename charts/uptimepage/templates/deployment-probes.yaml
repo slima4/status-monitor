@@ -1,0 +1,103 @@
+{{- $root := . }}
+{{- range .Values.probes }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "uptimepage.fullname" $root }}-probe-{{ .name }}
+  labels:
+    {{- include "uptimepage.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: probe
+    uptimepage.dev/region: {{ .region | quote }}
+spec:
+  # One agent per region. Two would run every check in the region twice.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "uptimepage.selectorLabels" $root | nindent 6 }}
+      app.kubernetes.io/component: probe
+      uptimepage.dev/probe: {{ .name | quote }}
+  template:
+    metadata:
+      labels:
+        {{- include "uptimepage.selectorLabels" $root | nindent 8 }}
+        app.kubernetes.io/component: probe
+        uptimepage.dev/probe: {{ .name | quote }}
+        uptimepage.dev/region: {{ .region | quote }}
+      annotations:
+        checksum/secret: {{ include (print $root.Template.BasePath "/secret.yaml") $root | sha256sum }}
+    spec:
+      {{- with $root.Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "uptimepage.serviceAccountName" $root }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "uptimepage.podSecurityContext" $root | nindent 8 }}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: agent
+          image: {{ include "uptimepage.image" $root }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          securityContext:
+            {{- include "uptimepage.containerSecurityContext" $root | nindent 12 }}
+          ports:
+            - name: metrics
+              containerPort: {{ $root.Values.service.metricsPort }}
+          env:
+            {{- include "uptimepage.commonEnv" $root | nindent 12 }}
+            - name: UPTIMEPAGE_AGENT__ENABLED
+              value: "true"
+            # In-cluster: the agent has its own token, no need to hairpin.
+            - name: UPTIMEPAGE_AGENT__CONTROL_PLANE_URL
+              value: {{ default (printf "http://%s:%d" (include "uptimepage.fullname" $root) (int $root.Values.service.port)) .controlPlaneUrl | quote }}
+            - name: UPTIMEPAGE_AGENT__REGION
+              value: {{ .region | quote }}
+            - name: UPTIMEPAGE_AGENT__TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-env" (include "uptimepage.fullname" $root)) .existingSecret }}
+                  key: {{ default (printf "probe-%s-token" .name) .existingSecretKey }}
+            - name: UPTIMEPAGE_AGENT__PULL_INTERVAL_SECS
+              value: {{ default 30 .pullIntervalSecs | quote }}
+            - name: UPTIMEPAGE_AGENT__FLUSH_INTERVAL_SECS
+              value: {{ default 5 .flushIntervalSecs | quote }}
+            - name: UPTIMEPAGE_AGENT__BUFFER_CAPACITY
+              value: {{ default 10000 .bufferCapacity | quote }}
+            {{- if and .flow .flow.enabled }}
+            - name: UPTIMEPAGE_FLOW__ENABLED
+              value: "true"
+            - name: UPTIMEPAGE_FLOW__LIGHTPANDA_PATH
+              value: /usr/local/bin/lightpanda
+            {{- end }}
+            {{- with .extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml (default $root.Values.app.resources .resources) | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

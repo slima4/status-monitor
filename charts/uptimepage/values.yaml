@@ -1,0 +1,229 @@
+# allInOne - one pod that also probes its own region.
+# split    - probing moves to one agent Deployment per entry in `probes`.
+mode: allInOne
+
+# External hostname the control plane is reached on. Required.
+domain: ""
+
+# External origin used to build OAuth callbacks and emailed links.
+# Defaults to https://{{ .Values.domain }}.
+publicBaseUrl: ""
+
+image:
+  registry: ghcr.io
+  repository: uptimepage/uptimepage
+  # Defaults to the chart appVersion.
+  tag: ""
+  # Takes precedence over tag when set (sha256:...).
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+app:
+  # LOAD-BEARING: no leader election, so a second pod duplicates every alert.
+  replicaCount: 1
+  # Region id this control plane owns. In allInOne mode it also probes it.
+  region: default
+  # Region assigned to new monitors when the creator picks none. Empty = `region`.
+  defaultRegion: ""
+  podAnnotations: {}
+  podLabels: {}
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      memory: 2Gi
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  topologySpreadConstraints: []
+  priorityClassName: ""
+  terminationGracePeriodSeconds: 30
+  # A cold first install runs every Postgres migration before /readyz passes.
+  startupProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    failureThreshold: 60
+  livenessProbe:
+    periodSeconds: 20
+    failureThreshold: 3
+  readinessProbe:
+    periodSeconds: 10
+    failureThreshold: 3
+  extraEnv: []
+  extraEnvFrom: []
+  extraVolumes: []
+  extraVolumeMounts: []
+
+# One agent Deployment per entry, mode=split only. Required keys are `name`
+# (DNS-1123) and `region`; then a `token` or `existingSecret`/`existingSecretKey`,
+# and optionally `flow` (needs an image built WITH_LIGHTPANDA), `controlPlaneUrl`,
+# `resources`, `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`.
+probes: []
+# - name: eu-helsinki
+#   region: eu-helsinki
+#   token: ""
+#   flow:
+#     enabled: false
+
+postgresql:
+  # Full DSN, Postgres 18+ (migrations use uuidv7()). Add ?sslmode=require for
+  # a managed instance.
+  url: ""
+  existingSecret: ""
+  existingSecretKey: postgres-url
+  maxConnections: 16
+  minConnections: 2
+
+clickhouse:
+  url: ""
+  database: monitor
+  user: default
+  password: ""
+  existingSecret: ""
+  existingSecretKey: clickhouse-password
+
+# `existingSecret` owns every key below when set, for External Secrets or Vault.
+# Values passed here instead are readable via `helm get values`.
+secrets:
+  existingSecret: ""
+  # REQUIRED, boot refuses an empty salt. openssl rand -base64 32
+  fingerprintSalt: ""
+  # Must decode to 32 bytes. Empty stores credentials in plaintext.
+  credentialsKekBase64: ""
+  # Empty disables the /operator/* surface entirely.
+  operatorAdminToken: ""
+
+# Seeds the first owner on first boot. Ignored once any user exists.
+bootstrap:
+  email: ""
+  orgName: ""
+
+auth:
+  # auth.enabled_methods is list-valued and the app parses no list keys from the
+  # environment, so all three stay on. A provider without credentials is inert.
+  github:
+    clientId: ""
+    clientSecret: ""
+    # Defaults to {publicBaseUrl}/auth/github/callback.
+    redirectUrl: ""
+  google:
+    clientId: ""
+    clientSecret: ""
+    redirectUrl: ""
+
+email:
+  # `log` writes action URLs to the pod log rather than sending anything.
+  provider: log
+  fromName: Uptimepage
+  fromAddress: ""
+  resend:
+    apiKey: ""
+    webhookSecret: ""
+
+tenancy:
+  pathBasedPublicRoutes: true
+  # <slug>.{domain} instead of /status/<slug>. Needs a wildcard cert (DNS-01).
+  subdomainPublicRoutes: false
+
+mcp:
+  enabled: false
+  oauthEnabled: false
+  # Defaults to https://mcp.{domain}/mcp.
+  resourceUri: ""
+
+security:
+  # Must cover the ingress controller's pod network, or every request looks like
+  # one address and the abuse guard throttles all clients together.
+  trustedProxies: 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fd00::/8
+  # Allows private/link-local targets by removing an SSRF guard.
+  allowPrivateTargets: false
+
+# ICMP needs the pod GID inside net.ipv4.ping_group_range, which Kubernetes does
+# not widen the way Docker does. Safe sysctl; addNetRaw is the fallback.
+ping:
+  sysctl: true
+  addNetRaw: false
+
+service:
+  type: ClusterIP
+  port: 8080
+  metricsPort: 9090
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  extraHosts: []
+  # A *.{domain} rule for subdomain-routed status pages. Needs a DNS-01 issuer.
+  wildcard:
+    enabled: false
+  tls:
+    enabled: true
+    secretName: ""
+  # LOAD-BEARING: the dispatch long-poll holds 25s + 30s, and a shorter read
+  # timeout kills "check now" with no error anywhere.
+  proxyTimeoutSeconds: 75
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+
+metrics:
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: {}
+    relabelings: []
+
+networkPolicy:
+  # Constrains ingress only; probe egress must stay open.
+  enabled: false
+  # Selectors allowed to reach the app port. Empty = anywhere in the cluster.
+  ingressFrom: []
+
+# Init containers: reject a Postgres older than 18, and create the ClickHouse
+# database, which no migration does. They run on every pod start.
+preflight:
+  enabled: true
+  checkPostgres: true
+  createClickhouseDatabase: true
+  image: postgres:18-alpine
+  curlImage: curlimages/curl:8.21.0
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      memory: 256Mi
+
+observability:
+  logFormat: json
+  logLevel: info
+  rustLog: info
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

@@ -1,0 +1,20 @@
+domain: status.example.com
+postgresql:
+  url: postgres://uptimepage:pw@postgres.example.internal:5432/uptimepage?sslmode=require
+clickhouse:
+  url: https://clickhouse.example.internal:8443
+  password: pw
+secrets:
+  fingerprintSalt: Y2ktb25seS1mYWtlLWZpbmdlcnByaW50LXNhbHQhISE=
+  # Must decode to exactly 32 bytes or the chart's own guard rejects it.
+  credentialsKekBase64: Y2ktb25seS1mYWtlLWtlay1ub3QtYS1zZWNyZXQhISE=
+ingress:
+  enabled: true
+  className: nginx
+metrics:
+  serviceMonitor:
+    enabled: true
+networkPolicy:
+  enabled: true
+podDisruptionBudget:
+  enabled: true

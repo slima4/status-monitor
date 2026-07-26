@@ -1,0 +1,167 @@
+name: charts
+
+on:
+  push:
+    branches: [main]
+    paths: &chart_paths
+      - "charts/**"
+      - ".github/workflows/charts.yml"
+  pull_request:
+    branches: [main]
+    paths: *chart_paths
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Package and push the charts to ghcr.io"
+        type: boolean
+        default: false
+
+concurrency:
+  group: charts-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  KUBECONFORM_VERSION: "0.8.0"
+  # Both ends of the range the charts declare in kubeVersion. Validating only
+  # the newest would miss an API the floor does not have; validating only the
+  # floor would miss one removed since. Keep in sync with kubeVersion.
+  KUBERNETES_VERSIONS: "1.29.0 1.36.0"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The version-bump check diffs against the base.
+          fetch-depth: 0
+
+      - uses: azure/setup-helm@v5
+
+      - name: A changed chart must change its version
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          # workflow_dispatch and a branch's first push have nothing to diff.
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            echo "no base revision to compare against; skipping"
+            exit 0
+          fi
+          fail=0
+          for chart in charts/*/; do
+            dir="${chart%/}"
+            name=$(basename "$dir")
+            # `&& continue` would exit the script under set -e when diff finds changes.
+            if git diff --quiet "$base" HEAD -- "$dir"; then
+              continue
+            fi
+            old=$(git show "$base:$dir/Chart.yaml" 2>/dev/null | awk '/^version:/{print $2}' || true)
+            new=$(awk '/^version:/{print $2}' "$dir/Chart.yaml")
+            if [ -z "$old" ]; then
+              echo "$name: new chart at $new"
+              continue
+            fi
+            if [ "$old" = "$new" ]; then
+              echo "::error file=$dir/Chart.yaml::$name changed but version is still $new. Bump it, or a re-publish silently serves different templates under a version people already pulled."
+              fail=1
+            else
+              echo "$name: $old -> $new"
+            fi
+          done
+          exit $fail
+
+      - name: Install kubeconform
+        run: |
+          curl -sSfL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
+            | tar -xz -C /usr/local/bin kubeconform
+
+      - name: Lint and validate every ci values file
+        run: |
+          set -euo pipefail
+          fail=0
+          for chart in charts/*/; do
+            name=$(basename "$chart")
+            for values in "$chart"ci/*-values.yaml; do
+              echo "::group::$name ($(basename "$values"))"
+              helm lint "$chart" -f "$values" || fail=1
+              for kube in $KUBERNETES_VERSIONS; do
+                # --kube-version also exercises the chart's kubeVersion gate.
+                # The skipped resource is the ServiceMonitor CRD, expected.
+                helm template release "$chart" -f "$values" --kube-version "$kube" \
+                  | kubeconform -strict -summary -ignore-missing-schemas \
+                      -kubernetes-version "$kube" || fail=1
+              done
+              echo "::endgroup::"
+            done
+          done
+          exit $fail
+
+      - name: Guard rails must actually block
+        run: |
+          set -euo pipefail
+          # Each would fail at runtime, not render time, if its guard regressed.
+          expect_failure() {
+            if helm template release charts/uptimepage \
+                 -f charts/uptimepage/ci/allinone-values.yaml "$@" >/dev/null 2>&1; then
+              echo "guard did not fire for: $*" >&2
+              exit 1
+            fi
+          }
+          expect_failure --set app.replicaCount=2
+          expect_failure --set secrets.fingerprintSalt=
+          expect_failure --set tenancy.subdomainPublicRoutes=true
+          expect_failure --set mode=split
+          # These three crash-loop at boot if the chart lets them through.
+          expect_failure --set secrets.credentialsKekBase64=c2hvcnQ=
+          expect_failure --set postgresql.url=postgres://monitor:monitor@pg:5432/monitor
+          expect_failure --set clickhouse.password=
+          echo "all guards fired"
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # cosign trades this for a short-lived Fulcio cert; no key to rotate.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+
+      - uses: sigstore/cosign-installer@v4
+
+      - name: Log in to ghcr.io
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Package, push, and sign
+        env:
+          REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
+        run: |
+          set -euo pipefail
+          for chart in charts/*/; do
+            dir="${chart%/}"
+            # `^` anchors keep these off appVersion: and maintainers' name:.
+            name=$(awk '/^name:/{print $2}' "$dir/Chart.yaml")
+            version=$(awk '/^version:/{print $2}' "$dir/Chart.yaml")
+            helm package "$dir" --destination dist
+            # The digest, not the tag: a tag can be moved to other content.
+            digest=$(helm push "dist/${name}-${version}.tgz" "$REGISTRY" 2>&1 \
+              | tee /dev/stderr | awk '/^Digest:/{print $2}')
+            if [ -z "$digest" ]; then
+              echo "::error::could not read the pushed digest for $name" >&2
+              exit 1
+            fi
+            ref="ghcr.io/${{ github.repository_owner }}/charts/${name}@${digest}"
+            cosign sign --yes "$ref"
+            # Same flags the docs tell users to pass, so a broken identity
+            # fails here rather than for the first person who checks.
+            cosign verify "$ref" \
+              --certificate-identity-regexp "^https://github.com/${{ github.repository }}/" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+            echo "signed and verified ${name} ${version} @ ${digest}"
+          done

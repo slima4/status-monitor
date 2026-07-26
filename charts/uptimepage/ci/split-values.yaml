@@ -1,0 +1,43 @@
+mode: split
+domain: status.example.com
+app:
+  region: eu-helsinki
+postgresql:
+  existingSecret: uptimepage-db
+clickhouse:
+  url: https://clickhouse.example.internal:8443
+  existingSecret: uptimepage-ch
+secrets:
+  existingSecret: uptimepage-core
+probes:
+  - name: eu-helsinki
+    region: eu-helsinki
+    token: sm_agent_ci_placeholder
+  - name: us-east
+    region: us-east
+    existingSecret: probe-us-east
+    existingSecretKey: agent-token
+    flow:
+      enabled: true
+tenancy:
+  subdomainPublicRoutes: true
+ingress:
+  enabled: true
+  className: nginx
+  wildcard:
+    enabled: true
+  extraHosts:
+    - mcp.status.example.com
+mcp:
+  enabled: true
+# Every core key, including resend-api-key and github-client-secret, comes from
+# secrets.existingSecret above.
+email:
+  provider: resend
+  fromAddress: no-reply@status.example.com
+auth:
+  github:
+    clientId: ci-client-id
+metrics:
+  serviceMonitor:
+    enabled: true

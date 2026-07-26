@@ -1,0 +1,307 @@
+{{- $pgSecret := default (printf "%s-env" (include "uptimepage.fullname" .)) .Values.postgresql.existingSecret }}
+{{- $pgKey := default "postgres-url" .Values.postgresql.existingSecretKey }}
+{{- $chSecret := default (printf "%s-env" (include "uptimepage.fullname" .)) .Values.clickhouse.existingSecret }}
+{{- $chKey := default "clickhouse-password" .Values.clickhouse.existingSecretKey }}
+{{- $core := include "uptimepage.secretName" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "uptimepage.fullname" . }}
+  labels:
+    {{- include "uptimepage.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.app.replicaCount }}
+  # A surge pod would run a second alert engine against the same database.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "uptimepage.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      labels:
+        {{- include "uptimepage.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+        {{- with .Values.app.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- with .Values.app.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "uptimepage.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      securityContext:
+        {{- include "uptimepage.podSecurityContext" . | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.app.terminationGracePeriodSeconds }}
+      {{- with .Values.app.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- if and .Values.preflight.enabled (or .Values.preflight.checkPostgres .Values.preflight.createClickhouseDatabase) }}
+      # Not a pre-install hook: hooks run before the Secret these read exists.
+      initContainers:
+        {{- if .Values.preflight.checkPostgres }}
+        - name: postgres-check
+          image: {{ .Values.preflight.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "uptimepage.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: PGURL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pgSecret }}
+                  key: {{ $pgKey }}
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              # Migrations call uuidv7(), which is Postgres 18. Older servers die
+              # mid-migration, so fail here instead.
+              v=$(psql "$PGURL" -tAqc "SHOW server_version_num")
+              echo "postgres server_version_num=$v"
+              if [ "$v" -lt 180000 ]; then
+                echo "FATAL: uptimepage requires Postgres 18 or newer (migrations use uuidv7())." >&2
+                exit 1
+              fi
+              # The migrations CREATE EXTENSION these; missing means a failed boot.
+              missing=$(psql "$PGURL" -tAqc "SELECT coalesce(string_agg(e, ', '), '') FROM unnest(ARRAY['citext','pg_trgm']) AS e WHERE e NOT IN (SELECT name FROM pg_available_extensions)")
+              if [ -n "$missing" ]; then
+                echo "FATAL: extensions unavailable on this server: $missing" >&2
+                exit 1
+              fi
+              echo "postgres preflight ok"
+          resources:
+            {{- toYaml .Values.preflight.resources | nindent 12 }}
+        {{- end }}
+        {{- if .Values.preflight.createClickhouseDatabase }}
+        - name: clickhouse-database
+          image: {{ .Values.preflight.curlImage }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "uptimepage.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: CH_URL
+              value: {{ .Values.clickhouse.url | quote }}
+            - name: CH_DATABASE
+              value: {{ .Values.clickhouse.database | quote }}
+            - name: CH_USER
+              value: {{ .Values.clickhouse.user | quote }}
+            - name: CH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $chSecret }}
+                  key: {{ $chKey }}
+                  optional: true
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              # No migration does this, and the client binds the database name at
+              # construction, so it must exist before the app connects.
+              curl -sS --fail-with-body \
+                -H "X-ClickHouse-User: ${CH_USER}" \
+                -H "X-ClickHouse-Key: ${CH_PASSWORD:-}" \
+                --data-binary "CREATE DATABASE IF NOT EXISTS \`${CH_DATABASE}\`" \
+                "${CH_URL}/"
+              echo "clickhouse database ${CH_DATABASE} ready"
+          resources:
+            {{- toYaml .Values.preflight.resources | nindent 12 }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: uptimepage
+          image: {{ include "uptimepage.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- include "uptimepage.containerSecurityContext" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: 8080
+            - name: metrics
+              containerPort: {{ .Values.service.metricsPort }}
+          env:
+            {{- include "uptimepage.commonEnv" . | nindent 12 }}
+            - name: UPTIMEPAGE_SERVER__API_BIND
+              value: "0.0.0.0:8080"
+            - name: UPTIMEPAGE_STORAGE__POSTGRES__URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $pgSecret }}
+                  key: {{ $pgKey }}
+            - name: UPTIMEPAGE_STORAGE__POSTGRES__MAX_CONNECTIONS
+              value: {{ .Values.postgresql.maxConnections | quote }}
+            - name: UPTIMEPAGE_STORAGE__POSTGRES__MIN_CONNECTIONS
+              value: {{ .Values.postgresql.minConnections | quote }}
+            - name: UPTIMEPAGE_STORAGE__CLICKHOUSE__URL
+              value: {{ .Values.clickhouse.url | quote }}
+            - name: UPTIMEPAGE_STORAGE__CLICKHOUSE__DATABASE
+              value: {{ .Values.clickhouse.database | quote }}
+            - name: UPTIMEPAGE_STORAGE__CLICKHOUSE__USER
+              value: {{ .Values.clickhouse.user | quote }}
+            - name: UPTIMEPAGE_STORAGE__CLICKHOUSE__PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $chSecret }}
+                  key: {{ $chKey }}
+                  optional: true
+            - name: UPTIMEPAGE_AUTH__FINGERPRINT_SALT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: fingerprint-salt
+            - name: UPTIMEPAGE_SECURITY__CREDENTIALS_KEK_BASE64
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: credentials-kek-base64
+                  optional: true
+            - name: UPTIMEPAGE_OPERATOR__ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: operator-admin-token
+                  optional: true
+            - name: UPTIMEPAGE_SECURITY__TRUSTED_PROXIES
+              value: {{ .Values.security.trustedProxies | quote }}
+            - name: UPTIMEPAGE_SECURITY__ALLOW_PRIVATE_TARGETS
+              value: {{ .Values.security.allowPrivateTargets | quote }}
+            - name: UPTIMEPAGE_SCHEDULER__ENABLED
+              value: {{ eq .Values.mode "allInOne" | quote }}
+            - name: UPTIMEPAGE_SCHEDULER__REGION
+              value: {{ .Values.app.region | quote }}
+            {{- with .Values.app.defaultRegion }}
+            - name: UPTIMEPAGE_SCHEDULER__DEFAULT_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            - name: UPTIMEPAGE_AUTH__PUBLIC_BASE_URL
+              value: {{ include "uptimepage.publicBaseUrl" . | quote }}
+            {{- with .Values.auth.github.clientId }}
+            - name: UPTIMEPAGE_AUTH__GITHUB__CLIENT_ID
+              value: {{ . | quote }}
+            - name: UPTIMEPAGE_AUTH__GITHUB__REDIRECT_URL
+              value: {{ default (printf "%s/auth/github/callback" (include "uptimepage.publicBaseUrl" $)) $.Values.auth.github.redirectUrl | quote }}
+            - name: UPTIMEPAGE_AUTH__GITHUB__CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: github-client-secret
+            {{- end }}
+            {{- with .Values.auth.google.clientId }}
+            - name: UPTIMEPAGE_AUTH__GOOGLE__CLIENT_ID
+              value: {{ . | quote }}
+            - name: UPTIMEPAGE_AUTH__GOOGLE__REDIRECT_URL
+              value: {{ default (printf "%s/auth/google/callback" (include "uptimepage.publicBaseUrl" $)) $.Values.auth.google.redirectUrl | quote }}
+            - name: UPTIMEPAGE_AUTH__GOOGLE__CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: google-client-secret
+            {{- end }}
+            {{- with .Values.bootstrap.email }}
+            - name: UPTIMEPAGE_BOOTSTRAP__EMAIL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.bootstrap.orgName }}
+            - name: UPTIMEPAGE_BOOTSTRAP__ORG_NAME
+              value: {{ . | quote }}
+            {{- end }}
+            - name: UPTIMEPAGE_EMAIL__PROVIDER
+              value: {{ .Values.email.provider | quote }}
+            - name: UPTIMEPAGE_EMAIL__FROM_NAME
+              value: {{ .Values.email.fromName | quote }}
+            {{- with .Values.email.fromAddress }}
+            - name: UPTIMEPAGE_EMAIL__FROM_ADDRESS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq .Values.email.provider "resend" }}
+            - name: UPTIMEPAGE_EMAIL__RESEND__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: resend-api-key
+            - name: UPTIMEPAGE_EMAIL__RESEND__WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: resend-webhook-secret
+                  optional: true
+            {{- end }}
+            - name: UPTIMEPAGE_TENANCY__PATH_BASED_PUBLIC_ROUTES
+              value: {{ .Values.tenancy.pathBasedPublicRoutes | quote }}
+            - name: UPTIMEPAGE_TENANCY__SUBDOMAIN_PUBLIC_ROUTES
+              value: {{ .Values.tenancy.subdomainPublicRoutes | quote }}
+            - name: UPTIMEPAGE_PUBLIC_STATUS__BASE_DOMAIN
+              value: {{ .Values.domain | quote }}
+            - name: UPTIMEPAGE_MCP__ENABLED
+              value: {{ .Values.mcp.enabled | quote }}
+            - name: UPTIMEPAGE_MCP__OAUTH_ENABLED
+              value: {{ .Values.mcp.oauthEnabled | quote }}
+            {{- if .Values.mcp.enabled }}
+            - name: UPTIMEPAGE_MCP__RESOURCE_URI
+              value: {{ default (printf "https://mcp.%s/mcp" .Values.domain) .Values.mcp.resourceUri | quote }}
+            {{- end }}
+            {{- with .Values.app.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.app.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          # httpGet only: the runtime image is distroless, no shell for exec.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: {{ .Values.app.startupProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.app.startupProbe.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: {{ .Values.app.livenessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.app.livenessProbe.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: {{ .Values.app.readinessProbe.periodSeconds }}
+            failureThreshold: {{ .Values.app.readinessProbe.failureThreshold }}
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          volumeMounts:
+            # readOnlyRootFilesystem is on; the flow engine needs scratch space.
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.app.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.app.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
