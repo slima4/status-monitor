@@ -9,6 +9,15 @@ use uuid::Uuid;
 use crate::domain::{AppTheme, DisplayPrefs, OrgId, TimeFormat, UserId};
 use crate::error::Result;
 
+/// Any user at all, soft-deleted included, so first-run seeding stays one-shot.
+pub async fn any_exist(pool: &PgPool) -> Result<bool> {
+    let (exists,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM users)")
+        .fetch_one(pool)
+        .await
+        .context("users::any_exist")?;
+    Ok(exists)
+}
+
 /// Both display preferences in one row read — used by the login cookie-issue
 /// pass and the account page. The per-preference setters below stay separate;
 /// each PATCH endpoint only writes its own column.

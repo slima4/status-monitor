@@ -187,6 +187,7 @@ async fn main() -> Result<()> {
         }
     };
     let pg_pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
+    uptimepage::bootstrap::seed_first_owner(&pg_pool, &cfg).await?;
     storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "region_reconcile")
         .reconcile_regions(
             &cfg.scheduler.region,

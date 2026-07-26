@@ -54,6 +54,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `auth.api_tokens` | `prefix_visible_chars` | Indexed prefix length for token lookup. The per-user token cap is a plan quota (`plans.max_api_tokens_per_user`), not a config key |
 | `auth.invitations` | `expiry_hours` | Invitation lifetime. The per-org pending cap is a plan quota (`plans.max_pending_invitations`), not a config key |
 | `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
+| `bootstrap` | `email`, `org_name` | Seeds the first owner at boot when the instance has no users, for installs with no terminal to run `bootstrap-owner` in. Empty `email` (default) disables it. See [First-run owner](#first-run-owner) below |
 | `mcp` | `enabled`, `oauth_enabled`, `resource_uri`, `allowed_origins`, `access_token_ttl_secs` | LLM connector (MCP) server at `/mcp`. Off by default; OAuth requires real HTTPS `resource_uri` + `auth.public_base_url`. See [MCP server](mcp.md) |
 | `email` | `provider`, `from_name`, `from_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"` |
 | `email.resend` | `api_key`, `webhook_secret` | `api_key` required when `email.provider = "resend"`. A set `webhook_secret` (the endpoint's Svix `whsec_…` signing secret) mounts `POST /hooks/resend`: a permanently bounced or spam-complaining address gets every email channel pointed at it disabled, with the reason shown on the channel form |
@@ -154,6 +155,49 @@ request/verify endpoints and the login-page email form.
 Rotating the value mid-deployment refuses to boot unless the override
 env var documented in `docs/troubleshooting.md` is set — this is
 deliberate so audit-trail breakage is loud.
+
+## First-run owner
+
+A fresh instance has no accounts, and every sign-in method assumes one already exists. The normal way to create it is the CLI:
+
+```bash
+uptimepage bootstrap-owner --email you@example.com
+```
+
+That prints a full-access API token, so it needs a terminal. App-store and appliance installs do not have one. For those, name the owner in config instead:
+
+```toml
+[bootstrap]
+email = "you@example.com"
+org_name = "Home Lab"
+```
+
+```bash
+UPTIMEPAGE_BOOTSTRAP__EMAIL=you@example.com
+UPTIMEPAGE_BOOTSTRAP__ORG_NAME='Home Lab'
+```
+
+On boot, if the `users` table is empty, this creates the owner and its org and logs a sign-in link:
+
+```
+WARN seeded the first owner; open sign_in_url to claim this instance
+  org=round-hill-r5m8md
+  sign_in_url=https://status.example.test/auth/magic-link/verify?token=…
+  expires_in_hours=24
+```
+
+Open the link to claim the instance. Notes on the shape of this:
+
+- It runs once. Any user row, soft-deleted included, means the instance is already claimed, and boot skips the whole block. The setting is inert from then on, so it is safe to leave in place: a value that later goes stale or malformed cannot break a restart.
+- On an unclaimed instance a malformed `bootstrap.email` fails boot rather than being ignored, and so does a missing `"magic_link"` in `auth.enabled_methods`, since there would be no way to hand the link back. Failing loudly beats seeding an account nobody can reach.
+- Only a single-use sign-in link is emitted, never an API token. In a container stdout **is** the log stream, and a token there would be a long-lived credential sitting in log storage. Mint tokens from the UI after signing in.
+- The link lives 24 hours rather than the usual `auth.magic_link.expiry_minutes`, because whoever installed the app may not read the logs for a while.
+- The link is minted before the account, so a failure partway through leaves no user row and the next boot retries cleanly.
+- The seeded email is not logged. It is already in your own config, and repeating it into log storage only spreads it further.
+
+Over plain HTTP on a LAN, also set `auth.session.cookie_secure = false`; the default `true` means the browser drops the session cookie the link issues.
+
+Deleting the seeded owner and letting the purge job clear it past its grace period empties `users` again, and the next restart will seed it afresh from the same config. Clear `bootstrap.email` once the instance is claimed if that is not what you want.
 
 ## Central Telegram bot
 

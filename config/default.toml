@@ -50,6 +50,11 @@ success_threshold = 2
 open_duration_secs = 60
 half_open_max_calls = 3
 
+[bootstrap]
+# Seeds this owner on first boot, for installs that cannot run the CLI.
+email = ""
+org_name = "My Org"
+
 [storage]
 # The credentials below are published; boot refuses them unless a local stack opts in.
 allow_default_credentials = false

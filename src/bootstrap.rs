@@ -1,16 +1,18 @@
-//! Operator CLI to seed the first owner on a fresh instance. Sign-in providers
-//! (OAuth, magic-link) all assume an account already exists or an inviter to
-//! carry a token; this creates that initial account + org out of band and mints
-//! a full-access API token so a self-hosted deployment is usable before any
-//! provider is wired up.
+//! Seeds the first owner on a fresh instance. Sign-in providers (OAuth,
+//! magic-link) all assume an account already exists or an inviter to carry a
+//! token; this creates that initial account + org out of band. Two entry
+//! points: the operator CLI, which mints a full-access API token and needs no
+//! provider at all, and boot-time seeding for installs with no terminal, which
+//! hands back a magic-link sign-in URL and so requires that method enabled.
 
 use anyhow::Context;
+use sqlx::PgPool;
 
 use crate::auth::scope::ScopeSet;
 use crate::auth::url::token_link;
 use crate::auth::{api_tokens, magic_link};
 use crate::config::AppConfig;
-use crate::domain::generate_signup_slug;
+use crate::domain::{OrgId, UserId, generate_signup_slug};
 use crate::error::{AppError, Result};
 use crate::storage::{PostgresTargetStore, orgs, users};
 
@@ -68,31 +70,85 @@ fn bad_usage(msg: impl std::fmt::Display) -> AppError {
     AppError::Other(anyhow::anyhow!("{msg}\n{USAGE}"))
 }
 
-/// Creates (or reuses) the owner account named by `email`, ensures it owns an
-/// org, and prints a fresh full-access token. Idempotent on the account and
-/// org; each run mints a new token.
-pub async fn run_owner(cfg: &AppConfig, args: &BootstrapArgs) -> Result<()> {
-    let pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
+/// Creates the owner account and its org, reusing either if already present.
+async fn ensure_owner_org(pool: &PgPool, email: &str, org_name: &str) -> Result<(UserId, OrgId)> {
+    let (user, _) = users::create_invited_user(pool, email).await?;
 
-    let (user, _) = users::create_invited_user(&pool, &args.email).await?;
-
-    let org = match orgs::oldest_membership_for_user(&pool, user).await? {
+    let org = match orgs::oldest_membership_for_user(pool, user).await? {
         Some(existing) => existing,
         None => {
             let mut created = None;
             for _ in 0..8 {
                 let slug = generate_signup_slug();
                 if let Some(org) =
-                    orgs::create_org_with_owner(&pool, user, &slug, &args.org_name, u32::MAX)
-                        .await?
+                    orgs::create_org_with_owner(pool, user, &slug, org_name, u32::MAX).await?
                 {
                     created = Some(org.id);
                     break;
                 }
             }
-            created.context("bootstrap-owner: could not allocate a unique org slug")?
+            created.context("bootstrap: could not allocate a unique org slug")?
         }
     };
+    Ok((user, org))
+}
+
+/// Seeds the owner named by `bootstrap.email` when the instance has no users.
+/// Hands back only a sign-in link, never a token: this lands in the log stream,
+/// so it has to expire and be single-use.
+pub async fn seed_first_owner(pool: &PgPool, cfg: &AppConfig) -> Result<()> {
+    let email = cfg.bootstrap.email.trim();
+    if email.is_empty() {
+        return Ok(());
+    }
+    // Claimed first, so a stale value left in config can never brick a later boot.
+    if users::any_exist(pool).await? {
+        return Ok(());
+    }
+    if !email.contains('@') {
+        return Err(AppError::Other(anyhow::anyhow!(
+            "bootstrap.email {email:?} is not an email address"
+        )));
+    }
+    if !cfg.auth.magic_link_enabled() {
+        return Err(AppError::Other(anyhow::anyhow!(
+            "bootstrap.email needs magic_link in auth.enabled_methods to hand back a sign-in link"
+        )));
+    }
+
+    // Whoever installed the app may not read the logs for hours.
+    const FIRST_RUN_LINK_MINUTES: u32 = 24 * 60;
+    // Link before account: failing here leaves no user row, so the next boot retries.
+    let link = magic_link::create(pool, email, None, FIRST_RUN_LINK_MINUTES, None, None).await?;
+
+    let (_, org) = ensure_owner_org(pool, email, &cfg.bootstrap.org_name).await?;
+    let slug = orgs::get_org(pool, org)
+        .await?
+        .map(|o| o.slug)
+        .unwrap_or_default();
+
+    let url = token_link(
+        &cfg.auth.public_base_url,
+        "/auth/magic-link/verify",
+        &link.token,
+    );
+    tracing::warn!(
+        // SAFE: the operator's own config named this owner, and the link is the
+        // only channel a terminal-less first boot has. Single-use and expiring,
+        // never a token; the email itself stays out, it adds nothing here.
+        org = %slug,
+        sign_in_url = %url,
+        expires_in_hours = FIRST_RUN_LINK_MINUTES / 60,
+        "seeded the first owner; open sign_in_url to claim this instance"
+    );
+    Ok(())
+}
+
+/// Idempotent on the account and org; each run mints a new full-access token.
+pub async fn run_owner(cfg: &AppConfig, args: &BootstrapArgs) -> Result<()> {
+    let pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
+
+    let (user, org) = ensure_owner_org(&pool, &args.email, &args.org_name).await?;
 
     let token = api_tokens::create(
         &pool,

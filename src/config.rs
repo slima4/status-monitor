@@ -86,6 +86,26 @@ pub struct AppConfig {
     pub slack_oauth: ConnectOauthConfig,
     #[serde(default)]
     pub discord_oauth: ConnectOauthConfig,
+    #[serde(default)]
+    pub bootstrap: BootstrapConfig,
+}
+
+/// Unattended first-run seeding, for app-store installs that have no terminal.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct BootstrapConfig {
+    /// Owner to seed when the instance has no users yet. Empty disables it.
+    pub email: String,
+    pub org_name: String,
+}
+
+impl Default for BootstrapConfig {
+    fn default() -> Self {
+        Self {
+            email: String::new(),
+            org_name: "My Org".to_string(),
+        }
+    }
 }
 
 /// `[slack_oauth]` / `[discord_oauth]`. Credentials of an operator-owned
@@ -1680,5 +1700,21 @@ mod tests {
         let mut cfg = storage_cfg();
         cfg.storage.allow_default_credentials = true;
         cfg.validate_storage().expect("opt-in bypasses the guard");
+    }
+
+    #[test]
+    fn bootstrap_disabled_by_default_and_org_name_survives_a_partial_table() {
+        let loaded = AppConfig::load().expect("load");
+        assert!(loaded.bootstrap.email.is_empty());
+        assert_eq!(loaded.bootstrap.org_name, "My Org");
+
+        // An override file naming only `email` must not blank the org name.
+        let partial: BootstrapConfig = Config::builder()
+            .add_source(File::from_str("email = 'a@b.test'", FileFormat::Toml))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+        assert_eq!(partial.org_name, "My Org");
     }
 }

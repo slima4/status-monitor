@@ -200,29 +200,55 @@ An [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server lets
 
 ## Self-host
 
+| I want to | Go to |
+|---|---|
+| Try it with one command | [Docker](#docker-recommended) |
+| Run it for real, with TLS and auth | [Production deployment](#production-deployment) |
+| Build the image myself (ARM host, or code changes) | [Build from source](#build-from-source) |
+| Skip Docker and run the binary | [Run without Docker](#run-without-docker) |
+
 ### Docker (recommended)
+
+Three steps. No Rust toolchain and no compile step.
+
+**1. Start it**
 
 ```bash
 docker compose up -d
 ```
 
-Brings up Postgres 18, ClickHouse 26.3, and the monitor. Migrations for both databases run at process startup — no init-script wiring, no external migrator.
+Pulls `ghcr.io/uptimepage/uptimepage:latest` and starts Postgres 18, ClickHouse 26.3, and the monitor. Both databases run their own migrations at startup, so there is nothing to wire up.
 
-This pulls the published image `ghcr.io/uptimepage/uptimepage:latest`, so there is no Rust toolchain and no compile step. Pin a release with `UPTIMEPAGE_IMAGE=ghcr.io/uptimepage/uptimepage:v1.0.0`.
-
-Automatic builds publish `linux/amd64`. On an ARM host (Apple silicon, Ampere) build from this checkout instead, which compiles natively with no emulation:
-
-```bash
-docker compose -f docker-compose.yml -f compose.build.yml up -d --build
-```
-
-Create the first owner account (the sign-in providers all assume an account already exists, so seed one out of band):
+**2. Create your account**
 
 ```bash
 docker compose exec uptimepage uptimepage bootstrap-owner --email you@example.com
 ```
 
-It prints, shown only once: a one-time link that signs you straight into the web dashboard, and a full-access API token plus the org slug. Open the link to reach the dashboard; use the token for the API. Create a target:
+Prints a one-time sign-in link, a full-access API token, and your org slug. These appear once, so copy them before closing the terminal.
+
+**3. Sign in and add a monitor**
+
+Open the link from step 2. That drops you into the dashboard at `http://localhost:8080`, where you can add your first monitor.
+
+To stop: `docker compose down`, or `docker compose down -v` to delete the data too.
+
+> This stack has no TLS and no auth in front of it, and it publishes the database ports. Great for trying it out, not safe on the open internet. To run it for real, see [Production deployment](#production-deployment).
+
+#### Options
+
+**Pin a version.** Set `UPTIMEPAGE_IMAGE=ghcr.io/uptimepage/uptimepage:v1.0.0` to stay on a release instead of `latest`.
+
+**On an ARM host?** Published images are `linux/amd64`. See [Build from source](#build-from-source).
+
+**Signing in later.** The bootstrap link works once. For repeat sign-in, and to invite a team, set up GitHub or Google OAuth, or an email provider for magic links (`[auth.github]`, `[auth.google]`, `[email]` in `config/default.toml`, or the matching env vars). See [docs/authentication.md](docs/authentication.md).
+
+**Packaging this for an app store?** Step 2 needs a terminal. Set `UPTIMEPAGE_BOOTSTRAP__EMAIL` instead and the first boot seeds that owner and logs a sign-in link, no shell required. See [First-run owner](docs/configuration.md#first-run-owner).
+
+<details>
+<summary><b>Prefer the API to the dashboard?</b></summary>
+
+Use the token and org slug from step 2. Create a monitor:
 
 ```bash
 curl -X POST http://127.0.0.1:8080/api/v1/targets \
@@ -248,9 +274,9 @@ curl -X POST http://127.0.0.1:8080/api/v1/targets \
   }'
 ```
 
-`interval` is seconds and must be at least the plan minimum, 180 on the free plan a fresh self-host starts on. A lower value returns `422 MIN_CHECK_INTERVAL`.
+`interval` is in seconds and has to meet the plan minimum, which is 180 on the free plan a fresh self-host starts on. Anything lower returns `422 MIN_CHECK_INTERVAL`.
 
-Read uptime, scrape metrics:
+Read uptime and scrape metrics:
 
 ```bash
 curl -H 'authorization: Bearer <token>' -H 'x-uptimepage-org: <org-slug>' \
@@ -258,13 +284,23 @@ curl -H 'authorization: Bearer <token>' -H 'x-uptimepage-org: <org-slug>' \
 curl http://127.0.0.1:9090/metrics
 ```
 
-The bootstrap link signs you in once. For ongoing sign-in — and for inviting a team — configure a sign-in provider: GitHub or Google OAuth, or a real email provider for magic links (`[auth.github]` / `[auth.google]` / `[email]` in `config/default.toml`, or the matching env vars). See [docs/authentication.md](docs/authentication.md).
+</details>
 
 ### Production deployment
 
-For a production deployment with TLS, basic auth, and proper hardening (Caddy edge, Postgres + ClickHouse internal-only, ClickHouse memory cap), see [`deployment/README.md`](deployment/README.md) or [docs/deployment.md](docs/deployment.md). The local dev stack above is fine for evaluation; do not expose it to the internet.
+Anything reachable from the internet should run this stack, not the one above. It adds a Caddy edge with automatic TLS, basic auth on the operator host, internal-only Postgres and ClickHouse, per-IP rate limits, and blue/green restarts. It pulls the same published image. Setup runbook is in [`deployment/README.md`](deployment/README.md), with the architecture in [docs/deployment.md](docs/deployment.md).
 
-### Local build
+### Build from source
+
+Published images are `linux/amd64`. Build from this checkout when you are on an ARM host (Apple silicon, Ampere), or when you are changing the code:
+
+```bash
+docker compose -f docker-compose.yml -f compose.build.yml up -d --build
+```
+
+Same stack and the same three steps as [Docker](#docker-recommended), only the image origin differs. Note that your local build then owns that image tag, so run `docker compose pull` when you want the published image back.
+
+### Run without Docker
 
 ```bash
 cargo build --release

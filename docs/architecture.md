@@ -19,7 +19,7 @@ The same binary runs in one of three modes; the mode is chosen at startup, befor
 
 - **Control plane** (default). Owns Postgres and ClickHouse, the REST API, the web UI, the MCP server, the marketing host, the scheduler for its own region, the incident writer, the escalation engine, public status pages, and the periodic jobs. Its own region is a normal `regions` row, not a sentinel.
 - **Agent** (`[agent] enabled = true`). A stateless probe: scheduler, registry, worker pool, batcher, sampler, and dispatch long-poller, and nothing else. No database, no web or API, no alerting. It pulls its region's decrypted monitor config from the control plane over an authenticated Bearer token and POSTs results back; region and agent identity are derived from the token server-side, never from the payload. See [Multi-region probes](multi-region.md).
-- **Bootstrap CLI** (`uptimepage bootstrap-owner --email <addr>`). Seeds the first user, org, and owner membership, mints a full-access API token, and exits. Runs against Postgres only.
+- **Bootstrap CLI** (`uptimepage bootstrap-owner --email <addr>`). Seeds the first user, org, and owner membership, mints a full-access API token, and exits. Runs against Postgres only. Installs with no terminal use `[bootstrap] email` instead, which seeds the same owner during control-plane startup and logs a sign-in link rather than a token. See [First-run owner](configuration.md#first-run-owner).
 
 ## Module layout
 
@@ -30,7 +30,7 @@ src/
 ├── app.rs            AppState, the composition root (every store + engine as a field)
 ├── router.rs         router assembly + middleware layer order
 ├── config.rs         typed AppConfig + UPTIMEPAGE_ env override loader
-├── bootstrap.rs      bootstrap-owner CLI mode
+├── bootstrap.rs      bootstrap-owner CLI mode + first-run owner seeding
 │
 ├── domain/           core types: Target, CheckSpec, CheckResult, Incident, on_call,
 │                     notification_channel, quota; no I/O
