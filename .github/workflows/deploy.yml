@@ -114,7 +114,7 @@ jobs:
     permissions:
       contents: read
       actions: read # read ci.yml run conclusion for the gate
-      packages: read # pull the app image from GHCR (org keeps it private)
+      packages: read # authenticated GHCR pull (higher rate limit than anonymous)
     environment: production # attach required-reviewer / protection rules via the GitHub env
     env:
       # Auto path: deploy the exact commit that was built, never re-migrate.
@@ -1004,9 +1004,9 @@ jobs:
           # image. (Pulling AFTER stop+drop once left prod 502 with an empty
           # DB when a session truncated mid-pull.)
           #
-          # Authenticate to GHCR so the pull works with the package kept
-          # private (org policy). The job's GITHUB_TOKEN carries packages:read;
-          # the login is ephemeral (token dies with the run).
+          # The package is public, so this login is for the higher authenticated
+          # pull rate limit, and so a re-privatised package doesn't break deploys.
+          # The job's GITHUB_TOKEN carries packages:read; the login is ephemeral.
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           docker compose pull "$TARGET_SVC"
 
