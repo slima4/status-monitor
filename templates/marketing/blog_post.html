@@ -47,4 +47,5 @@
     </p>
 </article>
 <script defer src="{{ "js/marketing/blog.js"|asset }}"></script>
+{% for s in embed_scripts %}<script defer src="{{ s|asset }}"></script>{% endfor %}
 {% endblock %}

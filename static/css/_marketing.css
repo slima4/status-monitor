@@ -2268,3 +2268,432 @@ html:has(.marketing-shell) {
     color: var(--mk-ink);
 }
 .mk-doc-card__desc { font-size: 0.8125rem; line-height: 1.5; color: var(--mk-ink-soft); }
+
+/* ── Quorum figure ──────────────────────────────────────────────────────────
+   A probe console. Regions check in parallel, so the figure gives each one its
+   own pipe and runs them at once; a confirmed region then sends a vote across
+   to the ballot. Down carries the colour weight because it is the exceptional
+   state, and pass stays a mark so a wall of green never shouts. */
+.mk-quorum {
+    /* Reads as a console, so it takes the dark ladder the article's own code
+       blocks use. Every derived token is restated: a var() chain resolves where
+       it is declared, so leaving --mk-rule-hover on the body scope would bake
+       in the light value. */
+    --mk-surface:   oklch(0.16 0.012 240);
+    --mk-bg:        oklch(0.13 0.012 240);
+    --mk-bg-2:      oklch(0.22 0.012 240);
+    --mk-ink:       oklch(0.94 0.008 240);
+    --mk-ink-soft:  oklch(0.80 0.008 240);
+    --mk-quiet:     oklch(0.66 0.010 240);
+    --mk-faint:     oklch(0.62 0.012 240);
+    --mk-rule:      oklch(0.30 0.012 240);
+    --mk-rule-soft: oklch(0.24 0.012 240);
+    --mk-rule-hover: oklch(0.44 0.012 240);
+    --mk-ok:        oklch(0.76 0.15 158);
+    --mk-ok-soft:   color-mix(in oklch, var(--mk-ok) 20%, var(--mk-surface));
+    --mk-down:      oklch(0.68 0.18 25);
+    --mk-mark:      oklch(0.80 0.13 70);
+    --mk-shadow-frame: 0 1px 0 oklch(1 0 0 / 0.05) inset, 0 20px 36px -24px oklch(0 0 0 / 0.55);
+
+    margin: 2.25rem 0;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-surface);
+    box-shadow: var(--mk-shadow-frame);
+    font-family: var(--mk-font-mono);
+    /* The article resolved its own colour against the light tokens, so restate
+       it here or anything unstyled inherits dark ink onto a dark card. */
+    color: var(--mk-ink-soft);
+    transition: border-color 220ms cubic-bezier(.2,0,0,1);
+}
+.mk-quorum.is-open { border-color: color-mix(in oklch, var(--mk-down) 70%, var(--mk-rule)); }
+/* The article styles bare p/ol at a specificity a single class cannot beat, so
+   the figure clears prose spacing before laying itself out. */
+.mk-quorum p, .mk-quorum ol { margin: 0; padding: 0; }
+/* Wide enough to stand outside the measure of the prose, the way the console
+   it mimics would. */
+@media (min-width: 1180px) {
+    .mk-quorum { margin-inline: -4rem; }
+}
+
+.mk-quorum__head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--mk-rule);
+}
+.mk-quorum__tag {
+    padding: 0.15rem 0.4rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 999px;
+    color: var(--mk-quiet);
+    font-size: 0.58rem;
+    font-weight: 650;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+/* The rule in force sits with the chrome, not in the prose: the pips show two
+   confirmations but only this says two. */
+.mk-quorum__rule { margin-right: auto; color: var(--mk-quiet); font-size: 0.66rem; }
+.mk-quorum__meta { color: var(--mk-faint); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
+.mk-quorum__clock { color: var(--mk-quiet); font-weight: 600; }
+
+/* ── headline ── */
+.mk-quorum__lead {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.25rem;
+    justify-content: space-between;
+    align-items: flex-end;
+    padding: 0.85rem 1rem 0.9rem;
+}
+.mk-quorum__score { margin: 0; display: flex; align-items: baseline; gap: 0.55rem; flex-wrap: wrap; }
+.mk-quorum__big {
+    color: var(--mk-ink);
+    font-size: clamp(1.9rem, 5vw, 2.5rem);
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    transition: color 220ms cubic-bezier(.2,0,0,1);
+}
+.mk-quorum.is-open .mk-quorum__big { color: var(--mk-down); }
+.mk-quorum__need {
+    margin-left: -0.1rem;
+    color: var(--mk-faint);
+    font-size: clamp(1.05rem, 2.6vw, 1.35rem);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.mk-quorum__unit { color: var(--mk-quiet); font-size: 0.7rem; }
+
+/* ── flow ── */
+.mk-quorum__flow {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 13.75rem;
+    gap: 1.1rem;
+    padding: 0 1rem 0.85rem;
+}
+.mk-quorum .mk-quorum__colhead {
+    margin: 0 0 0.5rem;
+    color: var(--mk-faint);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.mk-quorum__lanes { display: grid; gap: 2px; }
+.mk-quorum__lane {
+    display: grid;
+    grid-template-columns: minmax(0, 6.4rem) minmax(0, 1fr) auto minmax(0, 4.9rem);
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.24rem 0 0.24rem 0.45rem;
+    border-radius: 1px;
+    box-shadow: inset 2px 0 0 transparent;
+    transition: box-shadow 220ms cubic-bezier(.2,0,0,1), background-color 220ms cubic-bezier(.2,0,0,1);
+}
+.mk-quorum__lane.is-down {
+    box-shadow: inset 2px 0 0 var(--mk-down);
+    background: color-mix(in oklch, var(--mk-down) 12%, transparent);
+}
+.mk-quorum__name { color: var(--mk-ink); font-size: 0.72rem; font-weight: 550; }
+.mk-quorum__lane.is-silent .mk-quorum__name { color: var(--mk-faint); }
+
+.mk-quorum__pipe { display: flex; align-items: center; }
+.mk-quorum__cell {
+    flex: 1 1 auto;
+    min-width: 18px;
+    height: 16px;
+    border: 1px solid var(--mk-rule-soft);
+    border-radius: 1px;
+    transition-property: background-color, border-color, box-shadow;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(.2,0,0,1);
+}
+.mk-quorum__arrow {
+    flex: 0 0 auto;
+    width: 10px;
+    color: var(--mk-faint);
+    font-size: 0.6rem;
+    line-height: 1;
+    text-align: center;
+}
+.mk-quorum__arrow::before { content: "→"; }
+.mk-quorum__lane.is-silent .mk-quorum__cell { border-style: dotted; }
+.mk-quorum__cell.is-done { border-color: var(--mk-rule); background: var(--mk-bg-2); }
+/* The stage the check is in right now: setting the connection up, then
+   waiting on the answer. */
+.mk-quorum__cell[data-stage="dns"].is-lit,
+.mk-quorum__cell[data-stage="tcp"].is-lit,
+.mk-quorum__cell[data-stage="tls"].is-lit {
+    border-color: var(--mk-mark);
+    background: color-mix(in oklch, var(--mk-mark) 42%, transparent);
+}
+.mk-quorum__cell[data-stage="ttfb"].is-lit {
+    border-color: var(--mk-quiet);
+    background: color-mix(in oklch, var(--mk-quiet) 34%, transparent);
+}
+.mk-quorum__cell.is-pass { border-color: var(--mk-ok); background: color-mix(in oklch, var(--mk-ok) 26%, transparent); }
+.mk-quorum__cell.is-fail { border-color: var(--mk-down); background: color-mix(in oklch, var(--mk-down) 34%, transparent); }
+
+.mk-quorum__pips { display: flex; gap: 3px; }
+.mk-quorum__pip {
+    width: 5px;
+    height: 5px;
+    border: 1px solid var(--mk-rule);
+    border-radius: 50%;
+    transition: background-color 200ms cubic-bezier(.2,0,0,1), border-color 200ms cubic-bezier(.2,0,0,1);
+}
+.mk-quorum__pip.is-lit { border-color: var(--mk-down); background: var(--mk-down); }
+
+.mk-quorum__name, .mk-quorum__state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-quorum__state { color: var(--mk-quiet); font-size: 0.62rem; text-align: right; }
+.mk-quorum__lane.is-down .mk-quorum__state { color: var(--mk-down); font-weight: 650; }
+.mk-quorum__lane.is-silent .mk-quorum__state { color: var(--mk-faint); }
+
+.mk-quorum .mk-quorum__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.7rem;
+    margin: 0.6rem 0 0;
+    padding-left: 0.45rem;
+    color: var(--mk-faint);
+    font-size: 0.6rem;
+}
+.mk-quorum__key {
+    width: 12px;
+    height: 8px;
+    border: 1px solid var(--mk-rule);
+    border-radius: 1px;
+    margin-right: -0.35rem;
+}
+.mk-quorum__key--setup { border-color: var(--mk-mark); background: color-mix(in oklch, var(--mk-mark) 42%, transparent); }
+.mk-quorum__key--wait { border-color: var(--mk-quiet); background: color-mix(in oklch, var(--mk-quiet) 34%, transparent); }
+.mk-quorum__key--ok { border-color: var(--mk-ok); background: color-mix(in oklch, var(--mk-ok) 26%, transparent); }
+.mk-quorum__key--down { border-color: var(--mk-down); background: color-mix(in oklch, var(--mk-down) 34%, transparent); }
+
+/* Stage names sit once above the lanes rather than inside every cell: the
+   chip travels over the cells, and five labels per row times five rows is the
+   same word repeated 25 times. Mirrors the lane grid, with the pips column
+   held open so the pipe lines up. */
+.mk-quorum .mk-quorum__phases {
+    display: grid;
+    grid-template-columns: minmax(0, 6.4rem) minmax(0, 1fr) auto minmax(0, 4.9rem);
+    align-items: center;
+    gap: 0.6rem;
+    margin: 0 0 0.3rem;
+    padding-left: 0.45rem;
+}
+.mk-quorum__phases .mk-quorum__pips { visibility: hidden; }
+.mk-quorum__phaserow { display: flex; align-items: center; }
+.mk-quorum__phase {
+    /* Zero basis so a label tracks its cell's width instead of its own text. */
+    flex: 1 1 0;
+    min-width: 18px;
+    overflow: hidden;
+    color: var(--mk-faint);
+    font-size: 0.55rem;
+    letter-spacing: 0.06em;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.mk-quorum__phases .mk-quorum__arrow { color: transparent; }
+
+/* ── ballot ── */
+.mk-quorum__ballot { padding-left: 1.1rem; border-left: 1px solid var(--mk-rule); }
+/* Beats the article's own `ol li { list-style: decimal }`; the seats carry
+   their own numbers. */
+ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
+.mk-quorum__seats { display: grid; gap: 3px; margin: 0; padding: 0; }
+.mk-quorum__seat {
+    display: grid;
+    grid-template-columns: 1rem 1fr auto;
+    align-items: center;
+    gap: 0.4rem;
+    height: 22px;
+    padding: 0 0.4rem;
+    border: 1px solid var(--mk-rule-soft);
+    border-radius: 1px;
+    transition-property: background-color, border-color;
+    transition-duration: 220ms;
+    transition-timing-function: cubic-bezier(.2,0,0,1);
+}
+.mk-quorum__seatno { color: var(--mk-faint); font-size: 0.6rem; font-variant-numeric: tabular-nums; }
+.mk-quorum__seatname { overflow: hidden; color: var(--mk-faint); font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.mk-quorum__seat.is-taken { border-color: var(--mk-down); background: color-mix(in oklch, var(--mk-down) 24%, transparent); }
+.mk-quorum__seat.is-taken .mk-quorum__seatname { color: var(--mk-down); font-weight: 600; }
+.mk-quorum__seat.is-taken .mk-quorum__seatno { color: var(--mk-down); }
+/* A region still passing holds its seat but earns no fill: down is the state
+   that gets the weight. */
+.mk-quorum__seat.is-up { border-color: color-mix(in oklch, var(--mk-ok) 55%, var(--mk-rule)); }
+.mk-quorum__seat.is-up .mk-quorum__seatname { color: var(--mk-ok); }
+.mk-quorum__seatmark { color: var(--mk-faint); font-size: 0.6rem; text-align: right; }
+.mk-quorum__seat.is-up .mk-quorum__seatmark { color: var(--mk-ok); }
+.mk-quorum__seat.is-taken .mk-quorum__seatmark { color: var(--mk-down); }
+/* The threshold, drawn where the votes have to reach. */
+.mk-quorum__bar {
+    margin: 0.15rem 0 0.1rem;
+    padding-top: 0.2rem;
+    border-top: 2px solid var(--mk-ink);
+    color: var(--mk-ink);
+    transition: border-color 220ms cubic-bezier(.2,0,0,1), color 220ms cubic-bezier(.2,0,0,1);
+    font-size: 0.58rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    list-style: none;
+}
+.mk-quorum__bar.is-crossed { border-top-color: var(--mk-down); color: var(--mk-down); }
+/* Same row geometry as a seat, and it holds that one line: the note is written
+   short enough for the ballot column rather than wrapped. */
+.mk-quorum .mk-quorum__ghost {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    height: 22px;
+    margin-top: 3px;
+    padding: 0 0.4rem;
+    border: 1px dotted var(--mk-rule);
+    border-radius: 1px;
+    color: var(--mk-faint);
+    font-size: 0.62rem;
+    white-space: nowrap;
+}
+.mk-quorum__ghostmark { width: 0.6rem; }
+.mk-quorum__ghostnote { overflow: hidden; margin-left: auto; text-overflow: ellipsis; }
+.mk-quorum .mk-quorum__verdict {
+    margin: 0.7rem 0 0;
+    min-height: 4.5rem;
+    color: var(--mk-ink-soft);
+    font-size: 0.68rem;
+    line-height: 1.55;
+}
+.mk-quorum.is-open .mk-quorum__verdict { color: var(--mk-down); font-weight: 600; }
+
+/* The check in flight, and the vote it earns. */
+.mk-quorum__chip {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--mk-ink);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--mk-ink) 22%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    z-index: 2;
+    transition: opacity 140ms linear;
+}
+.mk-quorum__chip--vote {
+    border-radius: 50%;
+    background: var(--mk-down);
+    box-shadow: 0 0 0 4px color-mix(in oklch, var(--mk-down) 30%, transparent);
+}
+.mk-quorum__chip.is-live { opacity: 1; }
+
+/* ── check log ── */
+.mk-quorum__log {
+    margin-top: 0.7rem;
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-bg);
+    min-height: 4.7rem;
+    overflow-x: auto;
+}
+.mk-quorum__logline {
+    display: grid;
+    grid-template-columns: 3rem 6.2rem 2rem 3.2rem minmax(0, 1fr);
+    gap: 0.55rem;
+    margin: 0;
+    color: var(--mk-quiet);
+    font-size: 0.65rem;
+    line-height: 1.55;
+    white-space: nowrap;
+}
+.mk-quorum__logtime { color: var(--mk-faint); font-variant-numeric: tabular-nums; }
+.mk-quorum__logname { color: var(--mk-ink-soft); }
+.mk-quorum__logcode { font-weight: 650; font-variant-numeric: tabular-nums; }
+.mk-quorum__logcode.is-ok { color: var(--mk-ok); }
+.mk-quorum__logcode.is-down { color: var(--mk-down); }
+.mk-quorum__logms { color: var(--mk-faint); font-variant-numeric: tabular-nums; text-align: right; }
+.mk-quorum__lognote { overflow: hidden; text-overflow: ellipsis; }
+.mk-quorum__logwait { color: var(--mk-faint); font-size: 0.64rem; line-height: 1.6; }
+
+.mk-quorum .mk-quorum__caption {
+    padding: 0.7rem 1rem 0.8rem;
+    border-top: 1px solid var(--mk-rule);
+    color: var(--mk-quiet);
+    font-size: 0.68rem;
+    line-height: 1.6;
+}
+
+/* ── transport ── */
+.mk-quorum__tp { display: flex; align-items: center; gap: 0.4rem; }
+.mk-quorum__btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    color: var(--mk-quiet);
+    background: var(--mk-bg);
+    transition-property: color, border-color, background-color;
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(.2,0,0,1);
+}
+.mk-quorum__btn svg { width: 13px; height: 13px; fill: currentColor; }
+.mk-quorum__stroke { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mk-quorum__btn:hover:not(:disabled) { color: var(--mk-ink); border-color: var(--mk-rule-hover); }
+.mk-quorum__btn:disabled { opacity: 0.3; cursor: default; }
+.mk-quorum__btn--go {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    color: var(--mk-ink);
+    border-color: var(--mk-ok);
+    background: var(--mk-ok-soft);
+}
+.mk-quorum__btn--go svg { width: 14px; height: 14px; }
+.mk-quorum__ic { display: none; }
+.mk-quorum__btn--go[data-state="play"] .mk-quorum__ic--play,
+.mk-quorum__btn--go[data-state="pause"] .mk-quorum__ic--pause,
+.mk-quorum__btn--go[data-state="replay"] .mk-quorum__ic--replay { display: block; }
+.mk-quorum__round { color: var(--mk-faint); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 940px) {
+    .mk-quorum__flow { grid-template-columns: minmax(0, 1fr); }
+    .mk-quorum__ballot { padding: 0.9rem 0 0; border-left: 0; border-top: 1px solid var(--mk-rule); }
+    /* Full width here, so the verdict needs far fewer reserved lines. */
+    .mk-quorum .mk-quorum__verdict { min-height: 2.4rem; }
+}
+@media (max-width: 560px) {
+    /* The lane stacks here, so a single header row can no longer line up. */
+    .mk-quorum .mk-quorum__phases { display: none; }
+    .mk-quorum__lane {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "name state" "pipe pips";
+        row-gap: 0.25rem;
+        padding-block: 0.4rem;
+    }
+    .mk-quorum__name { grid-area: name; }
+    .mk-quorum__state { grid-area: state; }
+    .mk-quorum__pipe { grid-area: pipe; }
+    .mk-quorum__pips { grid-area: pips; }
+    .mk-quorum__logline { grid-template-columns: 3rem 1fr 2rem; }
+    .mk-quorum__logms, .mk-quorum__lognote { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mk-quorum, .mk-quorum__lane, .mk-quorum__cell, .mk-quorum__pip,
+    .mk-quorum__seat, .mk-quorum__btn, .mk-quorum__big, .mk-quorum__chip { transition: none; }
+}

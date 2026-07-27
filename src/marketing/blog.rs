@@ -55,6 +55,7 @@ pub struct Post {
     /// site card is used when absent.
     pub og_image: Option<String>,
     pub body_html: String,
+    pub embed_scripts: Vec<&'static str>,
     /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
     pub body_md: String,
     /// Local images the post renders, for the image sitemap.
@@ -183,6 +184,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
             "og_image must be a /static/-rooted path, got {img:?}"
         );
     }
+    let body_html = render(body);
     Ok(Post {
         slug: fm.slug.unwrap_or_else(|| stem.to_string()),
         title: fm.title,
@@ -194,7 +196,8 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         list_items: fm.list_items,
         faqs: fm.faqs.into_iter().map(|f| (f.q, f.a)).collect(),
         og_image: fm.og_image,
-        body_html: render(body),
+        embed_scripts: embed_scripts(&body_html),
+        body_html,
         body_md: body.trim().to_string(),
         images: collect_images(body),
     })
@@ -208,6 +211,11 @@ fn split_front_matter(raw: &str) -> Option<(&str, &str)> {
     Some((front, body))
 }
 
+/// Interactive figures a post can embed: the mount class it writes in Markdown,
+/// and the script that fills it. One table so the sanitiser allowlist and the
+/// script the page loads cannot drift apart.
+const EMBEDS: &[(&str, &str)] = &[("mk-embed-quorum", "js/marketing/quorum.js")];
+
 /// Sanitising Markdown render. CommonMark + tables → HTML → ammonia
 /// allowlist. Third-party PR content never reaches a browser as raw
 /// HTML; every `<script>`, `onerror=`, and `javascript:` href is
@@ -215,8 +223,10 @@ fn split_front_matter(raw: &str) -> Option<(&str, &str)> {
 pub fn render(markdown: &str) -> String {
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(parser(markdown)));
-    ammonia::Builder::default()
-        .link_rel(Some("noopener noreferrer"))
+    // Declared before the builder so it outlives the borrow taken below.
+    let mounts: Vec<&str> = EMBEDS.iter().map(|(mount, _)| *mount).collect();
+    let mut safe = ammonia::Builder::default();
+    safe.link_rel(Some("noopener noreferrer"))
         .add_tags(["details", "summary"])
         .add_allowed_classes("div", &["mk-table-scroll", "mk-faq__body"])
         .add_allowed_classes("details", &["mk-faq"])
@@ -224,9 +234,27 @@ pub fn render(markdown: &str) -> String {
         // Keep pulldown's `language-*` class so a language-tagged block reads as
         // code (scroll) and a plain fence reads as prose (wrap). A class cannot
         // execute, so this widens nothing dangerous.
-        .add_tag_attributes("code", &["class"])
-        .clean(&html)
-        .to_string()
+        .add_tag_attributes("code", &["class"]);
+    safe.add_allowed_classes("div", &mounts);
+    safe.clean(&html).to_string()
+}
+
+/// A figure counts as embedded only where the sanitiser left a real element.
+/// A post that writes the class name in prose or a code fence gets its angle
+/// brackets escaped, so the name alone must not pull in a script.
+fn has_mount(body_html: &str, mount: &str) -> bool {
+    body_html.contains(&format!("<div class=\"{mount}\""))
+}
+
+/// Scripts this post needs, read back off the rendered body: an embed exists
+/// only if its mount survived sanitising, so a stripped figure cannot leave a
+/// script loading against nothing.
+fn embed_scripts(body_html: &str) -> Vec<&'static str> {
+    EMBEDS
+        .iter()
+        .filter(|(mount, _)| has_mount(body_html, mount))
+        .map(|(_, script)| *script)
+        .collect()
 }
 
 /// Shared so an extension can't apply to the render but not the sitemap.
@@ -308,6 +336,7 @@ struct BlogPostPage {
     author: &'static Author,
     tags: Vec<String>,
     body_html: String,
+    embed_scripts: Vec<&'static str>,
     related: Vec<RelatedLink>,
     version: &'static str,
 }
@@ -432,6 +461,7 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         author: &AUTHOR,
         tags: post.tags.clone(),
         body_html: post.body_html.clone(),
+        embed_scripts: post.embed_scripts.clone(),
         related: related_posts(post, RELATED_LIMIT),
         version: env!("CARGO_PKG_VERSION"),
     }
@@ -692,6 +722,72 @@ mod tests {
         }
         for w in posts.windows(2) {
             assert!(w[0].date >= w[1].date, "blog index must be date-desc");
+        }
+    }
+
+    #[test]
+    fn embed_mount_survives_sanitising() {
+        for (mount, _) in EMBEDS {
+            let html = render(&format!("<div class=\"{mount}\"></div>"));
+            assert!(
+                html.contains(mount),
+                "{mount} is stripped, so its figure would never mount: {html}"
+            );
+        }
+    }
+
+    /// An unknown asset path resolves to a bare `/static/...` that 404s at
+    /// runtime, so a typo here would be a silently dead figure.
+    #[test]
+    fn embed_scripts_are_built_assets() {
+        for (mount, script) in EMBEDS {
+            assert_ne!(
+                crate::web::assets::url(script),
+                format!("/static/{script}"),
+                "{mount} loads {script}, which is not a built bundle"
+            );
+        }
+    }
+
+    #[test]
+    fn a_post_embedding_a_figure_asks_for_its_script() {
+        let embedded: Vec<&Post> = all()
+            .iter()
+            .filter(|p| !p.embed_scripts.is_empty())
+            .collect();
+        for post in &embedded {
+            for script in &post.embed_scripts {
+                assert!(
+                    EMBEDS.iter().any(|(_, s)| s == script),
+                    "{} asks for an unknown script {script}",
+                    post.slug
+                );
+            }
+        }
+        // The mount only ever appears via Markdown, so a post that writes one
+        // must come back out of the parser carrying its script.
+        for post in all() {
+            for (mount, script) in EMBEDS {
+                assert_eq!(
+                    has_mount(&post.body_html, mount),
+                    post.embed_scripts.contains(script),
+                    "{} disagrees about {mount}",
+                    post.slug
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_mount_named_in_prose_loads_nothing() {
+        for (mount, _) in EMBEDS {
+            let html = render(&format!(
+                "Write `<div class=\"{mount}\"></div>` to embed it."
+            ));
+            assert!(
+                embed_scripts(&html).is_empty(),
+                "{mount} written as text must not load its script: {html}"
+            );
         }
     }
 }
