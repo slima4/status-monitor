@@ -23,22 +23,21 @@
     <section>
         <div class="fnd">
             <div class="fnd__text">
-                <p class="mk-eyebrow mk-eyebrow--ok">founding access</p>
-                <p class="mk-body mt-2">The first <strong class="mk-ink">{{ founding_total|thousands }}</strong> hosted accounts get the founding plan and keep it at the founding limits, even after we close it. <span class="mk-mark">No catch, no expiry</span>.</p>
+                <p class="mk-body">The first <strong class="mk-ink">{{ founding_total|thousands }}</strong> hosted accounts get the founding plan and keep those limits for life, even after we close the cohort. No catch, no expiry.</p>
             </div>
             <div class="fnd__meterwrap">
                 <div class="fnd__gauge">
                     <span class="fnd__gauge-label">founding cohort</span>
-                    <span class="fnd__gauge-pct">{{ founding_pct_exact }}<span>%</span></span>
+                    <span class="fnd__gauge-pct">{{ founding_left|thousands }}<span>left</span></span>
                 </div>
                 <div class="fnd-meter" role="progressbar" aria-valuenow="{{ founding_pct_exact }}" aria-valuemin="0" aria-valuemax="100" aria-label="Founding spots claimed"><div class="fnd-meter__fill fnd-meter__fill--w{{ founding_pct }}"></div></div>
-                <div class="fnd__count"><span><strong>{{ founding_claimed|thousands }}</strong> / {{ founding_total|thousands }} claimed</span><span>{{ founding_left|thousands }} left</span></div>
+                <div class="fnd__count"><span><strong>{{ founding_claimed|thousands }}</strong> / {{ founding_total|thousands }} claimed</span><span>{{ founding_pct_exact }}%</span></div>
             </div>
         </div>
     </section>
 
     <section class="space-y-4">
-        <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="mk-price-grid grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div class="mk-price mk-price--stack">
                 <div class="mk-price__name">standard</div>
                 <p class="mk-price__tag">For a side project, or trying the thing out properly.</p>
@@ -83,7 +82,7 @@
                 <p class="mk-price__tag">For a product that needs the status page on your own domain.</p>
                 <div class="mk-price__amt"><b>$9</b><span>/ month</span></div>
                 <p class="mk-price__note">billed monthly or yearly</p>
-                <a href="{{ app_url }}/login" class="mk-cta mk-cta--ghost mk-cta--block" data-umami-event="plan-notify" data-umami-event-plan="pro">get notified</a>
+                <a href="mailto:hello@uptimepage.dev?subject=Tell%20me%20when%20Pro%20launches" class="mk-cta mk-cta--ghost mk-cta--block" data-umami-event="plan-notify" data-umami-event-plan="pro">notify me</a>
                 <p class="mk-price__head">everything in standard, plus</p>
                 <ul class="mk-price__list">
                     <li class="mk-price__line"><span><b>50</b> monitors</span></li>
@@ -104,7 +103,7 @@
                 <p class="mk-price__tag">For teams running this in production at real scale.</p>
                 <div class="mk-price__amt"><b>$19</b><span>/ month</span></div>
                 <p class="mk-price__note">billed monthly or yearly</p>
-                <a href="{{ app_url }}/login" class="mk-cta mk-cta--ghost mk-cta--block" data-umami-event="plan-notify" data-umami-event-plan="team">get notified</a>
+                <a href="mailto:hello@uptimepage.dev?subject=Tell%20me%20when%20Team%20launches" class="mk-cta mk-cta--ghost mk-cta--block" data-umami-event="plan-notify" data-umami-event-plan="team">notify me</a>
                 <p class="mk-price__head">everything in pro, plus</p>
                 <ul class="mk-price__list">
                     <li class="mk-price__line"><span><b>150</b> monitors</span></li>
@@ -129,25 +128,25 @@
         <div class="overflow-x-auto">
             <table class="cmp">
                 <thead>
-                    <tr><th>&nbsp;</th><th>Standard</th><th class="col-us us">Founding</th><th>Pro</th><th>Team</th></tr>
+                    <tr><th>&nbsp;</th><th>Standard</th><th>Founding</th><th>Pro</th><th>Team</th></tr>
                 </thead>
                 <tbody>
-                    <tr><th>monitors</th><td>20</td><td class="col-us">50</td><td>50</td><td>150</td></tr>
-                    <tr><th>check interval</th><td>3 min</td><td class="col-us">60 sec</td><td>60 sec</td><td>30 sec</td></tr>
-                    <tr><th>history</th><td>30 days</td><td class="col-us">90 days</td><td>90 days</td><td>13 months</td></tr>
-                    <tr><th>probe regions</th><td>3</td><td class="col-us">all</td><td>all</td><td>all</td></tr>
-                    <tr><th>team seats</th><td>3</td><td class="col-us">5</td><td>5</td><td>15</td></tr>
-                    <tr><th>status pages</th><td>1</td><td class="col-us">2</td><td>2</td><td>5</td></tr>
-                    <tr><th>status components</th><td>15</td><td class="col-us">30</td><td>30</td><td>75</td></tr>
-                    <tr><th>notification channels</th><td>20</td><td class="col-us">30</td><td>30</td><td>50</td></tr>
-                    <tr><th>share links per monitor</th><td>1</td><td class="col-us">3</td><td>3</td><td>5</td></tr>
-                    <tr><th>all alert channel types</th><td class="yes">yes</td><td class="col-us yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
-                    <tr><th>API + MCP</th><td class="yes">yes</td><td class="col-us yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
-                    <tr><th>bring your own SMS</th><td class="no">—</td><td class="col-us yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
-                    <tr><th>on-call + escalation</th><td class="no">—</td><td class="col-us no">—</td><td class="no">—</td><td class="yes">yes</td></tr>
-                    <tr><th>custom domain</th><td class="no">—</td><td class="col-us no">—</td><td class="yes">yes</td><td class="yes">yes</td></tr>
-                    <tr><th>white-label</th><td class="no">—</td><td class="col-us no">—</td><td class="yes">yes</td><td class="yes">yes</td></tr>
-                    <tr><th>self-host (AGPL)</th><td class="yes">unlimited</td><td class="col-us yes">unlimited</td><td class="yes">unlimited</td><td class="yes">unlimited</td></tr>
+                    <tr><th>monitors</th><td>20</td><td>50</td><td>50</td><td>150</td></tr>
+                    <tr><th>check interval</th><td>3 min</td><td>60 sec</td><td>60 sec</td><td>30 sec</td></tr>
+                    <tr><th>history</th><td>30 days</td><td>90 days</td><td>90 days</td><td>13 months</td></tr>
+                    <tr><th>probe regions</th><td>3</td><td>all</td><td>all</td><td>all</td></tr>
+                    <tr><th>team seats</th><td>3</td><td>5</td><td>5</td><td>15</td></tr>
+                    <tr><th>status pages</th><td>1</td><td>2</td><td>2</td><td>5</td></tr>
+                    <tr><th>status components</th><td>15</td><td>30</td><td>30</td><td>75</td></tr>
+                    <tr><th>notification channels</th><td>20</td><td>30</td><td>30</td><td>50</td></tr>
+                    <tr><th>share links per monitor</th><td>1</td><td>3</td><td>3</td><td>5</td></tr>
+                    <tr><th>all alert channel types</th><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>API + MCP</th><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>bring your own SMS</th><td class="no">—</td><td class="yes">yes</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>on-call + escalation</th><td class="no">—</td><td class="no">—</td><td class="no">—</td><td class="yes">yes</td></tr>
+                    <tr><th>custom domain</th><td class="no">—</td><td class="no">—</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>white-label</th><td class="no">—</td><td class="no">—</td><td class="yes">yes</td><td class="yes">yes</td></tr>
+                    <tr><th>self-host (AGPL)</th><td class="yes">unlimited</td><td class="yes">unlimited</td><td class="yes">unlimited</td><td class="yes">unlimited</td></tr>
                 </tbody>
             </table>
         </div>
@@ -164,27 +163,17 @@
         </div>
     </section>
 
-    <section class="space-y-8">
+    <section class="space-y-5">
         <div class="space-y-2 text-center">
-            <h2 class="mk-h2">What the <em class="mk-h2-em">$0</em> tier gets you, vs the others.</h2>
+            <h2 class="mk-h2">Weighing us against <em class="mk-h2-em">something else</em>?</h2>
+            <p class="mk-lede mx-auto">Each one gets a page of its own, limits side by side, checked against the source and dated.</p>
         </div>
-        <div class="overflow-x-auto">
-            <table class="cmp">
-                <thead>
-                    <tr><th>&nbsp;</th><th class="col-us us">uptimepage</th><th>uptimerobot</th><th>better stack</th><th>oneuptime</th></tr>
-                </thead>
-                <tbody>
-                    <tr><th>monitors</th><td class="col-us us">20</td><td>50 *</td><td>10</td><td>10</td></tr>
-                    <tr><th>check interval</th><td class="col-us us">3 min</td><td>5 min</td><td>3 min</td><td>billed</td></tr>
-                    <tr><th>history</th><td class="col-us us">30 days</td><td>limited</td><td>limited</td><td>15 days</td></tr>
-                    <tr><th>teammates</th><td class="col-us us">3</td><td>1</td><td>limited</td><td>1</td></tr>
-                    <tr><th>commercial use</th><td class="col-us us yes">yes</td><td class="no">personal only</td><td class="yes">yes</td><td class="yes">yes</td></tr>
-                    <tr><th>API and MCP</th><td class="col-us us yes">yes</td><td class="no">limited</td><td class="no">paid</td><td class="no">no API</td></tr>
-                    <tr><th>self-host, no limits</th><td class="col-us us yes">yes</td><td class="no">no</td><td class="no">no</td><td class="yes">yes</td></tr>
-                </tbody>
-            </table>
+        <div class="flex flex-wrap justify-center gap-2">
+            <a href="/vs/uptimerobot" class="mk-cta mk-cta--ghost">vs uptimerobot</a>
+            <a href="/vs/better-stack" class="mk-cta mk-cta--ghost">vs better stack</a>
+            <a href="/vs/oneuptime" class="mk-cta mk-cta--ghost">vs oneuptime</a>
+            <a href="/vs/uptime-kuma" class="mk-cta mk-cta--ghost">vs uptime kuma</a>
         </div>
-        <p class="cmp__note">* UptimeRobot allows 50 on free, but the free plan is personal, non-commercial use only. Competitor limits shift often, check theirs before you decide.</p>
     </section>
 
     <section class="space-y-8">

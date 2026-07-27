@@ -969,62 +969,61 @@ html:has(.marketing-shell) {
 
 /* ── Pricing card ─────────────────────────────────────────────────── */
 .mk-price {
+    --mk-price-pad-block: 2rem;
     position: relative;
     background: var(--mk-surface);
     border: 1px solid var(--mk-rule);
     border-radius: 2px;
-    padding: 2rem 1.75rem;
+    padding-block: var(--mk-price-pad-block);
+    padding-inline: 1.75rem;
     overflow: hidden;
 }
 .mk-price > * { position: relative; }
-.mk-price--stack { display: flex; flex-direction: column; gap: 1rem; }
+/* Subgrid so every card's seven rows align across the tier row. */
+.mk-price-grid { grid-template-rows: repeat(7, auto); }
+.mk-price--stack { display: grid; grid-template-rows: subgrid; grid-row: span 7; gap: 1rem; }
+/* Structural emphasis; green stays a mark, never a surface. */
 .mk-price--feature {
-    border-color: var(--mk-ok);
-    background: color-mix(in oklch, var(--mk-ok) 5%, var(--mk-surface));
+    border-color: var(--mk-ink);
     box-shadow: var(--mk-shadow-card);
 }
-.mk-price--feature::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--mk-ok); }
-.mk-price--feature .mk-price__amt b { color: var(--mk-ok); }
+/* Shared header rule: the featured tier and the panel that sells it. */
+.mk-price--feature::before,
+.fnd::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 3px; background: var(--mk-ink); }
 @media (min-width: 768px) {
     .mk-price--feature { box-shadow: var(--mk-shadow-card-hover); }
 }
-/* Negative block margin, not translateY: the grid stretches the card to the row
-   height minus its margins, so the featured tier grows past the others at both
-   ends. Held back to the 4-up breakpoint — with two columns there is a second
-   row underneath, and the overhang would eat half the gap above it. */
+/* Margin overhangs the row, repaid in padding so the subgrid rows stay aligned; 4-up only, or it eats the second row's gap. */
 @media (min-width: 1024px) {
-    .mk-price--feature { margin-block: -0.5rem; }
+    .mk-price--feature { --mk-price-pad-block: 2.5rem; margin-block: -0.5rem; }
 }
-.mk-price--soon { opacity: 0.9; background: var(--mk-bg); }
+/* Recede by surface: opacity would dim the border and badge and soften glyphs. */
+.mk-price--soon { background: var(--mk-bg); }
 .mk-price--soon .mk-price__name { color: var(--mk-ink-soft); }
+/* Centred in the top padding band; at 0.9rem it overlapped the tier name. */
 .mk-price__badge {
-    position: absolute; top: 0.9rem; right: 1rem;
+    position: absolute; top: calc(var(--mk-price-pad-block) - 1.625rem); right: 1.75rem;
     font-family: var(--mk-font-mono); font-size: 0.625rem;
     letter-spacing: 0.08em; text-transform: uppercase;
     color: var(--mk-ok); border: 1px solid var(--mk-ok);
     border-radius: 2px; padding: 0.1rem 0.35rem;
 }
-.mk-price__badge--pop { color: var(--mk-bg); background: color-mix(in oklch, var(--mk-ok) 80%, black); border-color: color-mix(in oklch, var(--mk-ok) 80%, black); font-weight: 600; }
+/* Ink fill, echoing the primary CTA below it. */
+.mk-price__badge--pop { color: var(--mk-bg); background: var(--mk-ink); border-color: var(--mk-ink); font-weight: 600; }
 .mk-price__badge--quiet { color: var(--mk-quiet); border-color: var(--mk-rule); }
 .mk-price__name { font-family: var(--mk-font-mono); font-weight: 600; font-size: 1.0625rem; color: var(--mk-ink); }
 .mk-price__name::before { content: "// "; color: var(--mk-faint); font-weight: 500; }
-/* Reserves 3 lines. The tag is the only variable-height row above the CTA,
-   so an under-sized floor lands the buttons at different heights. Sized for
-   the narrowest card, which is the 4-up column. */
-.mk-price__tag { font-size: 0.8125rem; color: var(--mk-quiet); line-height: 1.5; min-height: 4.5em; }
+.mk-price__tag { font-size: 0.8125rem; color: var(--mk-quiet); line-height: 1.5; }
 .mk-price__amt { font-family: var(--mk-font-mono); display: flex; align-items: baseline; gap: 0.4rem; }
 .mk-price__amt b { font-size: 2.25rem; font-weight: 600; color: var(--mk-ink); letter-spacing: -0.03em; line-height: 1; }
 .mk-price__amt span { font-size: 0.8125rem; color: var(--mk-quiet); }
 .mk-price__note,
 .mk-price__legal { font-family: var(--mk-font-mono); font-size: 0.6875rem; line-height: 1.4; color: var(--mk-quiet); }
-/* Tucked under the price, and floored so all four cards align. */
-.mk-price__note { margin-top: -0.4rem; min-height: 1.95rem; }
+/* Tucked under the price. */
+.mk-price__note { margin-top: -0.4rem; }
 /* Page footnote: no tuck, and clearance for the featured card's overhang. */
 .mk-price__legal { margin-top: 1.75rem; text-align: center; }
-/* Reserves 2 lines: "everything in standard, plus" wraps in the 4-up column
-   while "everything in pro, plus" does not, which would start each bullet
-   list at a different height. */
-.mk-price__head { font-family: var(--mk-font-mono); font-size: 0.6875rem; line-height: 1.4; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mk-quiet); min-height: 2.8em; }
+.mk-price__head { font-family: var(--mk-font-mono); font-size: 0.6875rem; line-height: 1.4; text-transform: uppercase; letter-spacing: 0.1em; color: var(--mk-quiet); }
 .mk-price__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
 .mk-price__feature {
     display: inline-flex;
@@ -1048,29 +1047,37 @@ html:has(.marketing-shell) {
 .mk-price__line b { color: var(--mk-ink); font-weight: 600; }
 
 .mk-cta--block { width: 100%; justify-content: center; min-height: 2.5rem; }
+/* The bare label is its own flex item, so it wraps once the column narrows. */
+.mk-price .mk-cta--block { padding-inline: 0.5rem; white-space: nowrap; }
 
 /* ── Founding cohort meter ────────────────────────────────────────── */
-.fnd { border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); padding: 1.25rem 1.5rem; display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 2rem; }
+/* Same depth plane as the tier cards; header rule shared with the featured tier. */
+.fnd { position: relative; overflow: hidden; border: 1px solid var(--mk-rule); border-radius: 2px; background: var(--mk-surface); box-shadow: var(--mk-shadow-card); padding: 1.25rem 1.5rem; display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 2rem; }
 .fnd__text { flex: 1 1 22rem; min-width: 0; }
 .fnd__meterwrap { flex: 1 1 18rem; min-width: 0; }
 .fnd__gauge { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 0.45rem; font-family: var(--mk-font-mono); }
 .fnd__gauge-label { font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--mk-quiet); }
 .fnd__gauge-pct { font-size: 1.375rem; font-weight: 600; color: var(--mk-ink); letter-spacing: -0.02em; line-height: 1; font-variant-numeric: tabular-nums; }
-.fnd__gauge-pct span { font-size: 0.8125rem; color: var(--mk-quiet); margin-left: 0.1em; }
+.fnd__gauge-pct span { font-size: 0.8125rem; color: var(--mk-quiet); margin-left: 0.35em; }
 .fnd-meter {
     position: relative;
     height: 0.625rem;
-    background: var(--mk-bg-2);
-    background-image: repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), var(--mk-rule-soft) calc(10% - 1px), var(--mk-rule-soft) 10%);
-    border: 1px solid var(--mk-rule);
+    /* Countable against the surface stripes; --mk-bg-2 read as one undivided bar. */
+    background: var(--mk-rule);
     border-radius: 2px;
     overflow: hidden;
-    box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.08);
+}
+/* Twenty 5% blocks so the reader can count what is left; over the fill, or the stripes stop dead at its edge. */
+.fnd-meter::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: repeating-linear-gradient(90deg, transparent 0, transparent calc(5% - 2px), var(--mk-surface) calc(5% - 2px), var(--mk-surface) 5%);
 }
 .fnd-meter__fill {
     width: 0; height: 100%;
-    background: linear-gradient(90deg, color-mix(in oklch, var(--mk-ok) 82%, black) 0%, var(--mk-ok) 100%);
-    box-shadow: 0 0 8px -1px color-mix(in oklch, var(--mk-ok) 70%, transparent);
+    background: var(--mk-ink);
     transform-origin: left center;
     animation: fnd-fill 900ms cubic-bezier(0.2, 0.65, 0.3, 1) backwards;
 }
@@ -1100,7 +1107,8 @@ html:has(.marketing-shell) {
 .fnd__count strong { color: var(--mk-ink); font-weight: 600; }
 
 /* ── Free-plan comparison table ───────────────────────────────────── */
-.cmp { width: 100%; border-collapse: collapse; font-family: var(--mk-font-mono); font-size: 0.8125rem; border: 1px solid var(--mk-rule); border-radius: 2px; font-variant-numeric: tabular-nums; }
+/* Opaque, or the shell's scanline shows through the cells. */
+.cmp { width: 100%; border-collapse: collapse; font-family: var(--mk-font-mono); font-size: 0.8125rem; border: 1px solid var(--mk-rule); border-radius: 2px; font-variant-numeric: tabular-nums; background: var(--mk-surface); }
 .cmp th, .cmp td { text-align: left; padding: 0.75rem 0.9rem; border-top: 1px solid var(--mk-rule); border-left: 1px solid var(--mk-rule); transition: background-color 120ms ease; }
 .cmp thead th { background: var(--mk-bg-2); color: var(--mk-quiet); font-weight: 500; font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.08em; border-top: 0; }
 .cmp tbody th { color: var(--mk-ink-soft); font-weight: 500; }
@@ -1112,10 +1120,14 @@ html:has(.marketing-shell) {
 }
 .cmp thead th:first-child { background: var(--mk-bg-2); }
 .cmp .us { color: var(--mk-ink); font-weight: 600; }
-.cmp .col-us { background: var(--mk-ok-soft); }
-.cmp thead th.col-us { background: var(--mk-ok-soft); color: var(--mk-ink); }
-.cmp tbody tr:hover > *:not(.col-us) { background: var(--mk-bg-2); }
-.cmp tbody tr:hover .col-us { background: color-mix(in oklch, var(--mk-ok-soft) 82%, var(--mk-ok)); }
+/* Ink rules, not a fill, which fought the green `yes` cells inside the column. */
+.cmp .col-us { border-left-color: var(--mk-ink); }
+/* Right wall; `:last-child` closes it when the marked column is the final one. */
+.cmp .col-us + th, .cmp .col-us + td { border-left-color: var(--mk-ink); }
+.cmp .col-us:last-child { border-right: 1px solid var(--mk-ink); }
+.cmp thead th.col-us { color: var(--mk-ink); box-shadow: inset 0 -2px 0 var(--mk-ink); }
+.cmp tbody tr:last-child .col-us { box-shadow: inset 0 -1px 0 var(--mk-ink); }
+.cmp tbody tr:hover > * { background: var(--mk-bg-2); }
 .cmp .yes { color: var(--mk-ok); }
 .cmp .no { color: var(--mk-quiet); }
 .cmp .part { color: oklch(0.62 0.13 66); }
