@@ -613,35 +613,11 @@
     </section>
 
     {# ── Pricing ───────────────────────────────────────────────── #}
-    <section id="pricing" class="mx-auto max-w-3xl space-y-5">
-        <header class="space-y-2 text-center">
+    <section id="pricing" class="mx-auto max-w-3xl space-y-5 text-center">
+        <header class="space-y-3">
             <h2 class="mk-h2">Free to start. <em class="mk-h2-em">Open source</em> to keep.</h2>
+            <p class="mk-priceline"><b>$0</b> with no expiry · paid tiers from <b>$9</b>, soon</p>
         </header>
-        <div class="mk-tierband">
-            <div class="mk-tier">
-                <span class="mk-tier__name">standard</span>
-                <span class="mk-tier__price">$0</span>
-                <span class="mk-tier__spec">20 monitors · 3-min checks · 30-day history</span>
-            </div>
-            <div class="mk-tier mk-tier--em">
-                <span class="mk-tier__name">founding</span>
-                <span class="mk-tier__price">$0</span>
-                <span class="mk-tier__spec">50 monitors · 60-sec checks · 90-day history</span>
-                <span class="mk-tier__flag">first {{ founding_total|thousands }} · {{ founding_left|thousands }} left</span>
-            </div>
-            <div class="mk-tier">
-                <span class="mk-tier__name">pro</span>
-                <span class="mk-tier__price">$9</span>
-                <span class="mk-tier__spec">50 monitors · 60-sec checks · custom domain</span>
-                <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
-            </div>
-            <div class="mk-tier">
-                <span class="mk-tier__name">team</span>
-                <span class="mk-tier__price">$19</span>
-                <span class="mk-tier__spec">150 monitors · 30-sec checks · on-call rotations</span>
-                <span class="mk-tier__flag mk-tier__flag--soon">soon</span>
-            </div>
-        </div>
         <div class="flex flex-wrap items-center justify-center gap-2">
             <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary" data-umami-event="signup-start" data-umami-event-position="pricing">
                 start free
@@ -651,7 +627,7 @@
             </a>
             <a href="/pricing" class="mk-cta mk-cta--ghost">see all plans</a>
         </div>
-        <p class="mk-mono mk-quiet text-xs text-center mk-ls-04">AGPL · self-host with no limits · no credit card</p>
+        <p class="mk-mono mk-quiet text-xs mk-ls-04">AGPL · self-host with no limits · no credit card</p>
     </section>
 
     {# ── FAQ ───────────────────────────────────────────────────── #}

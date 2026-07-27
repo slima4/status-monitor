@@ -1260,16 +1260,10 @@ html:has(.marketing-shell) {
 .mk-kv__val { font-size: 0.75rem; }
 .mk-codeblock { border: 1px solid var(--mk-rule); background: var(--mk-surface); color: var(--mk-ink); font-size: 0.75rem; line-height: 1.6; }
 
-/* ── Home pricing teaser band ─────────────────────────────────────── */
-.mk-tierband { text-align: left; background: var(--mk-bg-2); }
-.mk-tier { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.9rem; padding: 0.9rem 1.1rem; font-family: var(--mk-font-mono); }
-.mk-tier + .mk-tier { border-top: 1px solid var(--mk-rule); }
-.mk-tier--em { background: var(--mk-ok-soft); }
-.mk-tier__name { font-weight: 600; color: var(--mk-ink); font-size: 0.9375rem; min-width: 5rem; }
-.mk-tier__price { font-weight: 600; color: var(--mk-ink); font-size: 0.9375rem; min-width: 2.5rem; white-space: nowrap; }
-.mk-tier__spec { color: var(--mk-ink-soft); font-size: 0.8125rem; flex: 1 1 13rem; }
-.mk-tier__flag { color: var(--mk-ok); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; margin-left: auto; white-space: nowrap; }
-.mk-tier__flag--soon { color: var(--mk-quiet); }
+/* ── Home pricing teaser ──────────────────────────────────────────── */
+/* Prices only; the limits live on /pricing, where they cannot drift apart. */
+.mk-priceline { font-family: var(--mk-font-mono); font-size: 1rem; line-height: 1.6; color: var(--mk-ink-soft); }
+.mk-priceline b { color: var(--mk-ink); font-weight: 600; }
 
 /* ── Footer ───────────────────────────────────────────────────────── */
 .mk-footer {

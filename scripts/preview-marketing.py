@@ -30,8 +30,6 @@ SECTIONS = [
 ]
 
 SCALARS = {
-    "{{ founding_total|thousands }}": "1,000",
-    "{{ founding_left|thousands }}": "812",
     "{{ app_url }}": "#",
 }
 
