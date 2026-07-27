@@ -19,6 +19,11 @@ probes:
     existingSecretKey: agent-token
     flow:
       enabled: true
+    priorityClassName: high-priority
+    podAnnotations:
+      example.com/owner: sre
+    podLabels:
+      example.com/tier: probe
 tenancy:
   subdomainPublicRoutes: true
 ingress:

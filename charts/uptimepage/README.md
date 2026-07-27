@@ -72,6 +72,8 @@ probes:
 
 Mint each token on the control plane first. Agents reach it over the in-cluster Service by default, so a split install does not depend on the ingress being up.
 
+Each entry also takes `resources`, `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`, `podAnnotations`, `podLabels`, and `priorityClassName`. Setting `replicaCount: 0` parks a region without removing it from the release.
+
 For agents outside this cluster, use the separate `uptimepage-agent` chart.
 
 ## The single-replica constraint

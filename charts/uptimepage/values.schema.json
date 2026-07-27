@@ -62,7 +62,10 @@
           "flow": {
             "type": "object",
             "properties": { "enabled": { "type": "boolean" } }
-          }
+          },
+          "podAnnotations": { "type": "object" },
+          "podLabels": { "type": "object" },
+          "priorityClassName": { "type": "string" }
         }
       }
     },

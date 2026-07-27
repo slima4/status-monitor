@@ -62,7 +62,9 @@ app:
 # One agent Deployment per entry, mode=split only. Required keys are `name`
 # (DNS-1123) and `region`; then a `token` or `existingSecret`/`existingSecretKey`,
 # and optionally `flow` (needs an image built WITH_LIGHTPANDA), `controlPlaneUrl`,
-# `resources`, `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`.
+# `resources`, `nodeSelector`, `tolerations`, `affinity`, `topologySpreadConstraints`,
+# `podAnnotations`, `podLabels`, `priorityClassName`, and `replicaCount` (0 parks
+# the region, 1 runs it).
 probes: []
 # - name: eu-helsinki
 #   region: eu-helsinki

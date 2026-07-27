@@ -10,8 +10,9 @@ metadata:
     app.kubernetes.io/component: probe
     uptimepage.dev/region: {{ .region | quote }}
 spec:
-  # One agent per region. Two would run every check in the region twice.
-  replicas: 1
+  # One agent per region. Two would run every check in the region twice; 0 parks
+  # it without dropping the release. `default` would turn that 0 back into 1.
+  replicas: {{ if hasKey . "replicaCount" }}{{ .replicaCount }}{{ else }}1{{ end }}
   strategy:
     type: Recreate
   selector:
@@ -26,8 +27,14 @@ spec:
         app.kubernetes.io/component: probe
         uptimepage.dev/probe: {{ .name | quote }}
         uptimepage.dev/region: {{ .region | quote }}
+        {{- with .podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       annotations:
         checksum/secret: {{ include (print $root.Template.BasePath "/secret.yaml") $root | sha256sum }}
+        {{- with .podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       {{- with $root.Values.imagePullSecrets }}
       imagePullSecrets:
@@ -38,6 +45,9 @@ spec:
       securityContext:
         {{- include "uptimepage.podSecurityContext" $root | nindent 8 }}
       terminationGracePeriodSeconds: 30
+      {{- with .priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
       containers:
         - name: agent
           image: {{ include "uptimepage.image" $root }}
