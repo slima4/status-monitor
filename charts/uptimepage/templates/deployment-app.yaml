@@ -105,11 +105,15 @@ spec:
             - |
               # No migration does this, and the client binds the database name at
               # construction, so it must exist before the app connects.
-              curl -sS --fail-with-body \
-                -H "X-ClickHouse-User: ${CH_USER}" \
-                -H "X-ClickHouse-Key: ${CH_PASSWORD:-}" \
-                --data-binary "CREATE DATABASE IF NOT EXISTS \`${CH_DATABASE}\`" \
-                "${CH_URL}/"
+              # Credentials arrive as a config file on stdin; -H would leave them in argv.
+              # curl discards an unquoted value containing a colon and unescapes inside quotes.
+              quote() { printf '%s' "$1" | sed 's/[\\"]/\\&/g'; }
+              {
+                printf 'header = "X-ClickHouse-User: %s"\n' "$(quote "${CH_USER}")"
+                printf 'header = "X-ClickHouse-Key: %s"\n' "$(quote "${CH_PASSWORD:-}")"
+              } | curl -sS --fail-with-body -K - \
+                    --data-binary "CREATE DATABASE IF NOT EXISTS \`${CH_DATABASE}\`" \
+                    "${CH_URL}/"
               echo "clickhouse database ${CH_DATABASE} ready"
           resources:
             {{- toYaml .Values.preflight.resources | nindent 12 }}
