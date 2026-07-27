@@ -181,6 +181,38 @@ jobs:
           echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
           echo "$GHCR_TOKEN" | cosign login ghcr.io -u "$GHCR_USER" --password-stdin
 
+      # A chart is only publishable once the image it defaults to exists. The
+      # two are released by separate events here, so nothing else couples them.
+      - name: The image a chart names must exist
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          fail=0
+          for chart in charts/*/; do
+            dir="${chart%/}"
+            # The lint job already pins this annotation to appVersion.
+            ref=$(awk '/^ *image: ghcr\.io\//{print $2; exit}' "$dir/Chart.yaml")
+            # Not `path`: zsh aliases that to PATH, which bites anyone running this by hand.
+            image="${ref#ghcr.io/}"
+            tag="${image##*:}"
+            repo="${image%:*}"
+            token=$(curl -sS -u "$GHCR_USER:$GHCR_TOKEN" \
+              "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" | jq -r .token)
+            code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json' \
+              -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://ghcr.io/v2/${repo}/manifests/${tag}")
+            if [ "$code" = "200" ]; then
+              echo "$ref ok"
+            else
+              echo "::error file=$dir/Chart.yaml::$ref returned $code, so a default install would never pull. Push a v${tag} git tag and let release-image publish it first."
+              fail=1
+            fi
+          done
+          exit $fail
+
       - name: Package, push, and sign
         env:
           REGISTRY: oci://ghcr.io/${{ github.repository_owner }}/charts
