@@ -99,7 +99,7 @@ async fn architecture_page_renders_and_is_csp_clean() {
         "architecture page must render the map skeleton the script populates"
     );
     assert!(
-        body.contains("/static/architecture/flows.js")
+        body.contains("/static/js/architecture/flows.js")
             && body.contains("/static/architecture/flows.css"),
         "map styles and script must be external assets, not inline"
     );

@@ -1,4 +1,4 @@
-const COLUMNS = [
+export const COLUMNS = [
   {id:'actor',   label:'Actors / ingress',  color:'var(--c-actor)'},
   {id:'edge',    label:'Edge + routing',    color:'var(--c-edge)'},
   {id:'handler', label:'HTTP handlers',     color:'var(--c-handler)'},
@@ -8,7 +8,7 @@ const COLUMNS = [
   {id:'ext',     label:'External',          color:'var(--c-ext)'},
 ];
 
-const NODES = [
+export const NODES = [
   // actors
   {id:'op-ui',    col:'actor', t:'Operator browser',      s:'app.{domain} · htmx + fetch'},
   {id:'api-cli',  col:'actor', t:'API client / Terraform', s:'Bearer sm_live_'},
@@ -79,7 +79,7 @@ const NODES = [
   {id:'otlp',     col:'ext', t:'Grafana Cloud',      s:'OTLP traces + metrics'},
 ];
 
-const FLOWS = [
+export const FLOWS = [
   {
     id:'sched-http', name:'Scheduled HTTP check', desc:'Control plane probes a monitor in its own region',
     steps:[
@@ -283,144 +283,3 @@ const FLOWS = [
     ]
   },
 ];
-
-/* ── render ───────────────────────────────────────── */
-const root = document.querySelector('.archmap');
-const colsEl = document.getElementById('cols');
-const nodeEl = {};
-for (const c of COLUMNS){
-  const d = document.createElement('div');
-  d.className = 'col';
-  d.innerHTML = `<h2>${c.label}</h2>`;
-  for (const n of NODES.filter(n=>n.col===c.id)){
-    const b = document.createElement('div');
-    b.className='node'; b.style.setProperty('--nc', c.color); b.dataset.id=n.id;
-    b.tabIndex = 0; b.setAttribute('role','button');
-    b.innerHTML = `<b>${n.t}</b><span>${n.s}</span>`;
-    b.addEventListener('click', ()=>filterByNode(n.id));
-    b.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();filterByNode(n.id);} });
-    d.appendChild(b); nodeEl[n.id]=b;
-  }
-  colsEl.appendChild(d);
-}
-
-const flowListEl = document.getElementById('flowList');
-const flowEl = {};
-for (const f of FLOWS){
-  const d = document.createElement('div');
-  d.className='flow'; d.dataset.id=f.id;
-  d.tabIndex = 0; d.setAttribute('role','button');
-  d.innerHTML = `<b>${f.name}</b><span>${f.desc}</span>`;
-  d.addEventListener('click', ()=>select(f.id));
-  d.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();select(f.id);} });
-  d.addEventListener('focus', ()=>d.scrollIntoView({block:'nearest'}));
-  flowListEl.appendChild(d); flowEl[f.id]=d;
-}
-
-const svg = document.getElementById('wires');
-const badges = document.getElementById('badges');
-const stepListEl = document.getElementById('stepList');
-const title = id => (NODES.find(n=>n.id===id)||{t:id}).t;
-let current = null, nodeFilter = null;
-
-function select(id){
-  current = FLOWS.find(f=>f.id===id) || null;
-  root.classList.toggle('sel', !!current);
-  for (const f of FLOWS) flowEl[f.id].classList.toggle('on', !!current && f.id===current.id);
-  const live = new Set();
-  if (current) current.steps.forEach(s=>{live.add(s.f); live.add(s.t);});
-  for (const n of NODES) nodeEl[n.id].classList.toggle('on', live.has(n.id));
-  renderSteps();
-  draw();
-}
-
-function renderSteps(){
-  stepListEl.innerHTML = '';
-  if (!current){
-    stepListEl.innerHTML = '<div class="empty">No flow selected. Pick one above — the map will show the ordered hops, and hovering a step thickens its wire.</div>';
-    return;
-  }
-  current.steps.forEach((s,i)=>{
-    const d = document.createElement('div');
-    d.className='step';
-    d.innerHTML = `<div class="n">${i+1}</div><div>
-      <div class="hop"><b>${title(s.f)}</b> → <b>${title(s.t)}</b></div>
-      <div class="t">${s.h}</div><div class="d">${s.d}</div></div>`;
-    d.addEventListener('mouseenter', ()=>hot(i,true));
-    d.addEventListener('mouseleave', ()=>hot(i,false));
-    stepListEl.appendChild(d);
-  });
-}
-
-function hot(i, on){
-  svg.querySelectorAll('path').forEach((p,j)=>{
-    p.classList.toggle('hot', on && j===i);
-    p.classList.toggle('dim', on && j!==i);
-  });
-  if (!current) return;
-  const s = current.steps[i];
-  nodeEl[s.f].classList.toggle('focus', on);
-  nodeEl[s.t].classList.toggle('focus', on);
-}
-
-function filterByNode(id){
-  const hits = FLOWS.filter(f=>f.steps.some(s=>s.f===id||s.t===id)).map(f=>f.id);
-  if (!hits.length) return;
-  if (nodeFilter === id){                          // re-click same node: cycle the flows it touches
-    if (hits.length === 1) return;                 // only one flow, nothing to cycle
-    const idx = current ? hits.indexOf(current.id) : -1;
-    select(hits[(idx + 1) % hits.length]);
-    return;
-  }
-  nodeFilter = id;                                 // new node: filter the list, select the first
-  for (const f of FLOWS) flowEl[f.id].classList.toggle('hide', !hits.includes(f.id));
-  select(hits[0]);
-}
-
-document.getElementById('clear').addEventListener('click', ()=>{
-  nodeFilter = null;
-  for (const f of FLOWS) flowEl[f.id].classList.remove('hide');
-  select(null);
-});
-
-/* ── wires ────────────────────────────────────────── */
-const NS='http://www.w3.org/2000/svg';
-const bezierPoint=(p0,p1,p2,p3,t)=>{
-  const u=1-t, a=u*u*u, b=3*u*u*t, c=3*u*t*t, e=t*t*t;
-  return {x:a*p0.x+b*p1.x+c*p2.x+e*p3.x, y:a*p0.y+b*p1.y+c*p2.y+e*p3.y};
-};
-function draw(){
-  svg.innerHTML=''; badges.innerHTML='';
-  if (!current) return;
-  const host = svg.getBoundingClientRect();
-  const box = el => { const r = el.getBoundingClientRect();
-    return {l:r.left-host.left, r:r.right-host.left, t:r.top-host.top, b:r.bottom-host.top,
-            cx:(r.left+r.right)/2-host.left, cy:(r.top+r.bottom)/2-host.top}; };
-
-  current.steps.forEach((s,i)=>{
-    const a = box(nodeEl[s.f]), b = box(nodeEl[s.t]);
-    const lane = 8 + (i%3)*7;                      // fan out overlapping wires
-    let p0, c1, c2, p3;
-    if (b.l - a.r > 12){                            // left → right
-      const x1=a.r, y1=a.cy, x2=b.l-4, y2=b.cy, dx=Math.max(34,(x2-x1)*0.45);
-      p0={x:x1,y:y1}; c1={x:x1+dx,y:y1}; c2={x:x2-dx,y:y2}; p3={x:x2,y:y2};
-    } else if (a.l - b.r > 12){                     // right → left, route under
-      const x1=a.l, y1=a.cy, x2=b.r+4, y2=b.cy, dip=Math.max(a.b,b.b)+lane+10;
-      p0={x:x1,y:y1}; c1={x:x1-60,y:dip}; c2={x:x2+60,y:dip}; p3={x:x2,y:y2};
-    } else {                                        // same column
-      const side = a.r + lane + 14, y1=a.cy, y2=b.cy;
-      p0={x:a.r,y:y1}; c1={x:side+30,y:y1}; c2={x:side+30,y:y2}; p3={x:b.r,y:y2};
-    }
-    const d=`M${p0.x},${p0.y} C${c1.x},${c1.y} ${c2.x},${c2.y} ${p3.x},${p3.y}`;
-    const mid=bezierPoint(p0,c1,c2,p3,0.5);         // badge rides the actual curve
-    const p=document.createElementNS(NS,'path'); p.setAttribute('d',d); svg.appendChild(p);
-    const c=document.createElementNS(NS,'circle');
-    c.setAttribute('cx',mid.x); c.setAttribute('cy',mid.y); c.setAttribute('r',8); badges.appendChild(c);
-    const tx=document.createElementNS(NS,'text');
-    tx.setAttribute('x',mid.x); tx.setAttribute('y',mid.y+0.5); tx.textContent=i+1; badges.appendChild(tx);
-  });
-}
-
-new ResizeObserver(draw).observe(document.getElementById('map'));
-window.addEventListener('resize', draw);
-select(null);

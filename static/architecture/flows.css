@@ -79,7 +79,7 @@
 .archmap .node b{display:block;font-weight:500;font-size:12px;color:var(--ink);letter-spacing:.01em}
 .archmap .node span{display:block;font-size:10.5px;color:var(--faint);margin-top:1px;line-height:1.35}
 .archmap .node:hover{border-color:var(--muted)}
-.archmap .node:focus-visible,.archmap .flow:focus-visible{outline:2px solid var(--path);outline-offset:1px}
+.archmap .node:focus-visible,.archmap .flow:focus-visible,.archmap .step:focus-visible{outline:2px solid var(--path);outline-offset:1px}
 .archmap.sel .node{opacity:.3}
 .archmap.sel .node.on{opacity:1;border-color:var(--path);background:var(--path-soft)}
 .archmap .node.focus{outline:1px solid var(--path);outline-offset:1px}
@@ -90,6 +90,42 @@
 .archmap #badges{position:absolute;inset:14px;z-index:3;pointer-events:none;overflow:visible}
 .archmap #badges circle{fill:var(--path)}
 .archmap #badges text{fill:var(--surface);font:500 9px var(--mono);text-anchor:middle;dominant-baseline:central}
+
+/* ── playback ──────────────────────────────────────── */
+/* While a signal is walking the flow the map reads as a progress bar: hops
+   already travelled stay lit, the rest waits in the dark. */
+.archmap.play .node:not(.visited){opacity:.22;border-color:var(--line);background:var(--elev)}
+.archmap.play .node.visited{opacity:1;border-color:var(--path);background:var(--path-soft)}
+.archmap .node.live{border-color:var(--path);box-shadow:inset 2px 0 0 var(--path)}
+@keyframes arch-hit{
+  from{box-shadow:inset 2px 0 0 var(--path),0 0 0 0 color-mix(in oklch,var(--path) 55%,transparent)}
+  to{box-shadow:inset 2px 0 0 var(--path),0 0 0 14px transparent}
+}
+.archmap .node.hit{animation:arch-hit .55s ease-out}
+
+.archmap #wires path,.archmap #badges .badge{transition:opacity .22s ease}
+.archmap.play #wires path{opacity:.16}
+.archmap.play #wires path.done{opacity:.85}
+.archmap.play #wires path.now{stroke-width:2.6;opacity:1}
+.archmap.play #badges .badge{opacity:0}
+.archmap.play #badges .badge.seen{opacity:1}
+.archmap #badges .pkt{fill:var(--path);filter:drop-shadow(0 0 5px var(--path))}
+.archmap #badges .pkt-halo{fill:var(--path);opacity:.16}
+
+.archmap .transport{display:flex;align-items:center;gap:6px;padding:8px 10px;border-bottom:1px solid var(--line)}
+.archmap .tp{margin:0;padding:0;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;
+     color:var(--muted);transition:color .12s,border-color .12s,background .12s}
+.archmap .tp svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.archmap .tp .fill{fill:currentColor;stroke:none}
+.archmap .tp:hover:not(:disabled){color:var(--ink);border-color:var(--path)}
+.archmap .tp:disabled{opacity:.3;cursor:default;border-color:var(--line);color:var(--faint)}
+.archmap .tp--go{width:34px;height:34px;border-radius:50%;color:var(--ink);border-color:var(--path);background:var(--path-soft)}
+.archmap .tp--go svg{width:15px;height:15px}
+.archmap .tp .ic{display:none}
+.archmap #play[data-state="play"] .ic--play,
+.archmap #play[data-state="pause"] .ic--pause,
+.archmap #play[data-state="replay"] .ic--replay{display:block}
+.archmap .tp-count{margin-left:auto;font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
 
 /* ── side ──────────────────────────────────────────── */
 .archmap aside{position:sticky;top:78px;display:flex;flex-direction:column;gap:14px;max-height:calc(100dvh - 90px)}
@@ -108,8 +144,11 @@
 .archmap .flow.hide{display:none}
 
 .archmap .step{display:grid;grid-template-columns:18px 1fr;gap:8px;border:1px solid var(--line);border-radius:2px;
-      background:var(--elev);padding:7px 9px;margin:0 0 6px}
+      background:var(--elev);padding:7px 9px;margin:0 0 6px;cursor:pointer}
 .archmap .step:hover{border-color:var(--path)}
+.archmap.play .step{opacity:.45}
+.archmap.play .step.done{opacity:.8}
+.archmap.play .step.now{opacity:1;border-color:var(--path);background:var(--path-soft)}
 .archmap .step .n{width:18px;height:18px;border-radius:50%;background:var(--path);color:var(--surface);
          font-size:10px;font-weight:500;display:flex;align-items:center;justify-content:center;margin-top:1px}
 .archmap .step .hop{font-size:11px;color:var(--muted)}
@@ -122,5 +161,10 @@
        border-radius:2px;padding:4px 9px;cursor:pointer;margin:2px 8px 10px}
 .archmap button:hover{border-color:var(--path);color:var(--ink)}
 .archmap code{background:var(--sunk);border:1px solid var(--line);border-radius:2px;padding:0 3px;font-size:11px}
+
+@media (prefers-reduced-motion:reduce){
+  .archmap .node.hit{animation:none}
+  .archmap .node,.archmap #wires path,.archmap #badges .badge{transition:none}
+}
 
 @media (max-width:1100px){.archmap .shell{grid-template-columns:1fr}.archmap aside{position:static;max-height:none}.archmap #flows{max-height:none}}

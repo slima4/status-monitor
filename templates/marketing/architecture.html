@@ -30,7 +30,7 @@
 
 <div class="archmap">
   <header class="map-intro">
-    <p class="lede">Pick a flow on the right to light up the path through the system and read what is passed at each hop. Click any node to filter the flow list to the ones that touch it.</p>
+    <p class="lede">Pick a flow on the right to light up the path through the system and read what is passed at each hop, then press Play to watch the signal travel it one hop at a time. Click any node to filter the flow list to the ones that touch it.</p>
     <div class="legend">
       <span><i class="lg-actor"></i>Actor / ingress</span>
       <span><i class="lg-edge"></i>Edge + routing</span>
@@ -57,11 +57,33 @@
       </div>
       <div class="panel" id="stepsPanel">
         <h2>Steps</h2>
+        <div class="transport" role="group" aria-label="Flow playback">
+          <button class="tp" id="prev" aria-label="Previous step" title="Previous step">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path class="fill" d="M18 5v14L8 12z"/><rect class="fill" x="5" y="5" width="2.2" height="14" rx="1"/>
+            </svg>
+          </button>
+          <button class="tp tp--go" id="play" data-state="play" aria-label="Play the flow" title="Play the flow">
+            <svg class="ic ic--play" viewBox="0 0 24 24" aria-hidden="true"><path class="fill" d="M7 4.5v15l13-7.5z"/></svg>
+            <svg class="ic ic--pause" viewBox="0 0 24 24" aria-hidden="true">
+              <rect class="fill" x="6.5" y="4.5" width="4" height="15" rx="1"/><rect class="fill" x="13.5" y="4.5" width="4" height="15" rx="1"/>
+            </svg>
+            <svg class="ic ic--replay" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>
+            </svg>
+          </button>
+          <button class="tp" id="next" aria-label="Next step" title="Next step">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path class="fill" d="M6 5v14l10-7z"/><rect class="fill" x="16.8" y="5" width="2.2" height="14" rx="1"/>
+            </svg>
+          </button>
+          <span class="tp-count" id="stepCount" aria-live="polite" role="status"></span>
+        </div>
         <div class="scroll" id="stepList"><div class="empty">No flow selected. Pick one above — the map will show the ordered hops, and hovering a step thickens its wire.</div></div>
       </div>
     </aside>
   </div>
 </div>
 
-<script defer src="{{ "architecture/flows.js"|asset }}"></script>
+<script defer src="{{ "js/architecture/flows.js"|asset }}"></script>
 {% endblock %}
