@@ -4,15 +4,15 @@ name: release-image
 # Container Registry. Production pulls an immutable tag (sha-… or v…) and
 # never compiles Rust on the box — the build toolchain stays off prod.
 #
-# Arch: automatic builds (push to main, v* tags) publish linux/amd64 only —
-# the live prod hosts are x86, so the critical auto-deploy path never waits on
-# (or is blocked by) a second architecture. To also publish linux/arm64 — for
-# ARM agent hosts (Oracle Ampere, Vultr-arm, Hetzner CAX) — run this workflow
-# manually (Actions → release-image → Run workflow) with "include_arm64". That
-# produces a multi-arch manifest list under the same tags; amd64 hosts keep
-# resolving the amd64 entry, ARM hosts get arm64. Each arch builds NATIVELY on
-# its own runner (public-repo arm64 runners are free) — no QEMU, which would
-# make the Rust compile multiple times slower.
+# Arch: pushes to main publish linux/amd64 only — the live prod hosts are x86,
+# so the critical auto-deploy path never waits on (or is blocked by) a second
+# architecture. A v* tag publishes both, because a release is what outsiders
+# pull by version and ARM nodes are ordinary (Oracle Ampere, Vultr-arm, Hetzner
+# CAX, Graviton). A manual run with "include_arm64" adds arm64 to any build.
+# Both cases produce a multi-arch manifest list under the same tags; amd64
+# hosts keep resolving the amd64 entry, ARM hosts get arm64. Each arch builds
+# NATIVELY on its own runner (public-repo arm64 runners are free) — no QEMU,
+# which would make the Rust compile multiple times slower.
 #
 # Publish flow (same for 1 or 2 arches): each arch builds and pushes its image
 # by DIGEST only (untagged); a final `merge` job stitches the digests into the
@@ -63,8 +63,10 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Pick the architectures to build: amd64 always; arm64 only on a manual run
-  # that opts in. Emitted as a matrix the build job consumes via fromJSON.
+  # Pick the architectures to build: amd64 always; arm64 on a v* tag, because a
+  # release is what people pull by version and ARM nodes are common, plus on a
+  # manual run that opts in. Emitted as a matrix the build job consumes via
+  # fromJSON.
   setup:
     runs-on: ubuntu-latest
     outputs:
@@ -72,10 +74,13 @@ jobs:
     steps:
       - name: pick architectures
         id: pick
+        env:
+          IS_TAG: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          OPT_IN: ${{ github.event_name == 'workflow_dispatch' && inputs.include_arm64 }}
         run: |
           amd64='{"platform":"linux/amd64","runner":"ubuntu-latest"}'
           arm64='{"platform":"linux/arm64","runner":"ubuntu-24.04-arm"}'
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.include_arm64 }}" = "true" ]; then
+          if [ "$IS_TAG" = "true" ] || [ "$OPT_IN" = "true" ]; then
             echo "matrix={\"include\":[$amd64,$arm64]}" >> "$GITHUB_OUTPUT"
           else
             echo "matrix={\"include\":[$amd64]}" >> "$GITHUB_OUTPUT"
