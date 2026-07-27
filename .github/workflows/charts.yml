@@ -134,9 +134,15 @@ jobs:
       - uses: sigstore/cosign-installer@v4.1.2
 
       - name: Log in to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" \
-            | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          set -euo pipefail
+          # Separate credential stores: helm keeps its own, cosign reads the
+          # Docker keychain. One login leaves the other tool anonymous.
+          echo "$GHCR_TOKEN" | helm registry login ghcr.io -u "$GHCR_USER" --password-stdin
+          echo "$GHCR_TOKEN" | cosign login ghcr.io -u "$GHCR_USER" --password-stdin
 
       - name: Package, push, and sign
         env:
