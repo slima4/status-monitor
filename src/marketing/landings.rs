@@ -1651,6 +1651,67 @@ docker compose up -d"#,
         cta: "Start free",
     },
     Landing {
+        path: "/compare/uptime-kuma-vs-zabbix",
+        created: "2026-07-27",
+        lastmod: "2026-07-27",
+        title: "Uptime Kuma vs Zabbix",
+        eyebrow: "comparing self-hosted",
+        h1: "Uptime Kuma vs Zabbix: from outside, or from inside?",
+        meta_description: "Zabbix watches infrastructure from the inside with agents. Uptime Kuma asks services from the outside. What each takes to run, and where both go blind.",
+        lede: "Both are free, both are self-hosted, and that is where it ends. Zabbix collects metrics from inside your servers through agents. Uptime Kuma asks your services from the outside whether they still answer. Choosing wrongly leaves you either running a monitoring platform nobody has time for, or holding a checker that cannot tell you why anything broke.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "The split that decides it",
+                body: "Zabbix is agent-based. You install an agent on each host, and it reports CPU, memory, disk, processes, log lines and database internals back to a central server that stores everything and evaluates triggers. Uptime Kuma is agentless. It sits somewhere and makes requests, and if the request comes back correct within the timeout, the service is up. That is the whole difference, and everything below follows from it. Zabbix answers why a server is unhealthy. Uptime Kuma answers whether a customer can reach it. Those are different questions and neither tool answers the other one well.",
+            },
+            Section {
+                heading: "What Zabbix actually takes to run",
+                body: "More than people expect. A working install is a Zabbix server, a database, and a PHP frontend behind a web server. Zabbix supports MySQL 8.0.30 and up, MariaDB 10.5 and up, or PostgreSQL 13 to 18, optionally with the TimescaleDB extension. The frontend wants PHP 8.0 to 8.5 with about a dozen extensions, on Apache 2.4 or Nginx 1.20. Monitoring anything across a network boundary usually adds a Zabbix proxy. None of this is hard for someone who runs infrastructure for a living, and all of it is real work you keep doing: upgrades, database growth, and a schema that is the biggest single thing to maintain. Zabbix's own lifecycle page lists 7.4 as the current standard release and 7.0 as the supported LTS. Everything up to 6.4 was GPL-2.0; from 7.0 onward Zabbix is AGPL-3.0.",
+            },
+            Section {
+                heading: "Zabbix can check a website, but it is a side job",
+                body: "It genuinely can. Zabbix web scenarios run a sequence of HTTP steps and assert on status codes, on required strings in the response body, and on response time, which covers a login flow or a click path. There are also simple checks like icmpping and net.tcp.service that need no agent at all. What you should know before betting on it: the server has to be built with cURL support, redirects are capped at ten, and secret macros cannot be used in URLs because they resolve masked. It works. It is also configured like everything else in Zabbix, which means hosts, templates, items and triggers rather than pasting in a URL.",
+            },
+            Section {
+                heading: "What Uptime Kuma gives up",
+                body: "Depth, and anything resembling a team. Kuma has 31 monitor types and 94 notification integrations and installs as one container in five minutes, and someone who is not an engineer can add a check. But it has one shared login, so everyone who can see the dashboard can change anything, and there are no roles. It has no official API for managing monitors. And it knows nothing about the inside of your machines: a host at 95 percent disk is invisible to Kuma right up until the service falls over. Zabbix would have warned you a week earlier.",
+            },
+            Section {
+                heading: "Neither one keeps your config in Git",
+                body: "This is the part that bites teams later. Uptime Kuma is UI-only with no management API, so the monitors exist wherever someone clicked them. Zabbix is better, with a full JSON-RPC API and templates you can export as YAML or XML, but there is no official Terraform provider. The registry carries at least five community ones, from nzolot, claranet, elastic-infra, fe80 and tpretz, maintained at whatever pace their authors choose. If your infrastructure is declared in Terraform and reviewed in pull requests, your monitoring being a pile of manual UI state is a real gap, and adopting an unofficial provider for it is a bet on a volunteer.",
+            },
+            Section {
+                heading: "The blind spot they share",
+                body: "Both run inside the estate they watch. If the host running your Zabbix server dies, nothing collects and nothing alerts. If your single Kuma container sits on the machine that just went down, the same. Self-hosted monitoring that lives next to the thing it monitors will always miss the outage that takes both down, and that outage is the one your customers notice. It is the whole argument for a probe somewhere else.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "Uptimepage does the outside-in job, from several regions by default, and you can run your own probe agent inside the network for the private targets an external checker cannot see. It checks over HTTP, TCP, DNS, TLS, ping and domain expiry at 60 seconds on the free tier and 10 seconds self-hosted. The config lives in Git through a Terraform provider we publish and maintain, a REST API and an MCP server, so monitoring is reviewed like the rest of your infrastructure. On top: a branded status page with confirmed email and webhook subscribers, incidents opened automatically from failing checks, and organizations with roles instead of one shared password. It is one Rust binary. It is also AGPL-3.0, the same license Zabbix uses, so self-hosting is a real exit rather than a trial. It does not replace Zabbix for CPU graphs and capacity planning, and it is not trying to. Plenty of teams run Zabbix inside and Uptimepage outside.",
+            },
+        ],
+        code: None,
+        resources: &[
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Uptime Kuma vs Gatus",
+                href: "/compare/uptime-kuma-vs-gatus",
+            },
+            ResourceLink {
+                label: "Blackbox exporter vs Uptime Kuma",
+                href: "/compare/blackbox-exporter-vs-uptime-kuma",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/blog/monitoring-as-code",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
         path: "/compare/uptime-kuma-vs-upptime",
         created: "2026-07-17",
         lastmod: "2026-07-17",
@@ -2472,6 +2533,24 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Can an assistant change my monitoring over MCP?",
                 "It depends on the vendor, and it is the question worth asking. Uptimepage fences every write behind your explicit approval and audits it. Others take similar lines: PagerDuty ships read-only until you enable writes, Grafana Cloud asks for write consent during authorization, and OpenStatus hides mutating tools from read-only keys.",
+            ),
+        ],
+        "/compare/uptime-kuma-vs-zabbix" => &[
+            (
+                "Can Zabbix monitor a website the way Uptime Kuma does?",
+                "Yes. Zabbix web scenarios run HTTP steps and assert on status codes, on required strings in the body and on response time, and simple checks like icmpping and net.tcp.service need no agent. Two caveats: the server must be built with cURL support, and redirects are capped at ten. It is configured as hosts, templates, items and triggers rather than by pasting a URL.",
+            ),
+            (
+                "Do I have to install agents to use Zabbix?",
+                "Not for everything. Simple checks and web scenarios are agentless and run from the server. But the reason to choose Zabbix is what agents collect from inside a host, so an agentless Zabbix is mostly a harder-to-run Uptime Kuma.",
+            ),
+            (
+                "Does either give my customers a status page?",
+                "Not really. Zabbix has operational dashboards, not a customer-facing page. Kuma has status pages, but they offer RSS rather than confirmed subscribers, and incidents are posted by hand. Uptimepage opens incidents from failing checks and lets customers subscribe by email or webhook.",
+            ),
+            (
+                "Can I manage either one with Terraform?",
+                "Not officially. Uptime Kuma has no management API at all. Zabbix has a full JSON-RPC API and exportable templates, but no official Terraform provider; the registry carries at least five community ones. Uptimepage publishes and maintains its own provider alongside a REST API and MCP server.",
             ),
         ],
         "/compare/blackbox-exporter-vs-uptime-kuma" => &[
@@ -3770,6 +3849,7 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
         "/compare/uptime-kuma-vs-cachet" => Some(&KUMA_CACHET_MATRIX),
         "/compare/openstatus-vs-gatus" => Some(&OPENSTATUS_GATUS_MATRIX),
         "/compare/blackbox-exporter-vs-uptime-kuma" => Some(&BLACKBOX_KUMA_MATRIX),
+        "/compare/uptime-kuma-vs-zabbix" => Some(&KUMA_ZABBIX_MATRIX),
         "/open-source-uptime-monitoring" => Some(&OPEN_SOURCE_MONITOR_MATRIX),
         "/vs/self-hosted-status-pages" => Some(&SELF_HOSTED_MATRIX),
         "/vs/self-hosted-monitoring" => Some(&MONITORING_MATRIX),
@@ -3868,6 +3948,106 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
         "Uptime Kuma's 2.x line added a Globalping monitor type, so checks can run from other locations without a second instance; it is still not a probe fleet you control.",
         "Star counts rounded from GitHub, July 2026.",
         "Verified July 2026 against each project's repository, documentation and plan pages. Refresh when a project releases a new version.",
+    ],
+};
+
+/// Third-party face-off for `/compare/uptime-kuma-vs-zabbix`, verified July
+/// 2026 against Zabbix's own docs and lifecycle page. No star-count row here:
+/// Zabbix develops on git.zabbix.com, so its GitHub mirror understates it.
+static KUMA_ZABBIX_MATRIX: Matrix = Matrix {
+    heading: "The facts, side by side",
+    columns: &["Uptime Kuma", "Zabbix", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "license",
+            cells: &[("MIT", ""), ("AGPL-3.0 since 7.0", ""), ("AGPL-3.0", "")],
+        },
+        MatrixRow {
+            label: "what it watches",
+            cells: &[
+                ("services, from outside", ""),
+                ("hosts, from inside", ""),
+                ("services, from outside", ""),
+            ],
+        },
+        MatrixRow {
+            label: "agents required",
+            cells: &[
+                ("none", "yes"),
+                ("one per host for the useful parts", "part"),
+                ("none, optional private probe", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "what you run",
+            cells: &[
+                ("one container", "yes"),
+                ("server + database + PHP frontend", "part"),
+                ("one binary + compose", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "endpoint checks",
+            cells: &[
+                ("31 types incl. DBs · MQTT · browser", ""),
+                ("web scenarios + simple checks", ""),
+                ("HTTP · TCP · DNS · TLS · ping · domain", ""),
+            ],
+        },
+        MatrixRow {
+            label: "infrastructure metrics",
+            cells: &[
+                ("none", "no"),
+                ("CPU · memory · disk · logs · DBs", "yes"),
+                ("none", "no"),
+            ],
+        },
+        MatrixRow {
+            label: "checks from elsewhere",
+            cells: &[
+                ("via Globalping add-on", "part"),
+                ("proxies you host", "part"),
+                ("multi-region, run your own", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "customer status page",
+            cells: &[
+                ("yes, RSS only", "part"),
+                ("none, dashboards instead", "no"),
+                ("branded, email + webhook subs", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "incidents",
+            cells: &[
+                ("posted by hand", "part"),
+                ("triggers + events, internal", "part"),
+                ("auto-opened from checks", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "config as code",
+            cells: &[
+                ("UI only, no management API", "no"),
+                ("JSON-RPC API, community Terraform", "part"),
+                ("Terraform · REST · MCP, official", "yes"),
+            ],
+        },
+        MatrixRow {
+            label: "teams & roles",
+            cells: &[
+                ("single login", "no"),
+                ("users · groups · roles", "yes"),
+                ("orgs + roles", "yes"),
+            ],
+        },
+    ],
+    notes: &[
+        "Zabbix requires MySQL 8.0.30+, MariaDB 10.5+, or PostgreSQL 13-18 (optionally with TimescaleDB), plus PHP 8.0-8.5 on Apache 2.4 or Nginx 1.20.",
+        "Zabbix web scenarios assert on status codes, required strings and response time. The server must be built with cURL support, and redirects are capped at ten.",
+        "No official Zabbix Terraform provider exists. The registry carries at least five community providers, maintained independently of the project.",
+        "Verified July 2026 against Zabbix documentation, its license page and its lifecycle policy, and against the Uptime Kuma repository. Zabbix 7.4 reaches end of life on 30 September 2026, so recheck this table around the 8.0 release.",
     ],
 };
 
