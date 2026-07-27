@@ -34,7 +34,7 @@ const ORG_SAME_AS: &[&str] = &[
     "https://github.com/uptimepage",
     SOURCE_URL,
     "https://bsky.app/profile/uptimepage.bsky.social",
-    "https://www.saashub.com/uptimepage",
+    "https://www.saashub.com/uptimepage-dev",
     "https://stackshare.io/uptimepage",
     "https://alternativeto.net/software/uptimepage/",
     "https://www.nxgntools.com/tools/uptimepage",
