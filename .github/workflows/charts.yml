@@ -70,6 +70,25 @@ jobs:
           done
           exit $fail
 
+      - name: Docs must pin the version they tell people to verify
+        run: |
+          set -euo pipefail
+          fail=0
+          for chart in charts/*/; do
+            dir="${chart%/}"
+            name=$(awk '/^name:/{print $2}' "$dir/Chart.yaml")
+            version=$(awk '/^version:/{print $2}' "$dir/Chart.yaml")
+            # The colon keeps charts/uptimepage from matching uptimepage-agent.
+            stale=$(grep -rnF "ghcr.io/uptimepage/charts/${name}:" README.md docs charts/*/README.md \
+              | grep -vF "ghcr.io/uptimepage/charts/${name}:${version}" || true)
+            if [ -n "$stale" ]; then
+              echo "::error::$name is at $version, but these pin something else:"
+              echo "$stale"
+              fail=1
+            fi
+          done
+          exit $fail
+
       - name: Install kubeconform
         run: |
           curl -sSfL "https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz" \
