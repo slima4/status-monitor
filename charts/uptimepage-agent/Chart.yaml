@@ -2,7 +2,7 @@ apiVersion: v2
 name: uptimepage-agent
 description: Regional probe agent for an Uptimepage control plane, hosted or self-hosted
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "1.0.0"
 # `-0` so vendor builds (v1.31.1-gke.x) satisfy the constraint.
 kubeVersion: ">=1.29.0-0"
@@ -23,3 +23,18 @@ annotations:
   artifacthub.io/license: AGPL-3.0-only
   artifacthub.io/operator: "false"
   artifacthub.io/prerelease: "true"
+  artifacthub.io/links: |
+    - name: Documentation
+      url: https://uptimepage.dev/docs/kubernetes
+    - name: Source
+      url: https://github.com/uptimepage/uptimepage
+  # Artifact Hub scans what it finds here, so it has to track appVersion.
+  artifacthub.io/images: |
+    - name: uptimepage
+      image: ghcr.io/uptimepage/uptimepage:1.0.0
+  artifacthub.io/screenshots: |
+    - title: Latency by region
+      url: https://uptimepage.dev/static/marketing/monitor-latency-by-region.webp
+  artifacthub.io/changes: |
+    - kind: changed
+      description: Listing metadata only; the chart templates are unchanged

@@ -70,7 +70,7 @@ jobs:
           done
           exit $fail
 
-      - name: Docs must pin the version they tell people to verify
+      - name: Version references must match the chart
         run: |
           set -euo pipefail
           fail=0
@@ -78,12 +78,18 @@ jobs:
             dir="${chart%/}"
             name=$(awk '/^name:/{print $2}' "$dir/Chart.yaml")
             version=$(awk '/^version:/{print $2}' "$dir/Chart.yaml")
+            appVersion=$(awk '/^appVersion:/{gsub(/"/, "", $2); print $2}' "$dir/Chart.yaml")
             # The colon keeps charts/uptimepage from matching uptimepage-agent.
             stale=$(grep -rnF "ghcr.io/uptimepage/charts/${name}:" README.md docs charts/*/README.md \
               | grep -vF "ghcr.io/uptimepage/charts/${name}:${version}" || true)
             if [ -n "$stale" ]; then
               echo "::error::$name is at $version, but these pin something else:"
               echo "$stale"
+              fail=1
+            fi
+            # Artifact Hub scans the image named here, so a stale one scans the wrong build.
+            if ! grep -qF "ghcr.io/uptimepage/uptimepage:${appVersion}" "$dir/Chart.yaml"; then
+              echo "::error file=$dir/Chart.yaml::artifacthub.io/images does not name appVersion $appVersion"
               fail=1
             fi
           done

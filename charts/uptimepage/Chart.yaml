@@ -28,3 +28,19 @@ annotations:
       url: https://uptimepage.dev/docs
     - name: Source
       url: https://github.com/uptimepage/uptimepage
+  # Artifact Hub scans what it finds here, so it has to track appVersion.
+  artifacthub.io/images: |
+    - name: uptimepage
+      image: ghcr.io/uptimepage/uptimepage:1.0.0
+  artifacthub.io/screenshots: |
+    - title: Monitor dashboard
+      url: https://uptimepage.dev/static/marketing/uptime-monitoring-dashboard.webp
+    - title: Monitors list
+      url: https://uptimepage.dev/static/marketing/uptime-monitors-list.webp
+    - title: Public status page
+      url: https://uptimepage.dev/static/marketing/public-status-page.webp
+  artifacthub.io/changes: |
+    - kind: security
+      description: ClickHouse credentials no longer reach the preflight process arguments
+    - kind: added
+      description: Probe entries take podAnnotations, podLabels, priorityClassName, and replicaCount
