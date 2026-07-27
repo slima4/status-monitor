@@ -1991,6 +1991,64 @@ html:has(.marketing-shell) {
     70%  { transform: scale(3.4); opacity: 0; }
     100% { transform: scale(3.4); opacity: 0; }
 }
+/* One 12s loop shared by every flow; negative delays stagger the arrivals and
+   leave the map already in motion on first paint. */
+.mk-map__flow { --mk-flow-delay: 0s; }
+.mk-map__flow--2 { --mk-flow-delay: -2.4s; }
+.mk-map__flow--3 { --mk-flow-delay: -4.8s; }
+.mk-map__flow--4 { --mk-flow-delay: -7.2s; }
+.mk-map__flow--5 { --mk-flow-delay: -9.6s; }
+
+.mk-map__arc {
+    fill: none;
+    stroke: var(--mk-ok);
+    stroke-width: 0.7;
+    stroke-linecap: round;
+    stroke-dasharray: 20 100;
+    opacity: 0;
+    animation: mk-flow-travel 12s linear infinite var(--mk-flow-delay);
+}
+.mk-map__target {
+    fill: none;
+    stroke: var(--mk-ok);
+    stroke-width: 0.55;
+    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: mk-flow-land 12s ease-out infinite var(--mk-flow-delay);
+}
+/* Below 640px a viewBox unit is about a pixel, so the readout would render as
+   a smear rather than text. Arcs alone carry the idea there. */
+.mk-map__flow-label { display: none; }
+@media (min-width: 640px) {
+    .mk-map__flow-label {
+        display: block;
+        fill: var(--mk-ink-soft);
+        font-family: var(--mk-font-mono);
+        font-size: 3.2px;
+        letter-spacing: 0.02em;
+        opacity: 0;
+        animation: mk-flow-label 12s ease-out infinite var(--mk-flow-delay);
+    }
+}
+@keyframes mk-flow-travel {
+    0%        { stroke-dashoffset: 20; opacity: 0; }
+    3%        { opacity: 1; }
+    22%       { stroke-dashoffset: -100; opacity: 1; }
+    27%, 100% { stroke-dashoffset: -100; opacity: 0; }
+}
+@keyframes mk-flow-land {
+    0%, 17%   { opacity: 0; transform: scale(0.5); }
+    23%       { opacity: 0.9; transform: scale(1); }
+    45%       { opacity: 0.4; transform: scale(1); }
+    58%, 100% { opacity: 0; transform: scale(1); }
+}
+@keyframes mk-flow-label {
+    0%, 19%   { opacity: 0; }
+    25%, 46%  { opacity: 0.95; }
+    58%, 100% { opacity: 0; }
+}
+
 .mk-map__legend {
     display: flex;
     flex-wrap: wrap;
@@ -2020,6 +2078,13 @@ html:has(.marketing-shell) {
 
 @media (prefers-reduced-motion: reduce) {
     .mk-map__ping { animation: none; opacity: 0; }
+    /* Flows settle into a static route picture instead of vanishing. */
+    .mk-map__arc,
+    .mk-map__target,
+    .mk-map__flow-label { animation: none; }
+    .mk-map__arc { stroke-dasharray: none; opacity: 0.3; }
+    .mk-map__target { opacity: 0.55; }
+    .mk-map__flow-label { opacity: 0.8; }
     .mk-gallery__card,
     .mk-gallery__zoom { transition: none; }
 }
