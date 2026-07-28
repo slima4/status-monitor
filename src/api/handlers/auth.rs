@@ -71,6 +71,44 @@ fn unavailable(state: &AppState, provider: OauthProvider) -> AppError {
     )
 }
 
+/// Never fails a login: an org with no channel is recoverable, a sign-in that
+/// 500s is not.
+async fn seed_owner_email_channel(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    user: crate::domain::UserId,
+    email: &str,
+) {
+    // A channel seeded against the log-only sender reads as configured while
+    // dropping every alert.
+    if !state.cfg.email.delivers() {
+        return;
+    }
+    let seeded = async {
+        let limit = i64::from(
+            state
+                .quotas
+                .limit_for_org(org)
+                .await?
+                .max_notification_channels,
+        );
+        state
+            .notification_channel_store
+            .seed_owner_email(org, email, user, limit)
+            .await
+    }
+    .await;
+    match seeded {
+        Ok(Some(ch)) => {
+            tracing::info!(org_id = %org.0, channel_id = %ch.id, "seeded the owner's email alert channel")
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(error = %e, org_id = %org.0, "seeding the owner's email alert channel failed")
+        }
+    }
+}
+
 pub async fn github_login(state: State<AppState>, q: Query<LoginQuery>) -> Result<Redirect> {
     start_login(state, q, OauthProvider::Github).await
 }
@@ -251,6 +289,12 @@ async fn finish_login(
         })?;
     if resolved.restored {
         tracing::info!(user_id = %resolved.user_id.0, "re-auth restored a soft-deleted account");
+    }
+    if resolved.is_new_user
+        && let Some(org) = resolved.signup_org_id
+        && let Some(email) = identity.verified_email.as_deref()
+    {
+        seed_owner_email_channel(&state, org, resolved.user_id, email).await;
     }
 
     // The dance carried an invitation — redeem it now, server-side; the

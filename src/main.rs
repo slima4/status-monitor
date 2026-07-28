@@ -28,7 +28,6 @@ use uptimepage::{
         PageCache, PgIncidentStore, PublicSource,
     },
     scheduler::{Scheduler, TargetRegistry},
-    security::Cipher,
     storage::{
         self, ClickhouseResultSink, ClickhouseResultsStore, IncidentNarrationStore,
         MaintenanceStore, NotificationChannelStore, PgIncidentNarrationStore, PgMaintenanceStore,
@@ -175,17 +174,12 @@ async fn main() -> Result<()> {
     );
 
     let api_bind = cfg.server.api_bind.clone();
-    let cipher = match cfg.security.kek() {
-        Some(kek) => Some(Arc::new(Cipher::from_base64(kek).map_err(|e| {
-            AppError::Other(anyhow::anyhow!("invalid credentials_kek_base64: {e}"))
-        })?)),
-        None => {
-            tracing::warn!(
-                "credentials_kek_base64 unset — basic_auth/bearer_token will be stored in plaintext"
-            );
-            None
-        }
-    };
+    let cipher = cfg.security.cipher()?;
+    if cipher.is_none() {
+        tracing::warn!(
+            "credentials_kek_base64 unset — basic_auth/bearer_token will be stored in plaintext"
+        );
+    }
     let pg_pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
     uptimepage::bootstrap::seed_first_owner(&pg_pool, &cfg).await?;
     storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "region_reconcile")

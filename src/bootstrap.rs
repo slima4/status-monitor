@@ -14,6 +14,8 @@ use crate::auth::{api_tokens, magic_link};
 use crate::config::AppConfig;
 use crate::domain::{OrgId, UserId, generate_signup_slug};
 use crate::error::{AppError, Result};
+use crate::quotas::QuotaService;
+use crate::storage::notification_channels::{NotificationChannelStore, PgNotificationChannelStore};
 use crate::storage::{PostgresTargetStore, orgs, users};
 
 const USAGE: &str = "usage: uptimepage bootstrap-owner --email <addr> [--org-name <name>]";
@@ -71,7 +73,12 @@ fn bad_usage(msg: impl std::fmt::Display) -> AppError {
 }
 
 /// Creates the owner account and its org, reusing either if already present.
-async fn ensure_owner_org(pool: &PgPool, email: &str, org_name: &str) -> Result<(UserId, OrgId)> {
+async fn ensure_owner_org(
+    pool: &PgPool,
+    cfg: &AppConfig,
+    email: &str,
+    org_name: &str,
+) -> Result<(UserId, OrgId)> {
     let (user, _) = users::create_invited_user(pool, email).await?;
 
     let org = match orgs::oldest_membership_for_user(pool, user).await? {
@@ -90,7 +97,44 @@ async fn ensure_owner_org(pool: &PgPool, email: &str, org_name: &str) -> Result<
             created.context("bootstrap: could not allocate a unique org slug")?
         }
     };
+    seed_owner_email_channel(pool, cfg, org, user, email).await;
     Ok((user, org))
+}
+
+/// Idempotent, and never fatal: an instance with no channel is fixable, a
+/// bootstrap that aborts is not.
+async fn seed_owner_email_channel(
+    pool: &PgPool,
+    cfg: &AppConfig,
+    org: OrgId,
+    user: UserId,
+    email: &str,
+) {
+    // A self-host install with no mail provider is exactly where a seeded
+    // channel would lie about being a working destination.
+    if !cfg.email.delivers() {
+        return;
+    }
+    let seeded = async {
+        let store = PgNotificationChannelStore::new(pool.clone(), cfg.security.cipher()?);
+        let limit = i64::from(
+            QuotaService::new(cfg, Some(pool.clone()))
+                .limit_for_org(org)
+                .await?
+                .max_notification_channels,
+        );
+        store.seed_owner_email(org, email, user, limit).await
+    }
+    .await;
+    match seeded {
+        Ok(Some(ch)) => {
+            tracing::info!(org_id = %org.0, channel_id = %ch.id, "seeded the owner's email alert channel")
+        }
+        Ok(None) => {}
+        Err(e) => {
+            tracing::warn!(error = %e, org_id = %org.0, "seeding the owner's email alert channel failed")
+        }
+    }
 }
 
 /// Seeds the owner named by `bootstrap.email` when the instance has no users.
@@ -121,7 +165,7 @@ pub async fn seed_first_owner(pool: &PgPool, cfg: &AppConfig) -> Result<()> {
     // Link before account: failing here leaves no user row, so the next boot retries.
     let link = magic_link::create(pool, email, None, FIRST_RUN_LINK_MINUTES, None, None).await?;
 
-    let (_, org) = ensure_owner_org(pool, email, &cfg.bootstrap.org_name).await?;
+    let (_, org) = ensure_owner_org(pool, cfg, email, &cfg.bootstrap.org_name).await?;
     let slug = orgs::get_org(pool, org)
         .await?
         .map(|o| o.slug)
@@ -148,7 +192,7 @@ pub async fn seed_first_owner(pool: &PgPool, cfg: &AppConfig) -> Result<()> {
 pub async fn run_owner(cfg: &AppConfig, args: &BootstrapArgs) -> Result<()> {
     let pool = PostgresTargetStore::connect_pool(&cfg.storage.postgres).await?;
 
-    let (user, org) = ensure_owner_org(&pool, &args.email, &args.org_name).await?;
+    let (user, org) = ensure_owner_org(&pool, cfg, &args.email, &args.org_name).await?;
 
     let token = api_tokens::create(
         &pool,

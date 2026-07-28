@@ -183,6 +183,72 @@ async fn new_target_form_renders_create_mode() {
     );
 }
 
+/// A brand-new org has exactly one channel (the owner's seeded email), and a
+/// monitor bound to nothing pages nobody — so the create form ticks it. A
+/// second channel makes the right routing ambiguous, and the form stops
+/// guessing.
+#[tokio::test]
+async fn create_form_ticks_a_sole_channel_but_not_a_pair() {
+    let router = app();
+    let add_channel = async |name: &str| {
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/notification-channels")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "name": name,
+                            "config": { "type": "email", "to": format!("{name}@example.com") }
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED, "create channel {name}");
+    };
+
+    // Scoped to the channel inputs: plenty of unrelated boxes on this form
+    // (verify_tls, the interval rail) also render checked.
+    let channel_boxes = |html: &str| -> (usize, usize) {
+        let mut offered = 0;
+        let mut ticked = 0;
+        for (i, _) in html.match_indices("data-channel-select") {
+            let tail = &html[i..];
+            let tag = &tail[..tail.find('>').unwrap_or(tail.len())];
+            offered += 1;
+            ticked += usize::from(tag.contains(" checked"));
+        }
+        (offered, ticked)
+    };
+
+    add_channel("solo").await;
+    let resp = router
+        .clone()
+        .oneshot(Request::get("/targets/new").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        channel_boxes(&body_text(resp).await),
+        (1, 1),
+        "the only channel is offered and preselected"
+    );
+
+    add_channel("second").await;
+    let resp = router
+        .clone()
+        .oneshot(Request::get("/targets/new").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        channel_boxes(&body_text(resp).await),
+        (2, 0),
+        "with two channels the form must not guess"
+    );
+}
+
 #[tokio::test]
 async fn edit_form_renders_existing_target_without_leaking_credentials() {
     let router = app();

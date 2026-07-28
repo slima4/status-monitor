@@ -84,6 +84,15 @@ pub trait NotificationChannelStore: Send + Sync {
         max_channels: i64,
         actor: Option<UserId>,
     ) -> Result<NotificationChannel>;
+    /// `Ok(None)` when the org is at its channel cap or already holds this
+    /// address: a signup must not fail over either.
+    async fn seed_owner_email(
+        &self,
+        org: OrgId,
+        address: &str,
+        actor: UserId,
+        max_channels: i64,
+    ) -> Result<Option<NotificationChannel>>;
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>>;
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>>;
     async fn update(
@@ -276,6 +285,63 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .await
             .map_err(|e| AppError::Other(anyhow!("commit: {e}")))?;
         row.into_channel(self.cipher.as_deref())
+    }
+
+    async fn seed_owner_email(
+        &self,
+        org: OrgId,
+        address: &str,
+        actor: UserId,
+        max_channels: i64,
+    ) -> Result<Option<NotificationChannel>> {
+        // EmailConfig::validate rejects uppercase, and bounces are reported
+        // against the lowercase form the send used.
+        let address = address.trim().to_ascii_lowercase();
+        let config = ChannelConfig::Email(crate::domain::EmailConfig {
+            to: address.clone(),
+        });
+        let sealed = seal(&config, self.cipher.as_deref())?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| AppError::Other(anyhow!("begin: {e}")))?;
+        // Same lock the other cap-checked writers take, so a signup racing a
+        // manual create cannot overshoot the plan cap.
+        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+            .await
+            .map_err(|e| AppError::Other(anyhow!("advisory lock: {e}")))?;
+        let row: Option<ChannelRow> = sqlx::query_as(
+            r#"INSERT INTO notification_channels /* SAFE: seeded pre-verified — the signup that reached here already proved control of this inbox (OAuth verified_email, or a claimed magic link), which is the same proof the verification mail collects */
+               (org_id, name, kind, config, external_ref, enabled, verified_at, write_source)
+               SELECT $1, $2, 'email', $3, $2, true, now(), 'ui'
+               WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $4
+               ON CONFLICT (org_id, name) DO NOTHING
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at"#,
+        )
+        .bind(org.0)
+        .bind(&address)
+        .bind(&sealed)
+        .bind(max_channels)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("seed owner email channel: {e}")))?;
+        let Some(row) = row else {
+            tx.rollback().await.ok();
+            return Ok(None);
+        };
+        crate::storage::orgs::record_audit_tx(
+            &mut tx,
+            org,
+            Some(actor),
+            "channel.created",
+            serde_json::json!({ "channel_id": row.id, "kind": "email", "seeded": true }),
+        )
+        .await?;
+        tx.commit()
+            .await
+            .map_err(|e| AppError::Other(anyhow!("commit: {e}")))?;
+        row.into_channel(self.cipher.as_deref()).map(Some)
     }
 
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
@@ -583,6 +649,41 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             ch: ch.clone(),
         });
         Ok(ch)
+    }
+
+    async fn seed_owner_email(
+        &self,
+        org: OrgId,
+        address: &str,
+        _actor: UserId,
+        max_channels: i64,
+    ) -> Result<Option<NotificationChannel>> {
+        let address = address.trim().to_ascii_lowercase();
+        let mut g = self.inner.lock();
+        if g.iter().any(|e| e.org == org && e.ch.name == address)
+            || g.iter().filter(|e| e.org == org).count() as i64 >= max_channels
+        {
+            return Ok(None);
+        }
+        let now = Utc::now();
+        let ch = NotificationChannel {
+            id: Uuid::now_v7(),
+            name: address.clone(),
+            kind: ChannelKind::Email,
+            config: ChannelConfig::Email(crate::domain::EmailConfig { to: address }),
+            enabled: true,
+            disabled_reason: None,
+            verified_at: Some(now),
+            write_source: WriteSource::Ui,
+            created_at: now,
+            updated_at: now,
+        };
+        g.push(MemEntry {
+            org,
+            external_ref: ch.config.lifecycle_ref().map(str::to_owned),
+            ch: ch.clone(),
+        });
+        Ok(Some(ch))
     }
 
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {

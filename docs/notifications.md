@@ -33,6 +33,8 @@ If you use the generic webhook with a signing secret, every delivery carries a t
 
 ## Creating one
 
+A new account starts with one already: the address you signed up with, wired up and verified, because the sign-in itself proved you own that inbox. It behaves like any other channel from there, so rename it, point it elsewhere, or delete it. Self-hosted installs get the same thing for the bootstrap owner, but only where a real mail provider is configured, since the `log` provider delivers nowhere.
+
 Add the channel, then **test now** before saving. The test sends one clearly labelled synthetic alert through the real transport, so a wrong webhook URL or an expired token surfaces immediately instead of during your first outage. Testing works on a saved channel too, including a disabled one.
 
 Two types need a second step:
@@ -48,7 +50,7 @@ When the credentials belong to someone outside the org, say the Slack workspace 
 
 ## Binding a monitor
 
-The monitor form has a **Notifications** section listing your channels with a checkbox each. It only appears once the org has at least one channel, so create the channel first.
+The monitor form has a **Notifications** section listing your channels with a checkbox each. It only appears once the org has at least one channel, so create the channel first. When the org has exactly one, a new monitor ticks it for you; with several the form leaves the choice alone rather than guessing.
 
 Alongside the bindings sit the controls that decide when they fire:
 

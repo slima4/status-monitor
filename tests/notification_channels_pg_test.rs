@@ -756,3 +756,56 @@ async fn email_lifecycle_ref_is_derived_and_follows_the_address() {
     );
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn seeded_owner_email_is_verified_idempotent_and_capped() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "seed-own").await;
+    let store = PgNotificationChannelStore::new(pool.clone(), Some(test_cipher()));
+    let addr = format!("{}@Example.com", unique_slug("Seed-Own"));
+    let lowered = addr.to_ascii_lowercase();
+
+    let ch = store
+        .seed_owner_email(org_a, &addr, user_a, 10)
+        .await
+        .unwrap()
+        .expect("first seed lands");
+    // Unverified, an email channel is recorded as a failed notification and
+    // delivers nothing, which would defeat the seeding.
+    assert!(ch.verified_at.is_some());
+    assert!(ch.enabled);
+    assert_eq!(ch.kind, uptimepage::domain::ChannelKind::Email);
+    assert_eq!(ch.name, lowered);
+    assert_eq!(
+        store
+            .count_by_external_ref(uptimepage::domain::ChannelKind::Email, &lowered)
+            .await
+            .unwrap(),
+        1
+    );
+
+    // Re-running the signup path must not stack duplicates or error.
+    assert!(
+        store
+            .seed_owner_email(org_a, &addr, user_a, 10)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(store.list(org_a).await.unwrap().len(), 1);
+
+    // At the cap it declines rather than failing: a signup must still succeed.
+    assert!(
+        store
+            .seed_owner_email(org_b, &format!("other-{lowered}"), user_b, 0)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(store.list(org_b).await.unwrap().is_empty());
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}

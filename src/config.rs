@@ -464,6 +464,13 @@ pub struct TransactionalEmailConfig {
     pub resend: ResendConfig,
 }
 
+impl TransactionalEmailConfig {
+    /// Whether mail leaves the process. `log` renders to tracing and drops it.
+    pub fn delivers(&self) -> bool {
+        self.provider != "log"
+    }
+}
+
 impl Default for TransactionalEmailConfig {
     fn default() -> Self {
         Self {
@@ -1030,6 +1037,22 @@ impl SecurityConfig {
     pub fn kek(&self) -> Option<&str> {
         let t = self.credentials_kek_base64.expose_secret().trim();
         (!t.is_empty()).then_some(t)
+    }
+
+    /// `None` means no KEK, so secrets are stored in plaintext. Every store
+    /// must be handed the same one or a row sealed by one process fails to
+    /// open in another.
+    pub fn cipher(&self) -> Result<Option<std::sync::Arc<crate::security::Cipher>>> {
+        match self.kek() {
+            Some(kek) => Ok(Some(std::sync::Arc::new(
+                crate::security::Cipher::from_base64(kek).map_err(|e| {
+                    crate::error::AppError::Other(anyhow::anyhow!(
+                        "invalid credentials_kek_base64: {e}"
+                    ))
+                })?,
+            ))),
+            None => Ok(None),
+        }
     }
 }
 

@@ -743,6 +743,15 @@ pub async fn new_form(
     let (channels, owner_options, group_options, tag_options, plan, available) =
         form_options(&state, org, &alerts, &owner_id).await?;
     form.channels = channels;
+    // A fresh monitor in an org with exactly one channel routes to it by
+    // default — otherwise the first monitor most people create alerts nobody.
+    // With several channels the guess would be wrong as often as right, so
+    // the choice stays theirs. A copy keeps the source monitor's bindings.
+    if params.from.is_none()
+        && let [only] = form.channels.as_mut_slice()
+    {
+        only.selected = true;
+    }
     form.owner_options = owner_options;
     form.group_options = group_options;
     form.tag_options = tag_options;
