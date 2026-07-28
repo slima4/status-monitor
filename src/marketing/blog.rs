@@ -214,7 +214,10 @@ fn split_front_matter(raw: &str) -> Option<(&str, &str)> {
 /// Interactive figures a post can embed: the mount class it writes in Markdown,
 /// and the script that fills it. One table so the sanitiser allowlist and the
 /// script the page loads cannot drift apart.
-const EMBEDS: &[(&str, &str)] = &[("mk-embed-quorum", "js/marketing/quorum.js")];
+const EMBEDS: &[(&str, &str)] = &[
+    ("mk-embed-quorum", "js/marketing/quorum.js"),
+    ("mk-embed-gate", "js/marketing/gate.js"),
+];
 
 /// Sanitising Markdown render. CommonMark + tables → HTML → ammonia
 /// allowlist. Third-party PR content never reaches a browser as raw

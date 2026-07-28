@@ -1,3 +1,5 @@
+import { mover, paintTransport, picker, timers, transport } from './_figure.js';
+
 /* Region vote, replayed round by round.
 
    Regions check independently, so the figure runs them that way: every round
@@ -90,54 +92,36 @@ function logLine(ri, round){
   return {time: clock(round), name: r.name, code: pass ? '200' : '503', ms: `${r.ms[round]}ms`, note, pass};
 }
 
-const ICONS = {
-  prev: '<path d="M18 5v14L8 12z"/><rect x="5" y="5" width="2.2" height="14" rx="1"/>',
-  play: '<path d="M7 4.5v15l13-7.5z"/>',
-  pause: '<rect x="6.5" y="4.5" width="4" height="15" rx="1"/><rect x="13.5" y="4.5" width="4" height="15" rx="1"/>',
-  replay: '<path class="mk-quorum__stroke" d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path class="mk-quorum__stroke" d="M3 3v5h5"/>',
-  next: '<path d="M6 5v14l10-7z"/><rect x="16.8" y="5" width="2.2" height="14" rx="1"/>',
-};
-const icon = (name, cls) => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
-
 function mount(root){
   const calm = matchMedia('(prefers-reduced-motion:reduce)');
   let policy = POLICIES.find(p => p.value === DEFAULT_POLICY);
   const needNow = () => policy.need(SEATS);
 
-  root.classList.add('mk-quorum');
+  root.classList.add('mk-fig', 'mk-quorum');
   root.innerHTML = `
-    <div class="mk-quorum__head">
-      <span class="mk-quorum__tag">vote replay</span>
-      <span class="mk-quorum__confirm">confirm ${CONFIRMATIONS} in a row</span>
-      <span class="mk-quorum__meta"><b class="mk-quorum__clock">${clock(0)}</b> · <span class="mk-quorum__checks">0 checks</span></span>
+    <div class="mk-fig__head">
+      <span class="mk-fig__tag">vote replay</span>
+      <span class="mk-fig__note">confirm ${CONFIRMATIONS} in a row</span>
+      <span class="mk-fig__meta"><b class="mk-fig__clock">${clock(0)}</b> · <span class="mk-quorum__checks">0 checks</span></span>
     </div>
 
-    <div class="mk-quorum__lead">
-      <p class="mk-quorum__score">
-        <span class="mk-quorum__big">0</span><span class="mk-quorum__need">/${needNow()}</span>
-        <span class="mk-quorum__unit">regions down of the ${SEATS} reporting</span>
+    <div class="mk-fig__lead">
+      <p class="mk-fig__score">
+        <span class="mk-fig__big">0</span><span class="mk-fig__need">/${needNow()}</span>
+        <span class="mk-fig__unit">regions down of the ${SEATS} reporting</span>
       </p>
-      <div class="mk-quorum__tp" role="group" aria-label="Vote playback">
-        <button type="button" class="mk-quorum__btn" data-act="prev" aria-label="Previous round" title="Previous round">${icon('prev', '')}</button>
-        <button type="button" class="mk-quorum__btn mk-quorum__btn--go" data-act="toggle" data-state="play">
-          ${icon('play', 'mk-quorum__ic mk-quorum__ic--play')}
-          ${icon('pause', 'mk-quorum__ic mk-quorum__ic--pause')}
-          ${icon('replay', 'mk-quorum__ic mk-quorum__ic--replay')}
-        </button>
-        <button type="button" class="mk-quorum__btn" data-act="next" aria-label="Next round" title="Next round">${icon('next', '')}</button>
-        <span class="mk-quorum__round">${ROUNDS} rounds</span>
-      </div>
+      ${transport('Vote playback', `${ROUNDS} rounds`)}
     </div>
 
     <div class="mk-quorum__flow">
       <div class="mk-quorum__probes">
-        <p class="mk-quorum__colhead">GET api.example.com/health · every region, every minute</p>
+        <p class="mk-fig__colhead">GET api.example.com/health · every region, every minute</p>
         <p class="mk-quorum__phases" aria-hidden="true">
           <span></span>
           <span class="mk-quorum__phaserow">${STAGES.map((s, si) =>
             `${si ? '<i class="mk-quorum__arrow"></i>' : ''}<span class="mk-quorum__phase">${s.label}</span>`).join('')}</span>
-          <span class="mk-quorum__pips">${Array.from({length: CONFIRMATIONS}, () =>
-            '<i class="mk-quorum__pip"></i>').join('')}</span>
+          <span class="mk-fig__pips">${Array.from({length: CONFIRMATIONS}, () =>
+            '<i class="mk-fig__pip"></i>').join('')}</span>
           <span></span>
         </p>
         <div class="mk-quorum__lanes">${REGIONS.map((r, ri) => `
@@ -145,85 +129,63 @@ function mount(root){
             <span class="mk-quorum__name">${r.name}</span>
             <span class="mk-quorum__pipe" aria-hidden="true">${STAGES.map((s, si) =>
               `${si ? '<i class="mk-quorum__arrow"></i>' : ''}<i class="mk-quorum__cell" data-stage="${s.key}"></i>`).join('')}</span>
-            <span class="mk-quorum__pips" aria-hidden="true">${Array.from({length: CONFIRMATIONS}, () =>
-              '<i class="mk-quorum__pip"></i>').join('')}</span>
+            <span class="mk-fig__pips" aria-hidden="true">${Array.from({length: CONFIRMATIONS}, () =>
+              '<i class="mk-fig__pip"></i>').join('')}</span>
             <span class="mk-quorum__state"></span>
           </div>`).join('')}
         </div>
-        <p class="mk-quorum__legend" aria-hidden="true">
-          <span class="mk-quorum__key mk-quorum__key--setup"></span>connecting
-          <span class="mk-quorum__key mk-quorum__key--wait"></span>waiting
-          <span class="mk-quorum__key mk-quorum__key--ok"></span>passed
-          <span class="mk-quorum__key mk-quorum__key--down"></span>failed
+        <p class="mk-fig__legend" aria-hidden="true">
+          <span class="mk-fig__key mk-fig__key--setup"></span>connecting
+          <span class="mk-fig__key mk-fig__key--wait"></span>waiting
+          <span class="mk-fig__key mk-fig__key--ok"></span>passed
+          <span class="mk-fig__key mk-fig__key--down"></span>failed
         </p>
         <div class="mk-quorum__log" aria-hidden="true"></div>
       </div>
 
       <div class="mk-quorum__ballot">
-        <p class="mk-quorum__colhead">→ the vote · ${SEATS} reporting</p>
+        <p class="mk-fig__colhead">→ the vote · ${SEATS} reporting</p>
         <ol class="mk-quorum__seats">${Array.from({length: SEATS}, (_, i) => `
           <li class="mk-quorum__seat"><span class="mk-quorum__seatno">${i + 1}</span><span class="mk-quorum__seatname">—</span><span class="mk-quorum__seatmark"></span></li>`).join('')}
           <li class="mk-quorum__bar">
-            <span class="mk-quorum__pickwrap">
-              <select class="mk-quorum__pick" aria-label="Rule that opens the incident">${POLICIES.map(p =>
-                `<option value="${p.value}"${p.value === policy.value ? ' selected' : ''}>${p.label}</option>`).join('')}</select>
-            </span>
+            ${picker('Rule that opens the incident', POLICIES, policy.value)}
             <span class="mk-quorum__barneed"></span>
           </li>
         </ol>
         ${SILENT.map(r => `<p class="mk-quorum__ghost"><span class="mk-quorum__ghostmark">·</span><span class="mk-quorum__ghostname">${r.name}</span><span class="mk-quorum__ghostnote">no data · no vote</span></p>`).join('')}
-        <p class="mk-quorum__verdict" role="status" aria-live="polite"></p>
+        <p class="mk-fig__verdict" role="status" aria-live="polite"></p>
       </div>
     </div>
 
-    <p class="mk-quorum__caption">Six rounds of a real vote. A region only votes after two failures in a row, and the incident opens once enough votes land. Change the rule to see where that line falls: any region down pages you in round four, a majority holds out until round six, and all regions never pages at all, because sa-east misses one check in round three and passes again on the next pass.</p>`;
+    <p class="mk-fig__caption">Six rounds of a real vote. A region only votes after two failures in a row, and the incident opens once enough votes land. Change the rule to see where that line falls: any region down pages you in round four, a majority holds out until round six, and all regions never pages at all, because sa-east misses one check in round three and passes again on the next pass.</p>`;
 
   const lanes = [...root.querySelectorAll('.mk-quorum__lane')];
   const seatEls = [...root.querySelectorAll('.mk-quorum__seat')];
   const barEl = root.querySelector('.mk-quorum__bar');
   const barNeedEl = root.querySelector('.mk-quorum__barneed');
-  const pickEl = root.querySelector('.mk-quorum__pick');
-  const needEl = root.querySelector('.mk-quorum__need');
+  const pickEl = root.querySelector('.mk-fig__pick');
+  const needEl = root.querySelector('.mk-fig__need');
   const flow = root.querySelector('.mk-quorum__flow');
   const logEl = root.querySelector('.mk-quorum__log');
-  const bigEl = root.querySelector('.mk-quorum__big');
-  const clockEl = root.querySelector('.mk-quorum__clock');
+  const bigEl = root.querySelector('.mk-fig__big');
+  const clockEl = root.querySelector('.mk-fig__clock');
   const checksEl = root.querySelector('.mk-quorum__checks');
-  const verdictEl = root.querySelector('.mk-quorum__verdict');
-  const roundEl = root.querySelector('.mk-quorum__round');
+  const verdictEl = root.querySelector('.mk-fig__verdict');
+  const roundEl = root.querySelector('.mk-fig__round');
   const toggleBtn = root.querySelector('[data-act="toggle"]');
   const prevBtn = root.querySelector('[data-act="prev"]');
   const nextBtn = root.querySelector('[data-act="next"]');
 
   const cells = lanes.map(l => [...l.querySelectorAll('.mk-quorum__cell')]);
-  const chips = lanes.map(() => {
-    const el = document.createElement('i');
-    el.className = 'mk-quorum__chip';
-    flow.appendChild(el);
-    return el;
-  });
-  const votes = lanes.map(() => {
-    const el = document.createElement('i');
-    el.className = 'mk-quorum__chip mk-quorum__chip--vote';
-    flow.appendChild(el);
-    return el;
-  });
+  const {place, park, add} = mover(flow);
+  const chips = lanes.map(() => add('mk-fig__chip'));
+  const votes = lanes.map(() => add('mk-fig__chip mk-fig__chip--vote'));
 
   const player = {i: -1, playing: false, seated: 0};
   // Last round whose result has actually landed, per region: the seats follow
   // the probes rather than the tally.
   const seen = REGIONS.map(() => -1);
-  const pending = [];
-  const later = (ms, fn) => pending.push(setTimeout(fn, ms));
-  function clearTimers(){ for (const t of pending) clearTimeout(t); pending.length = 0; }
-
-  function park(chip){ chip.classList.remove('is-live'); }
-
-  function place(chip, target, ms){
-    const host = flow.getBoundingClientRect(), r = target.getBoundingClientRect();
-    chip.style.transition = ms ? `transform ${ms}ms cubic-bezier(.2,0,0,1)` : 'none';
-    chip.style.transform = `translate(${r.left - host.left + r.width / 2 - 5}px, ${r.top - host.top + r.height / 2 - 5}px)`;
-  }
+  const {later, clear: clearTimers} = timers();
 
   function renderLog(round, upto){
     const lines = [];
@@ -265,7 +227,7 @@ function mount(root){
       if (!row.reporting) return;
       c.classList.add(ci < STAGES.length - 1 ? 'is-done' : tick === 'x' ? 'is-fail' : 'is-pass');
     });
-    lane.querySelectorAll('.mk-quorum__pip').forEach((p, pi) =>
+    lane.querySelectorAll('.mk-fig__pip').forEach((p, pi) =>
       p.classList.toggle('is-lit', row.reporting && pi < row.run));
     lane.querySelector('.mk-quorum__state').textContent = state(row);
   }
@@ -328,17 +290,11 @@ function mount(root){
     controls();
   }
 
+  // Stepping past the rule firing stays allowed: the run stops, the ballot does
+  // not become unreadable.
   function controls(){
-    const mode = player.playing ? 'pause' : (finished() ? 'replay' : 'play');
-    toggleBtn.dataset.state = mode;
-    const label = {play: 'Play the vote', pause: 'Pause the vote', replay: 'Replay the vote'}[mode];
-    toggleBtn.setAttribute('aria-label', label);
-    toggleBtn.title = label;
-    roundEl.textContent = player.i < 0 ? `${ROUNDS} rounds` : `round ${player.i + 1} of ${ROUNDS}`;
-    prevBtn.disabled = player.i <= 0;
-    // Stepping past the rule firing is still allowed: the run stops, the ballot
-    // does not become unreadable.
-    nextBtn.disabled = player.i >= ROUNDS - 1;
+    paintTransport({toggle: toggleBtn, prev: prevBtn, next: nextBtn, round: roundEl},
+      {playing: player.playing, done: finished(), round: player.i, rounds: ROUNDS});
   }
 
   // Full state for a round, with no traffic in the air: used for scrubbing,
@@ -365,7 +321,7 @@ function mount(root){
     lane.classList.remove('is-down');
     lane.classList.toggle('is-silent', !REGIONS[ri].ms.length);
     cells[ri].forEach(c => { c.className = 'mk-quorum__cell'; });
-    lane.querySelectorAll('.mk-quorum__pip').forEach(p => p.classList.remove('is-lit'));
+    lane.querySelectorAll('.mk-fig__pip').forEach(p => p.classList.remove('is-lit'));
     lane.querySelector('.mk-quorum__state').textContent = REGIONS[ri].ms.length ? 'idle' : 'no data';
   }
 
