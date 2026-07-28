@@ -34,7 +34,8 @@ const REGIONS = [
 const ROUNDS = REGIONS[0].ticks.length;
 const clock = round => `${String(Math.floor((START_MIN + round) / 60)).padStart(2, '0')}:${String((START_MIN + round) % 60).padStart(2, '0')}`;
 
-// The vote, exactly as the incident writer counts it.
+// Where every region stands after `round`, counted the way the incident writer
+// counts it: a run of failures per region, and how many regions answered.
 function tally(round){
   const rows = REGIONS.map(r => {
     const seen = [...r.ticks.slice(0, round + 1)].filter(c => c !== '-');
@@ -42,14 +43,26 @@ function tally(round){
     for (let i = seen.length - 1; i >= 0 && seen[i] === 'x'; i--) run++;
     return {name: r.name, reporting: seen.length > 0, run, down: run >= CONFIRMATIONS};
   });
-  const reporting = rows.filter(r => r.reporting).length;
-  const need = Math.floor(reporting / 2) + 1;      // majority of the regions that answer
-  return {rows, reporting, need, down: rows.filter(r => r.down).length};
+  return {rows, reporting: rows.filter(r => r.reporting).length};
 }
 
 const FINAL = tally(ROUNDS - 1);
 const SEATS = FINAL.reporting;
-const NEED = FINAL.need;
+
+// The detection rules a monitor can carry, named the way the monitor form
+// names them and counted the way the policy counts them. A fixed count for the
+// last seat is left out: it would only restate "all regions".
+const POLICIES = [
+  {value: 'any',      label: 'any region down',     need: () => 1},
+  {value: 'majority', label: 'majority of regions', need: n => Math.floor(n / 2) + 1},
+  {value: 'all',      label: 'all regions',         need: n => n},
+  ...Array.from({length: SEATS - 1}, (_, i) => ({
+    value: String(i + 1),
+    label: `${i + 1} region${i ? 's' : ''}`,
+    need: () => i + 1,
+  })),
+];
+const DEFAULT_POLICY = 'majority';
 
 // Seats fill in the order regions confirm, so a scrubbed frame and a played
 // one agree on which name sits where.
@@ -88,18 +101,20 @@ const icon = (name, cls) => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden
 
 function mount(root){
   const calm = matchMedia('(prefers-reduced-motion:reduce)');
+  let policy = POLICIES.find(p => p.value === DEFAULT_POLICY);
+  const needNow = () => policy.need(SEATS);
 
   root.classList.add('mk-quorum');
   root.innerHTML = `
     <div class="mk-quorum__head">
       <span class="mk-quorum__tag">vote replay</span>
-      <span class="mk-quorum__rule">confirm ${CONFIRMATIONS} · rule majority</span>
+      <span class="mk-quorum__confirm">confirm ${CONFIRMATIONS} in a row</span>
       <span class="mk-quorum__meta"><b class="mk-quorum__clock">${clock(0)}</b> · <span class="mk-quorum__checks">0 checks</span></span>
     </div>
 
     <div class="mk-quorum__lead">
       <p class="mk-quorum__score">
-        <span class="mk-quorum__big">0</span><span class="mk-quorum__need">/${NEED}</span>
+        <span class="mk-quorum__big">0</span><span class="mk-quorum__need">/${needNow()}</span>
         <span class="mk-quorum__unit">regions down of the ${SEATS} reporting</span>
       </p>
       <div class="mk-quorum__tp" role="group" aria-label="Vote playback">
@@ -147,19 +162,28 @@ function mount(root){
       <div class="mk-quorum__ballot">
         <p class="mk-quorum__colhead">→ the vote · ${SEATS} reporting</p>
         <ol class="mk-quorum__seats">${Array.from({length: SEATS}, (_, i) => `
-          <li class="mk-quorum__seat"><span class="mk-quorum__seatno">${i + 1}</span><span class="mk-quorum__seatname">—</span><span class="mk-quorum__seatmark"></span></li>
-          ${i + 1 === NEED ? '<li class="mk-quorum__bar" aria-hidden="true">majority · ' + NEED + '</li>' : ''}`).join('')}
+          <li class="mk-quorum__seat"><span class="mk-quorum__seatno">${i + 1}</span><span class="mk-quorum__seatname">—</span><span class="mk-quorum__seatmark"></span></li>`).join('')}
+          <li class="mk-quorum__bar">
+            <span class="mk-quorum__pickwrap">
+              <select class="mk-quorum__pick" aria-label="Rule that opens the incident">${POLICIES.map(p =>
+                `<option value="${p.value}"${p.value === policy.value ? ' selected' : ''}>${p.label}</option>`).join('')}</select>
+            </span>
+            <span class="mk-quorum__barneed"></span>
+          </li>
         </ol>
         ${SILENT.map(r => `<p class="mk-quorum__ghost"><span class="mk-quorum__ghostmark">·</span><span class="mk-quorum__ghostname">${r.name}</span><span class="mk-quorum__ghostnote">no data · no vote</span></p>`).join('')}
         <p class="mk-quorum__verdict" role="status" aria-live="polite"></p>
       </div>
     </div>
 
-    <p class="mk-quorum__caption">Six rounds of a real vote. A region only votes after two failures in a row, and the incident only opens once the votes cross the majority of the regions that are reporting. sa-east misses one check in round three and resets on the next pass, which is the case that would have paged you elsewhere.</p>`;
+    <p class="mk-quorum__caption">Six rounds of a real vote. A region only votes after two failures in a row, and the incident opens once enough votes land. Change the rule to see where that line falls: any region down pages you in round four, a majority holds out until round six, and all regions never pages at all, because sa-east misses one check in round three and passes again on the next pass.</p>`;
 
   const lanes = [...root.querySelectorAll('.mk-quorum__lane')];
   const seatEls = [...root.querySelectorAll('.mk-quorum__seat')];
   const barEl = root.querySelector('.mk-quorum__bar');
+  const barNeedEl = root.querySelector('.mk-quorum__barneed');
+  const pickEl = root.querySelector('.mk-quorum__pick');
+  const needEl = root.querySelector('.mk-quorum__need');
   const flow = root.querySelector('.mk-quorum__flow');
   const logEl = root.querySelector('.mk-quorum__log');
   const bigEl = root.querySelector('.mk-quorum__big');
@@ -266,28 +290,55 @@ function mount(root){
   }
 
   function settle(round, down){
-    const t = tally(round);
-    const open = down >= t.need;
+    const need = needNow();
+    const open = down >= need;
+    // Last round, every vote in, and the line still not crossed: the rule has
+    // had its whole chance, so the verdict says so rather than "holding".
+    const spent = round === ROUNDS - 1 && down >= ORDER.length;
     root.classList.toggle('is-open', open && round >= 0);
     barEl.classList.toggle('is-crossed', open && round >= 0);
     bigEl.textContent = String(down);
     verdictEl.textContent = round < 0
       ? 'No region has a vote yet.'
       : open
-        ? `Quorum reached. ${down} of ${t.reporting} reporting regions agree, so the incident opens and on-call is paged.`
-        : `Holding. ${down} of ${t.reporting} regions are down and a majority is ${t.need}, so nobody is paged.`;
+        ? `Quorum reached. ${down} of ${SEATS} reporting regions agree, so the incident opens and on-call is paged.`
+        : spent
+          ? `All ${ROUNDS} rounds are done. ${down} of ${SEATS} regions down is not enough for this rule, which needs ${need}, so no alert is sent.`
+          : `Holding. ${down} of ${SEATS} regions are down and the rule needs ${need}, so nobody is paged.`;
+  }
+
+  // The threshold line sits under the last seat the rule needs, so picking a
+  // different rule moves it rather than redrawing the ballot.
+  function applyRule(){
+    const need = needNow();
+    seatEls[need - 1].after(barEl);
+    barNeedEl.textContent = `needs ${need}`;
+    needEl.textContent = `/${need}`;
+    settle(player.i, player.seated);
+    halt();
+  }
+
+  // Nothing left to show once the incident is open or the rounds run out.
+  const finished = () => player.i >= ROUNDS - 1 || root.classList.contains('is-open');
+
+  // The replay stops the moment the rule fires: that is the whole thing it
+  // came to show, and the rounds after it are just aftermath.
+  function halt(){
+    if (root.classList.contains('is-open')) player.playing = false;
+    controls();
   }
 
   function controls(){
-    const done = player.i >= ROUNDS - 1;
-    const mode = player.playing ? 'pause' : (done ? 'replay' : 'play');
+    const mode = player.playing ? 'pause' : (finished() ? 'replay' : 'play');
     toggleBtn.dataset.state = mode;
     const label = {play: 'Play the vote', pause: 'Pause the vote', replay: 'Replay the vote'}[mode];
     toggleBtn.setAttribute('aria-label', label);
     toggleBtn.title = label;
     roundEl.textContent = player.i < 0 ? `${ROUNDS} rounds` : `round ${player.i + 1} of ${ROUNDS}`;
     prevBtn.disabled = player.i <= 0;
-    nextBtn.disabled = done;
+    // Stepping past the rule firing is still allowed: the run stops, the ballot
+    // does not become unreadable.
+    nextBtn.disabled = player.i >= ROUNDS - 1;
   }
 
   // Full state for a round, with no traffic in the air: used for scrubbing,
@@ -375,11 +426,12 @@ function mount(root){
       park(chip);
       player.seated++;
       settle(round, paintSeats(round, player.seated));
+      halt();
     });
   }
 
   function play(){
-    if (player.i >= ROUNDS - 1) paint(-1);
+    if (finished()) paint(-1);
     player.playing = true;
     if (calm.matches){ player.playing = false; paint(ROUNDS - 1); return; }
     runRound(player.i < 0 ? 0 : player.i);
@@ -395,6 +447,14 @@ function mount(root){
   toggleBtn.addEventListener('click', () => player.playing ? pause() : play());
   prevBtn.addEventListener('click', () => step(player.i - 1));
   nextBtn.addEventListener('click', () => step(player.i < 0 ? 0 : player.i + 1));
+  // Swapping the rule re-reads the current frame rather than restarting: the
+  // votes already cast simply meet a different line, and a run in flight keeps
+  // going unless the new rule is already satisfied.
+  pickEl.addEventListener('change', () => {
+    policy = POLICIES.find(p => p.value === pickEl.value);
+    applyRule();
+  });
+  applyRule();
   paint(-1);
 }
 

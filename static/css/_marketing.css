@@ -2301,6 +2301,9 @@ html:has(.marketing-shell) {
     background: var(--mk-surface);
     box-shadow: var(--mk-shadow-frame);
     font-family: var(--mk-font-mono);
+    /* The rule picker drops a native popup, which follows this and not the
+       card's own colours. */
+    color-scheme: dark;
     /* The article resolved its own colour against the light tokens, so restate
        it here or anything unstyled inherits dark ink onto a dark card. */
     color: var(--mk-ink-soft);
@@ -2335,9 +2338,8 @@ html:has(.marketing-shell) {
     letter-spacing: 0.14em;
     text-transform: uppercase;
 }
-/* The rule in force sits with the chrome, not in the prose: the pips show two
-   confirmations but only this says two. */
-.mk-quorum__rule { margin-right: auto; color: var(--mk-quiet); font-size: 0.66rem; }
+/* The pips show two confirmations but only this says two. */
+.mk-quorum__confirm { margin-right: auto; color: var(--mk-quiet); font-size: 0.66rem; }
 .mk-quorum__meta { color: var(--mk-faint); font-size: 0.66rem; font-variant-numeric: tabular-nums; }
 .mk-quorum__clock { color: var(--mk-quiet); font-weight: 600; }
 
@@ -2536,20 +2538,64 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
 .mk-quorum__seatmark { color: var(--mk-faint); font-size: 0.6rem; text-align: right; }
 .mk-quorum__seat.is-up .mk-quorum__seatmark { color: var(--mk-ok); }
 .mk-quorum__seat.is-taken .mk-quorum__seatmark { color: var(--mk-down); }
-/* The threshold, drawn where the votes have to reach. */
+/* The threshold, drawn where the votes have to reach, carrying the rule that
+   puts it there. */
 .mk-quorum__bar {
-    margin: 0.15rem 0 0.1rem;
-    padding-top: 0.2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin: 0.2rem 0 0.15rem;
+    padding-top: 0.3rem;
     border-top: 2px solid var(--mk-ink);
+    transition: border-color 220ms cubic-bezier(.2,0,0,1);
+    list-style: none;
+}
+/* A select takes no pseudo-element of its own, so the caret hangs on a wrapper
+   and the control keeps the seat geometry either side of it. */
+.mk-quorum__pickwrap { position: relative; display: inline-flex; min-width: 0; }
+.mk-quorum__pickwrap::after {
+    position: absolute;
+    top: 50%;
+    right: 0.45rem;
+    width: 4px;
+    height: 4px;
+    border-right: 1px solid var(--mk-quiet);
+    border-bottom: 1px solid var(--mk-quiet);
+    transform: translateY(-75%) rotate(45deg);
+    content: "";
+    pointer-events: none;
+    transition: border-color 160ms cubic-bezier(.2,0,0,1);
+}
+.mk-quorum__pickwrap:hover::after { border-color: var(--mk-ink); }
+.mk-quorum__pick {
+    min-width: 0;
+    height: 22px;
+    padding: 0 1.1rem 0 0.4rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 1px;
     color: var(--mk-ink);
-    transition: border-color 220ms cubic-bezier(.2,0,0,1), color 220ms cubic-bezier(.2,0,0,1);
+    background: var(--mk-bg);
+    appearance: none;
+    font: inherit;
+    font-size: 0.63rem;
+    cursor: pointer;
+    transition-property: border-color, background-color;
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(.2,0,0,1);
+}
+.mk-quorum__pick:hover { border-color: var(--mk-rule-hover); background: var(--mk-bg-2); }
+.mk-quorum__pick:focus-visible { outline: 2px solid var(--mk-ok); outline-offset: 1px; }
+.mk-quorum__barneed {
+    margin-left: auto;
+    color: var(--mk-ink);
     font-size: 0.58rem;
     font-weight: 650;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    list-style: none;
+    transition: color 220ms cubic-bezier(.2,0,0,1);
 }
-.mk-quorum__bar.is-crossed { border-top-color: var(--mk-down); color: var(--mk-down); }
+.mk-quorum__bar.is-crossed { border-top-color: var(--mk-down); }
+.mk-quorum__bar.is-crossed .mk-quorum__barneed { color: var(--mk-down); }
 /* Same row geometry as a seat, and it holds that one line: the note is written
    short enough for the ballot column rather than wrapped. */
 .mk-quorum .mk-quorum__ghost {
@@ -2695,5 +2741,7 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
 
 @media (prefers-reduced-motion: reduce) {
     .mk-quorum, .mk-quorum__lane, .mk-quorum__cell, .mk-quorum__pip,
-    .mk-quorum__seat, .mk-quorum__btn, .mk-quorum__big, .mk-quorum__chip { transition: none; }
+    .mk-quorum__seat, .mk-quorum__btn, .mk-quorum__big, .mk-quorum__chip,
+    .mk-quorum__bar, .mk-quorum__barneed, .mk-quorum__pick,
+    .mk-quorum__pickwrap::after { transition: none; }
 }
