@@ -224,36 +224,32 @@ impl AbuseGuard {
     /// fully the old or fully the new set, never a half-updated mix.
     pub fn inspect(&self, check: &CheckSpec) -> Option<AbuseHit> {
         let s = self.state.load();
-        // `host_str()` / `unbracket` keep an IPv6 literal as-is; that's
-        // fine — IP literals are never host-set entries (the SSRF guard
-        // governs them), so the domain/reputation lookups simply no-op.
-        let host = match check {
-            CheckSpec::Http(h) => {
-                if let Some(i) = s.url_patterns.matches(h.url.as_str()).iter().next() {
-                    return Some(AbuseHit {
-                        kind: AbuseKind::UrlPattern,
-                        detail: format!("pattern #{i}"),
-                    });
-                }
-                h.url.host_str()?
-            }
-            CheckSpec::Tcp(t) => crate::security::unbracket(&t.host),
-            CheckSpec::Ping(p) => crate::security::unbracket(&p.host),
-            // Inbound-only: no outbound host to inspect.
-            CheckSpec::Heartbeat(_) => return None,
-            CheckSpec::TlsCert(c) => crate::security::unbracket(&c.host),
-            CheckSpec::DomainExpiry(d) => d.domain.as_str(),
-            CheckSpec::Dns(d) => d.domain.as_str(),
-            CheckSpec::Flow(f) => {
-                if let Some(i) = s.url_patterns.matches(f.start_url.as_str()).iter().next() {
-                    return Some(AbuseHit {
-                        kind: AbuseKind::UrlPattern,
-                        detail: format!("pattern #{i}"),
-                    });
-                }
-                f.start_url.host_str()?
-            }
+        // Only the two URL-bearing kinds can trip a full-URL pattern, and it
+        // outranks the host rules. Exhaustive on purpose: a new URL-bearing
+        // kind must not slip past pattern matching by defaulting to None.
+        let url = match check {
+            CheckSpec::Http(h) => Some(h.url.as_str()),
+            CheckSpec::Flow(f) => Some(f.start_url.as_str()),
+            CheckSpec::Tcp(_)
+            | CheckSpec::Ping(_)
+            | CheckSpec::Heartbeat(_)
+            | CheckSpec::TlsCert(_)
+            | CheckSpec::DomainExpiry(_)
+            | CheckSpec::Dns(_) => None,
         };
+        if let Some(u) = url
+            && let Some(i) = s.url_patterns.matches(u).iter().next()
+        {
+            return Some(AbuseHit {
+                kind: AbuseKind::UrlPattern,
+                detail: format!("pattern #{i}"),
+            });
+        }
+        // An IPv6 literal survives as-is; that's fine — IP literals are never
+        // host-set entries (the SSRF guard governs them), so the
+        // domain/reputation lookups simply no-op. Heartbeat has no host and
+        // drops out here.
+        let host = check.primary_host()?;
         s.domain_hit(host).or_else(|| s.reputation_hit(host))
     }
 

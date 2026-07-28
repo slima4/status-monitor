@@ -51,6 +51,23 @@ impl CheckSpec {
     pub fn is_passive(&self) -> bool {
         matches!(self, CheckSpec::Heartbeat(_))
     }
+
+    /// The host this check concerns, IPv6 brackets stripped. `None` for
+    /// heartbeat, which is inbound-only. Distinct from
+    /// [`crate::worker::host_throttle::host_port_raw`], which keys a *network endpoint* and
+    /// so excludes dns/domain_expiry: their subject is a name, not a socket.
+    pub fn primary_host(&self) -> Option<&str> {
+        match self {
+            CheckSpec::Http(h) => h.url.host_str().map(crate::security::unbracket),
+            CheckSpec::Tcp(t) => Some(crate::security::unbracket(&t.host)),
+            CheckSpec::Ping(p) => Some(crate::security::unbracket(&p.host)),
+            CheckSpec::TlsCert(c) => Some(crate::security::unbracket(&c.host)),
+            CheckSpec::DomainExpiry(d) => Some(d.domain.as_str()),
+            CheckSpec::Dns(d) => Some(d.domain.as_str()),
+            CheckSpec::Flow(f) => f.start_url.host_str().map(crate::security::unbracket),
+            CheckSpec::Heartbeat(_) => None,
+        }
+    }
 }
 
 /// Per-kind check-interval floor. Expiry state (tls_cert / domain_expiry)
@@ -382,6 +399,70 @@ mod tests {
             assert!(seen.insert(k), "duplicate kind in ALL_KINDS: {k}");
         }
         assert_eq!(CheckSpec::ALL_KINDS.len(), 8);
+    }
+
+    fn http(url: &str) -> CheckSpec {
+        CheckSpec::Http(HttpCheck {
+            url: url.parse().unwrap(),
+            method: HttpMethod::Get,
+            timeout: Duration::from_secs(5),
+            follow_redirects: false,
+            max_redirects: 0,
+            expected_status: ExpectedStatus::Exact(200),
+            expected_body_contains: None,
+            headers: HashMap::new(),
+            body: None,
+            verify_tls: true,
+            basic_auth: None,
+            bearer_token: None,
+        })
+    }
+
+    #[test]
+    fn primary_host_reads_every_outbound_kind() {
+        assert_eq!(
+            http("https://app.example.com/healthz").primary_host(),
+            Some("app.example.com")
+        );
+        let tcp: CheckSpec = serde_json::from_str(
+            r#"{"type":"tcp","host":"db.example.com","port":5432,"timeout":3000}"#,
+        )
+        .unwrap();
+        assert_eq!(tcp.primary_host(), Some("db.example.com"));
+        let dns: CheckSpec = serde_json::from_str(
+            r#"{"type":"dns","domain":"api.example.com","record_type":"A","timeout":3000}"#,
+        )
+        .unwrap();
+        assert_eq!(dns.primary_host(), Some("api.example.com"));
+        let domain: CheckSpec = serde_json::from_str(
+            r#"{"type":"domain_expiry","domain":"example.com","warn_days":30,"critical_days":7,"timeout":5000}"#,
+        )
+        .unwrap();
+        assert_eq!(domain.primary_host(), Some("example.com"));
+        let tls: CheckSpec = serde_json::from_str(
+            r#"{"type":"tls_cert","host":"example.com","port":443,"warn_days":30,"critical_days":7,"timeout":5000}"#,
+        )
+        .unwrap();
+        assert_eq!(tls.primary_host(), Some("example.com"));
+    }
+
+    #[test]
+    fn primary_host_strips_ipv6_brackets() {
+        let tcp: CheckSpec =
+            serde_json::from_str(r#"{"type":"tcp","host":"[::1]","port":5432,"timeout":3000}"#)
+                .unwrap();
+        assert_eq!(tcp.primary_host(), Some("::1"));
+        assert_eq!(
+            http("https://[2606:4700::1111]/").primary_host(),
+            Some("2606:4700::1111")
+        );
+    }
+
+    #[test]
+    fn primary_host_none_for_heartbeat() {
+        let hb: CheckSpec =
+            serde_json::from_str(r#"{"type":"heartbeat","period":300000,"grace":60000}"#).unwrap();
+        assert_eq!(hb.primary_host(), None);
     }
 
     #[test]
