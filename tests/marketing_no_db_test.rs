@@ -152,6 +152,26 @@ async fn known_post_renders_without_db() {
 }
 
 #[tokio::test]
+async fn post_with_a_figure_loads_only_its_own_script() {
+    let (status, body, _) = get("/blog/stop-false-uptime-alerts").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains(r#"class="mk-embed-quorum""#),
+        "the figure's mount must survive sanitising all the way to the page"
+    );
+    assert!(
+        body.contains("/static/js/marketing/quorum.js"),
+        "a post that embeds the figure must load the script that fills it"
+    );
+
+    let (_, other, _) = get("/blog/boring-uptime").await;
+    assert!(
+        !other.contains("quorum.js"),
+        "a post without the figure must not pay for its script"
+    );
+}
+
+#[tokio::test]
 async fn unknown_blog_post_returns_branded_404() {
     let (status, body, _) = get("/blog/does-not-exist").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
