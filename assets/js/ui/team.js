@@ -80,18 +80,12 @@
             const btn = orgNameForm.querySelector("button[type=submit]");
             btn.disabled = true;
             try {
-                const res = await fetch(`/api/v1/orgs/${orgId()}`, {
-                    method: "PATCH",
-                    headers,
-                    body: JSON.stringify({ name }),
-                });
+                const res = await window.smOrgIdentity.patch(orgId(), { name });
                 if (res.ok) {
                     nameStatus.className = "flash-text flash-text--ok";
                     nameStatus.textContent = "Saved.";
                 } else {
-                    let data = null;
-                    try { data = await res.json(); } catch { /* not JSON */ }
-                    window.smRenderApiError(nameErrors, data, res.status);
+                    window.smRenderApiError(nameErrors, res.data, res.status);
                 }
             } catch {
                 window.smRenderClientError(nameErrors, "Network error — try again.");
@@ -108,25 +102,12 @@
         const slugStatus = document.getElementById("org-slug-status");
         const slugErrors = document.getElementById("org-slug-errors");
 
-        const slugify = (raw) =>
-            raw.toLowerCase()
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^[0-9-]+/, "")
-                .slice(0, 30)
-                .replace(/-+$/, "");
+        const slugify = window.smOrgIdentity.slugify;
+        const fetchAvail = window.smOrgIdentity.checkSlug;
 
         const showAvail = (text, ok) => {
             slugAvail.textContent = text;
             slugAvail.className = "font-mono text-xs " + (ok ? "flash-text--ok" : "flash-text--bad");
-        };
-
-        // check-slug runs the real validator, so the client never mirrors it.
-        const fetchAvail = async (slug) => {
-            const res = await fetch(
-                `/api/v1/orgs/check-slug?slug=${encodeURIComponent(slug)}`,
-                { headers: { Accept: "application/json" } },
-            );
-            return res.json();
         };
 
         let checkTimer;
@@ -181,20 +162,14 @@
             const btn = slugForm.querySelector("button[type=submit]");
             btn.disabled = true;
             try {
-                const res = await fetch(`/api/v1/orgs/${orgId()}`, {
-                    method: "PATCH",
-                    headers,
-                    body: JSON.stringify({ slug }),
-                });
+                const res = await window.smOrgIdentity.patch(orgId(), { slug });
                 if (res.ok) {
                     slugForm.dataset.currentSlug = slug;
                     slugAvail.textContent = "";
                     slugStatus.className = "flash-text flash-text--ok";
                     slugStatus.textContent = "Saved.";
                 } else {
-                    let data = null;
-                    try { data = await res.json(); } catch { /* not JSON */ }
-                    window.smRenderApiError(slugErrors, data, res.status);
+                    window.smRenderApiError(slugErrors, res.data, res.status);
                 }
             } catch {
                 window.smRenderClientError(slugErrors, "Network error — try again.");

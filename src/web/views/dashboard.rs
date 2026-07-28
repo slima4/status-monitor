@@ -39,7 +39,7 @@ use crate::web::views::region_display::{LabeledRegion, labeled_regions};
 use crate::web::views::{
     HumanDur, RangeOption, build_range_options, describe_check, resolve_range_key,
 };
-use crate::web::{AuthedBrowser, CurrentOrg};
+use crate::web::{AuthedBrowser, CurrentOrg, CurrentUser};
 
 pub(crate) const RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
 pub(crate) const DEFAULT_RANGE: &str = "24h";
@@ -263,6 +263,17 @@ pub struct DashboardPage {
     pub restored_notice: bool,
     pub joined_notice: Option<String>,
     pub invite_missed_notice: bool,
+    /// Only while the org has no monitors: the slug is about to become a
+    /// public status-page host, and renaming it later is a hard cutover.
+    pub identity: Option<OrgIdentity>,
+}
+
+pub struct OrgIdentity {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    /// `.{base_domain}` in subdomain mode, `None` when pages are path-based.
+    pub host_suffix: Option<String>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -310,6 +321,10 @@ pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
         Ok(o) => o,
         Err(rej) => return rej.into_response(),
     };
+    let user = match CurrentUser::from_request_parts(&mut parts, app_state).await {
+        Ok(u) => u,
+        Err(rej) => return rej.into_response(),
+    };
     let params = match Query::<DashboardParams>::try_from_uri(&parts.uri) {
         Ok(q) => q,
         Err(rej) => return rej.into_response(),
@@ -318,7 +333,7 @@ pub async fn root(state: State<AppState>, mut parts: Parts) -> Response {
         Ok(c) => c,
         Err(rej) => return rej.into_response(),
     };
-    match index(auth, state, org, cookies, params).await {
+    match index(auth, state, org, user, cookies, params).await {
         Ok(page) => page.into_response(),
         Err(e) => e.into_response(),
     }
@@ -328,6 +343,7 @@ pub async fn index(
     _auth: AuthedBrowser,
     State(state): State<AppState>,
     org: CurrentOrg,
+    CurrentUser(user_id): CurrentUser,
     cookies: Cookies,
     Query(params): Query<DashboardParams>,
 ) -> WebResult<DashboardPage> {
@@ -349,11 +365,34 @@ pub async fn index(
     let (rows, matches) = filter_rows(&snapshot, selected_status, selected_kind, drill.as_ref());
     // Banner only when the slug matches the ACTIVE org — a pasted/crafted
     // ?joined= for some other org renders nothing.
-    let joined_notice = match (params.joined.as_deref(), state.db.as_ref()) {
-        (Some(slug), Some(pool)) => crate::storage::orgs::get_org(pool, org.0)
-            .await?
+    let org_row = match state.db.as_ref() {
+        Some(pool) if onboarding || params.joined.is_some() => {
+            crate::storage::orgs::get_org(pool, org.0).await?
+        }
+        _ => None,
+    };
+    let joined_notice = params.joined.as_deref().and_then(|slug| {
+        org_row
+            .as_ref()
             .filter(|o| o.slug == slug)
-            .map(|o| o.name),
+            .map(|o| o.name.clone())
+    });
+    let identity = match (onboarding, state.db.as_ref(), org_row) {
+        // Owner-only: PATCH /orgs refuses everyone else, so a member would get
+        // a form that 403s on save.
+        (true, Some(pool), Some(o))
+            if matches!(
+                crate::storage::orgs::membership_status(pool, user_id, org.0).await?,
+                crate::storage::orgs::MembershipStatus::Owner
+            ) =>
+        {
+            Some(OrgIdentity {
+                id: o.id.0.to_string(),
+                name: o.name,
+                slug: o.slug,
+                host_suffix: public_status::public_host_suffix(&state.cfg),
+            })
+        }
         _ => None,
     };
     Ok(DashboardPage {
@@ -375,6 +414,7 @@ pub async fn index(
         selected_status,
         selected_kind,
         drill: drill.map(|d| d.chip),
+        identity,
         restored_notice: flash.restored,
         joined_notice,
         invite_missed_notice: flash.invite_missed,
@@ -1407,6 +1447,7 @@ mod tests {
             matches: 2,
             truncated: false,
             onboarding: false,
+            identity: None,
             active_incidents: Arc::from(Vec::<DashboardActiveIncident>::new().into_boxed_slice()),
             status_counts: StatusCounts {
                 up: 1,
@@ -1533,11 +1574,21 @@ mod tests {
             restored_notice: false,
             joined_notice: None,
             invite_missed_notice: false,
+            identity: Some(OrgIdentity {
+                id: "00000000-0000-0000-0000-000000000009".into(),
+                name: "My status".into(),
+                slug: "brave-otter-1234".into(),
+                host_suffix: Some(".uptimepage.dev".into()),
+            }),
         };
         let html = page.render().unwrap();
         assert!(html.contains("nothing to watch yet."));
         assert!(html.contains("add your first monitor"));
         assert!(!html.contains(r#"id="dashboard-table""#));
+        assert!(html.contains("brave-otter-1234.uptimepage.dev"));
+        assert!(html.contains(r#"id="org-identity""#));
+        // The row calls smClearFormErrors/smRenderApiError, which live here.
+        assert!(html.contains("js/ui/api_form.js"));
     }
 
     #[test]

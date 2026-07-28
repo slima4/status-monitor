@@ -37,6 +37,9 @@
 
   {% if onboarding %}
   {% include "_empty_monitors_hero.html" %}
+  {% if let Some(id) = identity %}
+  {% include "dashboard/_org_identity.html" %}
+  {% endif %}
   {% else %}
   {% include "dashboard/table.html" %}
   {% endif %}
