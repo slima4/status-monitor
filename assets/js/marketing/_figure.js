@@ -45,6 +45,49 @@ export function timers(){
   };
 }
 
+// Middle band rather than a ratio, so a figure taller than the viewport counts.
+const BAND = '-25% 0px -25% 0px';
+// Tells a reader who stopped here from a scroll passing through.
+const DWELL_MS = 450;
+
+/** Runs the replay once, the first time the reader arrives at the figure. */
+export function autoplay(root, start){
+  const calm = matchMedia('(prefers-reduced-motion:reduce)');
+  const verdict = root.querySelector('.mk-fig__verdict');
+  let visible = false, armed = true, dwell = 0;
+
+  const stop = () => {
+    armed = false;
+    clearTimeout(dwell);
+    io.disconnect();
+    document.removeEventListener('visibilitychange', fire);
+  };
+  // A background tab clamps the timers, so it would burn the replay unseen.
+  const fire = () => {
+    if (!armed || !visible || document.hidden || calm.matches) return;
+    stop();
+    // Nobody asked for this run, so it must not talk over a screen reader.
+    verdict?.setAttribute('aria-live', 'off');
+    start();
+  };
+  const io = new IntersectionObserver(([e]) => {
+    visible = e.isIntersecting;
+    clearTimeout(dwell);
+    if (visible) dwell = setTimeout(fire, DWELL_MS);
+  }, {rootMargin: BAND});
+  // A touch scroll opens with a pointerdown on the card, so only a real click
+  // counts as the reader taking over.
+  const touched = () => {
+    verdict?.setAttribute('aria-live', 'polite');
+    stop();
+  };
+
+  io.observe(root);
+  document.addEventListener('visibilitychange', fire);
+  root.addEventListener('click', touched, {once: true});
+  root.addEventListener('keydown', touched, {once: true});
+}
+
 /** Moves a chip between elements of `host`, in the host's own coordinates. */
 export function mover(host){
   return {

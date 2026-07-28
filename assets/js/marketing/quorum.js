@@ -1,4 +1,4 @@
-import { mover, paintTransport, picker, timers, transport } from './_figure.js';
+import { autoplay, mover, paintTransport, picker, timers, transport } from './_figure.js';
 
 /* Region vote, replayed round by round.
 
@@ -412,6 +412,7 @@ function mount(root){
   });
   applyRule();
   paint(-1);
+  autoplay(root, play);
 }
 
 document.querySelectorAll('.mk-embed-quorum').forEach(mount);

@@ -1,4 +1,4 @@
-import { mover, paintTransport, picker, timers, transport } from './_figure.js';
+import { autoplay, mover, paintTransport, picker, timers, transport } from './_figure.js';
 
 /* What a quiet region does to the vote.
 
@@ -293,6 +293,7 @@ function mount(root){
   });
 
   paint(-1);
+  autoplay(root, play);
 }
 
 document.querySelectorAll('.mk-embed-silence').forEach(mount);

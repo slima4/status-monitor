@@ -1,4 +1,4 @@
-import { mover, paintTransport, picker, timers, transport } from './_figure.js';
+import { autoplay, mover, paintTransport, picker, timers, transport } from './_figure.js';
 
 /* The confirmation gate, replayed check by check.
 
@@ -259,6 +259,7 @@ function mount(root){
 
   buildPips();
   paint(-1);
+  autoplay(root, play);
 }
 
 document.querySelectorAll('.mk-embed-gate').forEach(mount);
