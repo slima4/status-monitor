@@ -2643,6 +2643,11 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     background: var(--mk-down);
     box-shadow: 0 0 0 4px color-mix(in oklch, var(--mk-down) 30%, transparent);
 }
+/* A chip carries a result, so it arrives coloured by the one it carries. */
+.mk-fig__chip.is-fail {
+    background: var(--mk-down);
+    box-shadow: 0 0 0 3px color-mix(in oklch, var(--mk-down) 30%, transparent);
+}
 .mk-fig__chip.is-live { opacity: 1; }
 
 /* ── check log ── */
@@ -2787,8 +2792,82 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
    moment on its way back to empty. */
 .mk-fig__pips.is-reset .mk-fig__pip { border-color: var(--mk-ok); }
 
+/* ── silence: what the control plane hears ── */
+.mk-silence__flow {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 13.75rem;
+    gap: 1.1rem;
+    padding: 0 1rem 0.85rem;
+}
+.mk-silence__lanes { display: grid; gap: 2px; }
+.mk-silence__lane {
+    display: grid;
+    grid-template-columns: minmax(0, 6.6rem) minmax(0, 1fr) 4.9rem minmax(0, 3.6rem);
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.3rem 0 0.3rem 0.45rem;
+    border-radius: 1px;
+    box-shadow: inset 2px 0 0 transparent;
+    transition-property: background-color, box-shadow;
+    transition-duration: 220ms;
+    transition-timing-function: cubic-bezier(.2,0,0,1);
+}
+/* Out of the vote is the state worth seeing, so it is drawn as absence rather
+   than as an alarm: no fill, no colour, just a row that has stepped back. */
+.mk-silence__lane.is-out { box-shadow: inset 2px 0 0 var(--mk-rule); opacity: 0.62; }
+.mk-silence__name { color: var(--mk-ink); font-size: 0.72rem; font-weight: 550; }
+.mk-silence__name, .mk-silence__heard, .mk-silence__vote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-silence__heard { color: var(--mk-faint); font-size: 0.6rem; font-variant-numeric: tabular-nums; text-align: right; }
+.mk-silence__vote { color: var(--mk-quiet); font-size: 0.62rem; text-align: right; }
+.mk-silence__lane.is-out .mk-silence__vote { color: var(--mk-faint); }
+
+.mk-silence__ticks { display: flex; align-items: center; gap: 4px; }
+.mk-silence__tick {
+    flex: 1 1 0;
+    min-width: 10px;
+    height: 14px;
+    border: 1px solid var(--mk-rule-soft);
+    border-radius: 1px;
+    transition-property: background-color, border-color;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(.2,0,0,1);
+}
+.mk-silence__tick.is-pass { border-color: var(--mk-ok); background: color-mix(in oklch, var(--mk-ok) 24%, transparent); }
+.mk-silence__tick.is-fail { border-color: var(--mk-down); background: color-mix(in oklch, var(--mk-down) 32%, transparent); }
+/* Nothing arrived, which has to look unlike a result rather than like a bad
+   one: an open slot, not a red one. */
+.mk-silence__tick.is-missing { border-style: dotted; border-color: var(--mk-rule); }
+
+.mk-silence__side { padding-left: 1.1rem; border-left: 1px solid var(--mk-rule); }
+.mk-silence__brain {
+    padding: 0.5rem 0.65rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-bg);
+    transition: border-color 220ms cubic-bezier(.2,0,0,1);
+}
+.mk-silence__brain.is-open { border-color: var(--mk-down); }
+.mk-silence .mk-silence__stat {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin: 0;
+    padding: 0.16rem 0;
+    color: var(--mk-quiet);
+    font-size: 0.62rem;
+}
+.mk-silence__stat b { color: var(--mk-ink); font-size: 0.85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+/* The line the down votes have to reach, drawn like the ballot's own. */
+.mk-silence .mk-silence__stat--rule { margin-top: 0.2rem; padding-top: 0.3rem; border-top: 2px solid var(--mk-ink); }
+.mk-silence.is-open .mk-silence__stat--rule { border-top-color: var(--mk-down); }
+.mk-silence.is-open .mk-silence__down { color: var(--mk-down); }
+
 @media (max-width: 940px) {
     .mk-quorum__flow { grid-template-columns: minmax(0, 1fr); }
+    .mk-silence__flow { grid-template-columns: minmax(0, 1fr); }
+    .mk-silence__side { padding: 0.9rem 0 0; border-left: 0; border-top: 1px solid var(--mk-rule); }
     .mk-quorum__ballot { padding: 0.9rem 0 0; border-left: 0; border-top: 1px solid var(--mk-rule); }
     /* Full width here, so the verdict needs far fewer reserved lines. */
     .mk-fig .mk-fig__verdict { min-height: 2.4rem; }
@@ -2808,8 +2887,17 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
         row-gap: 0.3rem;
         padding-block: 0.4rem;
     }
-    .mk-quorum__name, .mk-gate__name { grid-area: name; }
+    .mk-silence__lane {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas: "name vote" "ticks heard";
+        row-gap: 0.3rem;
+        padding-block: 0.4rem;
+    }
+    .mk-quorum__name, .mk-gate__name, .mk-silence__name { grid-area: name; }
     .mk-quorum__state, .mk-gate__state { grid-area: state; }
+    .mk-silence__vote { grid-area: vote; }
+    .mk-silence__ticks { grid-area: ticks; }
+    .mk-silence__heard { grid-area: heard; }
     .mk-quorum__pipe { grid-area: pipe; }
     .mk-gate__row { grid-area: row; }
     .mk-fig__pips { grid-area: pips; }
@@ -2821,5 +2909,6 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     .mk-quorum, .mk-quorum__lane, .mk-quorum__cell, .mk-fig__pip,
     .mk-quorum__seat, .mk-fig__btn, .mk-fig__big, .mk-fig__chip,
     .mk-quorum__bar, .mk-quorum__barneed, .mk-fig__pick,
-    .mk-fig__pickwrap::after, .mk-gate__lane, .mk-gate__cell { transition: none; }
+    .mk-fig__pickwrap::after, .mk-gate__lane, .mk-gate__cell,
+    .mk-silence__lane, .mk-silence__tick, .mk-silence__brain { transition: none; }
 }

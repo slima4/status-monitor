@@ -217,6 +217,7 @@ fn split_front_matter(raw: &str) -> Option<(&str, &str)> {
 const EMBEDS: &[(&str, &str)] = &[
     ("mk-embed-quorum", "js/marketing/quorum.js"),
     ("mk-embed-gate", "js/marketing/gate.js"),
+    ("mk-embed-silence", "js/marketing/silence.js"),
 ];
 
 /// Sanitising Markdown render. CommonMark + tables → HTML → ammonia
