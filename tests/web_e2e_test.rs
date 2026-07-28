@@ -183,10 +183,8 @@ async fn new_target_form_renders_create_mode() {
     );
 }
 
-/// A brand-new org has exactly one channel (the owner's seeded email), and a
-/// monitor bound to nothing pages nobody — so the create form ticks it. A
-/// second channel makes the right routing ambiguous, and the form stops
-/// guessing.
+/// A monitor bound to nothing pages nobody, so a sole channel is ticked. A
+/// second one makes the right routing ambiguous.
 #[tokio::test]
 async fn create_form_ticks_a_sole_channel_but_not_a_pair() {
     let router = app();
@@ -210,8 +208,8 @@ async fn create_form_ticks_a_sole_channel_but_not_a_pair() {
         assert_eq!(resp.status(), StatusCode::CREATED, "create channel {name}");
     };
 
-    // Scoped to the channel inputs: plenty of unrelated boxes on this form
-    // (verify_tls, the interval rail) also render checked.
+    // Scoped to the channel inputs: verify_tls and the interval rail also
+    // render checked.
     let channel_boxes = |html: &str| -> (usize, usize) {
         let mut offered = 0;
         let mut ticked = 0;
@@ -301,6 +299,107 @@ async fn target_detail_renders_charts_and_range_nav() {
     assert!(html.contains(r#"id="breakdown-chart""#));
     assert!(html.contains("/api/v1/targets/"));
     assert!(html.contains("/static/js/charts/detail_charts.js"));
+}
+
+/// Gaps are named while they are gaps, and stop being named once watched.
+#[tokio::test]
+async fn detail_offers_uncovered_checks_for_the_host() {
+    let router = app();
+    let id = create_http_target(&router, "coverage-target").await;
+
+    let detail = async || {
+        let resp = router
+            .clone()
+            .oneshot(
+                Request::get(format!("/targets/{id}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        body_text(resp).await
+    };
+
+    let html = detail().await;
+    assert!(html.contains("also worth watching"));
+    // Matched up to the query separator: the `&` is escaped in rendered HTML
+    // and the exact entity is the templating engine's call.
+    for href in [
+        r#"href="/targets/new?kind=tls_cert"#,
+        r#"href="/targets/new?kind=domain_expiry"#,
+        r#"href="/targets/new?kind=dns"#,
+    ] {
+        assert!(html.contains(href), "missing suggestion {href}");
+    }
+    assert_eq!(
+        html.matches("host=example.com").count(),
+        3,
+        "every suggestion points at the monitor's host"
+    );
+
+    // Cover one of them; the panel drops that row and keeps the rest.
+    let cert = json!({
+        "name": "cert",
+        "interval": 3600,
+        "enabled": true,
+        "check": {
+            "type": "tls_cert",
+            "host": "example.com",
+            "port": 443,
+            "warn_days": 30,
+            "critical_days": 7,
+            "timeout": 5000
+        }
+    });
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(cert.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "create cert monitor");
+
+    let html = detail().await;
+    assert!(
+        !html.contains(r#"href="/targets/new?kind=tls_cert"#),
+        "a covered check must stop being suggested"
+    );
+    assert!(html.contains(r#"href="/targets/new?kind=dns"#));
+}
+
+#[tokio::test]
+async fn create_form_prefills_from_a_coverage_link() {
+    let resp = app()
+        .oneshot(
+            Request::get("/targets/new?kind=domain_expiry&host=acme.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let html = body_text(resp).await;
+    assert!(html.contains(r#"value="acme.com""#), "host prefilled");
+    assert!(html.contains(r#"value="acme.com domain expiry""#), "named");
+    // Expiry kinds floor at an hour, so the form must not open on 60s.
+    assert!(html.contains(r#"data-interval="3600""#));
+
+    // A hand-edited kind is ignored rather than rejected.
+    let resp = app()
+        .oneshot(
+            Request::get("/targets/new?kind=nonsense&host=acme.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(!body_text(resp).await.contains(r#"value="acme.com""#));
 }
 
 #[tokio::test]

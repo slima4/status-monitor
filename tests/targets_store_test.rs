@@ -111,6 +111,79 @@ async fn kind_filter_and_counts_are_org_wide() {
     common::drop_test_db(&name).await;
 }
 
+/// The subject lives under a different JSON key per kind, and the answer must
+/// not cross tenants.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn hosts_by_kind_reads_each_kinds_subject_and_stays_org_scoped() {
+    let Some((db, name)) = common::fresh_test_db("targets_hosts").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let user_a = common::make_user(&pool, "h").await;
+    let user_b = common::make_user(&pool, "h").await;
+    let org_a = create_org_with_owner(&pool, user_a, &common::unique_slug("ha"), "A", 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let org_b = create_org_with_owner(&pool, user_b, &common::unique_slug("hb"), "B", 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+
+    // `host` for tls_cert, `domain` for dns and domain_expiry.
+    let tls: CheckSpec = serde_json::from_str(
+        r#"{"type":"tls_cert","host":"acme.com","port":443,"warn_days":30,"critical_days":7,"timeout":5000}"#,
+    )
+    .unwrap();
+    let dns: CheckSpec = serde_json::from_str(
+        r#"{"type":"dns","domain":"api.acme.com","record_type":"A","timeout":3000}"#,
+    )
+    .unwrap();
+    let expiry: CheckSpec = serde_json::from_str(
+        r#"{"type":"domain_expiry","domain":"acme.com","warn_days":30,"critical_days":7,"timeout":5000}"#,
+    )
+    .unwrap();
+    let http = CheckSpec::Http(common::default_http_check(
+        Url::parse("https://acme.com/").unwrap(),
+        ExpectedStatus::Exact(200),
+    ));
+    seed(&store, org_a.id, "cert", tls, None).await;
+    seed(&store, org_a.id, "record", dns, None).await;
+    seed(&store, org_a.id, "registration", expiry, None).await;
+    // Out of scope for the filter even though it shares the host.
+    seed(&store, org_a.id, "site", http.clone(), None).await;
+    // Another tenant watching the same host must not leak in.
+    seed(&store, org_b.id, "b-site", http, None).await;
+
+    let mut got = store
+        .hosts_by_kind(org_a.id, &["tls_cert", "domain_expiry", "dns"])
+        .await
+        .unwrap();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            ("dns".to_string(), "api.acme.com".to_string()),
+            ("domain_expiry".to_string(), "acme.com".to_string()),
+            ("tls_cert".to_string(), "acme.com".to_string()),
+        ]
+    );
+    assert!(
+        store
+            .hosts_by_kind(org_b.id, &["tls_cert", "domain_expiry", "dns"])
+            .await
+            .unwrap()
+            .is_empty(),
+        "B runs no coverage-shaped monitors, so it must see none of A's"
+    );
+
+    common::drop_test_db(&name).await;
+}
+
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
 async fn region_filter_and_distinct_groups_are_org_wide() {

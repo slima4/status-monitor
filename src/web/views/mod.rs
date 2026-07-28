@@ -1,6 +1,7 @@
 pub mod alert_channel_stop;
 pub mod auth;
 pub mod connect_oauth;
+pub mod coverage;
 pub mod dashboard;
 pub mod delegate_connect;
 pub mod discord_connect;

@@ -358,6 +358,24 @@ impl TargetStore for PostgresTargetStore {
             .collect())
     }
 
+    async fn hosts_by_kind(&self, org: OrgId, kinds: &[&str]) -> Result<Vec<(String, String)>> {
+        // tls_cert keys its subject as `host`, dns and domain_expiry as `domain`.
+        let rows: Vec<(Option<String>, Option<String>)> = sqlx::query_as(
+            r#"SELECT kind, coalesce(check_spec->>'host', check_spec->>'domain')
+               FROM targets
+               WHERE org_id = $1 AND kind = ANY($2)"#,
+        )
+        .bind(org.0)
+        .bind(kinds)
+        .fetch_all(&self.pool)
+        .await
+        .context("query target hosts by kind")?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(kind, host)| Some((kind?, host?)))
+            .collect())
+    }
+
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Target>> {
         let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(
             r#"SELECT id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,

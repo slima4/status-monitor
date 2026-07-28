@@ -737,6 +737,21 @@ impl TargetStore for InMemoryTargetStore {
             .collect())
     }
 
+    async fn hosts_by_kind(&self, _org: OrgId, kinds: &[&str]) -> Result<Vec<(String, String)>> {
+        Ok(self
+            .targets
+            .lock()
+            .iter()
+            .filter(|t| kinds.contains(&t.check.kind()))
+            .filter_map(|t| {
+                Some((
+                    t.check.kind().to_string(),
+                    t.check.primary_host()?.to_string(),
+                ))
+            })
+            .collect())
+    }
+
     async fn create(
         &self,
         _org: OrgId,

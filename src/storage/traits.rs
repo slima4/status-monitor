@@ -89,6 +89,10 @@ pub trait TargetStore: Send + Sync {
         &self,
         org: OrgId,
     ) -> Result<std::collections::HashMap<Uuid, (String, String)>>;
+    /// `(kind, host)` for the org's targets of the given kinds, read off the
+    /// `check_spec` tag with no full decode. The kind filter keeps this to the
+    /// handful of expiry-shaped monitors an org has, not its whole inventory.
+    async fn hosts_by_kind(&self, org: OrgId, kinds: &[&str]) -> Result<Vec<(String, String)>>;
     /// Create one target. `max_targets` is the plan cap; the INSERT is
     /// guarded by `(count) + 1 <= max_targets` so the bound holds even
     /// against a concurrent create (no check-then-act). A flow monitor is

@@ -562,6 +562,39 @@ pub struct NewParams {
     /// "Copy" action on the list) so similar monitors can be added fast.
     #[serde(default)]
     pub from: Option<Uuid>,
+    /// From the coverage hints. Unrecognised values are ignored rather than
+    /// rejected: this arrives in a URL people bookmark and edit.
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub host: Option<String>,
+}
+
+/// Kinds with no single host to fill (http, flow, heartbeat) leave the form
+/// untouched: there is no sensible half-prefill for a URL or a dead-man's switch.
+fn prefill_kind_host(form: &mut FormModel, kind: &str, host: &str) {
+    let host = host.trim();
+    if host.is_empty() {
+        return;
+    }
+    match kind {
+        "tls_cert" => form.tls_cert.host = host.to_owned(),
+        "domain_expiry" => form.domain_expiry.domain = host.to_owned(),
+        "dns" => form.dns.domain = host.to_owned(),
+        "tcp" => form.tcp.host = host.to_owned(),
+        "ping" => form.ping.host = host.to_owned(),
+        _ => return,
+    }
+    form.check_type = CheckSpec::ALL_KINDS
+        .iter()
+        .find(|k| **k == kind)
+        .copied()
+        .unwrap_or(form.check_type);
+    form.name = format!("{host} {kind}").replace('_', " ");
+    // Expiry kinds floor at an hour, so opening on 60s would be rejected on save.
+    form.interval_s = form
+        .interval_s
+        .max(crate::domain::min_interval_secs_for_kind(kind));
 }
 
 /// Whether `form_from_target` produces an edit form (PATCH the same monitor)
@@ -736,6 +769,9 @@ pub async fn new_form(
         None => {
             let mut form = empty_create_form();
             form.owner_user_id = user_id.0.to_string();
+            if let (Some(kind), Some(host)) = (params.kind.as_deref(), params.host.as_deref()) {
+                prefill_kind_host(&mut form, kind, host);
+            }
             (form, TargetAlerts::default())
         }
     };
@@ -743,10 +779,9 @@ pub async fn new_form(
     let (channels, owner_options, group_options, tag_options, plan, available) =
         form_options(&state, org, &alerts, &owner_id).await?;
     form.channels = channels;
-    // A fresh monitor in an org with exactly one channel routes to it by
-    // default — otherwise the first monitor most people create alerts nobody.
-    // With several channels the guess would be wrong as often as right, so
-    // the choice stays theirs. A copy keeps the source monitor's bindings.
+    // Otherwise the first monitor most people create alerts nobody. With
+    // several channels the guess would be wrong as often as right. A copy
+    // keeps the source monitor's bindings.
     if params.from.is_none()
         && let [only] = form.channels.as_mut_slice()
     {

@@ -19,6 +19,7 @@ use crate::error::AppError;
 use crate::storage::{ClampedRange, TimeRange, UptimeStats, rollup_bucket_secs};
 use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
+use crate::web::views::coverage;
 use crate::web::views::dashboard::{
     KpiDelta, Polarity, count_delta, render_spark_path_domain, ribbon_class, uptime_pp_delta,
 };
@@ -231,6 +232,8 @@ pub struct DetailPage {
     pub ribbon_oob: bool,
     /// Registrable domain a `domain_expiry` monitor queries; `None` otherwise.
     pub registered_domain: Option<String>,
+    /// `None` once the host is fully covered, and the panel vanishes with it.
+    pub coverage: Option<coverage::CoveragePanel>,
     pub config_json: String,
     pub range: &'static str,
     pub range_options: Vec<RangeOption>,
@@ -925,6 +928,13 @@ pub async fn index(
         _ => None,
     };
     let config_json = config_json_with_derived(&target.check, registered_domain.as_deref())?;
+    let coverage = {
+        let covered = state
+            .target_store
+            .hosts_by_kind(org, &coverage::COVERAGE_KINDS)
+            .await?;
+        coverage::panel(&target.check, &covered)
+    };
     let (kind, address) = describe_check(&target.check);
     let share_count = state
         .monitor_share_store
@@ -962,6 +972,7 @@ pub async fn index(
         segments: Arc::clone(&live.segments),
         ribbon_oob: false,
         registered_domain,
+        coverage,
         config_json,
         range: range_key,
         range_options: build_range_options(range_key, &RANGE_KEYS),
@@ -1459,6 +1470,7 @@ mod tests {
             kind: "HTTP",
             address: "https://example.com".into(),
             registered_domain: None,
+            coverage: None,
             interval_s: 60,
             enabled: true,
             tags: vec!["prod".into()],

@@ -1,0 +1,22 @@
+{# Rendered hidden and revealed by the script, so a dismissed panel never flashes. #}
+<section class="sticker-card space-y-3 p-5" data-coverage="{{ cov.host }}" hidden>
+  <div class="flex flex-wrap items-baseline justify-between gap-2">
+    <h2 class="panel-label">also worth watching</h2>
+    <button type="button" data-coverage-dismiss
+            class="cursor-pointer border-0 bg-transparent p-0 text-xs text-muted hover:text-body">dismiss</button>
+  </div>
+  <p class="text-xs text-muted">
+    This monitor proves the service answers. These are the failures it would
+    keep answering through.
+  </p>
+  <ul class="space-y-2">
+    {% for c in cov.items %}
+    <li class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+      <a href="{{ c.href }}" class="sticker-btn px-3 py-1.5 text-sm font-medium">+ {{ c.label }}</a>
+      <span class="font-mono text-xs text-body">{{ c.host }}</span>
+      <span class="min-w-0 flex-1 text-xs text-muted">{{ c.why }}</span>
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+<script defer src="{{ "js/ui/coverage_hint.js"|asset }}"></script>

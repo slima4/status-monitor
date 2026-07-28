@@ -176,6 +176,10 @@
   <script defer src="{{ "js/echarts.min.js"|asset }}"></script>
   <script type="module" src="{{ "js/charts/detail_charts.js"|asset }}"></script>
 
+  {% if let Some(cov) = coverage %}
+  {% include "targets/partials/_coverage.html" %}
+  {% endif %}
+
   <section class="sticker-card overflow-hidden" data-collapsible>
     <header class="bg-[color:var(--theme-surface-sunk)] px-5 py-2.5">
       <button type="button" data-collapse-toggle aria-expanded="false"
