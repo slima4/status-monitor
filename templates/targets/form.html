@@ -10,6 +10,8 @@
         data-min-interval="{{ form.min_interval_s }}"
         data-interval="{{ form.interval_s }}"
         data-kind-floors="{{ form.kind_floors_json() }}"
+        data-kind-intervals="{{ form.kind_intervals_json() }}"
+        {% if form.interval_pinned %}data-interval-touched="1"{% endif %}
         novalidate
         class="space-y-6">
 

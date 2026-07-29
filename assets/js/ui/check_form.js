@@ -20,6 +20,14 @@
     const kindFloor = (kind) => KIND_MIN_INTERVAL[kind] || 10;
     const isSlowKind = (kind) => kindFloor(kind) >= 3600;
 
+    // Sits above the floors: what to offer, and what to open on.
+    let KIND_INTERVALS = {};
+    try {
+        KIND_INTERVALS = JSON.parse(form.dataset.kindIntervals || "{}");
+    } catch { /* falls back to the floors */ }
+    const pickerFloor = (kind) => KIND_INTERVALS[kind]?.min || kindFloor(kind);
+    const suggested = (kind) => KIND_INTERVALS[kind]?.default;
+
     // Remember each rail's last cadence so switching kinds back restores it
     // (checking a radio in one rail auto-unchecks the other's — shared name).
     form.querySelectorAll("[data-interval-rail]").forEach((rail) => {
@@ -29,7 +37,7 @@
 
     function applyKindIntervalDefaults(kind) {
         const want = isSlowKind(kind) ? "slow" : "fast";
-        const floor = kindFloor(kind);
+        const floor = pickerFloor(kind);
         let active = null;
         form.querySelectorAll("[data-interval-rail]").forEach((rail) => {
             const on = rail.dataset.intervalRail === want;
@@ -37,22 +45,29 @@
             if (on) active = rail;
         });
         if (!active) return;
-        // Hide + disable presets below this kind's floor (e.g. flow can't run
-        // under 5m), tracking the smallest one still allowed.
+        // A cadence this monitor already runs stays pickable, or opening its
+        // form would silently re-point it at a preset.
+        const stored = form.dataset.interval;
+        const keeps = (o) => o.value === stored && Number(o.value) >= kindFloor(kind);
         let firstValid = null;
         active.querySelectorAll("input[name='interval_s']").forEach((o) => {
-            const below = Number(o.value) < floor;
+            const below = Number(o.value) < floor && !keeps(o);
             o.disabled = below;
             const seg = o.closest(".sm-rail__seg");
             if (seg) seg.classList.toggle("hidden", below);
             if (!below && !firstValid) firstValid = o;
         });
-        // Keep a still-valid current pick; otherwise snap to the smallest allowed
-        // preset so the default never violates the floor.
+        const wanted = active.querySelector(`input[name='interval_s'][value='${suggested(kind)}']`);
+        // Kinds sharing a rail would otherwise inherit the previous kind's pick.
+        const inherited = form.dataset.mode === "create" && !form.dataset.intervalTouched;
+        if (inherited && wanted && !wanted.disabled) {
+            wanted.checked = true;
+            return;
+        }
         const cur = active.querySelector("input[name='interval_s']:checked");
         if (cur && !cur.disabled) return;
         const last = active.querySelector(`input[name='interval_s'][value='${active.dataset.last}']`);
-        const def = last && !last.disabled ? last : firstValid;
+        const def = [last, wanted, firstValid].find((o) => o && !o.disabled);
         if (def) def.checked = true;
     }
 
@@ -99,6 +114,7 @@
         if (evt.target.name === "interval_s") {
             const rail = evt.target.closest("[data-interval-rail]");
             if (rail) rail.dataset.last = evt.target.value;
+            form.dataset.intervalTouched = "1";
             return;
         }
         if (evt.target.name !== "check_type") return;

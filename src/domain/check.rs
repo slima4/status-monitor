@@ -83,6 +83,43 @@ pub fn min_interval_secs_for_kind(kind: &str) -> u64 {
     }
 }
 
+/// Smallest preset the picker offers and where a new monitor opens. Both sit
+/// above [`min_interval_secs_for_kind`], which stays the hard limit so a
+/// monitor already running faster keeps saving.
+pub struct IntervalHints {
+    pub min: u64,
+    pub default: u64,
+}
+
+/// Most people never touch the cadence, so the suggestion is what they run.
+pub fn interval_hints_for_kind(kind: &str) -> IntervalHints {
+    match kind {
+        // RDAP rate-limits by source address, and a registration moves once a year.
+        "domain_expiry" => IntervalHints {
+            min: 43_200,
+            default: 86_400,
+        },
+        // A wrong certificate mid-cycle is already caught by the HTTPS monitor.
+        "tls_cert" => IntervalHints {
+            min: 21_600,
+            default: 43_200,
+        },
+        // Under the record's TTL a caching resolver just re-reads its cache.
+        "dns" => IntervalHints {
+            min: 60,
+            default: 300,
+        },
+        "flow" => IntervalHints {
+            min: 300,
+            default: 900,
+        },
+        other => IntervalHints {
+            min: min_interval_secs_for_kind(other),
+            default: 60,
+        },
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
@@ -375,6 +412,19 @@ mod duration_ms {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_kind_suggests_a_cadence_it_would_accept() {
+        for kind in CheckSpec::ALL_KINDS {
+            let hints = interval_hints_for_kind(kind);
+            let floor = min_interval_secs_for_kind(kind);
+            assert!(hints.min >= floor, "{kind}: picker offers below the floor");
+            assert!(
+                hints.default >= hints.min,
+                "{kind}: default is not offered by the picker"
+            );
+        }
+    }
 
     // Adding a CheckSpec variant breaks this exhaustive match, forcing ALL_KINDS
     // (and the count asserted below) to be updated in the same change.

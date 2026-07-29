@@ -272,6 +272,8 @@ pub struct FormModel {
     /// The org plan's `min_check_interval_secs`, surfaced so the form's
     /// `min=`/JS guard mirror the same floor the API enforces (no magic 60).
     pub min_interval_s: u64,
+    /// Carried over from a real monitor, so the picker must not re-suggest over it.
+    pub interval_pinned: bool,
     pub enabled: bool,
     pub tags: Vec<String>,
     /// Free-text operator group label (drives Monitors-page bucketing).
@@ -428,7 +430,22 @@ impl FormModel {
         serde_json::Value::Object(floors).to_string()
     }
 
-    /// Check-interval presets for http/tcp/dns, filtered by the plan floor.
+    /// Mirrored so a kind switch lands where the server would have rendered it.
+    pub fn kind_intervals_json(&self) -> String {
+        let hints: serde_json::Map<String, serde_json::Value> = CheckSpec::ALL_KINDS
+            .iter()
+            .map(|k| {
+                let h = crate::domain::interval_hints_for_kind(k);
+                (
+                    (*k).to_string(),
+                    serde_json::json!({ "min": h.min, "default": h.default }),
+                )
+            })
+            .collect();
+        serde_json::Value::Object(hints).to_string()
+    }
+
+    /// Check-interval presets for http/tcp/ping/dns, filtered by the plan floor.
     pub fn interval_options_fast(&self) -> Vec<IntervalChoice> {
         self.interval_group(
             &[30, 60, 120, 300, 600, 900, 1_800, 3_600],
@@ -438,16 +455,17 @@ impl FormModel {
 
     /// Check-interval presets for tls_cert/domain_expiry.
     pub fn interval_options_slow(&self) -> Vec<IntervalChoice> {
-        self.interval_group(&[3_600, 21_600, 43_200, 86_400], self.slow_kind())
+        self.interval_group(&[21_600, 43_200, 86_400], self.slow_kind())
     }
 
     /// An off-preset stored value is preserved as its own option in the
     /// active group, so editing an API-created monitor keeps its cadence.
     fn interval_group(&self, presets: &[u64], active: bool) -> Vec<IntervalChoice> {
+        let picker_min = crate::domain::interval_hints_for_kind(self.check_type).min;
         let mut values: Vec<u64> = presets
             .iter()
             .copied()
-            .filter(|s| *s >= self.min_interval_s)
+            .filter(|s| *s >= self.min_interval_s && (!active || *s >= picker_min))
             .collect();
         if active && !values.contains(&self.interval_s) {
             values.push(self.interval_s);
@@ -591,10 +609,7 @@ fn prefill_kind_host(form: &mut FormModel, kind: &str, host: &str) {
         .copied()
         .unwrap_or(form.check_type);
     form.name = format!("{host} {kind}").replace('_', " ");
-    // Expiry kinds floor at an hour, so opening on 60s would be rejected on save.
-    form.interval_s = form
-        .interval_s
-        .max(crate::domain::min_interval_secs_for_kind(kind));
+    form.interval_s = crate::domain::interval_hints_for_kind(kind).default;
 }
 
 /// Whether `form_from_target` produces an edit form (PATCH the same monitor)
@@ -613,6 +628,7 @@ fn empty_create_form() -> FormModel {
         name: String::new(),
         interval_s: 60,
         min_interval_s: 60,
+        interval_pinned: false,
         enabled: true,
         tags: Vec::new(),
         group_name: String::new(),
@@ -977,6 +993,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
         interval_s: t.interval.as_secs(),
         // Overwritten by the handler with the org plan's real floor.
         min_interval_s: 60,
+        interval_pinned: true,
         enabled: t.enabled,
         tags,
         group_name,
@@ -1294,6 +1311,45 @@ mod tests {
         .unwrap();
         assert!(html.contains(r#"name="interval_s" value="90" class="sr-only" checked"#));
         assert!(html.contains("90s"));
+    }
+
+    #[test]
+    fn expiry_kinds_open_on_the_suggested_cadence_not_the_floor() {
+        let mut form = empty_create_form();
+        prefill_kind_host(&mut form, "domain_expiry", "acme.com");
+        assert_eq!(form.interval_s, 86_400);
+        // Hourly stays legal, it is just not something the picker offers.
+        let offered: Vec<u64> = form
+            .interval_options_slow()
+            .iter()
+            .map(|o| o.secs)
+            .collect();
+        assert_eq!(offered, [43_200, 86_400]);
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"name="interval_s" value="86400" class="sr-only" checked"#));
+    }
+
+    #[test]
+    fn a_stored_cadence_below_the_suggestions_survives_an_edit() {
+        let mut form = empty_create_form();
+        form.check_type = "domain_expiry";
+        form.interval_s = 3_600;
+        form.interval_pinned = true;
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"name="interval_s" value="3600" class="sr-only" checked"#));
+        // Pinned, so the client leaves it alone.
+        assert!(html.contains(r#"data-interval-touched="1""#));
+        assert!(html.contains(r#"data-interval="3600""#));
     }
 
     #[test]

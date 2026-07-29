@@ -66,13 +66,15 @@ Connects, reads the certificate, and reports how many days remain.
 
 Two thresholds: a **warn** count that marks the monitor degraded, and a **critical** count that marks it down. The form starts at 30 and 7 days. Keep the warn threshold above your renewal automation's window, so a failed renewal surfaces while there is still time to fix it by hand.
 
-Certificates move slowly, so the minimum interval is one hour. Checking more often tells you nothing new.
+Certificates move slowly, so the minimum interval is one hour and the form suggests twice a day. Checking more often tells you nothing new: a certificate changes on renewal, and a wrong one served mid-cycle is already caught by any HTTPS monitor on the same host.
 
 ## Domain expiry
 
 Asks the registry how long is left on the domain registration itself, through RDAP.
 
 Different failure from TLS and often worse: an expired certificate breaks HTTPS, an expired domain hands your name back to the market. Same warn and critical day thresholds, same hourly floor. Worth one per domain you own, set to warn generously, since registrar transfers and renewal disputes take weeks rather than minutes.
+
+Leave this one daily, which is what the form suggests. A registration changes about once a year, and RDAP rate-limits by source address, so polling it hourly across a lot of domains risks the answers being refused rather than arriving faster. That matters most when a Terraform loop creates one monitor per domain.
 
 ## DNS
 
@@ -83,6 +85,8 @@ Pick a record type (`A`, `AAAA`, `CNAME`, `MX`, `NS`, `TXT`, `SOA`, `PTR`, `CAA`
 That last option is the point of the check. Without it, any answer at all counts as up, so you learn only that the name still resolves. With it, you learn that it resolves **to the right place** — which is what catches a hijacked record, a bad registrar change, or a regional misroute that a plain HTTP check from one location would sail straight past.
 
 An empty answer, including NXDOMAIN, is down. So is a mismatch when you have set an expected substring, and so is a resolver that fails outright. Querying a specific resolver is how you verify propagation: point one monitor at your authoritative server and another at a public resolver, and a gap between them is a propagation problem.
+
+The default resolver caches and honours TTL, so checking faster than the record's TTL mostly re-reads the cache. Five minutes suits most records. Naming a resolver explicitly queries it directly, which is where a tighter interval starts to earn its keep.
 
 ## Flow
 
@@ -98,13 +102,17 @@ Flows run only where a browser engine is available, so their regions are narrowe
 
 ## Intervals
 
-Every kind has a floor, and your plan sets its own on top. The effective minimum is whichever is higher.
+Every kind has a floor, and your plan sets its own on top. The effective minimum is whichever is higher. The floor is what the API accepts; the suggestion is what the form opens at, and what most people should run.
 
-| Kind | Floor |
-|---|---|
-| HTTP, TCP, Ping, DNS | 10 seconds |
-| Heartbeat | 60 seconds (evaluation cadence) |
-| Flow | 5 minutes |
-| TLS certificate, domain expiry | 1 hour |
+| Kind | Floor | Suggested |
+|---|---|---|
+| HTTP, TCP, Ping | 10 seconds | 60 seconds |
+| DNS | 10 seconds | 5 minutes |
+| Heartbeat | 60 seconds (evaluation cadence) | n/a, you set period and grace |
+| Flow | 5 minutes | 15 minutes |
+| TLS certificate | 1 hour | 12 hours |
+| Domain expiry | 1 hour | 24 hours |
+
+The API enforces only the floor, so Terraform and the REST API can go faster than the suggestion. They rarely should.
 
 Faster is not better. Interval decides how quickly you detect an outage, but the consecutive-failure setting decides how quickly you are told about one, and that is usually where the real tuning is. See [Notifications](notifications.md).

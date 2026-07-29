@@ -276,7 +276,7 @@ Opens a TCP connection, performs a TLS handshake against the host (accepting any
 - `days_remaining < warn_days` → `degraded`
 - otherwise → `up`
 
-`error` carries a JSON document with `days_remaining`, `not_after`, `subject_common_name`, `issuer_common_name`. A handshake failure (plain-TCP host, network error) returns `error` status with the underlying message. `warn_days` must be strictly greater than `critical_days`. Floor is `interval >= 3600` (enforced); default for a new monitor is `86400` (daily).
+`error` carries a JSON document with `days_remaining`, `not_after`, `subject_common_name`, `issuer_common_name`. A handshake failure (plain-TCP host, network error) returns `error` status with the underlying message. `warn_days` must be strictly greater than `critical_days`. Floor is `interval >= 3600` (enforced); a monitor created in the form opens at `43200` (twice daily), which leaves room for a short-lived certificate whose `warn_days` is only a day or two.
 
 ### Domain expiration
 
