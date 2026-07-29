@@ -72,9 +72,9 @@ Certificates move slowly, so the minimum interval is one hour and the form sugge
 
 Asks the registry how long is left on the domain registration itself, through RDAP.
 
-Different failure from TLS and often worse: an expired certificate breaks HTTPS, an expired domain hands your name back to the market. Same warn and critical day thresholds, same hourly floor. Worth one per domain you own, set to warn generously, since registrar transfers and renewal disputes take weeks rather than minutes.
+Different failure from TLS and often worse: an expired certificate breaks HTTPS, an expired domain hands your name back to the market. Same warn and critical day thresholds. Worth one per domain you own, set to warn generously, since registrar transfers and renewal disputes take weeks rather than minutes.
 
-Leave this one daily, which is what the form suggests. A registration changes about once a year, and RDAP rate-limits by source address, so polling it hourly across a lot of domains risks the answers being refused rather than arriving faster. That matters most when a Terraform loop creates one monitor per domain.
+The floor here is twelve hours rather than one, and the form suggests daily. A registration changes about once a year, and RDAP rate-limits by source address, so polling faster risks the answers being refused rather than arriving sooner. That matters most when a script or a Terraform loop creates one monitor per domain.
 
 ## DNS
 
@@ -111,7 +111,7 @@ Every kind has a floor, and your plan sets its own on top. The effective minimum
 | Heartbeat | 60 seconds (evaluation cadence) | n/a, you set period and grace |
 | Flow | 5 minutes | 15 minutes |
 | TLS certificate | 1 hour | 12 hours |
-| Domain expiry | 1 hour | 24 hours |
+| Domain expiry | 12 hours | 24 hours |
 
 The API enforces only the floor, so Terraform and the REST API can go faster than the suggestion. They rarely should.
 

@@ -70,12 +70,15 @@ impl CheckSpec {
     }
 }
 
-/// Per-kind check-interval floor. Expiry state (tls_cert / domain_expiry)
-/// moves slowly, so hourly minimum. Heartbeat's interval is its evaluation
-/// cadence, which can't be finer than the grace it judges, so a minute floor.
+/// Per-kind check-interval floor. Expiry state moves slowly, so certificates
+/// floor at an hour and registrations at twelve. Heartbeat's interval is its
+/// evaluation cadence, which can't be finer than the grace it judges, so a
+/// minute floor.
 pub fn min_interval_secs_for_kind(kind: &str) -> u64 {
     match kind {
-        "tls_cert" | "domain_expiry" => 3_600,
+        // RDAP rate-limits by source address, so this floor guards the probe IPs.
+        "domain_expiry" => 43_200,
+        "tls_cert" => 3_600,
         // A headless-browser run is far heavier than a single probe.
         "flow" => 300,
         "heartbeat" => 60,
@@ -84,7 +87,7 @@ pub fn min_interval_secs_for_kind(kind: &str) -> u64 {
 }
 
 /// Smallest preset the picker offers and where a new monitor opens. Both sit
-/// above [`min_interval_secs_for_kind`], which stays the hard limit so a
+/// at or above [`min_interval_secs_for_kind`], which stays the hard limit so a
 /// monitor already running faster keeps saving.
 pub struct IntervalHints {
     pub min: u64,
@@ -94,7 +97,6 @@ pub struct IntervalHints {
 /// Most people never touch the cadence, so the suggestion is what they run.
 pub fn interval_hints_for_kind(kind: &str) -> IntervalHints {
     match kind {
-        // RDAP rate-limits by source address, and a registration moves once a year.
         "domain_expiry" => IntervalHints {
             min: 43_200,
             default: 86_400,

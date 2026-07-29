@@ -1376,10 +1376,11 @@ fn check_abuse(state: &AppState, org: OrgId, check: &crate::domain::CheckSpec) -
     Err(hit.into_app_error())
 }
 
-/// Largest per-kind floor (tls_cert / domain_expiry = 3600s). Any
-/// requested interval at or above this is guaranteed to clear every kind
-/// floor and lets the PATCH path skip the existing-target read.
-const MAX_KIND_FLOOR_SECS: i64 = 3_600;
+/// Largest per-kind floor (domain_expiry). Any requested interval at or above
+/// this is guaranteed to clear every kind floor and lets the PATCH path skip
+/// the existing-target read. Set too low, the skip waves through an interval
+/// the kind would reject, so a test holds it to the real maximum.
+const MAX_KIND_FLOOR_SECS: i64 = 43_200;
 
 /// Per-resource validation, including the plan's check-interval floor. Both
 /// `create` and `bulk_create` run this per item, so the floor is enforced by
@@ -2044,6 +2045,16 @@ fn check_ip(ip: IpAddr, guard: &SsrfGuard) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_floor_skip_covers_every_kind() {
+        for kind in CheckSpec::ALL_KINDS {
+            assert!(
+                MAX_KIND_FLOOR_SECS >= crate::domain::min_interval_secs_for_kind(kind) as i64,
+                "{kind} floors above the skip, so PATCH would accept a rejected interval"
+            );
+        }
+    }
 
     #[test]
     fn scrub_secrets_redacts_echoed_values_in_body_and_headers() {

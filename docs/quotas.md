@@ -16,7 +16,7 @@ hosted service `free` is sold as **Standard**, `founding` as **Founding**, and
 | Quota | free | founding | pro | Meaning |
 |---|---|---|---|---|
 | `max_targets` | 20 | 50 | 150 | Monitored targets in the org |
-| `min_check_interval_secs` | 180 | 60 | 30 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 3600 for `tls_cert` / `domain_expiry`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `dns` / `ping`. |
+| `min_check_interval_secs` | 180 | 60 | 30 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 43200 for `domain_expiry`, 3600 for `tls_cert`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `dns` / `ping`. |
 | `retention_days` | 30 | 90 | 395 | History window the UI and API will read |
 | `raw_days` | 30 | 30 | 30 | Per-check detail retention, stamped onto each ClickHouse row at write time |
 | `max_flow_checks` | 0 | 0 | 0 | Browser flow monitors the org can create; 0 doubles as the feature gate, and every plan stays there until launch sets real caps |
@@ -90,9 +90,10 @@ enforced identically (atomic, never overshoot).
 A sub-minimum check interval is its own 422, `MIN_CHECK_INTERVAL`, enforced
 on create and PATCH, single and bulk — a target created at the floor cannot
 be edited below it. The floor is `max(plan.min_check_interval_secs, kind_min)`:
-the per-kind value (3600 for `tls_cert` / `domain_expiry`, 300 for `flow`,
-60 for `heartbeat`, 10 for the rest) applies regardless of plan tier —
-polling an expiry probe faster than once an hour yields no signal.
+the per-kind value (43200 for `domain_expiry`, 3600 for `tls_cert`, 300 for
+`flow`, 60 for `heartbeat`, 10 for the rest) applies regardless of plan tier —
+polling an expiry probe faster yields no signal, and `domain_expiry` reads
+RDAP, which rate-limits by source address.
 
 ## Rate limiting
 

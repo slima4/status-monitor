@@ -386,8 +386,8 @@ async fn create_form_prefills_from_a_coverage_link() {
     let html = body_text(resp).await;
     assert!(html.contains(r#"value="acme.com""#), "host prefilled");
     assert!(html.contains(r#"value="acme.com domain expiry""#), "named");
-    // Expiry kinds floor at an hour, so the form must not open on 60s.
-    assert!(html.contains(r#"data-interval="3600""#));
+    // Opens on the suggested cadence for the kind, not on the 60s default.
+    assert!(html.contains(r#"data-interval="86400""#));
 
     // A hand-edited kind is ignored rather than rejected.
     let resp = app()

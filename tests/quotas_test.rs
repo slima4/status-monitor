@@ -267,7 +267,7 @@ async fn sub_minimum_interval_rejected_on_create() {
     assert_eq!(b["error"]["code"], "MIN_CHECK_INTERVAL");
 }
 
-// ── tls_cert / domain_expiry have a 3600s kind-floor independent of plan ──
+// ── tls_cert floors at 3600s, domain_expiry at 43200s, independent of plan ──
 #[tokio::test]
 async fn sub_kind_floor_interval_rejected_on_tls_cert_create() {
     let Some(pool) = pg_pool_from_env().await else {
@@ -343,6 +343,53 @@ async fn sub_kind_floor_interval_rejected_on_patch_without_check_field() {
             Request::patch(format!("/api/v1/targets/{id}"))
                 .header("content-type", "application/json")
                 .body(Body::from(patch.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body_json(resp).await["error"]["code"], "MIN_CHECK_INTERVAL");
+}
+
+/// An hourly interval clears every other kind, so the PATCH path's skip must
+/// not treat it as clearing this one.
+#[tokio::test]
+async fn hourly_interval_rejected_on_domain_expiry_patch() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+    let name = format!("dom-{}", Uuid::now_v7());
+    let create = json!({
+        "name": name,
+        "check": {
+            "type": "domain_expiry",
+            "domain": "example.com",
+            "warn_days": 30,
+            "critical_days": 7,
+            "timeout": 5000
+        },
+        "interval": 86400,
+        "tags": []
+    });
+    let created = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .body(Body::from(create.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let id = body_json(created).await["id"].as_str().unwrap().to_string();
+
+    let resp = app
+        .oneshot(
+            Request::patch(format!("/api/v1/targets/{id}"))
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "interval": 3600 }).to_string()))
                 .unwrap(),
         )
         .await
