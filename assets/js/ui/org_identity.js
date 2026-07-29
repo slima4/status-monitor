@@ -1,6 +1,5 @@
-// Org rename + slug availability, shared by /settings/team and the first-run
-// row on an empty dashboard. One PATCH path and one availability check, so the
-// two surfaces can never disagree about what a valid slug is.
+// Org rename + slug availability behind /settings/team. Kept apart from the
+// page so the client's notion of a valid slug has one definition to drift from.
 (function () {
     const headers = {
         "Content-Type": "application/json",

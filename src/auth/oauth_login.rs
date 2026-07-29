@@ -269,6 +269,9 @@ pub async fn upsert_identity_and_signup_org(
 /// of writes to `organizations` / `memberships` / `org_audit_log`. The retry
 /// loop here only covers the rare slug collision from the adjective+noun+suffix
 /// RNG; the owner-limit bypass is documented there.
+///
+/// Both name and slug are deliberately neutral: a slug is a public host on our
+/// domain, so nothing user-supplied may land there unreviewed.
 async fn create_signup_org_in_tx(
     tx: &mut Transaction<'_, Postgres>,
     user: UserId,
