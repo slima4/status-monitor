@@ -321,11 +321,29 @@ pub struct FormModel {
     /// Whether the region assignment + policy section renders (edit only — a
     /// not-yet-created monitor has no id to assign regions to).
     pub show_regions: bool,
-    /// Whether the flow check-type card is offered, gated on the org plan
-    /// allowing at least one flow monitor. Editing an existing flow still shows
-    /// its card regardless, so a plan downgrade never hides a live monitor.
+    /// Whether the org plan allows a flow monitor; without one its card locks.
     pub flow_available: bool,
 }
+
+/// One card in the type rail; `locked` renders inert, with no radio.
+pub struct KindCard {
+    pub value: &'static str,
+    pub label: &'static str,
+    pub desc: &'static str,
+    pub selected: bool,
+    pub locked: bool,
+}
+
+const KIND_CARDS: &[(&str, &str, &str)] = &[
+    ("http", "http", "URL / API endpoint"),
+    ("tcp", "tcp", "host : port reachable"),
+    ("ping", "ping", "icmp echo reply"),
+    ("dns", "dns", "record resolves"),
+    ("tls_cert", "tls cert", "expiry + chain"),
+    ("domain_expiry", "domain", "registration expiry"),
+    ("heartbeat", "heartbeat", "your job pings us"),
+    ("flow", "flow", "browser login / journey"),
+];
 
 /// One option in the detection-threshold dropdown. `value` is what the form
 /// submits (`any`/`majority`/`all` or a plain integer).
@@ -405,6 +423,20 @@ impl FormModel {
                     format!("{value} fails")
                 },
                 selected: value == self.alert_confirmations,
+            })
+            .collect()
+    }
+
+    pub fn kind_cards(&self) -> Vec<KindCard> {
+        KIND_CARDS
+            .iter()
+            .map(|(value, label, desc)| KindCard {
+                value,
+                label,
+                desc,
+                selected: self.check_type == *value,
+                // Edit renders the rail static, so a live flow is never locked out.
+                locked: *value == "flow" && !self.flow_available,
             })
             .collect()
     }
@@ -588,14 +620,24 @@ pub struct NewParams {
     pub host: Option<String>,
 }
 
+/// Unrecognised kinds are ignored, not rejected: people hand-edit this URL.
+fn apply_kind_param(form: &mut FormModel, kind: &str) -> bool {
+    let Some(kind) = CheckSpec::ALL_KINDS.iter().find(|k| **k == kind).copied() else {
+        return false;
+    };
+    form.check_type = kind;
+    form.interval_s = crate::domain::interval_hints_for_kind(kind).default;
+    true
+}
+
 /// Kinds with no single host to fill (http, flow, heartbeat) leave the form
 /// untouched: there is no sensible half-prefill for a URL or a dead-man's switch.
-fn prefill_kind_host(form: &mut FormModel, kind: &str, host: &str) {
+fn prefill_host(form: &mut FormModel, host: &str) {
     let host = host.trim();
     if host.is_empty() {
         return;
     }
-    match kind {
+    match form.check_type {
         "tls_cert" => form.tls_cert.host = host.to_owned(),
         "domain_expiry" => form.domain_expiry.domain = host.to_owned(),
         "dns" => form.dns.domain = host.to_owned(),
@@ -603,13 +645,7 @@ fn prefill_kind_host(form: &mut FormModel, kind: &str, host: &str) {
         "ping" => form.ping.host = host.to_owned(),
         _ => return,
     }
-    form.check_type = CheckSpec::ALL_KINDS
-        .iter()
-        .find(|k| **k == kind)
-        .copied()
-        .unwrap_or(form.check_type);
-    form.name = format!("{host} {kind}").replace('_', " ");
-    form.interval_s = crate::domain::interval_hints_for_kind(kind).default;
+    form.name = format!("{host} {}", form.check_type).replace('_', " ");
 }
 
 /// Whether `form_from_target` produces an edit form (PATCH the same monitor)
@@ -785,8 +821,11 @@ pub async fn new_form(
         None => {
             let mut form = empty_create_form();
             form.owner_user_id = user_id.0.to_string();
-            if let (Some(kind), Some(host)) = (params.kind.as_deref(), params.host.as_deref()) {
-                prefill_kind_host(&mut form, kind, host);
+            if let Some(kind) = params.kind.as_deref()
+                && apply_kind_param(&mut form, kind)
+                && let Some(host) = params.host.as_deref()
+            {
+                prefill_host(&mut form, host);
             }
             (form, TargetAlerts::default())
         }
@@ -809,6 +848,11 @@ pub async fn new_form(
     ensure_tags_listed(&mut form);
     form.show_escalation = state.cfg.escalation.enabled;
     form.flow_available = plan.max_flow_checks > 0;
+    // `?kind=flow` and a copy both pick the kind before the plan is known.
+    if form.check_type == "flow" && !form.flow_available {
+        form.check_type = "http";
+        form.interval_s = crate::domain::interval_hints_for_kind("http").default;
+    }
     form.min_interval_s = plan_min_interval(&plan);
     // A new monitor is prefilled with 60s; raise it if the plan floor is
     // higher so the default the user sees would actually be accepted.
@@ -1085,6 +1129,99 @@ mod tests {
     }
 
     #[test]
+    fn a_kind_param_preselects_the_rail() {
+        let mut form = empty_create_form();
+        assert!(apply_kind_param(&mut form, "dns"));
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"name="check_type" value="dns" checked"#));
+
+        // A hand-edited kind is ignored rather than silently landing on http.
+        let mut form = empty_create_form();
+        assert!(!apply_kind_param(&mut form, "nonsense"));
+        assert_eq!(form.check_type, "http");
+    }
+
+    #[test]
+    fn edit_locks_the_kind_to_a_static_rail() {
+        let mut form = empty_create_form();
+        form.mode = "edit";
+        form.check_type = "tcp";
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(!html.contains("data-check-card"), "no selectable cards");
+        assert!(html.contains(r#"<input type="hidden" name="check_type" value="tcp">"#));
+        assert!(html.contains("check-type-card--static check-type-card--on"));
+    }
+
+    #[test]
+    fn flow_is_offered_but_locked_until_the_plan_allows_it() {
+        let html = FormPage {
+            active_tab: "targets",
+            form: empty_create_form(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("browser login / journey"));
+        assert!(!html.contains(r#"name="check_type" value="flow""#));
+        assert!(html.contains("not on your plan"));
+
+        let mut form = empty_create_form();
+        form.flow_available = true;
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"name="check_type" value="flow""#));
+        assert!(!html.contains("not on your plan"));
+
+        // The URL names the kind before the plan is known; it stays locked.
+        let mut form = empty_create_form();
+        assert!(apply_kind_param(&mut form, "flow"));
+        assert!(
+            form.kind_cards()
+                .iter()
+                .any(|c| c.value == "flow" && c.locked),
+            "a plan without flow keeps the card locked whatever the URL asked for"
+        );
+    }
+
+    #[test]
+    fn test_results_render_into_a_docked_sheet() {
+        let html = FormPage {
+            active_tab: "targets",
+            form: empty_create_form(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("data-test-sheet"));
+        assert!(html.contains("data-test-verdict"));
+        assert!(html.contains(r#"<div id="test-sheet-body" class="test-sheet__body" hidden>"#));
+        assert!(html.contains("data-test-result"));
+    }
+
+    #[test]
+    fn heartbeat_is_offered_to_new_monitors() {
+        let html = FormPage {
+            active_tab: "targets",
+            form: empty_create_form(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"name="check_type" value="heartbeat""#));
+    }
+
+    #[test]
     fn renders_a_card_and_panel_for_every_check_kind() {
         let html = FormPage {
             active_tab: "targets",
@@ -1092,23 +1229,13 @@ mod tests {
         }
         .render()
         .unwrap();
-        // Heartbeat is hidden from the create picker outright; flow is hidden
-        // unless the plan allows it (empty_create_form is the dark default).
-        // Every remaining kind gets a card, and every kind keeps its panel.
-        let picker_kinds = CheckSpec::ALL_KINDS
-            .iter()
-            .filter(|k| **k != "heartbeat" && **k != "flow");
+        // Flow is the only kind that can lock, and a locked card has no radio.
+        let selectable = CheckSpec::ALL_KINDS.iter().filter(|k| **k != "flow");
         assert_eq!(
             html.matches("data-check-card").count(),
-            picker_kinds.clone().count()
+            selectable.clone().count()
         );
-        for hidden in ["heartbeat", "flow"] {
-            assert!(
-                !html.contains(&format!(r#"name="check_type" value="{hidden}""#)),
-                "{hidden} card must be hidden on the default create form"
-            );
-        }
-        for v in picker_kinds {
+        for v in selectable {
             assert!(
                 html.contains(&format!(r#"value="{v}""#)),
                 "missing card for variant {v}"
@@ -1121,22 +1248,7 @@ mod tests {
                 "missing panel for variant {v}"
             );
         }
-        // Default selection lands on HTTP.
         assert!(html.contains(r#"name="check_type" value="http" checked"#));
-
-        // When the plan allows flow, its card appears.
-        let mut form = empty_create_form();
-        form.flow_available = true;
-        let html = FormPage {
-            active_tab: "targets",
-            form,
-        }
-        .render()
-        .unwrap();
-        assert!(
-            html.contains(r#"value="flow""#),
-            "flow card must show when the plan allows it"
-        );
     }
 
     #[test]
@@ -1316,7 +1428,8 @@ mod tests {
     #[test]
     fn expiry_kinds_open_on_the_suggested_cadence_not_the_floor() {
         let mut form = empty_create_form();
-        prefill_kind_host(&mut form, "domain_expiry", "acme.com");
+        assert!(apply_kind_param(&mut form, "domain_expiry"));
+        prefill_host(&mut form, "acme.com");
         assert_eq!(form.interval_s, 86_400);
         // Hourly stays legal, it is just not something the picker offers.
         let offered: Vec<u64> = form

@@ -13,10 +13,39 @@
         data-kind-intervals="{{ form.kind_intervals_json() }}"
         {% if form.interval_pinned %}data-interval-touched="1"{% endif %}
         novalidate
-        class="space-y-6">
+        class="mx-auto w-full max-w-7xl">
+
+    <div class="form-grid grid grid-cols-1 gap-6 lg:grid-cols-[17rem_1fr] lg:items-start lg:gap-8 xl:grid-cols-[17rem_1fr_15rem]">
+
+    <aside class="type-rail lg:sticky lg:top-6">
+      <span class="form-legend">what to watch</span>
+      {% if form.mode == "edit" %}
+      <input type="hidden" name="check_type" value="{{ form.check_type }}">
+      <div class="check-type-cards check-type-cards--rail mt-3" role="group" aria-label="Monitor type">
+        {% for c in form.kind_cards() %}
+        {% call reg::chooser_card_static(c.selected, c.label, c.desc) %}{% endcall %}
+        {% endfor %}
+      </div>
+      <p class="mt-2 font-mono text-xs text-quiet"># fixed after creation — create a new monitor to watch something else</p>
+      {% else %}
+      <div class="check-type-cards check-type-cards--rail mt-3" role="radiogroup" aria-label="Monitor type">
+        {% for c in form.kind_cards() %}
+        {% if c.locked %}
+        {% call reg::chooser_card_locked(c.label, c.desc, "not on your plan", "/pricing") %}{% endcall %}
+        {% else %}
+        {% call reg::chooser_card("data-check-card", "check_type", c.value, c.selected, c.label, c.desc) %}{% endcall %}
+        {% endif %}
+        {% endfor %}
+      </div>
+      <p class="mt-2 font-mono text-xs text-quiet"># pick once — the type is fixed after creation</p>
+      {% endif %}
+    </aside>
+
+    <div class="space-y-6">
 
     <header class="space-y-1">
-      <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
+      <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
+         class="inline-block text-sm text-muted hover:text-body">← {% if form.mode == "edit" %}monitor{% else %}monitors{% endif %}</a>
       <h1 class="page-title">
         <span class="page-title__prefix" aria-hidden="true">$</span><input
           name="name" type="text" required value="{{ form.name }}"
@@ -24,34 +53,18 @@
           aria-label="Monitor name" class="page-title__input">
       </h1>
       <p class="text-sm text-muted">
-        Pick what you want to watch and we’ll check it on your schedule.
+        {% if form.mode == "create" %}
+        Fill in what to check and we’ll run it on your schedule.
+        {% else %}
+        Every setting but the type, which is fixed once a monitor exists.
+        {% endif %}
       </p>
     </header>
 
     <div id="form-errors" role="alert" aria-live="polite"
          class="hidden alert-card alert-card--error"></div>
 
-    <div class="grid grid-cols-1 gap-y-6 lg:grid-cols-2 lg:items-start lg:gap-x-8">
-
     <div class="space-y-6">
-    <fieldset class="space-y-3">
-      <legend class="block w-full"><span class="form-legend">what to watch</span></legend>
-      <div class="check-type-cards">
-        {% call reg::chooser_card("data-check-card", "check_type", "http", form.check_type == "http", "http", "URL / API endpoint") %}{% endcall %}
-        {% call reg::chooser_card("data-check-card", "check_type", "tcp", form.check_type == "tcp", "tcp", "host : port reachable") %}{% endcall %}
-        {% call reg::chooser_card("data-check-card", "check_type", "ping", form.check_type == "ping", "ping", "icmp echo reply") %}{% endcall %}
-        {# Heartbeat temporarily hidden from the picker; still shown when editing an existing one. #}
-        {% if form.check_type == "heartbeat" %}
-        {% call reg::chooser_card("data-check-card", "check_type", "heartbeat", form.check_type == "heartbeat", "heartbeat", "your job pings us") %}{% endcall %}
-        {% endif %}
-        {% call reg::chooser_card("data-check-card", "check_type", "dns", form.check_type == "dns", "dns", "record resolves") %}{% endcall %}
-        {% call reg::chooser_card("data-check-card", "check_type", "tls_cert", form.check_type == "tls_cert", "tls cert", "expiry + chain") %}{% endcall %}
-        {% call reg::chooser_card("data-check-card", "check_type", "domain_expiry", form.check_type == "domain_expiry", "domain", "registration expiry") %}{% endcall %}
-        {% if form.flow_available || form.check_type == "flow" %}
-        {% call reg::chooser_card("data-check-card", "check_type", "flow", form.check_type == "flow", "flow", "browser login / journey") %}{% endcall %}
-        {% endif %}
-      </div>
-    </fieldset>
 
     <fieldset data-variant="http"
               class="{% if form.check_type != "http" %}hidden{% endif %}">
@@ -498,7 +511,7 @@
     </fieldset>
     </div>
 
-    <div class="space-y-6 lg:border-l lg:border-[color:var(--theme-line)] lg:pl-8">
+    <div class="space-y-6 border-t border-[color:var(--theme-line)] pt-6">
     <fieldset data-schedule-section{% if form.check_type == "heartbeat" %} hidden{% endif %}>
       <legend class="float-left mb-3 w-full"><span class="form-legend">schedule</span></legend>
       <div class="clear-both">
@@ -743,26 +756,45 @@
       </div>
     </fieldset>
     </div>
+
     </div>
 
-    <div class="flex flex-wrap gap-3 border-t border-[color:var(--theme-line)] pt-4">
-      <button type="submit"
-              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
-        {% if form.mode == "create" %}create{% else %}save changes{% endif %}
-      </button>
-      <button type="button" data-test-now title="Runs the check once without saving"
-              {% if form.check_type == "heartbeat" %}hidden{% endif %}
-              class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center gap-1.5">
-        <span aria-hidden="true">▶</span> test now
-      </button>
-      <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
-         class="btn-ghost px-4 py-2 text-sm">cancel</a>
-      <span class="ml-auto self-center text-xs text-quiet">
-        tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
-             <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
-      </span>
+    <aside class="action-rail lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6">
+      <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
+          {% if form.mode == "create" %}create{% else %}save changes{% endif %}
+        </button>
+        <button type="button" data-test-now title="Runs the check once without saving"
+                {% if form.check_type == "heartbeat" %}hidden{% endif %}
+                class="sticker-btn sticker-btn--accent px-4 py-2 text-sm font-medium inline-flex items-center justify-center gap-1.5">
+          <span aria-hidden="true">▶</span> test now
+        </button>
+        <a href="{% if form.mode == "edit" %}/targets/{{ form.id }}{% else %}/targets{% endif %}"
+           class="btn-ghost px-4 py-2 text-center text-sm">cancel</a>
+        <span class="text-xs text-quiet xl:text-center">
+          tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
+               <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
+        </span>
+      </div>
+    </aside>
     </div>
-    <div data-test-result role="status" class="hidden mt-4 tabular-nums"></div>
+
+    {# Announced where the eye is, not at the bottom of a long form. #}
+    <div data-test-sheet class="test-sheet" hidden>
+      <div class="test-sheet__inner">
+        <div class="test-sheet__bar">
+          <span class="test-sheet__label">test result</span>
+          <span data-test-verdict role="status" class="test-sheet__verdict"></span>
+          <button type="button" data-test-expand aria-expanded="false" aria-controls="test-sheet-body"
+                  class="scope-token ml-auto">details ▾</button>
+          <button type="button" data-test-dismiss class="scope-token">dismiss</button>
+        </div>
+        <div id="test-sheet-body" class="test-sheet__body" hidden>
+          <div data-test-result class="tabular-nums"></div>
+        </div>
+      </div>
+    </div>
   </form>
 </section>
 

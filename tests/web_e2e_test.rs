@@ -172,6 +172,8 @@ async fn new_target_form_renders_create_mode() {
     assert!(html.contains(r#"data-action="/api/v1/targets""#));
     assert!(html.contains(r#"data-method="POST""#));
     assert!(html.contains(r#"data-mode="create""#));
+    assert!(html.contains(r#"name="check_type" value="http" checked"#));
+    assert!(html.contains(r#"name="check_type" value="heartbeat""#));
     // Credentials are supplied via headers with secret variables, not inline auth fields.
     assert!(
         html.contains("data-var-auth-picker"),
@@ -266,6 +268,9 @@ async fn edit_form_renders_existing_target_without_leaking_credentials() {
     assert!(html.contains(r#"value="redacted-edit-target""#));
     assert!(html.contains(r#"data-method="PATCH""#));
     assert!(html.contains(r#"data-mode="edit""#));
+    // The kind is fixed once the monitor exists: rail is inert, nothing to submit with.
+    assert!(!html.contains("data-check-card"));
+    assert!(html.contains(r#"<input type="hidden" name="check_type" value="http">"#));
     // Stored credentials must never reach the form HTML.
     assert!(!html.contains("s3cret"));
     assert!(!html.contains("tok-abc"));
@@ -386,6 +391,7 @@ async fn create_form_prefills_from_a_coverage_link() {
     let html = body_text(resp).await;
     assert!(html.contains(r#"value="acme.com""#), "host prefilled");
     assert!(html.contains(r#"value="acme.com domain expiry""#), "named");
+    assert!(html.contains(r#"name="check_type" value="domain_expiry" checked"#));
     // Opens on the suggested cadence for the kind, not on the 60s default.
     assert!(html.contains(r#"data-interval="86400""#));
 

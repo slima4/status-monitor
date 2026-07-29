@@ -524,7 +524,10 @@
     .marketing-shell > * { position: relative; z-index: 1; }
     /* Header above main: its dropdowns (org picker) would otherwise be
        trapped under main's later-in-DOM sibling stacking context. */
-    .app-shell > header { z-index: 2; }
+    .app-shell > header { z-index: 3; }
+    /* Same in the other direction: each shell child is its own stacking
+       context, so a fixed panel in main paints under the later footer. */
+    .app-shell > main { z-index: 2; }
 
     /* Sticky footer: main grows so footer sits at viewport bottom on short
        pages; flex-shrink:0 guards against basis collapse from inner overflow. */
@@ -567,18 +570,19 @@
         .sm-fresh-load .app-shell main > section > * { animation: none; }
     }
     /* The monitor form is the section's only child, so the gate above would
-       rise it as one slab. Skip the container, stagger its parts instead. */
+       rise it as one slab. Skip the container, stagger its parts instead —
+       the parts being the columns inside .form-grid, since the form itself
+       holds only that grid and the (hidden) test sheet. */
     .sm-fresh-load .app-shell main > section > #check-form { animation: none; }
-    .sm-fresh-load #check-form > * {
+    .sm-fresh-load .form-grid > * {
         animation: sm-rise 540ms cubic-bezier(0.2, 0.65, 0.3, 1) backwards;
     }
-    .sm-fresh-load #check-form > *:nth-child(1) { animation-delay:  40ms; }
-    .sm-fresh-load #check-form > *:nth-child(2) { animation-delay: 110ms; }
-    .sm-fresh-load #check-form > *:nth-child(3) { animation-delay: 180ms; }
-    .sm-fresh-load #check-form > *:nth-child(4) { animation-delay: 250ms; }
-    .sm-fresh-load #check-form > *:nth-child(n+5) { animation-delay: 320ms; }
+    .sm-fresh-load .form-grid > *:nth-child(1) { animation-delay:  40ms; }
+    .sm-fresh-load .form-grid > *:nth-child(2) { animation-delay: 110ms; }
+    .sm-fresh-load .form-grid > *:nth-child(3) { animation-delay: 180ms; }
+    .sm-fresh-load .form-grid > *:nth-child(n+4) { animation-delay: 250ms; }
     @media (prefers-reduced-motion: reduce) {
-        .sm-fresh-load #check-form > * { animation: none; }
+        .sm-fresh-load .form-grid > * { animation: none; }
     }
 
     /* Visible focus ring on every interactive element. Must be a real
@@ -2794,6 +2798,31 @@
        monitor and channel forms, and radio-less link cards elsewhere. Selection
        state comes from :has(input:checked), so a link card simply never has it. */
     .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3; }
+    /* One card per row so each keeps its description; two-up once stacked. */
+    .check-type-cards--rail { @apply grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-1; }
+    .type-rail { align-self: start; }
+    @media (min-width: 64rem) {
+        .type-rail { border-right: 1px solid var(--theme-line); padding-right: 2rem; }
+    }
+    /* Mirrors the type rail once a third column fits; a bar below that. */
+    .action-rail {
+        align-self: start;
+        border-top: 1px solid var(--theme-line);
+        padding-top: 1rem;
+    }
+    @media (min-width: 80rem) {
+        .action-rail {
+            border-top: 0;
+            padding-top: 0;
+            border-left: 1px solid var(--theme-line);
+            padding-left: 2rem;
+        }
+    }
+    .check-type-card__note {
+        @apply text-xs;
+        color: var(--theme-text-muted);
+        text-wrap: pretty;
+    }
     /* Splits the popular channels from the rest in the type chooser. */
     .kind-divider { border-top: 1px solid var(--theme-line); }
     .check-type-card {
@@ -2810,7 +2839,7 @@
     @media (prefers-reduced-motion: reduce) {
         .check-type-card:active { scale: 1; }
     }
-    .check-type-card:not(:has(input:disabled)):not(:has(input:checked)):hover {
+    .check-type-card:not(:has(input:disabled)):not(:has(input:checked)):not(.check-type-card--static):hover {
         background: var(--theme-surface-sunk);
         border-color: var(--theme-ink);
     }
@@ -2823,15 +2852,22 @@
     .check-type-card:has(input:disabled):not(:has(input:checked)) {
         opacity: 0.5;
     }
-    .check-type-card:has(input:checked) {
+    /* Edit has no inputs to key the state off, so classes carry it. */
+    .check-type-card--static { cursor: default; }
+    .check-type-card--static:not(.check-type-card--on) { opacity: 0.5; }
+    .check-type-card--static:active { scale: 1; }
+    .check-type-card:has(input:checked),
+    .check-type-card--on {
         background: var(--theme-ink);
         border-color: var(--theme-ink);
         color: var(--theme-surface);
     }
-    .check-type-card:has(input:checked) .check-type-card__name {
+    .check-type-card:has(input:checked) .check-type-card__name,
+    .check-type-card--on .check-type-card__name {
         color: var(--theme-surface);
     }
-    .check-type-card:has(input:checked) .check-type-card__desc {
+    .check-type-card:has(input:checked) .check-type-card__desc,
+    .check-type-card--on .check-type-card__desc {
         color: var(--theme-surface);
         opacity: 0.7;
     }
@@ -2949,6 +2985,49 @@
         color: var(--theme-state-warn-fg-strong);
     }
     .test-result__pill  { @apply inline-block rounded-full border px-2 py-0.5 text-xs font-medium; }
+    /* Floats clear of every edge: flush to the bottom it reads as the end of
+       the page rather than as a panel over it. */
+    .test-sheet {
+        @apply pointer-events-none fixed inset-x-0 z-40 px-4;
+        bottom: 1.25rem;
+    }
+    .test-sheet__inner {
+        @apply pointer-events-auto mx-auto w-full max-w-7xl px-5 py-3.5;
+        background: var(--theme-surface-elev);
+        border: 2px solid var(--theme-ink);
+        box-shadow: var(--theme-shadow-card);
+        /* Concentric with the result cards it wraps: their radius + padding. */
+        border-radius: calc(var(--radius-sm) + 0.875rem);
+    }
+    .test-sheet__bar   { @apply flex flex-wrap items-center gap-3; }
+    .test-sheet__label { @apply font-mono text-xs; color: var(--theme-text-quiet); }
+    .test-sheet__verdict { @apply px-2.5 py-1 text-sm tabular-nums; }
+    .test-sheet__body  { @apply mt-2 overflow-y-auto; max-height: 45vh; }
+    /* Hit area out to 40px without changing how the chips look. */
+    .test-sheet__bar .scope-token { position: relative; }
+    .test-sheet__bar .scope-token::after {
+        content: "";
+        position: absolute;
+        inset: -9px -4px;
+    }
+    .test-sheet:not([hidden]) .test-sheet__inner {
+        animation: sm-sheet-in 180ms cubic-bezier(0.2, 0, 0, 1) both;
+    }
+    .test-sheet[data-leaving] .test-sheet__inner {
+        animation: sm-sheet-out 120ms cubic-bezier(0.2, 0, 0, 1) both;
+    }
+    @keyframes sm-sheet-in {
+        from { opacity: 0; translate: 0 8px; }
+        to   { opacity: 1; translate: 0 0; }
+    }
+    @keyframes sm-sheet-out {
+        from { opacity: 1; translate: 0 0; }
+        to   { opacity: 0; translate: 0 4px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .test-sheet:not([hidden]) .test-sheet__inner,
+        .test-sheet[data-leaving] .test-sheet__inner { animation: none; }
+    }
     .test-result__meta  {
         @apply text-xs;
         color: var(--theme-text-muted);

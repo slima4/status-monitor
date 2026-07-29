@@ -1,5 +1,5 @@
 // Monitor create/edit form. Handles:
-//   - protocol panel swap (http / tcp / ping / dns / tls_cert / domain_expiry)
+//   - protocol panel swap driven by the type rail (edit renders it locked)
 //   - Smart expected-status input ("200" / "200-299" / "200, 201, 204")
 //   - JSON submission via fetch (no htmx for JSON-API forms)
 //   - "Test now" → POST /api/v1/targets/test, renders verbose response inline
@@ -113,6 +113,13 @@
         if (policy) policy.disabled = flow && flowRegions < 2;
     }
 
+    // The kind's own value field, not the method/record-type select before it.
+    function focusFirstField(kind) {
+        const panel = form.querySelector(`fieldset[data-variant='${kind}']`);
+        panel?.querySelector(
+            "input:not([type='hidden']):not([type='checkbox']):not([type='radio']), textarea")?.focus();
+    }
+
     form.addEventListener("change", (evt) => {
         if (evt.target.name === "interval_s") {
             const rail = evt.target.closest("[data-interval-rail]");
@@ -128,9 +135,11 @@
         applyKindIntervalDefaults(want);
         applyPassiveKind(want);
         applyFlowRegions(want);
+        // So the next keystroke after a rail switch is already the useful one.
+        focusFirstField(want);
     });
 
-    const initialKind = form.querySelector("input[name='check_type']:checked")?.value || "http";
+    const initialKind = currentCheckType();
     applyKindIntervalDefaults(initialKind);
     applyPassiveKind(initialKind);
     applyFlowRegions(initialKind);
@@ -165,9 +174,7 @@
 
     form.addEventListener("click", (evt) => {
         const testBtn = evt.target.closest("[data-test-now]");
-        if (testBtn) {
-            handleTestNow(testBtn);
-        }
+        if (testBtn) handleTestNow(testBtn);
     });
 
     form.addEventListener("keydown", (evt) => {
@@ -426,9 +433,11 @@
         };
     }
 
+    // Edit carries the locked kind in a hidden input — nothing to check there.
     function currentCheckType() {
-        const radio = form.querySelector("input[name='check_type']:checked");
-        return radio ? radio.value : "http";
+        const el = form.querySelector("input[name='check_type']:checked")
+            || form.querySelector("input[name='check_type'][type='hidden']");
+        return el ? el.value : "http";
     }
 
     function buildCheck() {
@@ -707,6 +716,7 @@
 
     // Run one test (optionally pinned to `region`) and render the outcome into
     // `resultEl` via the shared .test-result renderers.
+    // `state` folds the expectation match into the status: ok / warn / bad.
     async function runTest(resultEl, check, region) {
         let res;
         try {
@@ -717,14 +727,14 @@
             });
         } catch (err) {
             window.smRenderCheckError(resultEl, `Network error: ${err.message || err}`);
-            return null;
+            return { result: null, state: "bad" };
         }
         if (res.status === 429) {
             const retry = res.headers.get("retry-after");
             window.smRenderCheckError(resultEl, retry
                 ? `Rate limited — retry in ${retry}s`
                 : "Rate limited — slow down");
-            return null;
+            return { result: null, state: "bad" };
         }
         // Read once as text, then try to parse: error responses are not always
         // our JSON envelope. A body-deserialize rejection (e.g. a missing
@@ -740,18 +750,84 @@
                 || "Test rejected.";
             const message = detail.length > 300 ? `${detail.slice(0, 300)}…` : detail;
             window.smRenderCheckError(resultEl, `${code}: ${message}`);
-            return null;
+            return { result: null, state: "bad" };
         }
         if (!body) {
             window.smRenderCheckError(resultEl, "Bad JSON in test response.");
-            return null;
+            return { result: null, state: "bad" };
         }
-        window.smRenderCheckResult(resultEl, body.result || {}, {
+        const result = body.result || {};
+        window.smRenderCheckResult(resultEl, result, {
             matched: body.matched_expectations,
             headers: body.response_headers_preview || [],
             body: body.response_body_snippet || null,
         });
-        return body.result || null;
+        const matched = body.matched_expectations !== false;
+        const state = !matched || result.status === "down"
+            ? "bad"
+            : result.status === "degraded" ? "warn" : "ok";
+        return { result, state };
+    }
+
+    const sheet = form.querySelector("[data-test-sheet]");
+    const sheetBody = form.querySelector("#test-sheet-body");
+    const sheetVerdict = form.querySelector("[data-test-verdict]");
+    const sheetExpand = form.querySelector("[data-test-expand]");
+
+    function expandSheet(on) {
+        if (!sheetBody) return;
+        sheetBody.hidden = !on;
+        sheetExpand.setAttribute("aria-expanded", String(on));
+        sheetExpand.textContent = on ? "details ▴" : "details ▾";
+    }
+
+    function showSheet(state, label, expand) {
+        if (!sheet) return;
+        delete sheet.dataset.leaving;
+        sheet.hidden = false;
+        sheetVerdict.className = `test-result test-sheet__verdict${state ? ` test-result--${state}` : ""}`;
+        sheetVerdict.textContent = label;
+        if (expand !== undefined) expandSheet(expand);
+    }
+
+    // Focus returns to the button, or a keyboard dismiss drops it to the
+    // document. Reduced motion has no animation end to wait for.
+    function hideSheet() {
+        form.querySelector("[data-test-now]")?.focus();
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+            sheet.hidden = true;
+            return;
+        }
+        sheet.dataset.leaving = "1";
+        sheet.addEventListener("animationend", () => {
+            sheet.hidden = true;
+            delete sheet.dataset.leaving;
+        }, { once: true });
+    }
+
+    if (sheet) {
+        sheetExpand.addEventListener("click", () => expandSheet(sheetBody.hidden));
+        form.querySelector("[data-test-dismiss]").addEventListener("click", hideSheet);
+    }
+
+    function summarize(outcomes, regions) {
+        const state = outcomes.some(o => o.state === "bad")
+            ? "bad"
+            : outcomes.some(o => o.state === "warn") ? "warn" : "ok";
+        if (regions.length === 0) {
+            const r = outcomes[0].result;
+            if (!r) return { state, label: "test failed" };
+            const bits = [
+                r.status ? r.status.toUpperCase() : "UNKNOWN",
+                r.duration_ms != null ? `${r.duration_ms} ms` : null,
+                r.response_code != null ? `HTTP ${r.response_code}` : null,
+            ].filter(Boolean);
+            return { state, label: bits.join(" · ") };
+        }
+        const failed = regions.filter((_, i) => outcomes[i].state === "bad").map(r => r.label);
+        const up = outcomes.length - failed.length;
+        const label = `${up}/${outcomes.length} up`;
+        return { state, label: failed.length ? `${label} · ${failed.join(", ")} failed` : label };
     }
 
     async function handleTestNow(btn) {
@@ -773,12 +849,14 @@
         // choice; don't silently probe the default region.
         if (allBoxes.length > 0 && regions.length === 0) {
             window.smRenderCheckError(resultEl, "Select at least one region to test.");
+            showSheet("bad", "no regions selected", true);
             return;
         }
         btn.disabled = true;
         btn.setAttribute("aria-busy", "true");
         const btnLabel = btn.innerHTML;
         btn.innerHTML = "testing…";
+        showSheet("", "testing…", false);
         // Per-step playback only makes sense for a single verdict; a multi-region
         // fan-out keeps its per-region banners.
         const isFlow = built.check.type === "flow";
@@ -789,13 +867,18 @@
             if (regions.length === 0) {
                 // No region selector (single-region plan) → test the default region.
                 window.smRenderCheckRunning(resultEl);
-                const result = await runTest(resultEl, built.check, null);
-                if (paintFlow) window.smFlowTestResult?.(result);
+                const outcome = await runTest(resultEl, built.check, null);
+                if (paintFlow) window.smFlowTestResult?.(outcome.result);
+                const { state, label } = summarize([outcome], regions);
+                // A clean pass needs no reading; anything else opens itself.
+                showSheet(state, label, state !== "ok");
                 return;
             }
             const rows = window.smRenderRegionTestRunning(resultEl, regions);
-            const results = await Promise.all(regions.map((r) => runTest(rows[r.id], built.check, r.id)));
-            if (paintFlow) window.smFlowTestResult?.(results[0]);
+            const outcomes = await Promise.all(regions.map((r) => runTest(rows[r.id], built.check, r.id)));
+            if (paintFlow) window.smFlowTestResult?.(outcomes[0].result);
+            const { state, label } = summarize(outcomes, regions);
+            showSheet(state, label, state !== "ok");
         } finally {
             btn.disabled = false;
             btn.removeAttribute("aria-busy");

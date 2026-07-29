@@ -8,6 +8,25 @@
 </label>
 {% endmacro %}
 
+{# Shown so the capability is discoverable, inert so it cannot be submitted. #}
+{% macro chooser_card_locked(label, desc, note, href) %}
+<span class="check-type-card check-type-card--static">
+  <span class="check-type-card__name">{{ label }}</span>
+  <span class="check-type-card__desc">{{ desc }}</span>
+  {# Named for itself: tabbing lands here with no sight of its card. #}
+  <a href="{{ href }}" aria-label="{{ label }} — {{ note }}"
+     class="check-type-card__note underline decoration-dotted">{{ note }}</a>
+</span>
+{% endmacro %}
+
+{# A choice already made: nothing to focus, click, or submit. #}
+{% macro chooser_card_static(checked, label, desc) %}
+<span class="check-type-card check-type-card--static{% if checked %} check-type-card--on{% endif %}"{% if checked %} aria-current="true"{% endif %}>
+  <span class="check-type-card__name">{{ label }}</span>
+  <span class="check-type-card__desc">{{ desc }}</span>
+</span>
+{% endmacro %}
+
 {% macro loading(text) %}
 {# Mirror of loadingPlaceholder() in htmx_loader.js — keep in step. #}
 <p class="px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
