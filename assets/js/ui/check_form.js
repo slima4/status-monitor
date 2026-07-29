@@ -27,6 +27,9 @@
     } catch { /* falls back to the floors */ }
     const pickerFloor = (kind) => KIND_INTERVALS[kind]?.min || kindFloor(kind);
     const suggested = (kind) => KIND_INTERVALS[kind]?.default;
+    // Floors reach twelve hours, and "43200 seconds" reads as nothing.
+    const floorLabel = (s) =>
+        s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60}m` : `${s}s`;
 
     // Remember each rail's last cadence so switching kinds back restores it
     // (checking a radio in one rail auto-unchecks the other's — shared name).
@@ -643,7 +646,7 @@
             ? Math.max(minInterval, Number.isInteger(stored) ? stored : minInterval)
             : parseInt(data.get("interval_s"), 10);
         if (!Number.isInteger(interval) || interval < minInterval) {
-            return { error: `Check interval must be at least ${minInterval} seconds.` };
+            return { error: `Check interval must be at least ${floorLabel(minInterval)}.` };
         }
 
         const groupRaw = (data.get("group_name") || "").trim();

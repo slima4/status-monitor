@@ -267,6 +267,9 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(mut update): Json<TargetUpdate>,
 ) -> Result<Redacted<Target>> {
+    // Read once and share: the flow paths, the credential carry, and the
+    // interval floor all want the same row.
+    let mut stored_target: Option<Target> = None;
     if let Some(check) = update.check.as_mut() {
         canonicalize_check(check)?;
         if let crate::domain::CheckSpec::Http(http) = check {
@@ -282,13 +285,11 @@ pub async fn update(
         // For a flow edit, read the stored monitor once: carry masked fill
         // secrets forward (an untouched `***` keeps the stored value) before
         // validation, and reuse it to tell a net-new flow from an edit.
-        let flow_stored = if matches!(check, crate::domain::CheckSpec::Flow(_)) {
-            state.target_store.get(org, id).await?
-        } else {
-            None
-        };
+        if matches!(check, crate::domain::CheckSpec::Flow(_)) {
+            stored_target = state.target_store.get(org, id).await?;
+        }
         if let crate::domain::CheckSpec::Flow(flow) = check
-            && let Some(existing) = &flow_stored
+            && let Some(existing) = &stored_target
             && let crate::domain::CheckSpec::Flow(stored) = &existing.check
         {
             carry_flow_secrets(flow, stored);
@@ -298,7 +299,7 @@ pub async fn update(
         validate_variable_refs(&state, org, check).await?;
         if matches!(check, crate::domain::CheckSpec::Flow(_)) {
             let was_flow = matches!(
-                flow_stored.as_ref().map(|t| &t.check),
+                stored_target.as_ref().map(|t| &t.check),
                 Some(crate::domain::CheckSpec::Flow(_))
             );
             // Gate + count only a net-new flow; editing an existing one stays
@@ -330,38 +331,7 @@ pub async fn update(
     if let Some(Some(uid)) = update.owner_user_id {
         validate_owner_is_member(&state, org, Some(uid)).await?;
     }
-    if let Some(interval) = update.interval {
-        let plan_min = i64::from(
-            state
-                .quotas
-                .limit_for_org(org)
-                .await?
-                .min_check_interval_secs,
-        );
-        let requested = interval.as_secs() as i64;
-        let kind_floor = if requested >= MAX_KIND_FLOOR_SECS {
-            0
-        } else {
-            let kind = match update.check.as_ref() {
-                Some(c) => c.kind(),
-                None => state
-                    .target_store
-                    .get(org, id)
-                    .await?
-                    .map(|t| t.check.kind())
-                    .unwrap_or("http"),
-            };
-            min_interval_secs_for_kind(kind) as i64
-        };
-        let effective_floor = plan_min.max(kind_floor);
-        if requested < effective_floor {
-            return Err(AppError::min_check_interval(
-                requested,
-                effective_floor,
-                "free",
-            ));
-        }
-    }
+    validate_patch_interval(&state, org, id, &update, stored_target.as_ref()).await?;
     // The disabled→enabled re-arm is folded into the store's enable statement,
     // so this path (and every other enable surface) inherits it.
     let check_rewritten = update.check.is_some();
@@ -1381,6 +1351,58 @@ fn check_abuse(state: &AppState, org: OrgId, check: &crate::domain::CheckSpec) -
 /// the existing-target read. Set too low, the skip waves through an interval
 /// the kind would reject, so a test holds it to the real maximum.
 const MAX_KIND_FLOOR_SECS: i64 = 43_200;
+
+/// The PATCH counterpart of the floor check in [`validate_new_target`]. A kind
+/// change is validated against the stored interval, since switching to a slower
+/// kind while omitting `interval` would otherwise keep a cadence that kind
+/// rejects. A missing target is left for the update itself to 404.
+async fn validate_patch_interval(
+    state: &AppState,
+    org: OrgId,
+    id: Uuid,
+    update: &TargetUpdate,
+    prefetched: Option<&Target>,
+) -> Result<()> {
+    let requested = update.interval.map(|i| i.as_secs() as i64);
+    if requested.is_none() && update.check.is_none() {
+        return Ok(());
+    }
+    // The row is only worth reading for the half the request leaves out, and an
+    // interval above every kind floor answers the kind half on its own.
+    let needs_row = requested.is_none()
+        || (update.check.is_none() && requested.is_some_and(|r| r < MAX_KIND_FLOOR_SECS));
+    let fetched = match (needs_row, prefetched) {
+        (true, None) => state.target_store.get(org, id).await?,
+        _ => None,
+    };
+    let stored = prefetched.or(fetched.as_ref());
+    let Some(requested) = requested.or_else(|| stored.map(|t| t.interval.as_secs() as i64)) else {
+        return Ok(());
+    };
+    let kind = update
+        .check
+        .as_ref()
+        .map(|c| c.kind())
+        .or_else(|| stored.map(|t| t.check.kind()));
+    let plan_min = i64::from(
+        state
+            .quotas
+            .limit_for_org(org)
+            .await?
+            .min_check_interval_secs,
+    );
+    // No kind means the read was skipped, which happens only when no kind floor
+    // could bind. The plan floor applies either way.
+    let effective_floor = plan_min.max(kind.map_or(0, |k| min_interval_secs_for_kind(k) as i64));
+    if requested < effective_floor {
+        return Err(AppError::min_check_interval(
+            requested,
+            effective_floor,
+            "free",
+        ));
+    }
+    Ok(())
+}
 
 /// Per-resource validation, including the plan's check-interval floor. Both
 /// `create` and `bulk_create` run this per item, so the floor is enforced by
