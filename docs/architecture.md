@@ -46,13 +46,13 @@ src/
 ├── http_client/      poolless probe client: phase-timing connector, DNS cache, SSRF guard
 ├── net/              happy-eyeballs dial (RFC 8305)
 ├── pipeline/         result batcher (size + timeout flush, bounded, counted drops)
-├── ad_hoc_dispatch/  check-now / test long-poll to the region's agent
+├── ad_hoc_dispatch.rs  check-now / test long-poll to the region's agent
 │
 ├── public_status/    incident writer (poller), status-page aggregator, subscriber dispatch
 ├── escalation/       paging engine + on-call resolution (feature-flagged, off by default)
 ├── notifier/         one transport per channel kind + IncidentNotice event
 ├── email/ telegram/ whatsapp/    transport-specific helpers
-├── http_outbound/    shared outbound client for webhooks and provider APIs
+├── http_outbound.rs  shared outbound client for webhooks and provider APIs
 │
 ├── api/              REST /api/v1 handlers, routes, OpenAPI doc, stable error envelope
 ├── web/              server-rendered operator UI (renders only; mutations call the API)
@@ -65,6 +65,7 @@ src/
 ├── jobs/             periodic jobs: retention, two-store erasure, token/session cleanups
 ├── observability/    tracing + Prometheus + OTLP, gauge sampler, dead-man snitch
 ├── agent/            stateless agent-mode entry point
+├── bin/              the loadtest binary
 └── error.rs          AppError -> ApiError envelope
 
 templates/            askama HTML compiled into the binary

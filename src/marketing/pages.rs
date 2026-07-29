@@ -209,7 +209,7 @@ pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
 }
 
 pub(crate) const ARCHITECTURE_PATH: &str = "/architecture";
-pub(crate) const ARCHITECTURE_LASTMOD: &str = "2026-07-23";
+pub(crate) const ARCHITECTURE_LASTMOD: &str = "2026-07-29";
 
 #[derive(Template, WebTemplate)]
 #[template(path = "marketing/architecture.html")]

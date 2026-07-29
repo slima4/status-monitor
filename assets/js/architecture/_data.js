@@ -220,7 +220,7 @@ export const FLOWS = [
   {
     id:'rdap', name:'Domain expiry with sticky last-good', desc:'Registry flakiness must not flip a monitor red',
     steps:[
-      {f:'sched', t:'pool',   h:'daily-ish tick',   d:'Minimum interval for this kind is an hour; the plan may widen it.'},
+      {f:'sched', t:'pool',   h:'daily-ish tick',   d:'Hard floor is twelve hours, and the picker defaults to a day. An expiry date moves about once a year, so a tighter interval buys no earlier warning and only spends the rate limits RDAP applies per source address.'},
       {f:'pool',  t:'e-rdap', h:'dispatch',         d:'Circuit-breaker key is rdap:{tld} so one slow registry cannot correlate failures across every customer.'},
       {f:'e-rdap',t:'rdap',   h:'query',            d:'Cross-tenant singleflight collapses concurrent probes for the same domain — registry data is public, so coalescing is safe and IANA-friendly.'},
       {f:'e-rdap',t:'pg',     h:'upsert last-good', d:'On success, (expiry_at, registrar, last_success_at) are written to domain_expiry_state.'},
