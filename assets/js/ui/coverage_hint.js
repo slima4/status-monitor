@@ -33,6 +33,14 @@
         const panel = btn.closest("[data-coverage]");
         if (!panel) return;
         remember(panel.dataset.coverage);
-        panel.hidden = true;
+        // Hidden only after the fade, since [hidden] would cut it short. Inert
+        // meanwhile, so the fading panel is not still tabbable.
+        panel.dataset.dismissing = "";
+        panel.inert = true;
+        setTimeout(() => {
+            panel.hidden = true;
+            panel.inert = false;
+            delete panel.dataset.dismissing;
+        }, 150);
     });
 })();

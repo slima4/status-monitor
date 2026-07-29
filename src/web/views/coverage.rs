@@ -11,7 +11,11 @@ pub const COVERAGE_KINDS: [&str; 3] = ["tls_cert", "domain_expiry", "dns"];
 
 pub struct CoverageSuggestion {
     pub kind: &'static str,
+    /// Card name from the check-type chooser, so the suggestion and the card
+    /// it lands on read alike.
     pub label: &'static str,
+    /// Spoken form: the card names alone are not a sentence.
+    pub what: &'static str,
     pub why: &'static str,
     pub host: String,
     pub href: String,
@@ -48,12 +52,17 @@ fn suggestions(check: &CheckSpec, host: &str, covered: &CoveredHosts) -> Vec<Cov
     };
 
     let mut out = Vec::new();
-    let mut offer = |kind: &'static str, label: &'static str, why: &'static str, h: String| {
+    let mut offer = |kind: &'static str,
+                     label: &'static str,
+                     what: &'static str,
+                     why: &'static str,
+                     h: String| {
         if check.kind() != kind && !already(kind, &h) {
             let encoded: String = url::form_urlencoded::byte_serialize(h.as_bytes()).collect();
             out.push(CoverageSuggestion {
                 kind,
                 label,
+                what,
                 why,
                 href: format!("/targets/new?kind={kind}&host={encoded}"),
                 host: h,
@@ -65,7 +74,8 @@ fn suggestions(check: &CheckSpec, host: &str, covered: &CoveredHosts) -> Vec<Cov
         offer(
             "tls_cert",
             "tls cert",
-            "certificates expire on their own schedule, and a monitor over HTTPS keeps passing until the day one does",
+            "a TLS certificate check",
+            "HTTPS keeps answering right up to the day the certificate expires.",
             host.clone(),
         );
     }
@@ -74,15 +84,17 @@ fn suggestions(check: &CheckSpec, host: &str, covered: &CoveredHosts) -> Vec<Cov
     if apex.rsplit('.').next().is_some_and(is_monitorable_tld) {
         offer(
             "domain_expiry",
-            "domain expiry",
-            "a lapsed registration takes down every host under the name at once",
+            "domain",
+            "a domain expiry check",
+            "One missed renewal takes down every host under the name at once.",
             apex,
         );
     }
     offer(
         "dns",
-        "dns record",
-        "a record that stops resolving is invisible to a check that only sees the answer it already has",
+        "dns",
+        "a DNS record check",
+        "Resolution can break while the service itself is answering fine.",
         host,
     );
     out

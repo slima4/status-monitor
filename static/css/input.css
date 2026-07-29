@@ -2790,16 +2790,25 @@
     }
     /* Multi-line helper hints: drop last-line orphans without markup churn. */
     #check-form .text-muted { text-wrap: pretty; }
-    /* Check-type chooser cards at the top of /targets/new and edit.
-       Hides the radio (visual selection comes from :has(input:checked)). */
+    /* Card register for choosing a kind: the radio-backed choosers on the
+       monitor and channel forms, and radio-less link cards elsewhere. Selection
+       state comes from :has(input:checked), so a link card simply never has it. */
     .check-type-cards { @apply grid grid-cols-2 gap-3 sm:grid-cols-3; }
     /* Splits the popular channels from the rest in the type chooser. */
     .kind-divider { border-top: 1px solid var(--theme-line); }
     .check-type-card {
-        @apply flex cursor-pointer flex-col items-start gap-1 rounded-sm border p-3 text-left transition;
+        @apply flex cursor-pointer flex-col items-start gap-1 rounded-sm border p-3 text-left;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
         font-family: var(--font-mono);
+        /* opacity carries the locked-chooser dim below, which JS toggles live. */
+        transition-property: background-color, border-color, color, opacity, scale;
+        transition-duration: 120ms;
+        transition-timing-function: ease;
+    }
+    .check-type-card:not(:has(input:disabled)):active { scale: 0.96; }
+    @media (prefers-reduced-motion: reduce) {
+        .check-type-card:active { scale: 1; }
     }
     .check-type-card:not(:has(input:disabled)):not(:has(input:checked)):hover {
         background: var(--theme-surface-sunk);
@@ -2840,7 +2849,44 @@
     .check-type-card__desc {
         @apply text-xs;
         color: var(--theme-text-muted);
+        text-wrap: pretty;
     }
+    /* Coverage panel: revealed by script, so the cards arrive rather than pop,
+       and dismissal settles instead of cutting. */
+    [data-coverage] {
+        transition-property: opacity, translate;
+        transition-duration: 150ms;
+        transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+    }
+    [data-coverage][data-dismissing] { opacity: 0; translate: 0 4px; }
+    @media (prefers-reduced-motion: no-preference) {
+        [data-coverage]:not([hidden]) .check-type-card {
+            animation: sm-coverage-in 220ms cubic-bezier(0.2, 0, 0, 1) both;
+        }
+        [data-coverage]:not([hidden]) .check-type-card:nth-child(2) { animation-delay: 100ms; }
+        [data-coverage]:not([hidden]) .check-type-card:nth-child(3) { animation-delay: 200ms; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        [data-coverage] { transition-duration: 0ms; }
+    }
+    @keyframes sm-coverage-in {
+        from { opacity: 0; translate: 0 6px; }
+        to   { opacity: 1; translate: 0 0; }
+    }
+    /* Small control, full-size target: the band keeps its height. */
+    .coverage-dismiss { position: relative; }
+    .coverage-dismiss::after {
+        content: "";
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        translate: -50% -50%;
+        min-width: 40px;
+        min-height: 40px;
+        width: 100%;
+        height: 100%;
+    }
+
     /* "+ add monitor" invitation card in a channel's used-by grid. Hover
        reuses the base card treatment (buttons have no inner input, so the
        :has() guards on the base rules don't interfere). */

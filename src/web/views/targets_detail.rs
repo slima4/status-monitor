@@ -1653,6 +1653,31 @@ mod tests {
     }
 
     #[test]
+    fn coverage_panel_renders_a_card_per_suggestion() {
+        let check: crate::domain::CheckSpec = serde_json::from_str(
+            r#"{"type":"tls_cert","host":"app.acme.com","port":443,
+                "warn_days":14,"critical_days":3,"timeout":5000}"#,
+        )
+        .unwrap();
+        let mut page = sample_page();
+        page.coverage = coverage::panel(&check, &[]);
+        let html = page.render().unwrap();
+        assert!(html.contains(r#"data-coverage="app.acme.com""#));
+        assert!(html.contains("also worth watching"));
+        assert!(html.contains("check-type-card"));
+        assert!(html.contains(">domain<"));
+        assert!(html.contains(">dns<"));
+        assert!(!html.contains(">tls cert<"));
+        // Overrides the card text, so it has to carry the reason too.
+        assert!(html.contains(
+            r#"aria-label="Add a DNS record check for app.acme.com. Resolution can break"#
+        ));
+        // Entity-escaped separator, so match the halves rather than the raw URL.
+        assert!(html.contains("/targets/new?kind=domain_expiry"));
+        assert!(html.contains("host=acme.com"));
+    }
+
+    #[test]
     fn detail_header_folds_secondary_actions_into_overflow_menu() {
         let html = sample_page().render().unwrap();
         // Primary actions stay visible.
