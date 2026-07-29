@@ -61,7 +61,7 @@ resource "uptimepage_target" "api" {
 
 | Name | Kind | Manages |
 |---|---|---|
-| `uptimepage_target` | resource | Monitors — `http`, `tcp`, `tls_cert`, `domain_expiry`, `dns`, `flow` checks. Ping and heartbeat monitors are not yet manageable through the provider |
+| `uptimepage_target` | resource | Monitors — `http`, `tcp`, `tls_cert`, `domain_expiry`, `dns`, `flow` checks. Applying a `flow` needs the plan cap raised first, since it is 0 everywhere ([monitor types](monitor-types.md#flow)). Ping and heartbeat monitors are not yet manageable through the provider |
 | `uptimepage_notification_channel` | resource | Alert destinations — `webhook`, `slack`, `discord`, `msteams`, `google_chat`, `telegram`, `whatsapp`, `email`, `pagerduty`, `ntfy`, `pushover`, `sms`. The one-tap `telegram_app` and `whatsapp_app` kinds are not manageable: their configs are minted by the link flows and the API rejects them in request bodies (`CHANNEL_KIND_MANAGED`) |
 | `uptimepage_target` | data source | Look up an existing target by id |
 

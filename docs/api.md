@@ -317,7 +317,7 @@ Drives a real headless browser from `start_url` through each step in order, so i
 
 Use a dedicated low-privilege test account, never a real or admin credential: the flow stores that credential and it runs on the probing agent. Put passwords in an org secret and reference it as `{{name}}` in a `fill` value (resolved at probe time, so only the token is stored); an inline literal is kept as typed. Every navigation URL is SSRF-filtered like other checks.
 
-`timeout` caps the whole run and `step_timeout` caps each selector wait. `verify_tls` is on by default; turn it off only for an internal endpoint with a self-signed certificate. Floor is `interval >= 300` (enforced). A flow runs only where a browser engine is available, so its regions are clamped to the flow-capable set rather than every region. The number of flow monitors an org may create is capped per plan.
+`timeout` caps the whole run and `step_timeout` caps each selector wait. `verify_tls` is on by default; turn it off only for an internal endpoint with a self-signed certificate. Floor is `interval >= 300` (enforced). A flow runs only where a browser engine is available, so its regions are clamped to the flow-capable set rather than every region. The number of flow monitors an org may create is capped per plan, and that cap is 0 on every seeded plan, so a create returns `403 FLOW_CHECKS_DISABLED` until an operator raises it.
 
 ## Target payload
 

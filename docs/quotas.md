@@ -19,7 +19,7 @@ hosted service `free` is sold as **Standard**, `founding` as **Founding**, and
 | `min_check_interval_secs` | 180 | 60 | 30 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 43200 for `domain_expiry`, 3600 for `tls_cert`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `dns` / `ping`. |
 | `retention_days` | 30 | 90 | 395 | History window the UI and API will read |
 | `raw_days` | 30 | 30 | 30 | Per-check detail retention, stamped onto each ClickHouse row at write time |
-| `max_flow_checks` | 0 | 0 | 0 | Browser flow monitors the org can create; 0 doubles as the feature gate, and every plan stays there until launch sets real caps |
+| `max_flow_checks` | 0 | 0 | 0 | Browser flow monitors the org can create; 0 doubles as the feature gate, so the kind is off on every seeded plan and a create returns `403 FLOW_CHECKS_DISABLED`. Self-hosted operators raise it on the plan row to switch flow on |
 | `max_regions` | 3 | ∞ | ∞ | Regions a single monitor can be assigned to |
 | `max_members` | 3 | 5 | 15 | Active members in the org |
 | `max_pending_invitations` | 10 | 15 | 25 | Outstanding (unaccepted) invitations |

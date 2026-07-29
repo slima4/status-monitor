@@ -2690,7 +2690,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "What can it monitor?",
-                "HTTP, TCP, DNS, TLS-certificate and domain expiry, ICMP ping, cron-job heartbeats and scripted browser login flows, every 60 seconds from as many regions as you run.",
+                "HTTP, TCP, DNS, TLS-certificate and domain expiry, ICMP ping and cron-job heartbeats, every 60 seconds from as many regions as you run. Scripted browser login flows ship in the same binary, switched off until you raise the cap on your plan row.",
             ),
             (
                 "Does it include a status page?",

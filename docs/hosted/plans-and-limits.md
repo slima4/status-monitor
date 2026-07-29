@@ -13,7 +13,7 @@ This page covers the hosted service at `uptimepage.dev`. A self-hosted instance 
 
 Prices, monitor counts, check intervals, history windows, seats, and status-page limits are on the [pricing page](https://uptimepage.dev/pricing), which is the number you are actually enforced at.
 
-Browser flow monitors are not included in any current plan; the per-plan cap sits at zero until they launch.
+Browser flow monitors are coming soon and are not included in any plan yet. The monitor type is visible in the form, marked as such, and the API answers `403 FLOW_CHECKS_DISABLED` until a plan carries a cap above zero.
 
 Founding is granted automatically while spots remain. There is nothing to claim and no code to enter. Once an account holds it, it keeps those limits for as long as the account is open, at no cost, and we do not downgrade it later.
 
