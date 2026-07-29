@@ -1,21 +1,20 @@
 {# Shared console-register macros. #}
 
-{% macro chooser_card(data_attr, name, value, checked, label, desc) %}
+{% macro chooser_card(data_attr, name, value, checked, label, desc, badge = "", badge_tone = "") %}
 <label class="check-type-card" {{ data_attr }}>
   <input type="radio" name="{{ name }}" value="{{ value }}"{% if checked %} checked{% endif %} class="sr-only">
   <span class="check-type-card__name">{{ label }}</span>
   <span class="check-type-card__desc">{{ desc }}</span>
+  {% if badge != "" %}<span class="card-badge card-badge--{{ badge_tone }}">{{ badge }}</span>{% endif %}
 </label>
 {% endmacro %}
 
 {# Shown so the capability is discoverable, inert so it cannot be submitted. #}
-{% macro chooser_card_locked(label, desc, note, href) %}
+{% macro chooser_card_locked(label, desc, badge, badge_tone) %}
 <span class="check-type-card check-type-card--static">
   <span class="check-type-card__name">{{ label }}</span>
   <span class="check-type-card__desc">{{ desc }}</span>
-  {# Named for itself: tabbing lands here with no sight of its card. #}
-  <a href="{{ href }}" aria-label="{{ label }} — {{ note }}"
-     class="check-type-card__note underline decoration-dotted">{{ note }}</a>
+  {% if badge != "" %}<span class="card-badge card-badge--{{ badge_tone }}">{{ badge }}</span>{% endif %}
 </span>
 {% endmacro %}
 

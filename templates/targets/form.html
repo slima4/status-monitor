@@ -31,9 +31,9 @@
       <div class="check-type-cards check-type-cards--rail mt-3" role="radiogroup" aria-label="Monitor type">
         {% for c in form.kind_cards() %}
         {% if c.locked %}
-        {% call reg::chooser_card_locked(c.label, c.desc, "not on your plan", "/pricing") %}{% endcall %}
+        {% call reg::chooser_card_locked(c.label, c.desc, c.badge, c.badge_tone) %}{% endcall %}
         {% else %}
-        {% call reg::chooser_card("data-check-card", "check_type", c.value, c.selected, c.label, c.desc) %}{% endcall %}
+        {% call reg::chooser_card("data-check-card", "check_type", c.value, c.selected, c.label, c.desc, c.badge, c.badge_tone) %}{% endcall %}
         {% endif %}
         {% endfor %}
       </div>

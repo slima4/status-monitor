@@ -2818,15 +2818,27 @@
             padding-left: 2rem;
         }
     }
-    .check-type-card__note {
-        @apply text-xs;
-        color: var(--theme-text-muted);
-        text-wrap: pretty;
+    /* Corner mark on a chooser card, tucked inside its top-right padding. */
+    .card-badge {
+        @apply pointer-events-none absolute top-2 right-2 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none tracking-tight;
+    }
+    .card-badge--ok {
+        border-color: var(--theme-state-ok-line);
+        color: var(--theme-state-ok-fg);
+    }
+    .card-badge--warn {
+        border-color: var(--theme-state-warn-line);
+        color: var(--theme-state-warn-fg);
+    }
+    /* A checked card inverts to ink, where the state ramp stops reading. */
+    .check-type-card:has(input:checked) .card-badge {
+        border-color: currentColor;
+        color: inherit;
     }
     /* Splits the popular channels from the rest in the type chooser. */
     .kind-divider { border-top: 1px solid var(--theme-line); }
     .check-type-card {
-        @apply flex cursor-pointer flex-col items-start gap-1 rounded-sm border p-3 text-left;
+        @apply relative flex cursor-pointer flex-col items-start gap-1 rounded-sm border p-3 text-left;
         background: var(--theme-surface-elev);
         border-color: var(--theme-line);
         font-family: var(--font-mono);
@@ -2855,6 +2867,10 @@
     /* Edit has no inputs to key the state off, so classes carry it. */
     .check-type-card--static { cursor: default; }
     .check-type-card--static:not(.check-type-card--on) { opacity: 0.5; }
+    /* Dim what is unavailable, not the badge that explains why. */
+    .check-type-card--static:has(.card-badge) { opacity: 1; }
+    .check-type-card--static:has(.card-badge) .check-type-card__name,
+    .check-type-card--static:has(.card-badge) .check-type-card__desc { opacity: 0.5; }
     .check-type-card--static:active { scale: 1; }
     .check-type-card:has(input:checked),
     .check-type-card--on {

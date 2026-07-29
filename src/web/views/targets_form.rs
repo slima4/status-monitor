@@ -332,6 +332,9 @@ pub struct KindCard {
     pub desc: &'static str,
     pub selected: bool,
     pub locked: bool,
+    /// Corner mark; empty renders no badge. `tone` keys the colour ramp.
+    pub badge: &'static str,
+    pub badge_tone: &'static str,
 }
 
 const KIND_CARDS: &[(&str, &str, &str)] = &[
@@ -430,13 +433,23 @@ impl FormModel {
     pub fn kind_cards(&self) -> Vec<KindCard> {
         KIND_CARDS
             .iter()
-            .map(|(value, label, desc)| KindCard {
-                value,
-                label,
-                desc,
-                selected: self.check_type == *value,
+            .map(|(value, label, desc)| {
                 // Edit renders the rail static, so a live flow is never locked out.
-                locked: *value == "flow" && !self.flow_available,
+                let locked = *value == "flow" && !self.flow_available;
+                let (badge, badge_tone) = match *value {
+                    "flow" if locked => ("coming soon", "warn"),
+                    "heartbeat" => ("new", "ok"),
+                    _ => ("", ""),
+                };
+                KindCard {
+                    value,
+                    label,
+                    desc,
+                    selected: self.check_type == *value,
+                    locked,
+                    badge,
+                    badge_tone,
+                }
             })
             .collect()
     }
@@ -1172,7 +1185,7 @@ mod tests {
         .unwrap();
         assert!(html.contains("browser login / journey"));
         assert!(!html.contains(r#"name="check_type" value="flow""#));
-        assert!(html.contains("not on your plan"));
+        assert!(html.contains(r#"<span class="card-badge card-badge--warn">coming soon</span>"#));
 
         let mut form = empty_create_form();
         form.flow_available = true;
@@ -1183,7 +1196,7 @@ mod tests {
         .render()
         .unwrap();
         assert!(html.contains(r#"name="check_type" value="flow""#));
-        assert!(!html.contains("not on your plan"));
+        assert!(!html.contains("coming soon"));
 
         // The URL names the kind before the plan is known; it stays locked.
         let mut form = empty_create_form();
@@ -1219,6 +1232,7 @@ mod tests {
         .render()
         .unwrap();
         assert!(html.contains(r#"name="check_type" value="heartbeat""#));
+        assert!(html.contains(r#"<span class="card-badge card-badge--ok">new</span>"#));
     }
 
     #[test]
