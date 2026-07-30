@@ -23,9 +23,8 @@
         http_body: true,
         http_expected_body_contains: false,
     };
-    // A flow step's fill value is the only interpolable field on a step, and it
-    // is where a login password belongs, so secrets are offered there. Matched
-    // by attribute because step rows are built client-side and carry no name.
+    // The only interpolable field on a step, and secrets belong there. Matched
+    // by attribute since client-built rows carry no name.
     const FLOW_VALUE = "[data-flow-value]";
     const SELECTOR = Object.keys(FIELDS)
         .map((n) => `[name="${n}"]`)
@@ -83,7 +82,7 @@
     menu.setAttribute("role", "listbox");
     menu.hidden = true;
     menu.className =
-        "fixed z-50 max-h-56 w-56 overflow-auto rounded border border-[color:var(--theme-line)] " +
+        "fixed z-50 max-h-56 overflow-auto rounded border border-[color:var(--theme-line)] " +
         "bg-[color:var(--theme-surface-elev)] py-1 font-mono text-xs shadow-lg";
     document.body.appendChild(menu);
 
@@ -93,6 +92,8 @@
     let highlight = -1;
 
     const OPEN = /\{\{\s*([A-Za-z0-9_]*)$/;
+    const MENU_MIN_WIDTH = 160;
+    const GUTTER = 8;
 
     function fieldAllowsSecret(el) {
         if (el.matches(FLOW_VALUE)) return true;
@@ -141,10 +142,16 @@
         highlight = items.findIndex((it) => !it.disabled);
         renderMenu();
         const r = el.getBoundingClientRect();
-        menu.style.left = Math.round(r.left) + "px";
         menu.style.top = Math.round(r.bottom + 4) + "px";
-        menu.style.width = Math.max(160, Math.round(r.width / 2)) + "px";
+        // Fit the longest key: a fraction of the field clips it.
+        const edge = document.documentElement.clientWidth - GUTTER;
+        menu.style.width = "max-content";
+        menu.style.minWidth = Math.round(Math.max(MENU_MIN_WIDTH, r.width / 2)) + "px";
+        menu.style.maxWidth = Math.round(Math.max(MENU_MIN_WIDTH, edge - r.left)) + "px";
         menu.hidden = false;
+        // offsetWidth needs the menu shown, so this runs after.
+        const left = Math.min(r.left, edge - menu.offsetWidth);
+        menu.style.left = Math.round(Math.max(GUTTER, left)) + "px";
     }
 
     function maybeOpen(el) {
