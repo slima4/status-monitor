@@ -1,9 +1,10 @@
 // Variable helpers for the monitor form. Two affordances, both driven off the
 // org's variable list (keys only; secret values never leave the server):
 //
-//   1. Insert menu: typing `{{` in an interpolable HTTP field (url, header
-//      value, body, body-assertion) opens a filtered list of variable keys;
-//      picking one completes the `{{key}}` token.
+//   1. Insert menu: typing `{{` in an interpolable field (HTTP url, header
+//      value, body, body-assertion, or a flow step's fill value) opens a
+//      filtered list of variable keys; picking one completes the `{{key}}`
+//      token.
 //   2. Auth picker: pick a secret variable and a scheme to drop a prefilled
 //      `Authorization: Bearer {{key}}` / `x-api-key: {{key}}` header row. The
 //      stored credential stays a reference; the secret resolves at probe time.
@@ -22,8 +23,13 @@
         http_body: true,
         http_expected_body_contains: false,
     };
+    // A flow step's fill value is the only interpolable field on a step, and it
+    // is where a login password belongs, so secrets are offered there. Matched
+    // by attribute because step rows are built client-side and carry no name.
+    const FLOW_VALUE = "[data-flow-value]";
     const SELECTOR = Object.keys(FIELDS)
         .map((n) => `[name="${n}"]`)
+        .concat(FLOW_VALUE)
         .join(", ");
 
     let vars = [];
@@ -89,6 +95,7 @@
     const OPEN = /\{\{\s*([A-Za-z0-9_]*)$/;
 
     function fieldAllowsSecret(el) {
+        if (el.matches(FLOW_VALUE)) return true;
         return FIELDS[el.getAttribute("name")] === true;
     }
 

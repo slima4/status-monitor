@@ -98,7 +98,7 @@ Steps run in order: navigate, fill a field, click, wait for a selector, assert t
 
 This is the check that catches what nothing else does: an expired OAuth secret, a broken JavaScript bundle, a session cookie that stopped being set. It is also the heaviest, so the minimum interval is five minutes and the number of flow monitors is capped by plan.
 
-Use a dedicated low-privilege account, never a real or admin login. Put the password in an org secret and reference it as `{{key}}` in the fill step, so the stored config holds the reference rather than the credential. See [Variables and secrets](variables.md).
+Use a dedicated low-privilege account, never a real or admin login. Put the password in an org secret and reference it as `{{key}}` in the fill step, so the stored config holds the reference rather than the credential. Typing `{{` in a fill value lists your variables to pick from. Only the fill value resolves variables, which is why secrets are offered there and nowhere else on a step. See [Variables and secrets](variables.md).
 
 Flows run only where a browser engine is available, so their regions are narrowed to that set rather than every region you have. Quorum needs two such regions to decide anything, so with one the monitor reports what that single region saw.
 
