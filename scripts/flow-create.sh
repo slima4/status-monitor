@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Instantly test, then create, a sample browser-flow login monitor against the
 # local dev stack. Pairs with `just flow-dev` (running) + `just dev-login`
-# (session seeded). No UI exists for flow yet, so this is the way to exercise it.
+# (session seeded). The monitor form covers the same ground; this is the
+# scriptable path, and it also lifts the plan gate the form needs.
 #
 # Overrides via env: BASE_URL, DEV_COOKIE, NAME.
 set -euo pipefail

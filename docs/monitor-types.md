@@ -100,7 +100,37 @@ This is the check that catches what nothing else does: an expired OAuth secret, 
 
 Use a dedicated low-privilege account, never a real or admin login. Put the password in an org secret and reference it as `{{key}}` in the fill step, so the stored config holds the reference rather than the credential. See [Variables and secrets](variables.md).
 
-Flows run only where a browser engine is available, so their regions are narrowed to that set rather than every region you have.
+Flows run only where a browser engine is available, so their regions are narrowed to that set rather than every region you have. Quorum needs two such regions to decide anything, so with one the monitor reports what that single region saw.
+
+### Importing a recording
+
+Writing selectors by hand is the slow part, so the form imports a recording instead. In Chrome, open DevTools, go to the Recorder panel, record yourself logging in, and export the recording as JSON. In the flow form, press **import a recording** and hand it the file. The import runs in your browser and the file is never uploaded, which matters because a recording contains whatever you typed, password included.
+
+The mapping is direct:
+
+| Recorded | Becomes |
+|---|---|
+| the first `navigate` | the start URL |
+| a later `navigate` | `goto` |
+| `change` | `fill` |
+| `click`, `doubleClick` | `click` |
+| `waitForElement` | `wait_for` |
+| a navigation assertion on a step | `assert_url` on the path |
+| `setViewport`, `scroll`, `hover`, key presses | dropped |
+
+A recorder captures the deepest element under the cursor, which on an icon button is the icon rather than the button. Clicking that icon directly would fire an event but submit nothing, so a click step always acts on the nearest enclosing button, link, `summary` or `role="button"` when there is one, which is what a real mouse click would have activated. Naming the button yourself lands on the same element. The one case to know about: if you need to click something interactive that sits *inside* a link or button, the click goes to the outer one instead.
+
+Two things get rewritten on the way in. A click on a field immediately followed by typing into it becomes one fill, because replaying the focus click spends a step to do nothing. A value recorded from anything that looks like a password or token is dropped rather than copied, and the row is flagged for you to point at a secret instead.
+
+Then read what landed before you save. The import reports every step it could not carry: a selector Chrome only recorded as XPath or link text, a step inside an iframe, an Enter keypress that submitted the form and now needs an explicit click on the submit control. It also tells you when the recording produced no assertion at all, which the API would reject anyway.
+
+### When a step fails
+
+A failing step reports which step and why, and a test run adds what the page looked like at that moment: the URL the browser had ended up on, the page title, the visible text, and anything the page logged to the browser console. Any secret the flow typed is scrubbed out of all of it before you are shown it.
+
+The URL is usually the whole answer. Still sitting on `/login` after a submit means the credentials never took; landing somewhere unexpected means a redirect changed. The console is where a broken bundle or an expired client-side token announces itself, though the listener attaches a moment after the first page starts loading, so a message logged during that first load can be missed. Anything logged from a later step is captured.
+
+There is no screenshot. The browser engine has no graphical renderer, so no picture exists to take, and the text above is what stands in for one. Failed network requests are not captured either: this engine's network events are not in a shape the client can read.
 
 ## Intervals
 
