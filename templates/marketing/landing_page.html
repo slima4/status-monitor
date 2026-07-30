@@ -60,6 +60,14 @@
         {% endfor %}
     </section>
 
+    {% for f in figures %}
+    <section class="mx-auto max-w-3xl space-y-3">
+        <h2 class="mk-h3">{{ f.heading }}</h2>
+        <div class="{{ f.mount }}"></div>
+        <p class="mk-body">{{ f.caption }}</p>
+    </section>
+    {% endfor %}
+
     {% if let Some(c) = code %}
     <section class="mx-auto max-w-3xl space-y-3">
         <h2 class="mk-h3">{{ c.caption }}</h2>
@@ -126,4 +134,6 @@
     </section>
 
 </div>
+{% for f in figures %}<script defer src="{{ f.script|asset }}"></script>{% endfor %}
+{% if code.is_some() %}<script defer src="{{ "js/marketing/landing.js"|asset }}"></script>{% endif %}
 {% endblock %}

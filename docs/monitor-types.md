@@ -94,7 +94,7 @@ The default resolver caches and honours TTL, so checking faster than the record'
 
 Drives a real headless browser through a scripted sequence, so it verifies that a user can still log in rather than that the login endpoint returns 200.
 
-Steps run in order: navigate, fill a field, click, wait for a selector, assert text, assert URL. At least one assertion is required, so a broken login fails instead of quietly passing. Up to 30 steps, with a whole-run budget and a per-step selector timeout.
+Steps run in order: navigate, fill a field, click, wait for a selector, assert text, assert URL. At least one assertion is required, so a broken login fails instead of quietly passing. Up to 30 steps, with a whole-run budget and a timeout for the steps that wait on something.
 
 This is the check that catches what nothing else does: an expired OAuth secret, a broken JavaScript bundle, a session cookie that stopped being set. It is also the heaviest, so the minimum interval is five minutes and the number of flow monitors is capped by plan.
 
@@ -124,11 +124,51 @@ Two things get rewritten on the way in. A click on a field immediately followed 
 
 Then read what landed before you save. The import reports every step it could not carry: a selector Chrome only recorded as XPath or link text, a step inside an iframe, an Enter keypress that submitted the form and now needs an explicit click on the submit control. It also tells you when the recording produced no assertion at all, which the API would reject anyway.
 
+### A worked example
+
+This one runs against [the-internet.herokuapp.com](https://the-internet.herokuapp.com/login), a public practice site that prints its own credentials on the login page, so you can build it yourself and watch it pass. The password goes in an org secret named `login_password`:
+
+```json
+{
+  "type": "flow",
+  "start_url": "https://the-internet.herokuapp.com/login",
+  "steps": [
+    {"op": "fill",   "selector": "#username", "value": "tomsmith"},
+    {"op": "fill",   "selector": "#password", "value": "{{login_password}}"},
+    {"op": "click",  "selector": "#login > button"},
+    {"op": "assert_url",  "contains": "/secure"},
+    {"op": "assert_text", "contains": "secure area"}
+  ],
+  "timeout": 30000,
+  "step_timeout": 10000,
+  "verify_tls": true
+}
+```
+
+Read it as a sequence of claims. The two fills prove the form fields still exist under those selectors, which catches a redesign that renamed them. The click proves the control is still there and still submits. `assert_url` proves the app moved you to the authenticated area, which is what fails when credentials are rejected. `assert_text` proves the page behind the login actually rendered, which catches the case where the URL changes but the app then errors.
+
+The last two are what make the check meaningful. Without an assertion the flow reports up as long as the steps do not error, so a login that silently rejects you would pass. The API rejects a flow that has no assertion for that reason.
+
+The click selector is worth a second look. That page's submit control is `<button class="radius" type="submit"><i class="fa fa-2x fa-sign-in"> Login</i></button>`, so a recorder writes down the `<i>`, not the button. The step targets the button because that is what a real click activates, which is the same rewrite the import performs.
+
+`timeout` caps the whole run at 30 seconds. `step_timeout` caps how long a step will wait for what it is looking for, at 10 seconds. It applies to the steps that wait: `wait_for`, `assert_text` and `assert_url` poll until it runs out. `fill` and `click` do not wait at all, so if a field is rendered late, raising the step timeout will not help. Put a `wait_for` in front of the fill instead. A slow app needs that, not a higher interval.
+
 ### When a step fails
 
 A failing step reports which step and why, and a test run adds what the page looked like at that moment: the URL the browser had ended up on, the page title, the visible text, and anything the page logged to the browser console. Any secret the flow typed is scrubbed out of all of it before you are shown it.
 
-The URL is usually the whole answer. Still sitting on `/login` after a submit means the credentials never took; landing somewhere unexpected means a redirect changed. The console is where a broken bundle or an expired client-side token announces itself, though the listener attaches a moment after the first page starts loading, so a message logged during that first load can be missed. Anything logged from a later step is captured.
+The URL is usually the whole answer. Still sitting on `/login` after a submit means the credentials never took; landing somewhere unexpected means a redirect changed. Point the flow above at the wrong password and it comes back like this:
+
+```
+DOWN  step 4/5  assert_url: url does not contain "/secure"
+
+URL         https://the-internet.herokuapp.com/login
+Title       The Internet
+Page text   Your password is invalid!
+Console     (nothing logged)
+```
+
+The step names the fault, the URL says the submit never took, and the page says why in its own words. The console is where a broken bundle or an expired client-side token announces itself, but plenty of apps log nothing at all, and this one does not need to. The listener also attaches a moment after the first page starts loading, so a message logged during that first load can be missed. Anything logged from a later step is captured.
 
 There is no screenshot. The browser engine has no graphical renderer, so no picture exists to take, and the text above is what stands in for one. Failed network requests are not captured either: this engine's network events are not in a shape the client can read.
 

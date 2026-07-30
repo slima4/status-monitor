@@ -172,6 +172,34 @@ async fn post_with_a_figure_loads_only_its_own_script() {
 }
 
 #[tokio::test]
+async fn landing_with_figures_mounts_them_and_loads_only_its_own_scripts() {
+    let (status, body, _) = get("/browser-login-monitoring").await;
+    assert_eq!(status, StatusCode::OK);
+    for mount in [
+        "mk-embed-flow-gap",
+        "mk-embed-flow-record",
+        "mk-embed-flow-evidence",
+    ] {
+        assert!(
+            body.contains(mount),
+            "{mount} must reach the page as a mount"
+        );
+    }
+    for script in ["flow_gap.js", "flow_record.js", "flow_evidence.js"] {
+        assert!(
+            body.contains(script),
+            "a page mounting a figure must load the script that fills it: {script}"
+        );
+    }
+
+    let (_, other, _) = get("/uptime-monitoring-for-developers").await;
+    assert!(
+        !other.contains("mk-embed-flow-"),
+        "a landing without figures must not pay for their scripts"
+    );
+}
+
+#[tokio::test]
 async fn unknown_blog_post_returns_branded_404() {
     let (status, body, _) = get("/blog/does-not-exist").await;
     assert_eq!(status, StatusCode::NOT_FOUND);

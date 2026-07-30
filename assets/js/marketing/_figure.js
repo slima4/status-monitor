@@ -45,6 +45,15 @@ export function timers(){
   };
 }
 
+/** Writes `text` a character at a time, on the figure's own clock so a scrub drops it. */
+export function typeOut(clocks, el, text, ms){
+  const tick = Math.max(22, ms / Math.max(1, text.length));
+  el.textContent = '';
+  for (let i = 1; i <= text.length; i++){
+    clocks.later(tick * i, () => { el.textContent = text.slice(0, i); });
+  }
+}
+
 // Middle band rather than a ratio, so a figure taller than the viewport counts.
 const BAND = '-25% 0px -25% 0px';
 // Tells a reader who stopped here from a scroll passing through.
@@ -104,6 +113,12 @@ export function mover(host){
       return el;
     },
   };
+}
+
+/** Ends a replay on the frame it stopped at, leaving that frame on screen. */
+export function stop(player, els, {round, rounds, unit}){
+  player.playing = false;
+  paintTransport(els, {playing: false, done: round >= rounds - 1, round, rounds, unit});
 }
 
 /** The three states the play button can be in, named the same way everywhere. */

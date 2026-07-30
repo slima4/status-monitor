@@ -46,6 +46,16 @@ pub struct Section {
     pub body: &'static str,
 }
 
+/// A replayable figure a landing can mount: the class its script looks for,
+/// the script that fills it, and the prose around it. One struct so the mount
+/// and the script it needs cannot drift apart.
+pub struct Figure {
+    pub mount: &'static str,
+    pub script: &'static str,
+    pub heading: &'static str,
+    pub caption: &'static str,
+}
+
 pub struct ResourceLink {
     pub label: &'static str,
     pub href: &'static str,
@@ -700,6 +710,100 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Built in Rust",
                 href: "/blog/building-an-uptime-monitor-in-rust",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/browser-login-monitoring",
+        created: "2026-07-30",
+        lastmod: "2026-07-30",
+        title: "Browser Login Monitoring for Real Sign-Ins",
+        eyebrow: "browser flows",
+        h1: "Know your login still works, not just that it answers",
+        meta_description: "Synthetic login monitoring in a real browser: fill the form, submit, assert the page behind it. Import a Chrome recording. Free to start.",
+        lede: "An HTTP check on your login page proves the page loads. It cannot tell you that the form still submits, that the session cookie is still set, or that the OAuth secret has not expired. A browser flow signs in the way a user does and tells you when that stops working.",
+        features: &[
+            Feature {
+                label: "What it proves",
+                value: "a real sign-in, end to end",
+            },
+            Feature {
+                label: "Steps",
+                value: "fill, click, wait, assert",
+            },
+            Feature {
+                label: "Authoring",
+                value: "import a Chrome recording",
+            },
+            Feature {
+                label: "Credentials",
+                value: "stored as a secret reference",
+            },
+            Feature {
+                label: "Check interval",
+                value: "from every 5 minutes",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "The failure an HTTP check cannot see",
+                body: "Every outage postmortem has one of these. The login page returned 200 the whole time, so the monitor stayed green, while nobody could actually get in. An expired OAuth client secret, a JavaScript bundle that 404s, a session cookie that stopped being set: none of them change the status line of the page that hosts the form. A flow check runs the sign-in itself, so the thing you care about is the thing being measured.",
+            },
+            Section {
+                heading: "Record it, do not write it",
+                body: "Chrome ships a Recorder in DevTools. Sign in once with it running, export the recording as JSON, and drop the file into the monitor form. It becomes steps you can read and edit. Selectors come across as written, the focus click before typing folds into the fill, and anything the recording could not carry is listed rather than guessed at.",
+            },
+            Section {
+                heading: "The password never lands in the config",
+                body: "A recording holds whatever you typed, in clear text. The import drops the value of anything that looks like a password or a token instead of copying it, and points you at an organization secret. The monitor then stores a reference like {{login_password}}, never the credential. Use a dedicated low-privilege account for this, not a real one and never an admin.",
+            },
+            Section {
+                heading: "A failure that names itself",
+                body: "When a step fails you get the step, the reason, and the page as it stood: the URL the browser had reached, the title, the visible text, and whatever the page logged to the browser console. Most of the time the URL settles it on its own. Still sitting on the login path after a submit means the credentials never took.",
+            },
+            Section {
+                heading: "The heaviest check, priced that way",
+                body: "A flow drives a real browser process per run, which costs far more than an HTTP request. So it runs no faster than every five minutes, the number of flow monitors is capped by plan, and flows only run in regions where a browser engine is available. Watch the one journey that matters with a flow, and keep plain HTTP checks on everything else.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "A login flow, as the API stores it",
+            body: r##"{
+  "type": "flow",
+  "start_url": "https://the-internet.herokuapp.com/login",
+  "steps": [
+    {"op": "fill",   "selector": "#username", "value": "tomsmith"},
+    {"op": "fill",   "selector": "#password", "value": "{{login_password}}"},
+    {"op": "click",  "selector": "#login > button"},
+    {"op": "assert_url",  "contains": "/secure"},
+    {"op": "assert_text", "contains": "secure area"}
+  ],
+  "timeout": 30000,
+  "step_timeout": 10000,
+  "verify_tls": true
+}"##,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "All eight check types",
+                href: "/docs/monitor-types",
+            },
+            ResourceLink {
+                label: "Variables and secrets",
+                href: "/docs/variables",
+            },
+            ResourceLink {
+                label: "Stop one bad probe waking you at 3 a.m.",
+                href: "/blog/stop-false-uptime-alerts",
+            },
+            ResourceLink {
+                label: "Uptime monitoring for developers",
+                href: "/uptime-monitoring-for-developers",
             },
         ],
         cta: "Start free",
@@ -2408,6 +2512,7 @@ struct LandingDoc {
     sections: &'static [Section],
     code: Option<&'static CodeSample>,
     matrix: Option<&'static Matrix>,
+    figures: &'static [Figure],
     resources: &'static [ResourceLink],
     cta: &'static str,
     canonical_url: String,
@@ -3835,6 +3940,34 @@ static STATUSPAGE_MATRIX: Matrix = Matrix {
 
 /// The comparison matrices, looked up by path so they stay off every other
 /// `Landing`. Mirrors [`page_faqs`].
+const FLOW_FIGURES: &[Figure] = &[
+    Figure {
+        mount: "mk-embed-flow-gap",
+        script: "js/marketing/flow_gap.js",
+        heading: "A 200 is not a login",
+        caption: "The same minute, two checks against the same page. The HTTP check times DNS, the TCP connect, the TLS handshake and the first byte, finds all four healthy, and stops at the status line. The flow keeps going: it fills the form, submits, and looks for the page that only exists once you are signed in. Everything here runs against the-internet.herokuapp.com, a public practice site, so you can build the same monitor and watch it work.",
+    },
+    Figure {
+        mount: "mk-embed-flow-record",
+        script: "js/marketing/flow_record.js",
+        heading: "Record it once, keep the steps",
+        caption: "Chrome's own Recorder exports what you did as JSON. Dropping that file in turns it into steps. The focus click before typing collapses into the fill, the submit button's icon becomes the button, and the password never survives the trip.",
+    },
+    Figure {
+        mount: "mk-embed-flow-evidence",
+        script: "js/marketing/flow_evidence.js",
+        heading: "When it breaks, it says where",
+        caption: "A failed step names itself, and the run hands back the page it was looking at. Usually the URL alone settles it: still on the login page means the credentials never took.",
+    },
+];
+
+fn page_figures(path: &str) -> &'static [Figure] {
+    match path {
+        "/browser-login-monitoring" => FLOW_FIGURES,
+        _ => &[],
+    }
+}
+
 fn page_matrix(path: &str) -> Option<&'static Matrix> {
     match path {
         "/compare/openstatus-vs-uptime-kuma" => Some(&OPENSTATUS_KUMA_MATRIX),
@@ -5184,6 +5317,7 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 sections: l.sections,
                 code: l.code.as_ref(),
                 matrix: page_matrix(l.path),
+                figures: page_figures(l.path),
                 resources: l.resources,
                 cta: l.cta,
                 canonical_url,
