@@ -4,11 +4,13 @@
 //! (the control plane or a flow-capable agent).
 
 pub mod engine;
+mod evidence;
 mod executor;
 
 use chrono::Utc;
 use uuid::Uuid;
 
+use crate::domain::agent_wire::FlowEvidence;
 use crate::domain::{CheckResult, CheckStatus, FlowCheck};
 use engine::CdpEngine;
 use executor::RunResult;
@@ -19,14 +21,30 @@ pub async fn execute_flow_check(
     flow: &FlowCheck,
     engine: Option<&CdpEngine>,
 ) -> CheckResult {
+    execute_flow_check_probe(target_id, org_id, flow, engine)
+        .await
+        .0
+}
+
+/// Same run, plus what the page said when a step failed. Backs the test-check
+/// UI, where the error string alone rarely places the fault.
+pub async fn execute_flow_check_probe(
+    target_id: Uuid,
+    org_id: Uuid,
+    flow: &FlowCheck,
+    engine: Option<&CdpEngine>,
+) -> (CheckResult, Option<FlowEvidence>) {
     let Some(engine) = engine else {
-        return CheckResult::error(target_id, org_id, "flow engine not configured on this node");
+        return (
+            CheckResult::error(target_id, org_id, "flow engine not configured on this node"),
+            None,
+        );
     };
 
     let started = Utc::now();
     // `run` applies the flow deadline internally, after it holds a concurrency
     // slot, and returns the elapsed probe time excluding any queue wait.
-    let (run, elapsed) = engine.run(flow).await;
+    let (run, evidence, elapsed) = engine.run(flow).await;
 
     let (status, error) = match run {
         RunResult::Passed => (CheckStatus::Up, None),
@@ -41,7 +59,7 @@ pub async fn execute_flow_check(
         RunResult::Engine(e) => (CheckStatus::Error, Some(e)),
     };
 
-    CheckResult {
+    let result = CheckResult {
         target_id,
         org_id,
         timestamp: started,
@@ -54,7 +72,8 @@ pub async fn execute_flow_check(
         response_code: None,
         response_size: None,
         error,
-    }
+    };
+    (result, evidence)
 }
 
 #[cfg(test)]
@@ -111,8 +130,10 @@ mod tests {
                     selector: "#password".into(),
                     value: "SuperSecretPassword!".into(),
                 },
+                // The icon inside the button, which is what a recorder
+                // captures. Only passes if the click retargets to the button.
                 FlowStep::Click {
-                    selector: "button[type=\"submit\"]".into(),
+                    selector: "#login > button > i".into(),
                 },
                 FlowStep::AssertUrl {
                     contains: "/secure".into(),
@@ -159,6 +180,93 @@ mod tests {
             verify_tls: false,
         };
         execute_flow_check(Uuid::nil(), Uuid::nil(), &flow, Some(engine)).await
+    }
+
+    // A failing step must explain itself without a picture.
+    #[tokio::test]
+    #[ignore]
+    async fn failed_step_collects_page_evidence() {
+        use tokio::io::AsyncWriteExt;
+
+        let Ok(bin) = std::env::var("FLOW_LIGHTPANDA_BIN") else {
+            eprintln!("FLOW_LIGHTPANDA_BIN unset; skipping");
+            return;
+        };
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buf = [0u8; 2048];
+                let _ = sock.readable().await;
+                let _ = sock.try_read(&mut buf);
+                let head = String::from_utf8_lossy(&buf).to_string();
+                let (code, body) = if head.starts_with("GET /session") {
+                    ("404 Not Found", String::new())
+                } else {
+                    (
+                        "200 OK",
+                        "<html><head><title>Sign in</title></head><body>\
+                         <p>Your credentials are invalid</p>\
+                         <script>console.error('early error');fetch('/session');setTimeout(function(){console.error('token expired');fetch('/session?late=1');},400);</script>\
+                         </body></html>"
+                            .to_string(),
+                    )
+                };
+                let resp = format!(
+                    "HTTP/1.1 {code}\r\nContent-Length: {}\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+
+        let flow = FlowCheck {
+            start_url: url::Url::parse(&format!("http://{addr}/login")).unwrap(),
+            steps: vec![FlowStep::AssertText {
+                selector: None,
+                contains: "welcome back".into(),
+            }],
+            timeout: Duration::from_secs(20),
+            step_timeout: Duration::from_secs(2),
+            verify_tls: false,
+        };
+        let (result, evidence) = execute_flow_check_probe(
+            Uuid::nil(),
+            Uuid::nil(),
+            &flow,
+            Some(&sandbox_engine(&bin, false)),
+        )
+        .await;
+        server.abort();
+
+        assert_eq!(result.status, CheckStatus::Down, "error={:?}", result.error);
+        let ev = evidence.expect("a failed step must carry evidence");
+        assert_eq!(ev.title.as_deref(), Some("Sign in"));
+        assert!(
+            ev.final_url
+                .as_deref()
+                .is_some_and(|u| u.contains("/login")),
+            "final_url={:?}",
+            ev.final_url
+        );
+        assert!(
+            ev.text_snippet
+                .as_deref()
+                .is_some_and(|t| t.contains("credentials are invalid")),
+            "text_snippet={:?}",
+            ev.text_snippet
+        );
+        assert_eq!(
+            ev.console,
+            vec![crate::domain::agent_wire::ConsoleLine {
+                level: "error".into(),
+                text: "token expired".into(),
+            }],
+            "one console.error must arrive exactly once"
+        );
     }
 
     // Causal proof the egress sandbox works: the same loopback page the browser

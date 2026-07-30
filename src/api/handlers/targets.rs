@@ -911,6 +911,7 @@ pub async fn test_check(
         warnings: Vec::new(),
         response_headers_preview: view.response_headers_preview,
         response_body_snippet: view.response_body_snippet,
+        flow_evidence: view.flow_evidence,
         region: Some(region),
     }))
 }
@@ -1272,6 +1273,17 @@ fn scrub_secrets(delivered: &mut DeliveredResult, secrets: &[String]) {
     // (e.g. a page that reflects a submitted value); scrub it like the rest.
     if let Some(err) = delivered.result.error.as_mut() {
         redact(err, secrets);
+    }
+    // Page content is the likeliest place a submitted value comes back.
+    if let Some(ev) = delivered.flow_evidence.as_mut() {
+        for field in [&mut ev.final_url, &mut ev.title, &mut ev.text_snippet] {
+            if let Some(v) = field.as_mut() {
+                redact(v, secrets);
+            }
+        }
+        for line in &mut ev.console {
+            redact(&mut line.text, secrets);
+        }
     }
 }
 
@@ -1987,29 +1999,35 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                 ));
             }
             validate_flow_url(&flow.start_url, guard)?;
-            for step in &flow.steps {
+            for (i, step) in flow.steps.iter().enumerate() {
+                // 1-based: the form numbers the rows the reader is looking at.
+                let n = i + 1;
                 match step {
                     FlowStep::Goto { url } => validate_flow_url(url, guard)?,
                     FlowStep::Click { selector } | FlowStep::WaitFor { selector } => {
-                        require_nonempty_step(selector)?
+                        require_nonempty_step(selector, n, "selector")?
                     }
                     FlowStep::Fill { selector, value } => {
-                        require_nonempty_step(selector)?;
+                        require_nonempty_step(selector, n, "selector")?;
                         if value == REDACTED {
                             return Err(AppError::bad_request_field(
                                 codes::REDACTION_SENTINEL,
-                                "fill value contains redaction sentinel — re-supply the real value",
+                                format!(
+                                    "step {n}: fill value contains redaction sentinel — re-supply the real value"
+                                ),
                                 "check.steps",
                             ));
                         }
                     }
                     FlowStep::AssertText { selector, contains } => {
                         if let Some(sel) = selector {
-                            require_nonempty_step(sel)?;
+                            require_nonempty_step(sel, n, "selector")?;
                         }
-                        require_nonempty_step(contains)?;
+                        require_nonempty_step(contains, n, "expected text")?;
                     }
-                    FlowStep::AssertUrl { contains } => require_nonempty_step(contains)?,
+                    FlowStep::AssertUrl { contains } => {
+                        require_nonempty_step(contains, n, "expected URL fragment")?
+                    }
                 }
             }
         }
@@ -2047,11 +2065,12 @@ fn validate_flow_url(url: &url::Url, guard: &SsrfGuard) -> Result<()> {
     }
 }
 
-fn require_nonempty_step(value: &str) -> Result<()> {
+/// Names the row and field, so the author knows which step to go fix.
+fn require_nonempty_step(value: &str, n: usize, what: &str) -> Result<()> {
     if value.trim().is_empty() {
         return Err(AppError::bad_request_field(
             codes::INVALID_FLOW_PARAMS,
-            "flow step selector and assertion values must not be empty",
+            format!("step {n}: {what} must not be empty"),
             "check.steps",
         ));
     }
@@ -2091,6 +2110,7 @@ mod tests {
                 name: "x-echo".into(),
                 value: "sk-live-secret".into(),
             }],
+            flow_evidence: None,
         };
         scrub_secrets(&mut delivered, &["sk-live-secret".to_string()]);
         assert_eq!(
@@ -2098,6 +2118,43 @@ mod tests {
             Some("{\"echo\":\"***\"}")
         );
         assert_eq!(delivered.response_headers_preview[0].value, "***");
+    }
+
+    // Every evidence field is a place a just-typed secret can come back.
+    #[test]
+    fn scrub_secrets_reaches_every_field_of_flow_evidence() {
+        use crate::ad_hoc_dispatch::DeliveredResult;
+        use crate::domain::CheckResult;
+        use crate::domain::agent_wire::{ConsoleLine, FlowEvidence};
+
+        let secret = "sk-live-secret";
+        let mut delivered = DeliveredResult {
+            result: CheckResult::error(Uuid::nil(), Uuid::nil(), "x"),
+            response_body_snippet: None,
+            response_headers_preview: vec![],
+            flow_evidence: Some(FlowEvidence {
+                final_url: Some(format!("https://app.example.com/login?t={secret}")),
+                title: Some(format!("Sign in {secret}")),
+                text_snippet: Some(format!("rejected {secret}")),
+                console: vec![ConsoleLine {
+                    level: "error".into(),
+                    text: format!("auth failed for {secret}"),
+                }],
+            }),
+        };
+        scrub_secrets(&mut delivered, &[secret.to_string()]);
+
+        let ev = delivered.flow_evidence.unwrap();
+        let seen = [
+            ev.final_url.unwrap(),
+            ev.title.unwrap(),
+            ev.text_snippet.unwrap(),
+            ev.console[0].text.clone(),
+        ];
+        for field in seen {
+            assert!(!field.contains(secret), "secret survived in {field:?}");
+            assert!(field.contains("***"), "no redaction marker in {field:?}");
+        }
     }
 
     #[test]
@@ -2168,6 +2225,31 @@ mod tests {
         use crate::security::ssrf::SsrfGuard;
         validate_check(&head_spec(None), &SsrfGuard::strict())
             .expect("HEAD without body match must pass");
+    }
+
+    // An import leaves a row blank when the recording had no usable selector,
+    // so authors meet this. Without a row number they hunt through thirty steps.
+    #[test]
+    fn validate_check_names_the_step_with_the_empty_selector() {
+        use crate::security::ssrf::SsrfGuard;
+        let spec: crate::domain::CheckSpec = serde_json::from_str(
+            r##"{"type":"flow","start_url":"https://app.example.com/login",
+                "steps":[
+                  {"op":"fill","selector":"#user","value":"bob"},
+                  {"op":"assert_url","contains":"/home"},
+                  {"op":"click","selector":"  "}
+                ],
+                "timeout":30000,"step_timeout":5000,"verify_tls":true}"##,
+        )
+        .expect("spec must deserialize");
+        let err =
+            validate_check(&spec, &SsrfGuard::strict()).expect_err("a blank selector must reject");
+        let msg = format!("{err:?}");
+        assert!(msg.contains("step 3"), "message must name the row: {msg}");
+        assert!(
+            msg.contains("selector"),
+            "message must name the field: {msg}"
+        );
     }
 
     #[test]

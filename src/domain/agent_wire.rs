@@ -83,9 +83,36 @@ pub struct DispatchBatch {
     pub checks: Vec<DispatchedCheck>,
 }
 
+/// What a failed flow run left on the page, standing in for the screenshot the
+/// renderer-less engine cannot take. Bounded at capture; resolved secrets are
+/// scrubbed on the control plane, at the same chokepoint as the HTTP body
+/// snippet, so this crosses the agent wire unredacted.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct FlowEvidence {
+    /// Often the whole answer: still on `/login` means the login never took.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = true)]
+    pub final_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = true)]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = true)]
+    pub text_snippet: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub console: Vec<ConsoleLine>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct ConsoleLine {
+    /// `log`, `warning`, `error`, and the other console API verbs.
+    pub level: String,
+    pub text: String,
+}
+
 /// Result an agent posts back for one claimed check. `result` is always present
 /// (a failed probe still yields a `CheckResult`); the probe preview is HTTP
-/// `test` detail only.
+/// `test` detail only, and the evidence flow `test` detail only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DispatchReport {
     pub check_id: Uuid,
@@ -94,4 +121,6 @@ pub struct DispatchReport {
     pub response_headers_preview: Vec<HeaderPreview>,
     #[serde(default)]
     pub response_body_snippet: Option<String>,
+    #[serde(default)]
+    pub flow_evidence: Option<FlowEvidence>,
 }

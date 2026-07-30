@@ -115,6 +115,10 @@ pub struct TestResponse {
     /// First 1 KiB of decoded body, HTTP only. UTF-8 lossy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub response_body_snippet: Option<String>,
+    /// Page state when a step failed, flow only. Absent on a pass, and on an
+    /// engine error, where the page state says nothing about the target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flow_evidence: Option<crate::domain::agent_wire::FlowEvidence>,
     /// Region the test ran in, echoed so a fan-out caller can correlate rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,

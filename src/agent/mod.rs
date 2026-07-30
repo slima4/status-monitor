@@ -255,15 +255,12 @@ impl AgentDispatchClient {
             let (result, probe) =
                 crate::worker::execute_with_probe(target_id, check.org_id, &check.spec, &deps)
                     .await;
-            let (response_headers_preview, response_body_snippet) = match probe {
-                Some(p) => (p.response_headers_preview, p.response_body_snippet),
-                None => (Vec::new(), None),
-            };
             let payload = DispatchReport {
                 check_id: check.id,
                 result,
-                response_headers_preview,
-                response_body_snippet,
+                response_headers_preview: probe.response_headers_preview,
+                response_body_snippet: probe.response_body_snippet,
+                flow_evidence: probe.flow_evidence,
             };
             self.post_result(&payload).await?;
         }

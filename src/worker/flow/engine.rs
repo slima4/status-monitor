@@ -10,12 +10,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chromiumoxide::Browser;
+use chromiumoxide::cdp::browser_protocol::network::EnableParams as NetworkEnable;
+use chromiumoxide::cdp::js_protocol::runtime::EnableParams as RuntimeEnable;
 use futures::StreamExt;
 use tokio::process::{Child, Command};
 use tokio::sync::Semaphore;
 
+use super::evidence::EvidenceCollector;
 use super::executor::{RunResult, run_steps};
 use crate::domain::FlowCheck;
+use crate::domain::agent_wire::FlowEvidence;
 
 pub struct FlowEngineConfig {
     pub binary: PathBuf,
@@ -63,49 +67,52 @@ impl CdpEngine {
         }
     }
 
-    /// Runs the flow and returns its result plus the elapsed probe time in ms.
-    /// The step list is assumed already variable-resolved by the caller.
-    pub async fn run(&self, flow: &FlowCheck) -> (RunResult, u32) {
+    /// Elapsed excludes queue wait. Steps must already be variable-resolved.
+    pub async fn run(&self, flow: &FlowCheck) -> (RunResult, Option<FlowEvidence>, u32) {
         let _permit = match self.sem.acquire().await {
             Ok(p) => p,
-            Err(_) => return (RunResult::Engine("flow engine shut down".into()), 0),
+            Err(_) => return (RunResult::Engine("flow engine shut down".into()), None, 0),
         };
         // Clock and deadline both start only once a slot is held, so time spent
         // queued for a permit is never charged against the flow's own budget.
         let started = Instant::now();
-        let result = match tokio::time::timeout(flow.timeout, self.run_once(flow)).await {
-            Ok(r) => r,
-            Err(_) => RunResult::Engine(format!(
-                "flow exceeded its {} ms budget",
-                flow.timeout.as_millis()
-            )),
+        let (result, evidence) = match tokio::time::timeout(flow.timeout, self.run_once(flow)).await
+        {
+            Ok(pair) => pair,
+            Err(_) => (
+                RunResult::Engine(format!(
+                    "flow exceeded its {} ms budget",
+                    flow.timeout.as_millis()
+                )),
+                None,
+            ),
         };
         let elapsed = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
-        (result, elapsed)
+        (result, evidence, elapsed)
     }
 
     /// One flow attempt, retried on a fresh port when the engine dies during
     /// startup — a freed ephemeral port can be taken before Lightpanda binds it.
-    async fn run_once(&self, flow: &FlowCheck) -> RunResult {
+    async fn run_once(&self, flow: &FlowCheck) -> (RunResult, Option<FlowEvidence>) {
         let mut last = String::new();
         for _ in 0..3 {
             let port = match free_port() {
                 Ok(p) => p,
-                Err(e) => return RunResult::Engine(format!("no free port: {e}")),
+                Err(e) => return (RunResult::Engine(format!("no free port: {e}")), None),
             };
             let mut child = match self.spawn(port, flow.verify_tls) {
                 Ok(c) => c,
-                Err(e) => return RunResult::Engine(format!("spawn lightpanda: {e}")),
+                Err(e) => return (RunResult::Engine(format!("spawn lightpanda: {e}")), None),
             };
             // A heavy page can't OOM the node: if RSS crosses the ceiling the
             // watchdog wins the race and the process is torn down.
-            let result = match (child.id(), self.mem_limit_bytes) {
+            let (result, evidence) = match (child.id(), self.mem_limit_bytes) {
                 (Some(pid), limit) if limit > 0 => tokio::select! {
                     r = drive(&mut child, port, flow) => r,
-                    _ = watch_rss(pid, limit) => RunResult::Engine(format!(
+                    _ = watch_rss(pid, limit) => (RunResult::Engine(format!(
                         "engine exceeded {} MB memory limit",
                         limit / (1024 * 1024)
-                    )),
+                    )), None),
                 },
                 _ => drive(&mut child, port, flow).await,
             };
@@ -117,9 +124,12 @@ impl CdpEngine {
                 last = startup.to_string();
                 continue;
             }
-            return result;
+            return (result, evidence);
         }
-        RunResult::Engine(format!("engine did not start after retries: {last}"))
+        (
+            RunResult::Engine(format!("engine did not start after retries: {last}")),
+            None,
+        )
     }
 
     fn spawn(&self, port: u16, verify_tls: bool) -> std::io::Result<Child> {
@@ -166,30 +176,47 @@ impl CdpEngine {
 /// retries on a fresh port instead of reporting a false verdict on the target.
 const STARTUP_FAILED: &str = "engine did not start: ";
 
-async fn drive(child: &mut Child, port: u16, flow: &FlowCheck) -> RunResult {
+async fn drive(
+    child: &mut Child,
+    port: u16,
+    flow: &FlowCheck,
+) -> (RunResult, Option<FlowEvidence>) {
     let ws = format!("ws://127.0.0.1:{port}/");
     let (browser, mut handler) = match connect_with_retry(child, &ws).await {
         Ok(pair) => pair,
-        Err(e) => return RunResult::Engine(format!("{STARTUP_FAILED}{e}")),
+        Err(e) => return (RunResult::Engine(format!("{STARTUP_FAILED}{e}")), None),
     };
     let pump = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
     let outcome = async {
+        // Listeners would catch the first byte if we opened `about:blank` and
+        // navigated after, but this engine never resolves that call.
         let page = browser
             .new_page(flow.start_url.as_str())
             .await
             .map_err(|e| format!("open page: {e}"))?;
+        let _ = page.execute(RuntimeEnable::default()).await;
+        let _ = page.execute(NetworkEnable::default()).await;
+        let collector = EvidenceCollector::attach(&page).await;
         page.wait_for_navigation()
             .await
             .map_err(|e| format!("initial navigation: {e}"))?;
-        Ok::<RunResult, String>(run_steps(&page, &flow.steps, flow.step_timeout).await)
+
+        let result = run_steps(&page, &flow.steps, flow.step_timeout).await;
+        // A pass has nothing to explain; after an engine break the page state
+        // is not trustworthy.
+        let evidence = match &result {
+            RunResult::Failed { .. } => Some(collector.finish(&page).await),
+            _ => None,
+        };
+        Ok::<(RunResult, Option<FlowEvidence>), String>((result, evidence))
     }
     .await;
 
     pump.abort();
     match outcome {
-        Ok(r) => r,
-        Err(e) => RunResult::Engine(e),
+        Ok(pair) => pair,
+        Err(e) => (RunResult::Engine(e), None),
     }
 }
 

@@ -210,6 +210,7 @@ pub async fn submit_dispatch_result(
         result: req.result,
         response_headers_preview: req.response_headers_preview,
         response_body_snippet: req.response_body_snippet,
+        flow_evidence: req.flow_evidence,
     };
     if let Some(meta) = state.ad_hoc.complete(req.check_id, delivered)
         && meta.kind == DispatchKind::CheckNow

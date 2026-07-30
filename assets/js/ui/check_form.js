@@ -761,6 +761,7 @@
             matched: body.matched_expectations,
             headers: body.response_headers_preview || [],
             body: body.response_body_snippet || null,
+            evidence: body.flow_evidence || null,
         });
         const matched = body.matched_expectations !== false;
         const state = !matched || result.status === "down"

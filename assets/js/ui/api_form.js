@@ -85,15 +85,36 @@ window.smRenderCheckResult = function (el, result, extra) {
     if (result.error) {
         html += `<div class="test-result__meta mt-1">${window.smEscapeHtml(result.error)}</div>`;
     }
+    const section = (label, text) =>
+        `<details class="mt-2"><summary class="cursor-pointer text-xs">${window.smEscapeHtml(label)}</summary><pre class="test-result__body">${window.smEscapeHtml(text)}</pre></details>`;
+
     const headers = extra.headers || [];
     if (headers.length > 0) {
-        const rows = headers
-            .map(h => `${window.smEscapeHtml(h.name)}: ${window.smEscapeHtml(h.value)}`)
-            .join("\n");
-        html += `<details class="mt-2"><summary class="cursor-pointer text-xs">Response headers (${headers.length})</summary><pre class="test-result__body">${rows}</pre></details>`;
+        html += section(
+            `Response headers (${headers.length})`,
+            headers.map(h => `${h.name}: ${h.value}`).join("\n"),
+        );
     }
     if (extra.body) {
-        html += `<details class="mt-2"><summary class="cursor-pointer text-xs">Response body (first 1 KiB)</summary><pre class="test-result__body">${window.smEscapeHtml(extra.body)}</pre></details>`;
+        html += section("Response body (first 1 KiB)", extra.body);
+    }
+    // Stands in for a screenshot: the flow engine has no renderer.
+    const ev = extra.evidence;
+    if (ev) {
+        const where = [
+            ev.final_url ? `URL:   ${ev.final_url}` : null,
+            ev.title ? `Title: ${ev.title}` : null,
+        ].filter(Boolean);
+        if (ev.text_snippet) where.push("", ev.text_snippet);
+        if (where.length > 0) html += section("Page when it failed", where.join("\n"));
+
+        const lines = ev.console || [];
+        if (lines.length > 0) {
+            html += section(
+                `Browser console (${lines.length})`,
+                lines.map(l => `${l.level}: ${l.text}`).join("\n"),
+            );
+        }
     }
     if (extra.footnote) {
         html += `<div class="test-result__meta mt-1 italic">${window.smEscapeHtml(extra.footnote)}</div>`;

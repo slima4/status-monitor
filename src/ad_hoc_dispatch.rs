@@ -51,6 +51,7 @@ pub struct DeliveredResult {
     pub result: CheckResult,
     pub response_headers_preview: Vec<HeaderPreview>,
     pub response_body_snippet: Option<String>,
+    pub flow_evidence: Option<crate::domain::agent_wire::FlowEvidence>,
 }
 
 /// Authoritative check fields, returned by [`AdHocDispatch::complete`] so the
@@ -232,15 +233,13 @@ pub async fn run_local_executor(
             // We produced the result with the authoritative ids, so persist it
             // as-is (mirrors the agent result-ingest path).
             let persist = matches!(check.kind, DispatchKind::CheckNow).then(|| result.clone());
-            let (response_headers_preview, response_body_snippet) = probe
-                .map(|p| (p.response_headers_preview, p.response_body_snippet))
-                .unwrap_or_default();
             dispatch.complete(
                 check.id,
                 DeliveredResult {
                     result,
-                    response_headers_preview,
-                    response_body_snippet,
+                    response_headers_preview: probe.response_headers_preview,
+                    response_body_snippet: probe.response_body_snippet,
+                    flow_evidence: probe.flow_evidence,
                 },
             );
             if let Some(r) = persist
@@ -296,6 +295,7 @@ mod tests {
             },
             response_headers_preview: vec![],
             response_body_snippet: None,
+            flow_evidence: None,
         }
     }
 

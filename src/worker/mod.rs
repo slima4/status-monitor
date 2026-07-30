@@ -171,18 +171,51 @@ pub async fn execute(
     }
 }
 
-/// Verbose variant of `execute` for the test-check UI: HTTP returns a
-/// populated probe; other variants return `None`.
+/// Extra detail a test-check carries back beyond the verdict. One struct
+/// rather than a per-kind enum: kinds with no detail just leave it empty.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct ProbeDetail {
+    pub response_headers_preview: Vec<crate::domain::agent_wire::HeaderPreview>,
+    pub response_body_snippet: Option<String>,
+    pub flow_evidence: Option<crate::domain::agent_wire::FlowEvidence>,
+}
+
+impl From<HttpProbe> for ProbeDetail {
+    fn from(p: HttpProbe) -> Self {
+        Self {
+            response_headers_preview: p.response_headers_preview,
+            response_body_snippet: p.response_body_snippet,
+            flow_evidence: None,
+        }
+    }
+}
+
+/// Verbose variant of `execute` for the test-check UI.
 pub(crate) async fn execute_with_probe(
     target_id: Uuid,
     org_id: Uuid,
     spec: &CheckSpec,
     deps: &WorkerDeps<'_>,
-) -> (CheckResult, Option<HttpProbe>) {
-    if let CheckSpec::Http(http) = spec {
-        let (r, p) = execute_http_check_probe(target_id, org_id, http, deps.http).await;
-        (r, Some(p))
-    } else {
-        (execute(target_id, org_id, spec, deps).await, None)
+) -> (CheckResult, ProbeDetail) {
+    match spec {
+        CheckSpec::Http(http) => {
+            let (r, p) = execute_http_check_probe(target_id, org_id, http, deps.http).await;
+            (r, p.into())
+        }
+        CheckSpec::Flow(flow) => {
+            let (r, evidence) =
+                flow::execute_flow_check_probe(target_id, org_id, flow, deps.flow).await;
+            (
+                r,
+                ProbeDetail {
+                    flow_evidence: evidence,
+                    ..Default::default()
+                },
+            )
+        }
+        _ => (
+            execute(target_id, org_id, spec, deps).await,
+            ProbeDetail::default(),
+        ),
     }
 }
