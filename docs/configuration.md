@@ -21,7 +21,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `security` | `allow_private_targets` | SSRF guard: when `false` (default) any target resolving to loopback / private / link-local / reserved IPs is rejected |
 | `security` | `credentials_kek_base64` | 32-byte base64 key encrypting `basic_auth` / `bearer_token` at rest. Empty (default) stores plaintext — dev only |
 | `security` | `trusted_proxies` | CIDR ranges whose `X-Forwarded-For` is honoured for client-IP extraction. Empty means no reverse proxy: the TCP peer is trusted as-is |
-| `flow` | `enabled`, `lightpanda_path`, `max_concurrency`, `mem_limit_mb`, `block_private_networks`, `block_cidrs`, `max_response_mb`, `user_agent_suffix` | Browser-driven flow monitors (Lightpanda engine). Off by default |
+| `flow` | `enabled`, `lightpanda_path`, `max_concurrency`, `mem_limit_mb`, `block_private_networks`, `block_cidrs`, `v8_max_heap_mb`, `max_response_mb`, `user_agent_suffix` | Browser-driven flow monitors (Lightpanda engine). Off by default. See [Browser flow monitors](#browser-flow-monitors) below |
 | `rate_limits` | `per_ip.*`, `janitor.*` | Mirrors of the per-IP numbers the reverse proxy enforces, plus the in-process limiter-map janitor cadence. Per-org/per-user limits come from the plans table |
 | `abuse` | `url_patterns_denied`, `domain_denylist_path`, `reputation_source_path`, `hot_reload_enabled` | Deny-list of attack-recon URL patterns and domains checked at target creation. `hot_reload_enabled` lets SIGHUP swap the rules in without a restart |
 | `circuit_breaker` | `failure_threshold`, `success_threshold`, `open_duration_secs`, `half_open_max_calls` | per-host breaker state machine |
@@ -330,6 +330,44 @@ shutdown. A transport build failure logs a warning and the service
 continues without traces — telemetry never takes down monitoring.
 Inconsistent settings (export on with a missing endpoint / instance /
 key, or an out-of-range ratio) are a clean startup config error.
+
+## Browser flow monitors
+
+A [flow monitor](monitor-types.md#flow) drives a real headless browser through a login, so it costs far more than any other check kind: one browser process per run, held for the length of the run. The block is off everywhere by default, and turning it on is a deliberate decision about which nodes can afford it.
+
+```toml
+[flow]
+enabled = false                        # this node runs flow checks
+lightpanda_path = "lightpanda"         # engine binary; absolute path in a container
+max_concurrency = 2                    # simultaneous browser processes on this node
+mem_limit_mb = 250                     # per-run RSS ceiling; over it the run is killed as Error
+block_private_networks = true          # runtime SSRF guard, after DNS resolution
+block_cidrs = "169.254.0.0/16,127.0.0.0/8,100.64.0.0/10,::1/128,fc00::/7,fe80::/10"
+v8_max_heap_mb = 0                     # in-engine JS heap cap; 0 = engine default
+max_response_mb = 0                    # reject any single browser response over this; 0 = no limit
+user_agent_suffix = ""                 # appended to the browser UA for attribution
+```
+
+| Key | Purpose |
+|---|---|
+| `enabled` | Whether this process runs flow checks at all. An agent self-reports the answer, and the control plane never sends a flow to a node that said no |
+| `lightpanda_path` | Where the engine binary is. The shipped images put it at `/usr/local/bin/lightpanda` |
+| `max_concurrency` | How many browser processes may run at once here. Each run spawns a fresh process and tears it down after, so this is the real memory lever |
+| `mem_limit_mb` | Per-run resident memory ceiling. A run that crosses it is killed and recorded as `Error`, not `Down`: the page did not fail, this node refused to keep paying for it. `0` disables the watchdog |
+| `block_private_networks` | Blocks the browser's own outbound requests to private and internal addresses, after DNS resolves. The save-time URL check cannot cover this, because redirects, `fetch` calls and DNS rebinding all resolve later |
+| `block_cidrs` | Extra ranges to block, comma-separated. The default list covers cloud metadata, loopback, CGNAT, and IPv6 unique-local and link-local. A `-` prefix exempts a range |
+| `v8_max_heap_mb` | JS heap cap inside the engine. Set it below `mem_limit_mb` so a runaway script trips the cheap limit before the process-level one |
+| `max_response_mb` | Refuses any single response larger than this, so one large asset cannot blow the memory ceiling on its own |
+| `user_agent_suffix` | Appended to the browser's User-Agent, so a site owner reading their logs can tell what the traffic is |
+
+Two switches have to line up before anyone can create one, and they are independent on purpose:
+
+- **`flow.enabled`** decides which nodes *can run* a flow. Set it on the control plane, on selected agents, or on nothing.
+- **`plans.max_flow_checks`** decides which orgs *may create* one. It is 0 on every seeded plan, so the API answers `403 FLOW_CHECKS_DISABLED` until an operator raises it. It is both the cap and the kill switch.
+
+Enabling the engine on a node does not let anyone create a flow, and raising the plan cap does not make one run. You need both.
+
+In the shipped compose stack the env var is `AGENT_FLOW_ENABLED`, which maps to `UPTIMEPAGE_FLOW__ENABLED`. Set it per agent, not globally: an agent on a small host will spend its memory on browsers and start missing its other checks. A flow monitor's regions are clamped to the flow-capable set when it is saved, so an agent with the engine off simply never receives one. Quorum needs two regions to decide anything, so with a single flow-capable region the monitor reports what that one region saw. See [Multi-region probes](multi-region.md).
 
 ## Tuning notes
 

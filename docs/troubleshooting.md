@@ -84,3 +84,34 @@ Almost always a Row-derive mismatch on UUID, Enum8, or DateTime64 column types:
 ## Loadtest reports `connect` errors at high concurrency
 
 Loopback ephemeral port exhaustion or kernel SYN backlog overflow. See [loadtest.md](loadtest.md) — set `MOCK_PORTS=64` or `RAMP_SECS=30`.
+
+## `403 FLOW_CHECKS_DISABLED` when creating a flow monitor
+
+The org's plan allows zero flow checks. `plans.max_flow_checks` is 0 on every seeded plan, so it is both the per-plan cap and the feature's kill switch. Raise it on the plan the org sits on. Turning the engine on with `flow.enabled` does not lift this, and lifting this does not make a flow run anywhere — see [Browser flow monitors](configuration.md#browser-flow-monitors).
+
+## Flow monitor errors with `flow engine not configured on this node`
+
+The check reached a process where `flow.enabled` is false or the engine binary is missing at `flow.lightpanda_path`. This is an `Error`, not a `Down`: nothing was learned about the target.
+
+Normally the routing prevents it, because a flow monitor's regions are clamped to the flow-capable set when it is saved and an agent that reports no engine never receives one in its config pull. Seeing this means a node's config changed after the monitor was saved. Either turn the engine back on there, or re-save the monitor so its regions are clamped again.
+
+## Flow monitor errors instead of failing, with no step named
+
+The run never got far enough to blame a step. Two common causes:
+
+- The whole-run budget ran out. `timeout` caps the entire run, not each step, and a browser reaching a slow origin can spend it before the last assertion. Raise `timeout`, or shorten the flow.
+- The run crossed `flow.mem_limit_mb` and was killed. One page pulling in a heavy bundle is enough. Raise the ceiling for that node, or set `flow.max_response_mb` so a single oversized asset is refused before it costs the whole budget.
+
+Both are recorded `Error` on purpose. The target did not fail; this node declined to keep paying for the answer.
+
+## A flow `fill` step passes but the form behaves as if nothing was typed
+
+The step sets the field's value and fires `input` and `change`. An ordinary form accepts that. A framework that tracks its own value setter can ignore an assignment made this way, so the step reports success against a field the application still considers empty. The submit then does nothing and the `assert_url` step is what actually fails.
+
+The failure evidence is where you confirm it: the URL is still the login path and the page text usually says the credentials were rejected. There is no workaround inside the flow — this is a limit of how the engine types. See [What a flow cannot do](monitor-types.md#what-a-flow-cannot-do).
+
+## A flow `fill` or `click` fails immediately on a slow page
+
+`step_timeout` does not apply to them. `fill` and `click` look for their element once and fail on the spot; only `wait_for`, `assert_text` and `assert_url` poll until the timeout runs out. Raising `step_timeout` will not help a field that renders late.
+
+Put a `wait_for` on that selector ahead of the step that needs it.

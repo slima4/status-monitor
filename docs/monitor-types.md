@@ -102,6 +102,20 @@ Use a dedicated low-privilege account, never a real or admin login. Put the pass
 
 Flows run only where a browser engine is available, so their regions are narrowed to that set rather than every region you have. Quorum needs two such regions to decide anything, so with one the monitor reports what that single region saw.
 
+### What a flow cannot do
+
+The step list is deliberately short, and every step finds its element with `document.querySelector` on the top-level document. That draws a hard line around what a flow can watch:
+
+- **No iframes and no shadow DOM.** `querySelector` does not cross either boundary. A login widget embedded in an iframe, or a component built on a shadow root, is invisible to every step. The import flags recorded steps that came from an iframe rather than letting them fail later.
+- **No key presses.** There is no step for pressing Enter. If your form submits that way, click the submit control instead. A recording that used Enter is flagged on import for exactly this reason.
+- **No file uploads, no drag, no hover, no scrolling.** A recording that includes them drops those steps.
+- **One page at a time.** A link that opens a new tab leads somewhere the flow cannot follow.
+- **No screenshot, and no capture of failed network requests.** The engine has no graphical renderer, and its network events are not in a shape the client can read. See [When a step fails](#when-a-step-fails) for what you get instead.
+
+A `fill` sets the field's value and then fires `input` and `change` events, which is what an ordinary form listens for. A framework that tracks its own value setter can ignore a value assigned this way, in which case the fill reports success and the form behaves as though nothing was typed. The assertion at the end is what catches it, which is the other reason a flow without one is refused.
+
+Everything above is a limit of the browser engine, not of the check. When a journey needs something on this list, watch the part you can reach and put a plain HTTP monitor on the rest.
+
 ### Importing a recording
 
 Writing selectors by hand is the slow part, so the form imports a recording instead. In Chrome, open DevTools, go to the Recorder panel, record yourself logging in, and export the recording as JSON. In the flow form, press **import a recording** and hand it the file. The import runs in your browser and the file is never uploaded, which matters because a recording contains whatever you typed, password included.
