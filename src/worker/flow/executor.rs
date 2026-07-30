@@ -174,11 +174,21 @@ fn js_fill(selector: &str, value: &str) -> String {
     )
 }
 
+/// Elements the browser gives an activation behaviour to. `click()` runs that
+/// behaviour only for the element it is called on, so clicking the `<i>` inside
+/// a submit button fires an event that bubbles but submits nothing. A recorder
+/// captures the deepest element under the cursor, which is usually that icon,
+/// so retarget to the ancestor a real mouse click would have activated. The
+/// ancestor always wins when one matches, so a handler bound to an inner
+/// element nested inside a link or button does not get the click.
+const CLICK_TARGETS: &str = "button, a, input[type=\"submit\"], input[type=\"button\"], input[type=\"reset\"], summary, [role=\"button\"]";
+
 fn js_click(selector: &str) -> String {
     format!(
         "(function(){{const e=document.querySelector({s});if(!e)return 'NOT_FOUND';\
-         e.click();return 'OK';}})()",
+         (e.closest({t})||e).click();return 'OK';}})()",
         s = enc(selector),
+        t = enc(CLICK_TARGETS),
     )
 }
 
@@ -221,6 +231,19 @@ mod tests {
         assert_eq!(
             js_text(None),
             "document.body?document.body.textContent:null"
+        );
+    }
+
+    #[test]
+    fn click_retargets_to_the_activatable_ancestor() {
+        let js = js_click("#login > button > i");
+        assert!(js.contains("closest("), "click must retarget: {js}");
+        assert!(js.contains("button, a, input[type=\\\"submit\\\"]"));
+        // Falls back to the element itself, so a plain button still clicks
+        // itself and a handler-only div is unaffected.
+        assert!(
+            js.contains("||e).click()"),
+            "must fall back to the element: {js}"
         );
     }
 
