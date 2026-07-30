@@ -478,7 +478,31 @@
             {% call reg::flow_step_row(s.op, s.url, s.selector, s.value, s.contains) %}{% endcall %}
             {% endfor %}
           </div>
-          <button type="button" data-flow-add class="scope-token">+ add step</button>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" data-flow-add class="scope-token">+ add step</button>
+            <button type="button" data-flow-import-toggle class="scope-token"
+                    aria-expanded="false" aria-controls="flow-import-panel">import json</button>
+          </div>
+          <div id="flow-import-panel" hidden class="flow-import">
+            <p class="text-xs text-muted">
+              In Chrome: <span class="hl">DevTools → Recorder → record your login → Export → JSON</span>.
+              The file is read in this page and <span class="hl">never uploaded</span> — a recording
+              contains whatever you typed, password included. A flow check in the
+              <span class="hl">API's own format</span> works here too.
+            </p>
+            <div class="flex flex-wrap items-center gap-2">
+              <label class="scope-token">
+                choose file
+                <input type="file" accept="application/json,.json" data-flow-import-file class="sr-only">
+              </label>
+              <span class="text-xs text-quiet">or paste below</span>
+            </div>
+            <textarea data-flow-import-text rows="4" spellcheck="false"
+                      placeholder='{"title":"Recording","steps":[…]} or {"type":"flow","start_url":"…","steps":[…]}'
+                      class="field w-full font-mono text-xs"></textarea>
+            <button type="button" data-flow-import-apply class="scope-token">import pasted json</button>
+            <ul data-flow-import-notes class="hidden"></ul>
+          </div>
           <span class="block text-xs text-muted">Fill values are stored as typed. For passwords, reference a <a href="/settings/variables" target="_blank" rel="noopener" class="underline">secret variable</a> so the monitor keeps only a <code>&lbrace;&lbrace;key&rbrace;&rbrace;</code> token, <span class="hl">never the literal</span>.</span>
         </div>
 
@@ -806,6 +830,7 @@
 <script defer src="{{ "js/ui/collapsible.js"|asset }}"></script>
 <script defer src="{{ "js/ui/optional_fields.js"|asset }}"></script>
 <script defer src="{{ "js/ui/flow_steps.js"|asset }}"></script>
+<script defer src="{{ "js/ui/flow_import.js"|asset }}"></script>
 <script defer src="{{ "js/ui/check_form.js"|asset }}"></script>
 <script defer src="{{ "js/ui/monitor_escalation.js"|asset }}"></script>
 {% endblock %}

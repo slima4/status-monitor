@@ -42,6 +42,7 @@
         if (op) op.addEventListener("change", () => {
             applyOp(row);
             resetPlayback();
+            refreshMarks();
         });
         // Restrict drag to the handle: arm draggable on grab, disarm after.
         const handle = row.querySelector("[data-flow-drag]");
@@ -80,7 +81,13 @@
     });
 
     // Any edit to the step list invalidates the last test's per-step verdicts.
-    wrap.addEventListener("input", resetPlayback);
+    wrap.addEventListener("input", (evt) => {
+        // Editing a flagged row is the author dealing with the warning.
+        const row = evt.target.closest("[data-flow-row]");
+        if (row) row.classList.remove("flow-step--flagged");
+        resetPlayback();
+        refreshMarks();
+    });
 
     // Drag reorder.
     let dragging = null;
@@ -214,6 +221,84 @@
         return el ? el.value : "";
     };
     const trimmed = (row, sel) => val(row, sel).trim();
+
+    function setField(row, sel, value) {
+        const el = row.querySelector(sel);
+        if (el && value != null) el.value = value;
+    }
+
+    // Fields the API rejects when blank. `fill.value` is absent on purpose: an
+    // empty one is legal, and it is how a dropped password waits to be filled.
+    const REQUIRED_FIELDS = {
+        goto: ["url"],
+        click: ["selector"],
+        fill: ["selector"],
+        wait_for: ["selector"],
+        assert_text: ["contains"],
+        assert_url: ["contains"],
+    };
+    const FIELD_INPUT = {
+        url: "[data-flow-url]",
+        selector: "[data-flow-selector]",
+        contains: "[data-flow-contains]",
+    };
+
+    function blankRequired(row) {
+        const op = row.querySelector("[data-flow-op]").value;
+        return (REQUIRED_FIELDS[op] || [])
+            .map((f) => row.querySelector(FIELD_INPUT[f]))
+            .filter((el) => el && el.value.trim() === "");
+    }
+
+    function markRow(row, bad) {
+        row.classList.toggle("flow-step--incomplete", bad.length > 0);
+        row.querySelectorAll("[aria-invalid]").forEach((el) => el.removeAttribute("aria-invalid"));
+        bad.forEach((el) => el.setAttribute("aria-invalid", "true"));
+    }
+
+    // Only ever clears. Marks are raised at import time, where we know a step
+    // arrived unusable; a row the author is still typing into is not a fault.
+    function refreshMarks() {
+        rows().forEach((row) => {
+            if (row.classList.contains("flow-step--incomplete") && blankRequired(row).length === 0) {
+                markRow(row, []);
+            }
+        });
+    }
+
+    // Items are {op, url, selector, value, contains}; absent fields stay blank.
+    window.smFlowReplaceSteps = function (steps) {
+        if (!Array.isArray(steps) || steps.length === 0) return 0;
+        rows().forEach((row) => row.remove());
+        steps.forEach((s) => {
+            const row = addRow();
+            if (!row) return;
+            const op = row.querySelector("[data-flow-op]");
+            if (op && OP_FIELDS[s.op]) {
+                op.value = s.op;
+                // The combobox only redraws its label on change, and the
+                // event also drives applyOp.
+                op.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+            setField(row, "[data-flow-url]", s.url);
+            setField(row, "[data-flow-selector]", s.selector);
+            setField(row, "[data-flow-value]", s.value);
+            setField(row, "[data-flow-contains]", s.contains);
+        });
+        renumber();
+        resetPlayback();
+        // Flag what the import could not complete here, rather than letting the
+        // API reject it after a round-trip.
+        rows().forEach((row) => markRow(row, blankRequired(row)));
+        return rows().length;
+    };
+
+    // Rows an import warned about. Not invalid — the API would take them — so
+    // they carry no aria-invalid, only the edge that says read this one.
+    window.smFlowFlagRows = function (numbers) {
+        const want = new Set(numbers);
+        rows().forEach((row, i) => row.classList.toggle("flow-step--flagged", want.has(i + 1)));
+    };
 
     // Ordered array of {op, ...fields} in DOM order, consumed by check_form.js.
     window.smCollectFlowSteps = function () {

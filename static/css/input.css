@@ -1453,6 +1453,13 @@
     [data-flow-row] {
         transition: border-color 140ms ease, box-shadow 140ms ease, opacity 140ms ease;
     }
+    /* Import left a required field blank, or warned about the row. Declared
+       before the playback states so a real verdict outranks both. */
+    .flow-step--incomplete,
+    .flow-step--flagged {
+        border-color: var(--theme-state-warn-line);
+        box-shadow: inset 3px 0 0 var(--theme-state-warn-strong);
+    }
     .flow-step--pass {
         border-color: var(--theme-state-ok-line);
         box-shadow: inset 3px 0 0 var(--theme-state-ok-strong);
@@ -1490,6 +1497,35 @@
         margin-top: 0.15rem;
         font-family: var(--font-mono);
         font-size: 0.7rem;
+        color: var(--theme-state-bad-fg-onsoft);
+    }
+
+    /* Recorder import drawer. */
+    .flow-import {
+        display: flex;
+        flex-direction: column;
+        gap: 0.6rem;
+        border: 1px solid var(--theme-line);
+        border-radius: 0.125rem;
+        padding: 0.75rem;
+    }
+    /* A class display beats the UA [hidden] rule; restate it. */
+    .flow-import[hidden] { display: none; }
+    .flow-import__note {
+        font-size: 0.7rem;
+        line-height: 1.45;
+        color: var(--theme-text-muted);
+        padding-left: 0.85rem;
+        text-indent: -0.85rem;
+    }
+    .flow-import__note::before {
+        content: "→ ";
+        opacity: 0.55;
+    }
+    .flow-import__note--warn {
+        color: var(--theme-state-warn-fg-onsoft);
+    }
+    .flow-import__note--bad {
         color: var(--theme-state-bad-fg-onsoft);
     }
     /* Inner checkbox (label chips) or aria-expanded (button toggles) → ink box. */
