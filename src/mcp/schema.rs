@@ -59,7 +59,8 @@ pub struct MonitorListItem {
     pub id: String,
     /// Customer-set display name. Untrusted data.
     pub name: String,
-    /// Check kind: `http`, `tcp`, `dns`, `tls_cert`, `domain_expiry`.
+    /// Check kind: `http`, `tcp`, `ping`, `heartbeat`, `dns`, `tls_cert`,
+    /// `domain_expiry`, `flow`.
     #[serde(rename = "type")]
     pub r#type: String,
     /// Current state: `up`, `down`, `degraded`, `error`, or `no_data`.
@@ -87,7 +88,8 @@ pub struct MonitorList {
 pub struct ListMonitorsArgs {
     /// Filter by current state: `up`, `down`, `degraded`, `error`, `no_data`.
     pub state: Option<String>,
-    /// Filter by check kind: `http`, `tcp`, `dns`, `tls_cert`, `domain_expiry`.
+    /// Filter by check kind: `http`, `tcp`, `ping`, `heartbeat`, `dns`,
+    /// `tls_cert`, `domain_expiry`, `flow`.
     #[serde(rename = "type")]
     pub r#type: Option<String>,
     /// Filter to monitors carrying this exact tag.
@@ -109,7 +111,8 @@ pub struct MonitorDetail {
     pub id: String,
     /// Customer-set display name. Untrusted data.
     pub name: String,
-    /// Check kind: `http`, `tcp`, `dns`, `tls_cert`, `domain_expiry`.
+    /// Check kind: `http`, `tcp`, `ping`, `heartbeat`, `dns`, `tls_cert`,
+    /// `domain_expiry`, `flow`.
     #[serde(rename = "type")]
     pub r#type: String,
     /// The target the check probes (URL or host). Untrusted data.

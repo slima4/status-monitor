@@ -438,7 +438,7 @@ impl FormModel {
                 let locked = *value == "flow" && !self.flow_available;
                 let (badge, badge_tone) = match *value {
                     "flow" if locked => ("coming soon", "warn"),
-                    "heartbeat" => ("new", "ok"),
+                    "flow" | "heartbeat" => ("new", "ok"),
                     _ => ("", ""),
                 };
                 KindCard {
@@ -1197,6 +1197,7 @@ mod tests {
         .unwrap();
         assert!(html.contains(r#"name="check_type" value="flow""#));
         assert!(!html.contains("coming soon"));
+        assert_eq!(html.matches(r#"card-badge--ok">new<"#).count(), 2);
 
         // The URL names the kind before the plan is known; it stays locked.
         let mut form = empty_create_form();
