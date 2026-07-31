@@ -15,9 +15,9 @@ The exact payload for each is in [REST API](api.md#check-specs). This page is ab
 | Is my certificate about to expire | TLS certificate |
 | Is my domain about to expire | Domain expiry |
 | Does this hostname still resolve where it should | DNS |
-| Can a real user still log in | Flow (coming soon) |
+| Can a real user still log in | Flow |
 
-Most orgs run mostly HTTP monitors, one TLS and one domain-expiry per property, and a heartbeat per scheduled job. Flow is built but not yet switched on for anyone, so the login path it would watch still needs an HTTP monitor for now.
+Most orgs run mostly HTTP monitors, one TLS and one domain-expiry per property, a heartbeat per scheduled job, and a flow for the login path that would cost them the most.
 
 ## HTTP
 
@@ -90,13 +90,11 @@ The default resolver caches and honours TTL, so checking faster than the record'
 
 ## Flow
 
-**Coming soon.** The kind is implemented and documented here, but the per-plan cap that gates it is 0 on every plan, so nobody can create one yet. The form shows the type as coming soon, and the API answers `403 FLOW_CHECKS_DISABLED`. On a self-hosted install the operator lifts the gate by raising `max_flow_checks` on the plan an org sits on.
-
 Drives a real headless browser through a scripted sequence, so it verifies that a user can still log in rather than that the login endpoint returns 200.
 
 Steps run in order: navigate, fill a field, click, wait for a selector, assert text, assert URL. At least one assertion is required, so a broken login fails instead of quietly passing. Up to 30 steps, with a whole-run budget and a timeout for the steps that wait on something.
 
-This is the check that catches what nothing else does: an expired OAuth secret, a broken JavaScript bundle, a session cookie that stopped being set. It is also the heaviest, so the minimum interval is five minutes and the number of flow monitors is capped by plan.
+This is the check that catches what nothing else does: an expired OAuth secret, a broken JavaScript bundle, a session cookie that stopped being set. It is also the heaviest, so the minimum interval is five minutes and the number of flow monitors is capped by plan. On the hosted service every plan carries at least one; the counts are on [Plans and limits](hosted/plans-and-limits.md). A self-hosted install starts at zero, which is both the cap and the kill switch: set `flow.enabled` on the process that will run them and raise `max_flow_checks` on the plan the org sits on. See [Configuration](configuration.md#browser-flow-monitors).
 
 Use a dedicated low-privilege account, never a real or admin login. Put the password in an org secret and reference it as `{{key}}` in the fill step, so the stored config holds the reference rather than the credential. Typing `{{` in a fill value lists your variables to pick from. Only the fill value resolves variables, which is why secrets are offered there and nowhere else on a step. See [Variables and secrets](variables.md).
 

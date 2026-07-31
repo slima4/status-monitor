@@ -858,7 +858,7 @@ pub(crate) fn unlimited_plan() -> Plan {
         sms_alerts_enabled: false,
         incident_narration_enabled: true,
         on_call_enabled: true,
-        // Dark until launch enables flow per-plan; self-host flips it in the DB.
+        // Matches the seed: flow stays off until the plan row raises the cap.
         max_flow_checks: 0,
         max_flow_steps: 30,
         is_listed: false,

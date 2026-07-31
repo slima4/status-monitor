@@ -87,7 +87,7 @@ Loopback ephemeral port exhaustion or kernel SYN backlog overflow. See [loadtest
 
 ## `403 FLOW_CHECKS_DISABLED` when creating a flow monitor
 
-The org's plan allows zero flow checks. `plans.max_flow_checks` is 0 on every seeded plan, so it is both the per-plan cap and the feature's kill switch. Raise it on the plan the org sits on. Turning the engine on with `flow.enabled` does not lift this, and lifting this does not make a flow run anywhere — see [Browser flow monitors](configuration.md#browser-flow-monitors).
+The org's plan allows zero flow checks. `plans.max_flow_checks` is both the per-plan cap and the feature's kill switch, and it is seeded at 0. Raise it on the plan the org sits on. Turning the engine on with `flow.enabled` does not lift this, and lifting this does not make a flow run anywhere — see [Browser flow monitors](configuration.md#browser-flow-monitors).
 
 ## Flow monitor errors with `flow engine not configured on this node`
 

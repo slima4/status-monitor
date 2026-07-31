@@ -717,7 +717,7 @@ docker compose up -d"#,
     Landing {
         path: "/browser-login-monitoring",
         created: "2026-07-30",
-        lastmod: "2026-07-30",
+        lastmod: "2026-07-31",
         title: "Browser Login Monitoring for Real Sign-Ins",
         eyebrow: "browser flows",
         h1: "Know your login still works, not just that it answers",
@@ -765,6 +765,10 @@ docker compose up -d"#,
             Section {
                 heading: "A failure that names itself",
                 body: "When a step fails you get the step, the reason, and the page as it stood: the URL the browser had reached, the title, the visible text, and whatever the page logged to the browser console. Most of the time the URL settles it on its own. Still sitting on the login path after a submit means the credentials never took.",
+            },
+            Section {
+                heading: "See the break coming, not just the break",
+                body: "Every run is kept, passing ones included, with each step's outcome and how long it took. The monitor page draws one small chart per step, each on its own scale, so a wait that has crept from 200 ms to four seconds stands out instead of flattening against a step that takes a second anyway. That is the login two weeks before it starts failing. Failed steps sit out of the line and are counted beside it, because a step that fails waits out its whole timeout and would otherwise bury every timing around it.",
             },
             Section {
                 heading: "The heaviest check, priced that way",
@@ -2795,7 +2799,7 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "What can it monitor?",
-                "HTTP, TCP, DNS, TLS-certificate and domain expiry, ICMP ping and cron-job heartbeats, every 60 seconds from as many regions as you run. Scripted browser login flows ship in the same binary, switched off until you raise the cap on your plan row.",
+                "HTTP, TCP, DNS, TLS-certificate and domain expiry, ICMP ping, cron-job heartbeats and scripted browser login flows, every 60 seconds from as many regions as you run.",
             ),
             (
                 "Does it include a status page?",

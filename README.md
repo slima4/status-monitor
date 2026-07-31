@@ -69,7 +69,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 
 | | |
 |---|---|
-| **Checks** | HTTP, TCP, ICMP ping, heartbeat (inbound dead-man's-switch), DNS, TLS-cert expiry, domain expiry, browser login flow — per-host circuit breaking, designed for ~50k concurrent in-flight |
+| **Checks** | HTTP, TCP, ICMP ping, heartbeat (inbound dead-man's-switch), DNS, TLS-cert expiry, domain expiry, browser login flow with per-step timings — per-host circuit breaking, designed for ~50k concurrent in-flight |
 | **Public status page** | HTML + JSON + RSS, per-component opt-in, incident narration, maintenance windows, email + webhook subscribers |
 | **Alerting** | Slack, PagerDuty, Discord, Microsoft Teams, Google Chat, Telegram, WhatsApp, SMS, email, webhook, ntfy, Pushover — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
 | **Incidents** | Internal incident state ⊥ public phase, acknowledge to silence paging, per-monitor reminder cadence |
@@ -100,7 +100,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 | `domain_expiry` | query RDAP, alert before the domain's `expiration` event | 86 400 s (daily) | `max(plan_min, 43 200 s)` |
 | `flow` | drive a headless browser through login / transaction steps, assert the result | 300 s | `max(plan_min, 300 s)` |
 
-`tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds and surface `days_remaining` plus registrar / cert subject in the result payload. Their floors are 1 hour for `tls_cert` and 12 hours for `domain_expiry`, regardless of plan — these probes track values that change on a scale of days, not minutes, and RDAP rate-limits by source address. `flow` runs a real browser, so it only executes where a browser engine is available (its regions clamp to the flow-capable set) and the number of flow monitors is capped per plan; put credentials in an org secret and reference them as `{{name}}`. See [docs/api.md](docs/api.md) for the full payload shapes.
+`tls_cert` and `domain_expiry` use `warn_days` / `critical_days` thresholds and surface `days_remaining` plus registrar / cert subject in the result payload. Their floors are 1 hour for `tls_cert` and 12 hours for `domain_expiry`, regardless of plan — these probes track values that change on a scale of days, not minutes, and RDAP rate-limits by source address. `flow` runs a real browser, so it only executes where a browser engine is available (its regions clamp to the flow-capable set) and the number of flow monitors is capped per plan; put credentials in an org secret and reference them as `{{name}}`. Every flow run is kept with each step's outcome and duration, and the monitor page charts each step on its own scale, so a wait drifting from 200 ms to four seconds shows up long before the journey fails. A self-hosted install starts with that cap at 0; [docs/monitor-types.md](docs/monitor-types.md#flow) covers turning it on. See [docs/api.md](docs/api.md) for the full payload shapes.
 
 ## Public status page
 

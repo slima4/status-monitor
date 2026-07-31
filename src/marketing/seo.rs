@@ -55,7 +55,7 @@ The source is AGPL to self-host with no limits.";
 const LLMS_FACTS: &[(&str, &str)] = &[
     (
         "Check types",
-        "HTTP/HTTPS, TCP, DNS, TLS certificate, domain expiry, ICMP ping",
+        "HTTP/HTTPS, TCP, DNS, TLS certificate, domain expiry, ICMP ping, cron-job heartbeat, scripted browser login flow",
     ),
     ("Check interval", "every 60 seconds"),
     (
@@ -91,7 +91,7 @@ const LLMS_FACTS: &[(&str, &str)] = &[
     ),
     (
         "Plan limits",
-        "Standard: 20 monitors, checks every 3 minutes, 30-day history, 3 global regions, 1 status page with 15 components, 3 team members, every alert channel, API and MCP. Founding adds 50 monitors, 60-second checks, all regions, 90-day history, 5 team members, 2 status pages and BYO SMS, free for the first 1,000 accounts and kept for life. Pro is $9/month: the founding limits plus a custom status-page domain and white-label. Team is $19/month and adds 150 monitors, 30-second checks, 13-month history, 15 team members, 5 status pages, and on-call rotations with escalation policies.",
+        "Standard: 20 monitors including 1 browser login flow, checks every 3 minutes, 30-day history, 3 global regions, 1 status page with 15 components, 3 team members, every alert channel, API and MCP. Founding adds 50 monitors including 3 browser login flows, 60-second checks, all regions, 90-day history, 5 team members, 2 status pages and BYO SMS, free for the first 1,000 accounts and kept for life. Pro is $9/month: the founding limits plus 5 browser login flows, a custom status-page domain and white-label. Team is $19/month and adds 150 monitors including 15 browser login flows, 30-second checks, 13-month history, 15 team members, 5 status pages, and on-call rotations with escalation policies.",
     ),
     (
         "Self-hosting",

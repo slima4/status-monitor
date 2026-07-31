@@ -363,7 +363,7 @@ user_agent_suffix = ""                 # appended to the browser UA for attribut
 Two switches have to line up before anyone can create one, and they are independent on purpose:
 
 - **`flow.enabled`** decides which nodes *can run* a flow. Set it on the control plane, on selected agents, or on nothing.
-- **`plans.max_flow_checks`** decides which orgs *may create* one. It is 0 on every seeded plan, so the API answers `403 FLOW_CHECKS_DISABLED` until an operator raises it. It is both the cap and the kill switch.
+- **`plans.max_flow_checks`** decides which orgs *may create* one, and how many. It is seeded at 0, so the API answers `403 FLOW_CHECKS_DISABLED` until an operator raises it. It is both the cap and the kill switch.
 
 Enabling the engine on a node does not let anyone create a flow, and raising the plan cap does not make one run. You need both.
 

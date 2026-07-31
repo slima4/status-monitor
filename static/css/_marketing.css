@@ -719,8 +719,6 @@ html:has(.marketing-shell) {
     letter-spacing: 0.06em;
     color: var(--mk-ok);
 }
-/* A kind that is built but not yet enabled: no live verdict to report. */
-.mk-tape__verdict--soon { color: var(--mk-quiet); }
 .mk-tape__verdict::before { content: "["; color: var(--mk-faint); margin-right: 0.35em; }
 .mk-tape__verdict::after  { content: "]"; color: var(--mk-faint); margin-left: 0.35em; }
 .mk-tape__body {
