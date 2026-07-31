@@ -1,0 +1,11 @@
+<section class="sticker-card p-5">
+  <div class="flex items-baseline justify-between pb-1">
+    <h2 class="panel-label">step duration (mean)</h2>
+    <span class="cli-brackets font-mono text-xs text-quiet">each step to its own scale</span>
+  </div>
+  <p class="pb-4 text-sm text-muted">A step counts only where the run reached it. Watch for one climbing while the rest hold — that is a journey drifting toward failure while still passing.</p>
+  <div id="flow-steps"
+       data-endpoint="/api/v1/targets/{{ id }}/flow-steps?from={{ from_iso|urlencode }}&to={{ to_iso|urlencode }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}">
+    <p class="flow-spark-empty">Loading step timings…</p>
+  </div>
+</section>

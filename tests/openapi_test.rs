@@ -60,6 +60,7 @@ async fn openapi_doc_lists_every_documented_path() {
         "/api/v1/targets/{id}",
         "/api/v1/targets/{id}/check-now",
         "/api/v1/targets/{id}/results",
+        "/api/v1/targets/{id}/flow-steps",
         "/api/v1/targets/{id}/uptime",
         "/api/v1/targets/{id}/incidents",
         "/api/v1/tags",

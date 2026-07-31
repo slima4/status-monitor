@@ -439,3 +439,174 @@ async fn an_old_failure_is_listed_even_when_newer_runs_fill_the_page() {
     sorted.sort_by(|a, b| b.cmp(a));
     assert_eq!(times, sorted, "the merged list stays chronological");
 }
+
+#[tokio::test]
+#[ignore]
+async fn a_step_never_reached_contributes_no_duration() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let sink = ClickhouseFlowRunSink::new(
+        client.clone(),
+        "eu-helsinki".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
+    sink.write_runs(&[failed_login(org_id, target_id)]).await;
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    let steps = store
+        .flow_step_buckets(OrgId(org_id), target_id, any_time(), 60, None)
+        .await
+        .unwrap();
+
+    let indexes: Vec<u16> = steps.iter().map(|s| s.step).collect();
+    assert_eq!(
+        indexes,
+        vec![0, 1, 2, 3],
+        "the skipped fifth step must not appear at all"
+    );
+    assert_eq!(steps[3].op, "assert_url");
+    assert_eq!(steps[3].buckets[0].avg, 2000, "the failing step's own wait");
+    assert_eq!(steps[3].buckets[0].samples, 1);
+}
+
+// A step slowing down is visible while the journey is still passing.
+#[tokio::test]
+#[ignore]
+async fn a_step_getting_slower_reads_as_a_rising_series() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let sink = ClickhouseFlowRunSink::new(
+        client.clone(),
+        "eu-helsinki".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
+
+    let runs: Vec<FlowRunRecord> = (0..4)
+        .map(|i| {
+            let mut run = failed_login(org_id, target_id);
+            run.timestamp = Utc::now() - Duration::minutes(30 * (4 - i));
+            run.status = CheckStatus::Up;
+            run.error = None;
+            run.evidence = None;
+            run.steps = vec![
+                step("fill", StepOutcome::Passed, 10),
+                step("assert_url", StepOutcome::Passed, 100 * (i as u32 + 1)),
+            ];
+            run
+        })
+        .collect();
+    sink.write_runs(&runs).await;
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    let steps = store
+        .flow_step_buckets(OrgId(org_id), target_id, any_time(), 60, None)
+        .await
+        .unwrap();
+
+    let slow = steps.iter().find(|s| s.step == 1).expect("second step");
+    let series: Vec<u32> = slow.buckets.iter().map(|b| b.avg).collect();
+    assert_eq!(series, vec![100, 200, 300, 400]);
+    let times: Vec<i64> = slow.buckets.iter().map(|b| b.t).collect();
+    let mut sorted = times.clone();
+    sorted.sort_unstable();
+    assert_eq!(times, sorted, "buckets read oldest first, as a chart plots");
+
+    let flat = steps.iter().find(|s| s.step == 0).expect("first step");
+    assert!(
+        flat.buckets.iter().all(|b| b.avg == 10),
+        "the step that did not change must not move"
+    );
+}
+
+// Editing a flow renames a step in place. The series is labelled with what the
+// step runs today, not what it used to be.
+#[tokio::test]
+#[ignore]
+async fn a_renamed_step_is_labelled_with_its_current_op() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let sink = ClickhouseFlowRunSink::new(
+        client.clone(),
+        "eu-helsinki".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
+
+    // Both ops land in one bucket, so only the newest run can settle the label.
+    let runs: Vec<FlowRunRecord> = [("wait_for", 40), ("assert_text", 10)]
+        .into_iter()
+        .map(|(op, mins)| {
+            let mut run = failed_login(org_id, target_id);
+            run.timestamp = Utc::now() - Duration::minutes(mins);
+            run.status = CheckStatus::Up;
+            run.error = None;
+            run.evidence = None;
+            run.steps = vec![step(op, StepOutcome::Passed, 25)];
+            run
+        })
+        .collect();
+    sink.write_runs(&runs).await;
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    let steps = store
+        .flow_step_buckets(OrgId(org_id), target_id, any_time(), 86_400, None)
+        .await
+        .unwrap();
+
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].buckets.len(), 1, "both runs share one bucket");
+    assert_eq!(steps[0].op, "assert_text", "labelled with the retired op");
+}
+
+#[tokio::test]
+#[ignore]
+async fn step_durations_scope_to_one_region() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let ttl = uptimepage::storage::OrgTtlDays::new();
+    let eu = ClickhouseFlowRunSink::new(client.clone(), "eu-helsinki".into(), ttl.clone());
+    let us = ClickhouseFlowRunSink::new(client.clone(), "us-east".into(), ttl);
+
+    let mut slow = failed_login(org_id, target_id);
+    slow.steps = vec![step("fill", StepOutcome::Passed, 900)];
+    let mut fast = failed_login(org_id, target_id);
+    fast.steps = vec![step("fill", StepOutcome::Passed, 10)];
+    eu.write_runs(&[fast]).await;
+    us.write_runs(&[slow]).await;
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    let steps = store
+        .flow_step_buckets(OrgId(org_id), target_id, any_time(), 60, Some("us-east"))
+        .await
+        .unwrap();
+
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].buckets[0].avg, 900, "the other region leaked in");
+}

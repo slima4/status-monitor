@@ -222,6 +222,39 @@ pub struct LatencySeriesByRegion {
     pub bucket_seconds: u32,
 }
 
+/// One time-bucket of a single step's duration. Same grid as
+/// [`LatencyBucket`], so the two detail charts line up.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FlowStepBucket {
+    /// Unix-milliseconds at the bucket's start (JS `new Date(t)`).
+    pub t: i64,
+    /// Mean duration over the bucket, in ms.
+    pub avg: u32,
+    /// Runs that reached the step. A bucket none reached is omitted, so the
+    /// chart draws a gap rather than a dip to zero.
+    pub samples: u64,
+}
+
+/// One declared step's duration over time, counting only the runs that
+/// reached it — averaging a skipped step's zero would mask the slowdown this
+/// series exists to show.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FlowStepTrend {
+    /// Zero-based index into the flow's declared steps.
+    pub step: u16,
+    /// What the newest run in the range recorded here, so an edited flow is
+    /// labelled with what it runs today.
+    pub op: String,
+    pub buckets: Vec<FlowStepBucket>,
+}
+
+/// Returned by `GET /targets/{id}/flow-steps`.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct FlowStepSeries {
+    pub steps: Vec<FlowStepTrend>,
+    pub bucket_seconds: u32,
+}
+
 /// One region's rollup for a single monitor over a range — drives the
 /// per-region breakdown table on the monitor detail page.
 #[derive(Debug, Clone, Serialize, ToSchema)]

@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::api::page::{PageEnvelope, PageOfCheckResult, PageOfIncident};
-use crate::api::types::{LatencySeries, LatencySeriesByRegion};
+use crate::api::types::{FlowStepSeries, LatencySeries, LatencySeriesByRegion};
 use crate::app::AppState;
 use crate::domain::{confirmed_downtime_secs, humanize_check_error, uptime_pct_from_downtime};
 use crate::error::{AppError, Result};
@@ -155,19 +155,26 @@ pub async fn list_results(
     )))
 }
 
-/// Bucket count the latency series aims for across any range. The server
-/// divides the span into ~this many slices (floored to the 60s rollup grain)
-/// so 1h and 30d both return a comparably dense series and switching ranges
-/// visibly re-scales the chart.
+/// Slices a full-width chart aims for, so 1h and 30d both return a comparably
+/// dense series and switching ranges visibly re-scales the chart.
 const LATENCY_TARGET_BUCKETS: i64 = 60;
 
-/// Picks a bucket width (seconds) that splits `range` into roughly
-/// [`LATENCY_TARGET_BUCKETS`] slices, floored to a whole minute (the rollup
-/// grain) with a 60s minimum. 1h→60s, 24h→1440s, 7d→10080s, 30d→43200s.
-pub(crate) fn latency_bucket_seconds(range: TimeRange) -> u32 {
+/// Slices a step sparkline aims for. It renders a few hundred pixels wide, so
+/// the latency grain would spend bytes and DOM on detail narrower than a
+/// stroke — a 30-step flow at 60 slices is a 72 KiB page-load fetch.
+const FLOW_STEP_TARGET_BUCKETS: i64 = 30;
+
+/// Bucket width (seconds) splitting `range` into roughly `target` slices,
+/// floored to a whole minute (the rollup grain) with a 60s minimum.
+/// At 60: 1h→60s, 24h→1440s, 7d→10080s, 30d→43200s.
+fn bucket_seconds(range: TimeRange, target: i64) -> u32 {
     let span = (range.to - range.from).num_seconds().max(60);
-    let secs = (span / LATENCY_TARGET_BUCKETS / 60).max(1) * 60;
+    let secs = (span / target / 60).max(1) * 60;
     u32::try_from(secs).unwrap_or(u32::MAX)
+}
+
+pub(crate) fn latency_bucket_seconds(range: TimeRange) -> u32 {
+    bucket_seconds(range, LATENCY_TARGET_BUCKETS)
 }
 
 #[utoipa::path(
@@ -275,6 +282,62 @@ pub async fn latency_by_region(
     }
     Ok(Json(LatencySeriesByRegion {
         regions,
+        bucket_seconds,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/targets/{id}/flow-steps",
+    tag = "results",
+    summary = "Per-step duration series for a browser-flow monitor",
+    description = "One series per declared step: the mean duration among the \
+                   runs that reached the step. Steps a run never reached are \
+                   excluded, so a journey that stopped early does not average \
+                   zeros into the steps behind it. Bucketed like `/latency` but \
+                   coarser — these render as sparklines, and a 30-step flow at \
+                   the latency grain is a 72 KiB response. Empty for every \
+                   check kind but flow.",
+    params(
+        ("id" = Uuid, Path, description = "Target id"),
+        ("from" = Option<DateTime<Utc>>, Query, description = "Inclusive lower bound (default: now-24h)"),
+        ("to" = Option<DateTime<Utc>>, Query, description = "Exclusive upper bound (default: now)"),
+    ),
+    responses(
+        (status = 200, body = FlowStepSeries, example = json!({
+            "bucket_seconds": 1440,
+            "steps": [{
+                "step": 3,
+                "op": "assert_url",
+                "buckets": [{ "t": 1747137600000_i64, "avg": 1840, "samples": 5 }]
+            }]
+        })),
+        (status = 400, description = "Bad time range", body = ApiError),
+        (status = 404, description = "Target not found", body = ApiError),
+    ),
+)]
+pub async fn flow_steps(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<TargetsRead>,
+    Path(id): Path<Uuid>,
+    Query(q): Query<RangeQuery>,
+) -> Result<Json<FlowStepSeries>> {
+    // Raw-table read, so the raw window and the span cap both apply: the runs
+    // it aggregates are gone on the same day the run panel's are, and one
+    // request fans every run out per declared step before grouping.
+    let range = state.quotas.clamp_raw(org, q.resolve()?).await?;
+    let bucket_seconds = bucket_seconds(range.inner(), FLOW_STEP_TARGET_BUCKETS);
+    let (target, steps) = tokio::try_join!(
+        state.target_store.get(org, id),
+        state
+            .results_store
+            .flow_step_buckets(org, id, range, bucket_seconds, q.region.as_deref()),
+    )?;
+    if target.is_none() {
+        return Err(target_not_found());
+    }
+    Ok(Json(FlowStepSeries {
+        steps,
         bucket_seconds,
     }))
 }
@@ -472,6 +535,24 @@ mod tests {
         assert_eq!(span(Duration::try_hours(24).unwrap()), 1440);
         assert_eq!(span(Duration::try_days(7).unwrap()), 10080);
         assert_eq!(span(Duration::try_days(30).unwrap()), 43200);
+    }
+
+    // Sparklines are a few hundred pixels wide, so the latency grain would spend
+    // payload on detail thinner than the stroke drawing it.
+    #[test]
+    fn step_buckets_are_coarser_than_latency_buckets() {
+        let to = ts(2026, 5, 1);
+        for days in [1, 7, 30] {
+            let range = TimeRange {
+                from: to - Duration::try_days(days).unwrap(),
+                to,
+            };
+            let steps = bucket_seconds(range, FLOW_STEP_TARGET_BUCKETS);
+            assert!(
+                steps >= latency_bucket_seconds(range) * 2,
+                "{days}d: step bucket {steps}s is not coarser"
+            );
+        }
     }
 
     #[test]

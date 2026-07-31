@@ -71,8 +71,9 @@
 
   {# Heartbeat checks carry no latency, so the charts would just draw zero. #}
   {% if kind != "HEARTBEAT" %}
-  {# Flow runs a browser journey with no per-phase network timing, so the
-     breakdown would be one meaningless band; show latency full-width instead. #}
+  {# A browser journey has no per-phase network timing, so the breakdown would be
+     one meaningless band; where its time goes is a per-step question, answered
+     below in its own section. #}
   {# Overlay only when there are two regions to actually compare: gating on the
      catalog would hide the tail quantiles for a monitor only one region reported. #}
   {% let by_region = region_breakdown.len() > 1 && selected_region.is_none() %}
@@ -181,7 +182,9 @@
   {% endif %}
 
   {% if kind == "FLOW" %}
+  {% include "targets/partials/_flow_steps.html" %}
   {% include "targets/partials/_flow_runs.html" %}
+  <script type="module" src="{{ "js/charts/flow_step_trend.js"|asset }}"></script>
   {% endif %}
 
   <section class="sticker-card overflow-hidden" data-collapsible>

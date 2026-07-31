@@ -354,6 +354,20 @@ pub trait ResultsStore: Send + Sync {
     ) -> Result<Vec<FlowRunView>> {
         Ok(Vec::new())
     }
+    /// One series per declared step, bucketed over the range: the mean
+    /// duration among the runs that reached it. Reads the run table directly
+    /// rather than a rollup — the interval floor caps a flow at 288 runs a
+    /// day, small enough to aggregate per request.
+    async fn flow_step_buckets(
+        &self,
+        _org: OrgId,
+        _target_id: Uuid,
+        _range: ClampedRange,
+        _bucket_seconds: u32,
+        _region: Option<&str>,
+    ) -> Result<Vec<crate::api::types::FlowStepTrend>> {
+        Ok(Vec::new())
+    }
     async fn list_results(
         &self,
         org: OrgId,

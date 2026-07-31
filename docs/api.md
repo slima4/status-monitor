@@ -38,6 +38,7 @@ Documentation pages, blog posts and the homepage also answer `Accept: text/markd
 | `GET` | `/api/v1/targets/{id}/results` | recent check results (`from`, `to`, `limit`, `offset`, `region`) — paginated |
 | `GET` | `/api/v1/targets/{id}/latency` | bucketed latency series (`from`, `to`, `region`) — server-side quantiles + per-phase means |
 | `GET` | `/api/v1/targets/{id}/latency/by-region` | per-region latency series (`from`, `to`) — one series per region, for overlay charts |
+| `GET` | `/api/v1/targets/{id}/flow-steps` | per-step duration series for a browser flow (`from`, `to`, `region`) — one series per journey step |
 | `GET` | `/api/v1/targets/{id}/uptime` | uptime summary over a range (`from`, `to`, `region`) |
 | `GET` | `/api/v1/targets/{id}/regions` | list the regions a monitor probes from |
 | `PUT` | `/api/v1/targets/{id}/regions` | set the regions a monitor probes from |
@@ -633,7 +634,7 @@ Pre-bucketed quantiles and per-phase means read straight from the per-minute rol
 
 ### Region filter
 
-`results`, `latency`, and `uptime` accept an optional `region=` query parameter to scope the read to one probe region; omit it for an all-regions view. Region ids are the slugs registered via the operator surface. See [Multi-region probes](multi-region.md).
+`results`, `latency`, `flow-steps`, and `uptime` accept an optional `region=` query parameter to scope the read to one probe region; omit it for an all-regions view. Region ids are the slugs registered via the operator surface. See [Multi-region probes](multi-region.md).
 
 ### Per-region latency series
 
@@ -647,6 +648,29 @@ Same bucketing and cost as `/latency`, but split by region so each can be overla
   "regions": [
     { "region": "default",  "buckets": [ /* LatencyBucket… */ ] },
     { "region": "eu-west",  "buckets": [ /* LatencyBucket… */ ] }
+  ]
+}
+```
+
+### Per-step duration series
+
+`GET /api/v1/targets/{id}/flow-steps?from=…&to=…&region=…`
+
+One series per declared step of a browser flow: the mean duration of that step among the runs that reached it. A step a run never reached contributes nothing, so a journey that stopped early does not average zeros into the steps behind it, and a bucket where nothing reached the step is omitted rather than reported as fast. Empty for every other check kind.
+
+Bucketing works like `/latency` but aims for about half as many slices. These render as sparklines a few hundred pixels wide, and at the latency grain a 30-step flow is a 72 KiB response for detail narrower than the line drawing it. `bucket_seconds` tells you what the server picked.
+
+`op` is what the newest run in the range recorded at that index, so a flow edited mid-window is labelled with what it runs today. `step` is the zero-based index into the declared steps.
+
+```jsonc
+{
+  "bucket_seconds": 1440,
+  "steps": [
+    {
+      "step": 3,
+      "op": "assert_url",
+      "buckets": [ { "t": 1747137600000, "avg": 1840, "samples": 5 } ]
+    }
   ]
 }
 ```

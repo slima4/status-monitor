@@ -1961,6 +1961,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_flow_charts_its_steps_where_other_kinds_chart_their_phases() {
+        let flow = flow_page(Vec::new()).render().unwrap();
+        assert!(flow.contains(r#"id="flow-steps""#));
+        assert!(
+            !flow.contains("breakdown-chart"),
+            "a journey has no network phases to break down"
+        );
+
+        let http = sample_page().render().unwrap();
+        assert!(http.contains("breakdown-chart"));
+        assert!(!http.contains(r#"id="flow-steps""#));
+    }
+
+    #[test]
+    fn the_step_trend_carries_the_pages_range_and_region() {
+        let mut p = flow_page(Vec::new());
+        p.selected_region = Some("eu-helsinki".into());
+        let html = p.render().unwrap();
+        let at = html.find(r#"id="flow-steps""#).expect("panel rendered");
+        let panel = &html[at..at + 400];
+        assert!(panel.contains("/flow-steps?from="));
+        assert!(panel.contains("&region=eu-helsinki"));
+    }
+
     // A monitor that fails once and recovers opens no incident, so the banner
     // must not send the reader to an empty tab.
     #[test]

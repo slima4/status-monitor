@@ -190,6 +190,16 @@ The step names the fault, the URL says the submit never took, and the page says 
 
 There is no screenshot. The browser engine has no graphical renderer, so no picture exists to take, and the text above is what stands in for one. Failed network requests are not captured either: this engine's network events are not in a shape the client can read.
 
+### Watching a journey over time
+
+Every run is kept, not just the failing ones, so the monitor page can answer whether a failure is new. The run list shows each run's steps with their outcome and duration, newest first, and a failed run opens to the page it captured. Runs sit under the range you have selected, and a failure stays in the list however many passes were written after it.
+
+Below it, one small chart per step: how long that step took, over time. A step is counted only for the runs that actually reached it, so a journey that stops early does not drag the steps behind it down to zero. Each step is drawn to its own scale, which is the point — a click that has crept from 11 ms to 44 ms has quadrupled, and on one shared axis beside a step taking a full second it would be a flat line on the floor. Every chart shows the current figure and how far it has moved across the range; anything up by half again is called out.
+
+This is the picture worth watching. A login that still passes but whose redirect wait has climbed from 200 ms to four seconds is a step away from failing, and its chart says so weeks before the first red run does.
+
+Durations are kept longer than the captured pages are — see [Quotas and limits](quotas.md).
+
 ## Intervals
 
 Every kind has a floor, and your plan sets its own on top. The effective minimum is whichever is higher. The floor is what the API accepts; the suggestion is what the form opens at, and what most people should run.

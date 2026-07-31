@@ -11,8 +11,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::api::types::{
-    AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket,
-    PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown,
+    AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, FlowStepBucket,
+    FlowStepTrend, LatencyBucket, PriorPeriodSummary, RegionLatencySeries, RegionRollup,
+    StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
 use crate::domain::agent_wire::{ConsoleLine, FlowEvidence, FlowRunRecord, StepOutcome, StepTrace};
@@ -980,6 +981,85 @@ impl ResultsStore for ClickhouseResultsStore {
             .await
             .context("clickhouse flow_runs for target")?;
         Ok(rows.into_iter().map(FlowRunView::from).collect())
+    }
+
+    async fn flow_step_buckets(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        bucket_seconds: u32,
+        region: Option<&str>,
+    ) -> Result<Vec<FlowStepTrend>> {
+        #[derive(Row, Deserialize)]
+        struct StepRow {
+            step: u16,
+            op: String,
+            bucket_ts: u32,
+            avg_ms: f64,
+            samples: u64,
+        }
+        // Not the rollup grain the other bucketed reads snap to — this one has
+        // no rollup and no neighbouring chart to line up with. A floor is still
+        // needed: a zero-second interval has no start to round to.
+        let bucket = bucket_seconds.max(60);
+        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
+        // `arrayEnumerate` fans one run out to a row per step, and the index
+        // it yields is the step's own index.
+        let query = format!(
+            "SELECT toUInt16(idx - 1) AS step, \
+                    argMax(op, ts) AS op, \
+                    toUInt32(toStartOfInterval(ts, INTERVAL {bucket} SECOND)) AS bucket_ts, \
+                    avg(ms) AS avg_ms, \
+                    count() AS samples \
+             FROM (\
+                 SELECT timestamp AS ts, \
+                        arrayJoin(arrayEnumerate(step_ms)) AS idx, \
+                        step_op[idx] AS op, \
+                        step_outcome[idx] AS outcome, \
+                        step_ms[idx] AS ms \
+                 FROM {FLOW_TABLE} \
+                 WHERE org_id = ? AND target_id = ? {region_pred} \
+                   AND timestamp >= fromUnixTimestamp(?) AND timestamp < fromUnixTimestamp(?)\
+             ) \
+             WHERE outcome != 'skipped' \
+             GROUP BY step, bucket_ts \
+             ORDER BY step, bucket_ts"
+        );
+        let mut q = self.client.query(&query).bind(org.0).bind(target_id);
+        if let Some(r) = region {
+            q = q.bind(r);
+        }
+        let rows: Vec<StepRow> = q
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
+            .fetch_all()
+            .await
+            .context("clickhouse flow_step_buckets")?;
+
+        // Ordered by step then time, so one pass folds without a map.
+        let mut trends: Vec<FlowStepTrend> = Vec::new();
+        for r in rows {
+            let bucket = FlowStepBucket {
+                t: i64::from(r.bucket_ts) * 1000,
+                avg: r.avg_ms.round().max(0.0) as u32,
+                samples: r.samples,
+            };
+            match trends.last_mut() {
+                // Oldest bucket first, and each carries its own newest op, so
+                // the label lands on what the step runs today.
+                Some(t) if t.step == r.step => {
+                    t.op = r.op;
+                    t.buckets.push(bucket);
+                }
+                _ => trends.push(FlowStepTrend {
+                    step: r.step,
+                    op: r.op,
+                    buckets: vec![bucket],
+                }),
+            }
+        }
+        Ok(trends)
     }
 
     async fn ping(&self) -> Result<()> {
