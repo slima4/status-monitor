@@ -2,17 +2,18 @@ name: deploy
 
 # Continuous deploy to production (Hetzner / uptimepage.dev).
 #
+# Deploys are non-destructive: this workflow never drops a database or a data
+# volume, and it carries no input that would. Migrations are forward-only, so a
+# migration that is wrong once applied is fixed by a new migration. Editing an
+# applied one crash-loops the boot with no path back through here.
+#
 # Two ways in:
 #   • automatic — chains off a successful `release-image` build on main, and
 #     only proceeds if the branch-push `ci` run is ALSO green for the same
-#     commit (enforced in the "ci gate" step). The auto path pins the remote
-#     working tree AND the image to that commit's sha, and never re-migrates
-#     (REMIGRATE is forced false) — so it is safe ONLY for new/additive
-#     migrations. A push that edits an already-applied migration in place
-#     (pre-launch policy) will NOT self-heal — run this workflow manually with
-#     remigrate=true to drop + rebuild the DB for that change.
-#   • manual — `workflow_dispatch`: pick any image tag and optionally the
-#     destructive remigrate. Manual runs skip the ci gate (human asserts it).
+#     commit (enforced in the "ci gate" step). Pins the remote working tree AND
+#     the image to that commit's sha.
+#   • manual — `workflow_dispatch`: pick any image tag. Manual runs skip the ci
+#     gate (human asserts it).
 #
 # Required repo secrets (Settings → Secrets → Actions; none committed):
 #   DEPLOY_SSH_KEY      private key for the deploy@ user (the gitignored
@@ -85,16 +86,6 @@ on:
         description: "Image tag to deploy (e.g. sha-<full40>, v1.2.3, latest)"
         required: true
         type: string
-      remigrate:
-        description: "DESTRUCTIVE: drop + re-create the Postgres database, then let the app re-run all migrations from scratch. Wipes orgs/users/targets. Pre-launch only. ClickHouse is untouched."
-        required: true
-        type: boolean
-        default: false
-      remigrate_clickhouse:
-        description: "DESTRUCTIVE: drop the ClickHouse data volume — wipes all check-result history + rollups; the app re-applies CH migrations on the fresh volume. Postgres untouched."
-        required: true
-        type: boolean
-        default: false
   workflow_run:
     workflows: [release-image]
     types: [completed]
@@ -117,11 +108,9 @@ jobs:
       packages: read # authenticated GHCR pull (higher rate limit than anonymous)
     environment: production # attach required-reviewer / protection rules via the GitHub env
     env:
-      # Auto path: deploy the exact commit that was built, never re-migrate.
-      # Manual path: operator-chosen tag + opt-in destructive remigrate.
+      # Auto path: deploy the exact commit that was built. Manual path:
+      # operator-chosen tag.
       IMAGE_TAG: ${{ inputs.image_tag || format('sha-{0}', github.event.workflow_run.head_sha) }}
-      REMIGRATE: ${{ inputs.remigrate || false }}
-      REMIGRATE_CH: ${{ inputs.remigrate_clickhouse || false }}
       HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
       DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
       DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -255,7 +244,7 @@ jobs:
           # KEK already there), never committed.
           ssh -T -i ~/.ssh/id_deploy -o IdentitiesOnly=yes \
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "NEW_IMAGE='${NEW_IMAGE}' REMIGRATE='${REMIGRATE}' REMIGRATE_CH='${REMIGRATE_CH}' HEAD_SHA='${HEAD_SHA}' \
+              "NEW_IMAGE='${NEW_IMAGE}' HEAD_SHA='${HEAD_SHA}' \
                GHCR_USER='${GHCR_USER}' GHCR_TOKEN='${GHCR_TOKEN}' \
                GRAFANA_CLOUD_PROM_URL='${GRAFANA_CLOUD_PROM_URL}' \
                GRAFANA_CLOUD_PROM_USER='${GRAFANA_CLOUD_PROM_USER}' \
@@ -310,18 +299,6 @@ jobs:
           # .env.bak.*, sparse-checkout overrides) must be owner-only. Fresh
           # Hetzner box defaults umask 0022 → secrets land world-readable.
           umask 077
-
-          # Fail closed: only the two known values are accepted; anything else
-          # (a quoting change, a typo) aborts rather than silently skipping —
-          # or silently performing — the destructive path.
-          case "$REMIGRATE" in
-            true|false) ;;
-            *) echo "::error::REMIGRATE must be true|false, got '$REMIGRATE'"; exit 1 ;;
-          esac
-          case "$REMIGRATE_CH" in
-            true|false) ;;
-            *) echo "::error::REMIGRATE_CH must be true|false, got '$REMIGRATE_CH'"; exit 1 ;;
-          esac
 
           cd /opt/uptimepage
           if [ -n "$HEAD_SHA" ]; then
@@ -1009,33 +986,6 @@ jobs:
           # The job's GITHUB_TOKEN carries packages:read; the login is ephemeral.
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           docker compose pull "$TARGET_SVC"
-
-          # --- optional destructive re-migrate (Postgres only) ---------------
-          # Now the cutover is fast: stop, drop, recreate, restart in seconds.
-          if [ "$REMIGRATE" = "true" ]; then
-            echo "remigrate: stopping app + dropping Postgres database 'monitor'"
-            docker compose stop uptimepage_blue uptimepage_green
-            docker compose exec -T postgres sh -c \
-              'PGPASSWORD="$POSTGRES_PASSWORD" psql -U monitor -d postgres -v ON_ERROR_STOP=1 \
-                 -c "DROP DATABASE IF EXISTS monitor WITH (FORCE);" \
-                 -c "CREATE DATABASE monitor OWNER monitor;"'
-          fi
-
-          # --- optional destructive ClickHouse re-migrate (volume drop) ------
-          # CH has no DROP DATABASE cutover like PG; a clean slate means
-          # removing the data volume so the server re-inits (CLICKHOUSE_DB
-          # auto-creates) and the app re-applies CH migrations on connect.
-          if [ "$REMIGRATE_CH" = "true" ]; then
-            echo "remigrate-ch: dropping the ClickHouse data volume"
-            # Project name off a still-running container (the compose project is
-            # `uptimepage`, not the dir) → the volume is <project>_clickhouse_data.
-            proj=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$(docker compose ps -q postgres)")
-            docker compose stop uptimepage_blue uptimepage_green clickhouse
-            docker compose rm -f clickhouse
-            docker volume rm "${proj}_clickhouse_data"
-            # Config mode (0644) already re-asserted unconditionally above.
-            docker compose up -d clickhouse
-          fi
 
           # --- blue/green cutover -------------------------------------------
           # Boot the idle color on the new image while the active color keeps

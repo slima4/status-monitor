@@ -8,8 +8,9 @@ name: rollback
 # IMPORTANT — rollback is CODE-ONLY:
 #   • Applied database migrations are NOT reverted. Rolling the image back is
 #     safe only when the newer deploy's migrations were additive (old code can
-#     still read the newer schema). A breaking schema change must instead be
-#     undone with deploy's destructive `remigrate` path (downtime), not here.
+#     still read the newer schema). Undoing a breaking schema change takes a
+#     new forward migration and a deploy; nothing here or in deploy.yml drops
+#     data to get back.
 #   • The previous color's container is left stopped (not removed) by deploy,
 #     so the very fastest manual rollback — when the prior container is still
 #     present on the box — is just `docker compose start uptimepage_<color>`
@@ -74,8 +75,5 @@ jobs:
         run: |
           set -euo pipefail
           tag='${{ steps.resolve.outputs.tag }}'
-          gh workflow run deploy.yml \
-            -f image_tag="$tag" \
-            -f remigrate=false \
-            -f remigrate_clickhouse=false
+          gh workflow run deploy.yml -f image_tag="$tag"
           echo "dispatched deploy for $tag — watch it in the Actions tab (zero-downtime blue/green cutover)."

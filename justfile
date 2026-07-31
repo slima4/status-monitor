@@ -152,9 +152,9 @@ check:
     cargo nextest run --workspace --no-run
 
 # Pre-push DB gate: the #[ignore] PG+CH integration tests against a FRESH
-# ci_verify database, so edited-in-place migrations are validated like prod's
-# remigrate (a stale dev DB hides fresh-schema breaks). Needs the dev stack up
-# (`just up`). Classic runner — streams output and skips nextest's build-all
+# ci_verify database, so a new migration is proven against the schema prod will
+# actually apply it to (a stale dev DB hides fresh-schema breaks). Needs the
+# dev stack up (`just up`). Classic runner — streams output and skips nextest's build-all
 # enumeration stall. ClickHouse defaults to the dev monitor db (tests scope by
 # org/target uuids, so the shared volume is fine).
 check-db:
