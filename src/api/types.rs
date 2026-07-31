@@ -222,22 +222,26 @@ pub struct LatencySeriesByRegion {
     pub bucket_seconds: u32,
 }
 
-/// One time-bucket of a single step's duration. Same grid as
-/// [`LatencyBucket`], so the two detail charts line up.
+/// One time-bucket of a single step's duration.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct FlowStepBucket {
     /// Unix-milliseconds at the bucket's start (JS `new Date(t)`).
     pub t: i64,
-    /// Mean duration over the bucket, in ms.
-    pub avg: u32,
-    /// Runs that reached the step. A bucket none reached is omitted, so the
-    /// chart draws a gap rather than a dip to zero.
+    /// Mean duration of the runs that passed the step, in ms. `null` when none
+    /// did, which is a gap in the timing rather than an instant step.
+    #[schema(nullable = true)]
+    pub avg: Option<u32>,
+    /// Runs that passed the step — what `avg` is drawn from.
     pub samples: u64,
+    /// Runs that reached the step and failed it. Kept out of `avg`: a failed
+    /// step sat in its whole step timeout, and a handful of those bury the
+    /// timings of every run around them.
+    pub failed: u64,
 }
 
-/// One declared step's duration over time, counting only the runs that
-/// reached it — averaging a skipped step's zero would mask the slowdown this
-/// series exists to show.
+/// One declared step's duration over time. A bucket appears whenever the step
+/// was reached at all, so a step that only ever fails is distinguishable from
+/// one the journey never got to.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct FlowStepTrend {
     /// Zero-based index into the flow's declared steps.

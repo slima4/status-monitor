@@ -1649,6 +1649,12 @@
     .flow-spark__value { font-size: 0.78rem; color: var(--theme-text); }
     .flow-spark__delta { font-size: 0.68rem; color: var(--theme-text-quiet); }
     .flow-spark__delta--up { color: var(--theme-state-bad-fg-onsoft); }
+    .flow-spark__failed {
+        margin: 0;
+        font-family: var(--font-mono);
+        font-size: 0.62rem;
+        color: var(--theme-state-bad-fg-onsoft);
+    }
     .flow-spark__none,
     .flow-spark-empty {
         margin: 0;

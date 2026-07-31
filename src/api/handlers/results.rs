@@ -292,11 +292,14 @@ pub async fn latency_by_region(
     tag = "results",
     summary = "Per-step duration series for a browser-flow monitor",
     description = "One series per declared step: the mean duration among the \
-                   runs that reached the step. Steps a run never reached are \
-                   excluded, so a journey that stopped early does not average \
-                   zeros into the steps behind it. Bucketed like `/latency` but \
-                   coarser — these render as sparklines, and a 30-step flow at \
-                   the latency grain is a 72 KiB response. Empty for every \
+                   runs that passed it, plus how many failed. Steps a run never \
+                   reached are excluded, so a journey that stopped early does \
+                   not average zeros into the steps behind it. Failures are \
+                   counted but kept out of the mean — a failed step sat in its \
+                   whole step timeout and would bury the runs around it. `avg` \
+                   is null for a bucket nothing passed. Bucketed like `/latency` \
+                   but coarser: these render as sparklines, and a 30-step flow \
+                   at the latency grain is a 72 KiB response. Empty for every \
                    check kind but flow.",
     params(
         ("id" = Uuid, Path, description = "Target id"),
@@ -309,7 +312,7 @@ pub async fn latency_by_region(
             "steps": [{
                 "step": 3,
                 "op": "assert_url",
-                "buckets": [{ "t": 1747137600000_i64, "avg": 1840, "samples": 5 }]
+                "buckets": [{ "t": 1747137600000_i64, "avg": 1840, "samples": 5, "failed": 0 }]
             }]
         })),
         (status = 400, description = "Bad time range", body = ApiError),

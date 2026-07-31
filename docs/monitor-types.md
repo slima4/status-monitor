@@ -194,7 +194,9 @@ There is no screenshot. The browser engine has no graphical renderer, so no pict
 
 Every run is kept, not just the failing ones, so the monitor page can answer whether a failure is new. The run list shows each run's steps with their outcome and duration, newest first, and a failed run opens to the page it captured. Runs sit under the range you have selected, and a failure stays in the list however many passes were written after it.
 
-Below it, one small chart per step: how long that step took, over time. A step is counted only for the runs that actually reached it, so a journey that stops early does not drag the steps behind it down to zero. Each step is drawn to its own scale, which is the point — a click that has crept from 11 ms to 44 ms has quadrupled, and on one shared axis beside a step taking a full second it would be a flat line on the floor. Every chart shows the current figure and how far it has moved across the range; anything up by half again is called out.
+Below it, one small chart per step: how long that step took when it passed, over time. Steps the run never reached are left out, so a journey that stops early does not drag the steps behind it down to zero. Failures are left out of the line too, and counted next to it instead: a step that fails waits out its whole step timeout first, so a handful of failures would bury the timings of every run around them and hide the very drift the chart is for. A step that was reached but never passed says so rather than showing an empty chart.
+
+Each step is drawn to its own scale, which is the point — a click that has crept from 11 ms to 44 ms has quadrupled, and on one shared axis beside a step taking a full second it would be a flat line on the floor. Every chart shows the current figure and how far it has moved across the range; anything up by half again is called out.
 
 This is the picture worth watching. A login that still passes but whose redirect wait has climbed from 200 ms to four seconds is a step away from failing, and its chart says so weeks before the first red run does.
 

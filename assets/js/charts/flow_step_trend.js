@@ -49,8 +49,8 @@ function driftRatio(buckets) {
     return head > 0 ? endMean(buckets, "tail") / head : null;
 }
 
-// Splits into runs of consecutive buckets so a stretch nothing reached breaks
-// the line rather than drawing a straight segment across it.
+// Splits into runs of consecutive buckets so a stretch with no passing run
+// breaks the line rather than drawing a straight segment across it.
 function segments(buckets, bucketMs) {
     const out = [];
     let run = [];
@@ -115,10 +115,22 @@ function sparkline(buckets, bucketMs) {
     return svg;
 }
 
+function note(root, text) {
+    const p = document.createElement("p");
+    p.className = "flow-spark__none";
+    p.textContent = text;
+    root.appendChild(p);
+    return root;
+}
+
 function cell(step, bucketMs, tz) {
-    const buckets = step.buckets ?? [];
+    const reached = step.buckets ?? [];
+    // Only a passing run carries a duration; a failure spent its whole step
+    // timeout and says nothing about how long the step takes when it works.
+    const timed = reached.filter(b => b.avg !== null);
+    const failed = reached.reduce((sum, b) => sum + b.failed, 0);
     const name = `${step.step + 1} ${step.op}`;
-    const ratio = driftRatio(buckets);
+    const ratio = driftRatio(timed);
     const drifting = ratio !== null && ratio >= DRIFT_AT;
 
     const root = document.createElement("li");
@@ -129,22 +141,17 @@ function cell(step, bucketMs, tz) {
     head.textContent = name;
     root.appendChild(head);
 
-    if (!buckets.length) {
-        const none = document.createElement("p");
-        none.className = "flow-spark__none";
-        none.textContent = "never reached";
-        root.appendChild(none);
-        return root;
-    }
+    if (!reached.length) return note(root, "never reached");
+    if (!timed.length) return note(root, `never passed · ${failed} failed`);
 
-    root.appendChild(sparkline(buckets, bucketMs));
+    root.appendChild(sparkline(timed, bucketMs));
 
     const foot = document.createElement("p");
     foot.className = "flow-spark__foot";
 
     const value = document.createElement("span");
     value.className = "flow-spark__value";
-    value.textContent = fmtMs(buckets[buckets.length - 1].avg);
+    value.textContent = fmtMs(timed[timed.length - 1].avg);
     foot.appendChild(value);
 
     const delta = document.createElement("span");
@@ -160,6 +167,15 @@ function cell(step, bucketMs, tz) {
     foot.appendChild(delta);
     root.appendChild(foot);
 
+    // The line deliberately omits failures, so say so rather than let a step
+    // that fails half the time read as untroubled.
+    if (failed) {
+        const flag = document.createElement("p");
+        flag.className = "flow-spark__failed";
+        flag.textContent = `${failed} failed, not counted`;
+        root.appendChild(flag);
+    }
+
     // Reading the value at a point matters more here than a full tooltip layer:
     // the question is "how slow was it then", and the header already has room.
     const readout = (b) => {
@@ -167,18 +183,19 @@ function cell(step, bucketMs, tz) {
         head.textContent = `${name} · ${tz.format(new Date(b.t))}`;
     };
     const reset = () => {
-        value.textContent = fmtMs(buckets[buckets.length - 1].avg);
+        value.textContent = fmtMs(timed[timed.length - 1].avg);
         head.textContent = name;
     };
     root.addEventListener("pointermove", (e) => {
         const box = root.getBoundingClientRect();
         const at = (e.clientX - box.left) / box.width;
-        readout(buckets[Math.min(buckets.length - 1, Math.max(0, Math.round(at * (buckets.length - 1))))]);
+        readout(timed[Math.min(timed.length - 1, Math.max(0, Math.round(at * (timed.length - 1))))]);
     });
     root.addEventListener("pointerleave", reset);
 
-    const label = `${name}: ${fmtMs(Math.min(...buckets.map(b => b.avg)))} to ` +
-        `${fmtMs(Math.max(...buckets.map(b => b.avg)))}, now ${fmtMs(buckets[buckets.length - 1].avg)}`;
+    const label = `${name}: ${fmtMs(Math.min(...timed.map(b => b.avg)))} to ` +
+        `${fmtMs(Math.max(...timed.map(b => b.avg)))}, now ${fmtMs(timed[timed.length - 1].avg)}` +
+        (failed ? `, ${failed} runs failed the step` : "");
     root.setAttribute("role", "img");
     root.setAttribute("aria-label", label);
     return root;

@@ -355,9 +355,11 @@ pub trait ResultsStore: Send + Sync {
         Ok(Vec::new())
     }
     /// One series per declared step, bucketed over the range: the mean
-    /// duration among the runs that reached it. Reads the run table directly
-    /// rather than a rollup — the interval floor caps a flow at 288 runs a
-    /// day, small enough to aggregate per request.
+    /// duration among the runs that *passed* it, plus how many failed. A
+    /// failed step sat in its whole step timeout, so averaging it in lets a
+    /// handful of failures bury the timings of every run around them. Reads
+    /// the run table directly rather than a rollup — the interval floor caps a
+    /// flow at 288 runs a day, small enough to aggregate per request.
     async fn flow_step_buckets(
         &self,
         _org: OrgId,

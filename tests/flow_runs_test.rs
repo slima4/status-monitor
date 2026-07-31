@@ -472,8 +472,73 @@ async fn a_step_never_reached_contributes_no_duration() {
         "the skipped fifth step must not appear at all"
     );
     assert_eq!(steps[3].op, "assert_url");
-    assert_eq!(steps[3].buckets[0].avg, 2000, "the failing step's own wait");
-    assert_eq!(steps[3].buckets[0].samples, 1);
+    assert_eq!(
+        steps[3].buckets[0].avg, None,
+        "the step was reached but never passed, so it has no duration to report"
+    );
+    assert_eq!(steps[3].buckets[0].samples, 0);
+    assert_eq!(steps[3].buckets[0].failed, 1);
+    assert_eq!(
+        steps[0].buckets[0].avg,
+        Some(12),
+        "a passing step still times"
+    );
+}
+
+// A failed step spent its whole step timeout, so averaging it in would bury the
+// runs around it — the reading it distorts is the one the chart exists for.
+#[tokio::test]
+#[ignore]
+async fn a_failure_is_counted_but_kept_out_of_the_mean() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let sink = ClickhouseFlowRunSink::new(
+        client.clone(),
+        "eu-helsinki".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
+
+    // Three passes near 200ms and one 10s timeout, all inside one bucket.
+    let mut runs: Vec<FlowRunRecord> = (0..3)
+        .map(|i| {
+            let mut run = failed_login(org_id, target_id);
+            run.timestamp = Utc::now() - Duration::minutes(10 + i);
+            run.status = CheckStatus::Up;
+            run.error = None;
+            run.evidence = None;
+            run.steps = vec![step("assert_url", StepOutcome::Passed, 200)];
+            run
+        })
+        .collect();
+    let mut timed_out = failed_login(org_id, target_id);
+    timed_out.timestamp = Utc::now() - Duration::minutes(5);
+    timed_out.steps = vec![step("assert_url", StepOutcome::Failed, 10_000)];
+    timed_out.evidence = None;
+    runs.push(timed_out);
+    sink.write_runs(&runs).await;
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    let steps = store
+        .flow_step_buckets(OrgId(org_id), target_id, any_time(), 86_400, None)
+        .await
+        .unwrap();
+
+    assert_eq!(steps.len(), 1);
+    let bucket = &steps[0].buckets[0];
+    assert_eq!(
+        bucket.avg,
+        Some(200),
+        "the 10s timeout dragged the mean; averaging all four gives 2600"
+    );
+    assert_eq!(bucket.samples, 3);
+    assert_eq!(bucket.failed, 1);
 }
 
 // A step slowing down is visible while the journey is still passing.
@@ -518,8 +583,8 @@ async fn a_step_getting_slower_reads_as_a_rising_series() {
         .unwrap();
 
     let slow = steps.iter().find(|s| s.step == 1).expect("second step");
-    let series: Vec<u32> = slow.buckets.iter().map(|b| b.avg).collect();
-    assert_eq!(series, vec![100, 200, 300, 400]);
+    let series: Vec<Option<u32>> = slow.buckets.iter().map(|b| b.avg).collect();
+    assert_eq!(series, vec![Some(100), Some(200), Some(300), Some(400)]);
     let times: Vec<i64> = slow.buckets.iter().map(|b| b.t).collect();
     let mut sorted = times.clone();
     sorted.sort_unstable();
@@ -527,7 +592,7 @@ async fn a_step_getting_slower_reads_as_a_rising_series() {
 
     let flat = steps.iter().find(|s| s.step == 0).expect("first step");
     assert!(
-        flat.buckets.iter().all(|b| b.avg == 10),
+        flat.buckets.iter().all(|b| b.avg == Some(10)),
         "the step that did not change must not move"
     );
 }
@@ -608,5 +673,9 @@ async fn step_durations_scope_to_one_region() {
         .unwrap();
 
     assert_eq!(steps.len(), 1);
-    assert_eq!(steps[0].buckets[0].avg, 900, "the other region leaked in");
+    assert_eq!(
+        steps[0].buckets[0].avg,
+        Some(900),
+        "the other region leaked in"
+    );
 }

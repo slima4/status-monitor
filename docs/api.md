@@ -656,7 +656,9 @@ Same bucketing and cost as `/latency`, but split by region so each can be overla
 
 `GET /api/v1/targets/{id}/flow-steps?from=…&to=…&region=…`
 
-One series per declared step of a browser flow: the mean duration of that step among the runs that reached it. A step a run never reached contributes nothing, so a journey that stopped early does not average zeros into the steps behind it, and a bucket where nothing reached the step is omitted rather than reported as fast. Empty for every other check kind.
+One series per declared step of a browser flow: the mean duration of that step among the runs that **passed** it, plus how many failed. A step a run never reached contributes nothing, so a journey that stopped early does not average zeros into the steps behind it.
+
+Failures are counted but kept out of the mean. A failed step sat in its whole `step_timeout` before giving up, so a handful of them bury the timings of every run around them — on a real 14-day window, six failures out of forty-eight runs moved a step's reading from 876 ms to 2017 ms. `avg` is `null` for a bucket no run passed, which is a gap in the timing rather than an instant step; a bucket still appears whenever the step was reached, so a step that only ever fails is distinguishable from one the journey never got to.
 
 Bucketing works like `/latency` but aims for about half as many slices. These render as sparklines a few hundred pixels wide, and at the latency grain a 30-step flow is a 72 KiB response for detail narrower than the line drawing it. `bucket_seconds` tells you what the server picked.
 
@@ -669,7 +671,10 @@ Bucketing works like `/latency` but aims for about half as many slices. These re
     {
       "step": 3,
       "op": "assert_url",
-      "buckets": [ { "t": 1747137600000, "avg": 1840, "samples": 5 } ]
+      "buckets": [
+        { "t": 1747137600000, "avg": 1840, "samples": 5, "failed": 0 },
+        { "t": 1747181000000, "avg": null, "samples": 0, "failed": 3 }  // reached, never passed
+      ]
     }
   ]
 }

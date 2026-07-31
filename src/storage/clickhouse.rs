@@ -996,8 +996,11 @@ impl ResultsStore for ClickhouseResultsStore {
             step: u16,
             op: String,
             bucket_ts: u32,
+            /// `NaN` when the bucket holds no passing run — `avgIf` over an
+            /// empty match has no mean to report.
             avg_ms: f64,
             samples: u64,
+            failed: u64,
         }
         // Not the rollup grain the other bucketed reads snap to — this one has
         // no rollup and no neighbouring chart to line up with. A floor is still
@@ -1005,13 +1008,16 @@ impl ResultsStore for ClickhouseResultsStore {
         let bucket = bucket_seconds.max(60);
         let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
         // `arrayEnumerate` fans one run out to a row per step, and the index
-        // it yields is the step's own index.
+        // it yields is the step's own index. A bucket survives on failures
+        // alone so the reader can tell a step that only ever fails from one
+        // the journey never reached.
         let query = format!(
             "SELECT toUInt16(idx - 1) AS step, \
                     argMax(op, ts) AS op, \
                     toUInt32(toStartOfInterval(ts, INTERVAL {bucket} SECOND)) AS bucket_ts, \
-                    avg(ms) AS avg_ms, \
-                    count() AS samples \
+                    avgIf(ms, outcome = 'passed') AS avg_ms, \
+                    countIf(outcome = 'passed') AS samples, \
+                    countIf(outcome = 'failed') AS failed \
              FROM (\
                  SELECT timestamp AS ts, \
                         arrayJoin(arrayEnumerate(step_ms)) AS idx, \
@@ -1042,8 +1048,9 @@ impl ResultsStore for ClickhouseResultsStore {
         for r in rows {
             let bucket = FlowStepBucket {
                 t: i64::from(r.bucket_ts) * 1000,
-                avg: r.avg_ms.round().max(0.0) as u32,
+                avg: (!r.avg_ms.is_nan()).then(|| r.avg_ms.round().max(0.0) as u32),
                 samples: r.samples,
+                failed: r.failed,
             };
             match trends.last_mut() {
                 // Oldest bucket first, and each carries its own newest op, so
