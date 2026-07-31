@@ -153,6 +153,14 @@ impl StepOutcome {
         }
     }
 
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+
     /// An unknown value reads as not-reached: claim less about a step, not more.
     pub fn from_enum8(v: i8) -> Self {
         match v {

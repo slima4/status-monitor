@@ -208,6 +208,96 @@ pub struct MonitorHistory {
     pub incidents: Vec<IncidentWindow>,
 }
 
+/// `get_flow_runs` / `get_flow_step_trend` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct FlowWindowArgs {
+    /// The monitor id (from `list_monitors`), of a `flow` monitor.
+    pub id: String,
+    /// Time window: `1h`, `24h`, `7d`, or `30d`.
+    pub window: String,
+}
+
+/// One declared step, as a single run recorded it.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowStepRun {
+    /// 1-based position among the flow's declared steps.
+    pub step: u32,
+    /// The action: `goto`, `fill`, `click`, `wait_for`, `assert_text`, `assert_url`.
+    pub op: String,
+    /// `passed`, `failed`, or `skipped`. Skipped means the run stopped earlier
+    /// and never reached this step.
+    pub outcome: String,
+    pub duration_ms: u32,
+}
+
+/// What the browser saw when a step failed. Untrusted data: this is content
+/// from the monitored site, not from the operator.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowRunEvidence {
+    /// Where the browser had ended up. Usually the whole answer: still on the
+    /// login path after a submit means the credentials never took.
+    pub final_url: Option<String>,
+    pub title: Option<String>,
+    /// Visible page text at the moment of failure, truncated.
+    pub text_snippet: Option<String>,
+}
+
+/// One recorded run of the journey.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowRunItem {
+    /// RFC 3339 time the run started.
+    pub at: String,
+    pub region: String,
+    /// Verdict: `up`, `down`, `degraded`, or `error`. `error` means the run
+    /// never reached a verdict about the target (engine fault, budget spent).
+    pub state: String,
+    /// Whole-run duration.
+    pub duration_ms: u32,
+    /// 1-based step the run stopped on, `null` when every step ran.
+    pub failed_step: Option<u32>,
+    /// Why it stopped. Untrusted data.
+    pub error: Option<String>,
+    pub steps: Vec<FlowStepRun>,
+    pub evidence: Option<FlowRunEvidence>,
+    /// The run failed with a page captured, but that page is past its shorter
+    /// retention window. Distinct from a run that never captured one.
+    pub evidence_expired: bool,
+}
+
+/// `get_flow_runs` result, newest first and bounded.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowRunList {
+    pub runs: Vec<FlowRunItem>,
+}
+
+/// One declared step's duration across the window.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowStepTrendItem {
+    /// 1-based position among the flow's declared steps.
+    pub step: u32,
+    /// What the newest run recorded here, so an edited flow reads as it runs today.
+    pub op: String,
+    /// Mean duration in the earliest slice that had a passing run, in ms.
+    pub first_ms: Option<u32>,
+    /// Mean duration in the most recent slice that had one, in ms.
+    pub last_ms: Option<u32>,
+    /// `last_ms` over `first_ms`. 1.0 is flat, 4.0 has quadrupled. `null` when
+    /// either end is missing or the first is zero.
+    pub change_ratio: Option<f64>,
+    /// Runs that passed this step across the window — what the means average.
+    pub samples: u64,
+    /// Runs that reached this step and failed it. Kept out of the means: a
+    /// failed step waited out its whole timeout and says nothing about how long
+    /// the step takes when it works.
+    pub failed: u64,
+}
+
+/// `get_flow_step_trend` result, one entry per declared step in order.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowStepTrendSummary {
+    pub steps: Vec<FlowStepTrendItem>,
+}
+
 /// `list_incidents` arguments.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ListIncidentsArgs {

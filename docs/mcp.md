@@ -24,6 +24,8 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 | `list_monitors` | `targets:read` | Monitors with optional `state` / `type` / `tag` filters, cursor-paginated; each item carries current state + last-checked time. |
 | `get_monitor` | `targets:read` | One monitor's config, current state, last error, last HTTP status, and 24h / 30d uptime. |
 | `get_monitor_history` | `targets:read` | One monitor's history over a `window` (`1h` / `24h` / `7d` / `30d`): uptime, latency series, failures with error text, incident windows. |
+| `get_flow_runs` | `targets:read` | A browser flow monitor's recent runs over a `window`: every declared step with its outcome and duration, the step a failure stopped on, and the page the browser saw. Answers *why* a login check failed. |
+| `get_flow_step_trend` | `targets:read` | Per step of a browser flow monitor, over a `window`: earliest and latest mean duration, the ratio between them, and how many runs passed or failed it. Answers *which step is getting slower* while the monitor still reports up. |
 | `list_incidents` | `incidents:read` | Currently-open incidents on the org's status pages: incident id, affected monitor, severity, latest update phase. Cursor-paginated. |
 | `get_incident` | `incidents:read` | One incident: affected monitor, severity, open/resolved times, error sample, and the full operator-update timeline. |
 | `get_incident_metrics` | `incidents:read` | Incident metrics over a trailing window (default 30 days): MTTA/MTTR, total, counts by severity and state, auto- vs human-resolved, and the noisiest monitors. |
@@ -231,6 +233,8 @@ Once connected, drive it in natural language — the client picks the tool:
 - "What's broken in my org right now?" → `get_org_health`
 - "Show me every DNS monitor that's degraded." → `list_monitors(type=dns, state=degraded)`
 - "How has the checkout API done over the last 7 days?" → `get_monitor_history(window=7d)`
+- "Why did the login check fail last night?" → `get_flow_runs(window=24h)`
+- "Is any step of the sign-in getting slower?" → `get_flow_step_trend(window=30d)`
 - "What incidents are open, and what's been posted on them?" → `list_incidents` → `get_incident`
 - "Acknowledge the payments incident — we're investigating." → `acknowledge_incident(phase=investigating)` (asks you to confirm)
 - "Am I near any plan limits?" → `get_org_usage`

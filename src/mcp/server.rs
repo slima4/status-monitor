@@ -40,14 +40,15 @@ use super::confirm::require_confirmation;
 use super::cursor;
 use super::error::{McpToolError, codes};
 use super::schema::{
-    CheckRunResult, CheckTiming, Failure, GetIncidentArgs, GetIncidentMetricsArgs, GetMonitorArgs,
-    GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, IncidentActionArgs,
-    IncidentActionResult, IncidentDetail, IncidentList, IncidentMetricsResult, IncidentSummary,
-    IncidentUpdateItem, IncidentUpdatePosted, IncidentWindow, LatencyPoint, ListIncidentsArgs,
-    ListMonitorsArgs, ListStatusPagesArgs, MetricCount, MonitorDetail, MonitorHistory,
-    MonitorIdArg, MonitorList, MonitorListItem, MonitorStateResult, NoisyMonitor, OrgHealth,
-    OrgUsage, PostIncidentUpdateArgs, Quota, StatusPageComponent as McpComponent, StatusPageDetail,
-    StatusPageList, StatusPageSummary, WorstMonitor,
+    CheckRunResult, CheckTiming, Failure, FlowRunEvidence, FlowRunItem, FlowRunList, FlowStepRun,
+    FlowStepTrendItem, FlowStepTrendSummary, FlowWindowArgs, GetIncidentArgs,
+    GetIncidentMetricsArgs, GetMonitorArgs, GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals,
+    IncidentActionArgs, IncidentActionResult, IncidentDetail, IncidentList, IncidentMetricsResult,
+    IncidentSummary, IncidentUpdateItem, IncidentUpdatePosted, IncidentWindow, LatencyPoint,
+    ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs, MetricCount, MonitorDetail,
+    MonitorHistory, MonitorIdArg, MonitorList, MonitorListItem, MonitorStateResult, NoisyMonitor,
+    OrgHealth, OrgUsage, PostIncidentUpdateArgs, Quota, StatusPageComponent as McpComponent,
+    StatusPageDetail, StatusPageList, StatusPageSummary, WorstMonitor,
 };
 use crate::storage::{Actor, LifecycleOutcome};
 
@@ -75,6 +76,9 @@ const HISTORY_INCIDENT_CAP: usize = 50;
 /// Confirmed incidents read to derive uptime over a window; far above any
 /// realistic confirmed-incident count, so it never truncates the downtime sum.
 const UPTIME_INCIDENT_CAP: usize = 2_000;
+/// Each run carries its whole step trace, so a deeper page costs the model more
+/// context than it buys.
+const FLOW_RUN_CAP: usize = 25;
 
 #[derive(Clone)]
 pub struct McpServer {
@@ -459,6 +463,64 @@ impl McpServer {
             latency_series,
             failures,
             incidents: incident_windows,
+        }))
+    }
+
+    #[tool(
+        description = "A browser flow monitor's recent runs over a window (1h/24h/7d/30d): every declared step with its outcome and duration, the step a failure stopped on, and the page the browser saw. Use this to answer why a login check failed. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_flow_runs(
+        &self,
+        Parameters(args): Parameters<FlowWindowArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<FlowRunList>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::TargetsRead)?;
+        let org = auth.org;
+        let id = parse_uuid(&args.id, "monitor id")?;
+        let (span, _) = parse_window(&args.window)?;
+        self.require_flow(org, id).await?;
+
+        let range = self.clamped_raw_window(org, span).await?;
+        let runs = self
+            .state
+            .results_store
+            .flow_runs(org, id, range, None, FLOW_RUN_CAP)
+            .await
+            .map_err(|e| McpToolError::internal(format!("flow runs: {e}")))?;
+
+        Ok(Json(FlowRunList {
+            runs: runs.into_iter().map(flow_run_item).collect(),
+        }))
+    }
+
+    #[tool(
+        description = "How long each step of a browser flow monitor takes over a window (1h/24h/7d/30d), and how far it has moved: per step the earliest and latest mean duration, their ratio, and how many runs passed or failed it. Use this to spot a step drifting toward failure while the monitor still reports up. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    async fn get_flow_step_trend(
+        &self,
+        Parameters(args): Parameters<FlowWindowArgs>,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<FlowStepTrendSummary>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::TargetsRead)?;
+        let org = auth.org;
+        let id = parse_uuid(&args.id, "monitor id")?;
+        let (span, bucket_secs) = parse_window(&args.window)?;
+        self.require_flow(org, id).await?;
+
+        let range = self.clamped_raw_window(org, span).await?;
+        let trends = self
+            .state
+            .results_store
+            .flow_step_buckets(org, id, range, bucket_secs, None)
+            .await
+            .map_err(|e| McpToolError::internal(format!("flow step trend: {e}")))?;
+
+        Ok(Json(FlowStepTrendSummary {
+            steps: trends.into_iter().map(step_trend_item).collect(),
         }))
     }
 
@@ -864,6 +926,39 @@ impl McpServer {
             .map_err(|d| McpToolError::rate_limited(d.retry_after_secs))
     }
 
+    /// Naming the kind beats an empty answer, which a model reads as "no runs yet".
+    async fn require_flow(&self, org: crate::domain::OrgId, id: Uuid) -> Result<(), McpToolError> {
+        let target = self.load_target(org, id).await?;
+        if !matches!(target.check, crate::domain::CheckSpec::Flow(_)) {
+            return Err(McpToolError::invalid_argument(format!(
+                "monitor is a `{}` check; flow runs exist only for `flow` monitors",
+                target.check.kind()
+            )));
+        }
+        Ok(())
+    }
+
+    /// Both flow reads hit the raw run table, so the raw window applies rather
+    /// than the longer one the rollup charts read.
+    async fn clamped_raw_window(
+        &self,
+        org: crate::domain::OrgId,
+        span: Duration,
+    ) -> Result<ClampedRange, McpToolError> {
+        let now = Utc::now();
+        self.state
+            .quotas
+            .clamp_raw(
+                org,
+                TimeRange {
+                    from: now - span,
+                    to: now,
+                },
+            )
+            .await
+            .map_err(|e| McpToolError::internal(format!("resolve window: {e}")))
+    }
+
     /// Load a target in the org, or a tool not-found error.
     async fn load_target(
         &self,
@@ -1257,6 +1352,56 @@ fn ms_to_rfc3339(ms: i64) -> Option<String> {
         .map(|dt: DateTime<Utc>| dt.to_rfc3339())
 }
 
+fn flow_run_item(v: crate::storage::traits::FlowRunView) -> FlowRunItem {
+    let stopped = v.stopped_step;
+    FlowRunItem {
+        at: v.timestamp.to_rfc3339(),
+        region: sanitize_data(&v.region),
+        state: v.status.as_str().to_string(),
+        duration_ms: v.duration_ms,
+        // Stored as an index; the error text counts from one.
+        failed_step: stopped.and_then(|i| u32::try_from(i + 1).ok()),
+        error: v.error.as_deref().map(present_error),
+        steps: v
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| FlowStepRun {
+                step: u32::try_from(i + 1).unwrap_or(u32::MAX),
+                op: s.op.clone(),
+                outcome: s.outcome.as_str().to_string(),
+                duration_ms: s.duration_ms,
+            })
+            .collect(),
+        // Console lines are left out: long, and the URL and text name the fault.
+        evidence: v.evidence.map(|e| FlowRunEvidence {
+            final_url: e.final_url.as_deref().map(sanitize_data),
+            title: e.title.as_deref().map(sanitize_data),
+            text_snippet: e.text_snippet.as_deref().map(sanitize_data),
+        }),
+        evidence_expired: v.evidence_expired,
+    }
+}
+
+fn step_trend_item(t: crate::api::types::FlowStepTrend) -> FlowStepTrendItem {
+    // A bucket carries no mean when nothing passed it, so the ends are the
+    // outermost slices that timed anything.
+    let first = t.buckets.iter().find_map(|b| b.avg);
+    let last = t.buckets.iter().rev().find_map(|b| b.avg);
+    FlowStepTrendItem {
+        step: u32::from(t.step) + 1,
+        op: t.op,
+        first_ms: first,
+        last_ms: last,
+        change_ratio: first
+            .zip(last)
+            .filter(|(f, _)| *f > 0)
+            .map(|(f, l)| (f64::from(l) / f64::from(f) * 100.0).round() / 100.0),
+        samples: t.buckets.iter().map(|b| b.samples).sum(),
+        failed: t.buckets.iter().map(|b| b.failed).sum(),
+    }
+}
+
 fn parse_uuid(s: &str, what: &str) -> Result<Uuid, McpToolError> {
     Uuid::parse_str(s).map_err(|_| McpToolError::invalid_argument(format!("invalid {what}")))
 }
@@ -1389,8 +1534,11 @@ fn parse_kind(s: &str) -> Result<&'static str, McpToolError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::types::{FlowStepBucket, FlowStepTrend};
+    use crate::domain::agent_wire::{ConsoleLine, FlowEvidence, StepOutcome, StepTrace};
     use crate::domain::public::{IncidentSeverity, PublicIncidentUpdate};
     use crate::domain::result::CheckStatus;
+    use crate::storage::traits::FlowRunView;
 
     fn check_result(dns: Option<u16>, ttfb: Option<u16>, size: Option<u32>) -> CheckResult {
         CheckResult {
@@ -1576,5 +1724,110 @@ mod tests {
     fn parse_uuid_rejects_garbage() {
         assert!(parse_uuid("not-a-uuid", "monitor id").is_err());
         assert!(parse_uuid(&Uuid::nil().to_string(), "monitor id").is_ok());
+    }
+
+    fn step(op: &str, outcome: StepOutcome, ms: u32) -> StepTrace {
+        StepTrace {
+            op: op.into(),
+            outcome,
+            duration_ms: ms,
+        }
+    }
+
+    fn flow_run(stopped: Option<usize>, evidence: Option<FlowEvidence>) -> FlowRunView {
+        FlowRunView {
+            timestamp: Utc::now(),
+            region: "eu-helsinki".into(),
+            status: CheckStatus::Down,
+            duration_ms: 3_100,
+            stopped_step: stopped,
+            error: Some("step 2/3 click: selector not found".into()),
+            steps: vec![
+                step("fill", StepOutcome::Passed, 40),
+                step("click", StepOutcome::Failed, 10_000),
+                step("assert_url", StepOutcome::Skipped, 0),
+            ],
+            evidence,
+            evidence_expired: false,
+        }
+    }
+
+    #[test]
+    fn a_run_numbers_its_steps_from_one() {
+        let item = flow_run_item(flow_run(Some(1), None));
+        assert_eq!(item.failed_step, Some(2));
+        assert_eq!(
+            item.steps.iter().map(|s| s.step).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(item.steps[2].outcome, "skipped");
+    }
+
+    #[test]
+    fn a_completed_run_names_no_failed_step() {
+        assert_eq!(flow_run_item(flow_run(None, None)).failed_step, None);
+    }
+
+    #[test]
+    fn evidence_carries_the_page_without_its_console() {
+        let item = flow_run_item(flow_run(
+            Some(1),
+            Some(FlowEvidence {
+                final_url: Some("https://app.example.com/login".into()),
+                title: Some("Sign in".into()),
+                text_snippet: Some("Your password is invalid!".into()),
+                console: vec![ConsoleLine {
+                    level: "error".into(),
+                    text: "boom".into(),
+                }],
+            }),
+        ));
+        let evidence = item.evidence.expect("a failure captured the page");
+        assert_eq!(
+            evidence.text_snippet.as_deref(),
+            Some("Your password is invalid!")
+        );
+        assert!(!serde_json::to_string(&evidence).unwrap().contains("boom"));
+    }
+
+    fn bucket(avg: Option<u32>, samples: u64, failed: u64) -> FlowStepBucket {
+        FlowStepBucket {
+            t: 0,
+            avg,
+            samples,
+            failed,
+        }
+    }
+
+    #[test]
+    fn a_trend_measures_between_the_slices_that_timed_something() {
+        let item = step_trend_item(FlowStepTrend {
+            step: 3,
+            op: "assert_url".into(),
+            buckets: vec![
+                bucket(None, 0, 2),
+                bucket(Some(200), 5, 0),
+                bucket(None, 0, 1),
+                bucket(Some(800), 4, 0),
+            ],
+        });
+        assert_eq!(item.step, 4);
+        assert_eq!((item.first_ms, item.last_ms), (Some(200), Some(800)));
+        assert_eq!(item.change_ratio, Some(4.0));
+        assert_eq!((item.samples, item.failed), (9, 3));
+    }
+
+    #[test]
+    fn a_step_that_never_passed_reports_no_ratio() {
+        let item = step_trend_item(FlowStepTrend {
+            step: 0,
+            op: "fill".into(),
+            buckets: vec![bucket(None, 0, 3)],
+        });
+        assert_eq!(
+            (item.first_ms, item.last_ms, item.change_ratio),
+            (None, None, None)
+        );
+        assert_eq!(item.failed, 3);
     }
 }
