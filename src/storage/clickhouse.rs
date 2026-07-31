@@ -772,6 +772,9 @@ impl From<StoredFlowRunRow> for FlowRunView {
         let text_snippet = some_if_filled(r.text_snippet);
         let has_page =
             final_url.is_some() || title.is_some() || text_snippet.is_some() || !console.is_empty();
+        // The column TTL empties the page on a background merge, not when the
+        // window closes, so the window decides — never what is still there.
+        let past_window = r.evidence_expired != 0;
         Self {
             timestamp: from_unix_secs(r.timestamp),
             region: r.region,
@@ -780,8 +783,9 @@ impl From<StoredFlowRunRow> for FlowRunView {
             stopped_step: r.stopped_step.map(usize::from),
             error: some_if_filled(r.error),
             steps,
-            evidence_expired: r.evidence_expired != 0,
-            evidence: has_page.then_some(FlowEvidence {
+            // Only a run that stopped at a step ever captured one to lose.
+            evidence_expired: past_window && r.stopped_step.is_some(),
+            evidence: (has_page && !past_window).then_some(FlowEvidence {
                 final_url,
                 title,
                 text_snippet,
@@ -2070,5 +2074,50 @@ mod tests {
             msg.contains("unterminated") && msg.contains("block comment"),
             "unexpected error: {msg}"
         );
+    }
+
+    /// A page the background merge has not yet emptied, past its window.
+    fn stored_run(evidence_expired: u8, stopped_step: Option<u16>) -> super::StoredFlowRunRow {
+        super::StoredFlowRunRow {
+            timestamp: 1_700_000_000,
+            region: "eu-helsinki".into(),
+            status: 2,
+            duration_ms: 3_100,
+            stopped_step,
+            error: "step 2/2 assert_url: url does not contain \"/secure\"".into(),
+            step_op: vec!["fill".into(), "assert_url".into()],
+            step_outcome: vec![1, 2],
+            step_ms: vec![40, 10_000],
+            final_url: "https://app.example.com/login".into(),
+            title: "Sign in".into(),
+            text_snippet: "Your password is invalid!".into(),
+            console_level: Vec::new(),
+            console_text: Vec::new(),
+            evidence_expired,
+        }
+    }
+
+    #[test]
+    fn a_page_past_its_window_is_dropped_even_before_the_merge_empties_it() {
+        let view = super::FlowRunView::from(stored_run(1, Some(1)));
+        assert!(view.evidence.is_none());
+        assert!(view.evidence_expired);
+        assert_eq!(view.steps.len(), 2, "the trace outlives the page");
+    }
+
+    #[test]
+    fn a_page_inside_its_window_is_returned() {
+        let view = super::FlowRunView::from(stored_run(0, Some(1)));
+        let evidence = view.evidence.expect("still inside the window");
+        assert_eq!(
+            evidence.text_snippet.as_deref(),
+            Some("Your password is invalid!")
+        );
+        assert!(!view.evidence_expired);
+    }
+
+    #[test]
+    fn a_run_that_never_reached_a_step_lost_no_page() {
+        assert!(!super::FlowRunView::from(stored_run(1, None)).evidence_expired);
     }
 }
