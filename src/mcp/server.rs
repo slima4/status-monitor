@@ -302,14 +302,10 @@ impl McpServer {
             .ok_or_else(|| McpToolError::not_found("monitor not found"))?;
 
         let now = Utc::now();
-        let r24 = ClampedRange::unclamped(TimeRange {
-            from: now - Duration::try_hours(24).unwrap_or_default(),
-            to: now,
-        });
-        let r30 = ClampedRange::unclamped(TimeRange {
-            from: now - Duration::try_days(30).unwrap_or_default(),
-            to: now,
-        });
+        let (r24, r30) = tokio::try_join!(
+            self.clamped_raw_window(org, Duration::try_hours(24).unwrap_or_default()),
+            self.clamped_raw_window(org, Duration::try_days(30).unwrap_or_default()),
+        )?;
         let (latest, mut up24, mut up30, incidents) = tokio::try_join!(
             self.state
                 .results_store
@@ -395,10 +391,7 @@ impl McpServer {
             .ok_or_else(|| McpToolError::not_found("monitor not found"))?;
 
         let now = Utc::now();
-        let range = ClampedRange::unclamped(TimeRange {
-            from: now - span,
-            to: now,
-        });
+        let range = self.clamped_raw_window(org, span).await?;
         let (uptime, buckets, incidents) = tokio::try_join!(
             self.state.results_store.uptime(org, id, range, None),
             self.state
@@ -939,8 +932,9 @@ impl McpServer {
         Ok(())
     }
 
-    /// Both flow reads hit the raw run table, so the raw window applies rather
-    /// than the longer one the rollup charts read.
+    /// A trailing window, held to what the plan retains at per-check detail.
+    /// One clamp per tool, so every field of a response covers the same span
+    /// rather than a rollup read reaching past the raw one beside it.
     async fn clamped_raw_window(
         &self,
         org: crate::domain::OrgId,

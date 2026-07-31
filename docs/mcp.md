@@ -33,6 +33,8 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 | `get_status_page` | `status_page:read` | One status page with its components and each linked monitor's current state. |
 | `get_org_usage` | `targets:read` | Resource usage against plan limits (monitors, status pages, members, components) + key policy values. |
 
+A `window` is a request, not a promise: every history tool clamps it to what your plan retains at per-check detail, and one clamp covers the whole response so its fields never describe different spans. See [Quotas and limits](quotas.md).
+
 A status-page monitor is down → `get_org_health` gives the `incident_id` → `get_incident` shows the timeline → `acknowledge_incident` takes ownership → `post_incident_update` tells your customers. Incidents (and the `incident_id` / ack workflow) exist only for monitors that are status-page components; a monitor not on any status page can be failing with `incident_id: null` — `since` still reports how long it's been down. `run_check_now` and `get_monitor` return `http_status` for HTTP monitors so you can tell "wrong status code" from "no response".
 
 ### Write tools
