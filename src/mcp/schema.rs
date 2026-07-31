@@ -258,13 +258,17 @@ pub struct FlowRunItem {
     /// Why it stopped. Untrusted data.
     pub error: Option<String>,
     pub steps: Vec<FlowStepRun>,
+    /// `null` both when the run captured no page and once the page it captured
+    /// has passed its window; `evidence_expired` tells the two apart.
     pub evidence: Option<FlowRunEvidence>,
     /// The run failed with a page captured, but that page is past its shorter
     /// retention window. Distinct from a run that never captured one.
     pub evidence_expired: bool,
 }
 
-/// `get_flow_runs` result, newest first and bounded.
+/// `get_flow_runs` result: newest first, and bounded to the most recent runs
+/// merged with the most recent failures, so a failure stays reachable in a
+/// window whose newest runs all passed.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct FlowRunList {
     pub runs: Vec<FlowRunItem>,

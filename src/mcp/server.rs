@@ -76,8 +76,9 @@ const HISTORY_INCIDENT_CAP: usize = 50;
 /// Confirmed incidents read to derive uptime over a window; far above any
 /// realistic confirmed-incident count, so it never truncates the downtime sum.
 const UPTIME_INCIDENT_CAP: usize = 2_000;
-/// Each run carries its whole step trace, so a deeper page costs the model more
-/// context than it buys.
+/// Per branch of the run read, which merges newest-N with newest-N failures, so
+/// the answer holds up to twice this. Each run carries its whole step trace, so
+/// a deeper page costs the model more context than it buys.
 const FLOW_RUN_CAP: usize = 25;
 
 #[derive(Clone)]
@@ -1441,13 +1442,28 @@ fn sanitize_prompt(s: &str) -> String {
     s.chars().filter(|c| !c.is_control()).take(200).collect()
 }
 
-/// Neutralise customer-supplied text returned to the model: drop control
-/// characters (except tab/newline, which are legitimate in error text) that
-/// could smuggle hidden instructions, and cap length. The server instructions
-/// already label this as data, not commands — this is belt-and-suspenders.
+/// Renders as nothing, so it hides an instruction from whoever reads the same
+/// text the model was given. `char::is_control` covers only the C0/C1 block.
+fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}'                  // soft hyphen
+        | '\u{061C}'                // arabic letter mark
+        | '\u{200B}'..='\u{200F}'   // zero-width, bidi marks
+        | '\u{202A}'..='\u{202E}'   // bidi embedding and override
+        | '\u{2060}'..='\u{2064}'   // word joiner, invisible operators
+        | '\u{2066}'..='\u{2069}'   // bidi isolates
+        | '\u{FEFF}'                // zero-width no-break space
+        | '\u{E0000}'..='\u{E007F}' // tag characters
+    )
+}
+
+/// Neutralise customer-supplied text returned to the model: drop characters that
+/// could smuggle hidden instructions (tab and newline stay, they are legitimate
+/// in error text) and cap length. The server instructions already label this as
+/// data, not commands — this is belt-and-suspenders.
 fn sanitize_data(s: &str) -> String {
     s.chars()
-        .filter(|c| !c.is_control() || *c == '\n' || *c == '\t')
+        .filter(|c| (!c.is_control() && !is_invisible(*c)) || *c == '\n' || *c == '\t')
         .take(4000)
         .collect()
 }
@@ -1815,6 +1831,13 @@ mod tests {
         assert_eq!((item.first_ms, item.last_ms), (Some(200), Some(800)));
         assert_eq!(item.change_ratio, Some(4.0));
         assert_eq!((item.samples, item.failed), (9, 3));
+    }
+
+    #[test]
+    fn sanitize_drops_what_a_reader_could_not_see() {
+        let hidden = "ok\u{200b}\u{202e}\u{2069}\u{feff}\u{e0041}";
+        assert_eq!(sanitize_data(hidden), "ok");
+        assert_eq!(sanitize_data("line\nnext\tcol"), "line\nnext\tcol");
     }
 
     #[test]
