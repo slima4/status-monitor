@@ -233,6 +233,9 @@ pub struct AppState {
     pub target_store: Arc<dyn TargetStore>,
     pub results_store: Arc<dyn ResultsStore>,
     pub result_sink: Arc<dyn ResultSink>,
+    /// Where an agent's flow-run telemetry lands. `None` on a control plane
+    /// without ClickHouse (test fixtures), where runs are simply not recorded.
+    pub flow_run_sink: Option<Arc<dyn crate::storage::traits::FlowRunSink>>,
     pub http_clients: Arc<HttpClients>,
     pub worker_pool: Arc<WorkerPool>,
     pub dashboard_cache: DashboardCache,
@@ -542,6 +545,7 @@ impl AppState {
             target_store,
             results_store,
             result_sink,
+            flow_run_sink: None,
             http_clients,
             worker_pool,
             dashboard_cache: build_dashboard_cache(),
@@ -597,6 +601,14 @@ impl AppState {
     /// Set the persisted secret that keys alert-channel one-click stop links.
     pub fn with_alert_channel_stop_secret(mut self, secret: String) -> Self {
         self.alert_channel_stop_secret = secret;
+        self
+    }
+
+    pub fn with_flow_run_sink(
+        mut self,
+        sink: Arc<dyn crate::storage::traits::FlowRunSink>,
+    ) -> Self {
+        self.flow_run_sink = Some(sink);
         self
     }
 

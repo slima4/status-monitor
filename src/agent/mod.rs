@@ -13,6 +13,7 @@ use http_body_util::{BodyExt, Full, Limited};
 use hyper::body::Bytes;
 use hyper::header::{self, AUTHORIZATION, IF_NONE_MATCH};
 use hyper::{Request, StatusCode};
+use metrics::counter;
 use secrecy::ExposeSecret;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
@@ -21,17 +22,20 @@ use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::domain::agent_wire::{
-    AgentTargetsResponse, DispatchBatch, DispatchReport, DispatchedCheck, IngestRequestRef,
+    AgentTargetsResponse, DispatchBatch, DispatchReport, DispatchedCheck, FlowRunRecord,
+    IngestRequestRef,
 };
 use crate::domain::{CheckResult, OrgId, Target};
 use crate::error::{AppError, Result};
 use crate::http_client::HttpClients;
 use crate::http_client::client::build_clients;
 use crate::http_outbound::{self, OutboundHttpClient};
+use crate::observability::metrics::names;
 use crate::pipeline::{BatcherConfig, ResultBatcher};
 use crate::scheduler::{Scheduler, TargetRegistry};
 use crate::security::SsrfGuard;
 use crate::storage::admin::EnabledTargetSource;
+use crate::storage::traits::FlowRunSink;
 use crate::storage::{DomainExpiryStateStore, InMemoryDomainExpiryStateStore, ResultSink};
 use crate::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
 use crate::worker::host_throttle::HostThrottle;
@@ -165,6 +169,54 @@ impl EnabledTargetSource for AgentPullSource {
     }
 }
 
+/// Flow runs waiting for the next result batch to carry them home. Bounded, so
+/// a control plane that stays unreachable costs the oldest runs rather than the
+/// agent's memory.
+const MAX_PENDING_FLOW_RUNS: usize = 512;
+
+/// Holds flow runs between the worker that produced them and the result batch
+/// that ships them. They ride along rather than taking their own request: the
+/// ingest endpoint already authenticates the region, dedups the batch, and
+/// checks the target assignment they need.
+#[derive(Default)]
+pub struct PendingFlowRuns {
+    runs: std::sync::Mutex<std::collections::VecDeque<FlowRunRecord>>,
+}
+
+impl PendingFlowRuns {
+    fn take(&self) -> Vec<FlowRunRecord> {
+        let mut q = self.runs.lock().expect("pending flow runs poisoned");
+        q.drain(..).collect()
+    }
+
+    /// Put a drained batch back at the front when its request never landed, so
+    /// a control-plane blip costs a delay rather than the history.
+    fn restore(&self, runs: Vec<FlowRunRecord>) {
+        let mut q = self.runs.lock().expect("pending flow runs poisoned");
+        for run in runs.into_iter().rev() {
+            if q.len() >= MAX_PENDING_FLOW_RUNS {
+                q.pop_back();
+                counter!(names::STORAGE_DROPPED, "reason" => "flow_run_buffer_full").increment(1);
+            }
+            q.push_front(run);
+        }
+    }
+}
+
+#[async_trait]
+impl FlowRunSink for PendingFlowRuns {
+    async fn write_runs(&self, runs: &[FlowRunRecord]) {
+        let mut q = self.runs.lock().expect("pending flow runs poisoned");
+        for run in runs {
+            if q.len() >= MAX_PENDING_FLOW_RUNS {
+                q.pop_front();
+                counter!(names::STORAGE_DROPPED, "reason" => "flow_run_buffer_full").increment(1);
+            }
+            q.push_back(run.clone());
+        }
+    }
+}
+
 /// [`ResultSink`] that POSTs batches to the control-plane ingest API. Region
 /// and agent id are not sent — the control plane derives them from the bearer
 /// token, so they can't be spoofed. A fresh `batch_id` per call, reused across
@@ -173,6 +225,9 @@ pub struct AgentResultSink {
     client: OutboundHttpClient,
     url: Url,
     token: String,
+    /// Drained into the batch below, so a flow run reaches the control plane on
+    /// the request that carries the verdict it belongs to.
+    flow_runs: Arc<PendingFlowRuns>,
 }
 
 #[async_trait]
@@ -181,6 +236,9 @@ impl ResultSink for AgentResultSink {
         if results.is_empty() {
             return Ok(());
         }
+        // Drained once, outside the retry, so every attempt re-sends the same
+        // body and the batch stays deduplicable by its id.
+        let flow_runs = self.flow_runs.take();
         // One id for this batch, reused across the internal retries below so a
         // lost ack (POST landed, response dropped) re-sends the SAME id and the
         // dashboard dedups it instead of double-writing. Retrying here — not
@@ -198,12 +256,20 @@ impl ResultSink for AgentResultSink {
             .with_max_elapsed_time(Some(Duration::from_secs(30)))
             .build();
         let op = || async {
-            let body = IngestRequestRef { batch_id, results };
+            let body = IngestRequestRef {
+                batch_id,
+                results,
+                flow_runs: &flow_runs,
+            };
             http_outbound::post_json_with_headers(&self.client, &self.url, &body, &headers)
                 .await
                 .map_err(backoff::Error::transient)
         };
-        backoff::future::retry(backoff, op).await
+        let sent = backoff::future::retry(backoff, op).await;
+        if sent.is_err() {
+            self.flow_runs.restore(flow_runs);
+        }
+        sent
     }
 }
 
@@ -345,10 +411,12 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
     ));
     let results_url = Url::parse(&format!("{base}/api/agent/results"))
         .context("agent.control_plane_url is not a valid URL")?;
+    let pending_flow_runs = Arc::new(PendingFlowRuns::default());
     let sink: Arc<dyn ResultSink> = Arc::new(AgentResultSink {
         client: outbound,
         url: results_url,
         token: token.clone(),
+        flow_runs: pending_flow_runs.clone(),
     });
 
     let http_clients = Arc::new(build_clients(
@@ -400,7 +468,8 @@ pub async fn run(cfg: AppConfig) -> Result<()> {
             host_throttle,
             domain_runtime.clone(),
         )
-        .with_flow_engine(flow_engine.clone()),
+        .with_flow_engine(flow_engine.clone())
+        .with_flow_runs(flow_capable.then_some(pending_flow_runs as Arc<dyn FlowRunSink>)),
     );
     let registry = Arc::new(TargetRegistry::new(source));
     let mut sched_cfg = cfg.scheduler.clone();

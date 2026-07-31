@@ -7,6 +7,7 @@ pub mod clickhouse;
 pub mod contacts;
 pub mod domain_expiry_state;
 pub mod escalation_policies;
+pub mod flow_runs;
 pub mod heartbeats;
 pub mod incident_ops;
 pub mod incidents;
@@ -38,7 +39,9 @@ pub use channel_link_codes::{
     ChannelLinkCodeStore, ConsumedLink, DelegateRow, InMemoryChannelLinkCodeStore, LinkCode,
     LinkCodeStatus, LinkPurpose, MintOutcome, PgChannelLinkCodeStore,
 };
-pub use clickhouse::{ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate};
+pub use clickhouse::{
+    ClickhouseFlowRunSink, ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate,
+};
 pub use contacts::{ContactStore, InMemoryContactStore, PgContactStore};
 pub use domain_expiry_state::{
     DomainExpiryState, DomainExpiryStateStore, InMemoryDomainExpiryStateStore,
@@ -47,6 +50,7 @@ pub use domain_expiry_state::{
 pub use escalation_policies::{
     EscalationPolicyStore, InMemoryEscalationPolicyStore, PgEscalationPolicyStore,
 };
+pub use flow_runs::ScrubbedFlowRunSink;
 pub use heartbeats::{HeartbeatMonitor, HeartbeatStore, InMemoryHeartbeatStore, PgHeartbeatStore};
 pub use incident_ops::{
     Actor, DueIncident, EmergencyAck, InMemoryIncidentOpsStore, IncidentOpsFilter,

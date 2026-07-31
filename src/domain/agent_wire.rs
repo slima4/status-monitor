@@ -36,6 +36,11 @@ pub struct AgentTargetsResponse {
 pub struct IngestRequest {
     pub batch_id: Uuid,
     pub results: Vec<CheckResult>,
+    /// Alongside the results, never inside a `CheckResult`: that type is the row
+    /// every check kind writes. Defaulted so a control plane deployed ahead of
+    /// its agents keeps accepting batches.
+    #[serde(default)]
+    pub flow_runs: Vec<FlowRunRecord>,
 }
 
 /// Borrowed mirror of [`IngestRequest`] so the agent serializes a result batch
@@ -44,6 +49,25 @@ pub struct IngestRequest {
 pub struct IngestRequestRef<'a> {
     pub batch_id: Uuid,
     pub results: &'a [CheckResult],
+    pub flow_runs: &'a [FlowRunRecord],
+}
+
+/// What one browser-flow run left behind. The verdict fields are repeated from
+/// the `CheckResult` so a run reads without a join.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlowRunRecord {
+    /// Agent-supplied but never trusted: ingest restamps it from the target's
+    /// region assignment, the same as it does for a `CheckResult`.
+    pub org_id: Uuid,
+    pub target_id: Uuid,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+    pub status: crate::domain::CheckStatus,
+    pub duration_ms: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub steps: Vec<StepTrace>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<FlowEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,8 +109,7 @@ pub struct DispatchBatch {
 
 /// What a failed flow run left on the page, standing in for the screenshot the
 /// renderer-less engine cannot take. Bounded at capture; resolved secrets are
-/// scrubbed on the control plane, at the same chokepoint as the HTTP body
-/// snippet, so this crosses the agent wire unredacted.
+/// scrubbed on the control plane, so this crosses the agent wire unredacted.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
 pub struct FlowEvidence {
     /// Often the whole answer: still on `/login` means the login never took.
@@ -118,6 +141,17 @@ pub enum StepOutcome {
     Passed,
     Failed,
     Skipped,
+}
+
+impl StepOutcome {
+    /// Wire value for the ClickHouse `Enum8` column; the migration pins these.
+    pub fn as_enum8(self) -> i8 {
+        match self {
+            Self::Passed => 1,
+            Self::Failed => 2,
+            Self::Skipped => 3,
+        }
+    }
 }
 
 /// One entry per declared step, positional, so an entry's index is its step

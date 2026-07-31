@@ -171,6 +171,34 @@ pub async fn execute(
     }
 }
 
+/// Runs a scheduled check and, for a flow, the record of how it got there.
+/// Every other kind returns `None`, so nothing on the hot path changes.
+pub(crate) async fn execute_recorded(
+    target_id: Uuid,
+    org_id: Uuid,
+    spec: &CheckSpec,
+    deps: &WorkerDeps<'_>,
+) -> (
+    CheckResult,
+    Option<crate::domain::agent_wire::FlowRunRecord>,
+) {
+    let CheckSpec::Flow(f) = spec else {
+        return (execute(target_id, org_id, spec, deps).await, None);
+    };
+    let (result, probe) = flow::execute_flow_check_probe(target_id, org_id, f, deps.flow).await;
+    let record = crate::domain::agent_wire::FlowRunRecord {
+        org_id,
+        target_id,
+        timestamp: result.timestamp,
+        status: result.status,
+        duration_ms: result.duration_ms,
+        error: result.error.clone(),
+        steps: probe.steps,
+        evidence: probe.evidence,
+    };
+    (result, Some(record))
+}
+
 /// Extra detail a test-check carries back beyond the verdict. One struct
 /// rather than a per-kind enum: kinds with no detail just leave it empty.
 #[derive(Debug, Clone, Default)]

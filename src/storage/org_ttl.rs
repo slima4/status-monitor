@@ -9,21 +9,24 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::error::Result;
-use crate::quotas::service::raw_ttl_days_by_org;
+use crate::quotas::service::{RetentionDays, retention_days_by_org};
 
 /// Stamped on rows whose org isn't in the snapshot yet (just-created org, or a
-/// boot before the first load). Matches the `ttl_days` column DEFAULT, so an
-/// unknown org never over-retains.
-const DEFAULT_TTL_DAYS: u16 = 30;
+/// boot before the first load). Matches the column DEFAULTs, so an unknown org
+/// never over-retains.
+const DEFAULT: RetentionDays = RetentionDays {
+    row: 30,
+    evidence: 7,
+};
 
 const REFRESH_INTERVAL: Duration = Duration::from_secs(300);
 
-/// Resolves an org's physical raw-retention window (`ttl_days`) for the write
-/// path. Bulk-loaded from `plans` so a flush reads a lock, never the DB; the
-/// 64-entry request-path plan cache would thrash under per-flush, all-org reads.
+/// Resolves an org's physical retention windows for the write path. Bulk-loaded
+/// from `plans` so a flush reads a lock, never the DB; the 64-entry
+/// request-path plan cache would thrash under per-flush, all-org reads.
 #[derive(Clone, Default)]
 pub struct OrgTtlDays {
-    snapshot: Arc<RwLock<HashMap<Uuid, u16>>>,
+    snapshot: Arc<RwLock<HashMap<Uuid, RetentionDays>>>,
 }
 
 impl OrgTtlDays {
@@ -31,20 +34,20 @@ impl OrgTtlDays {
         Self::default()
     }
 
-    /// `ttl_days` for each org under a single read lock — one acquisition per
-    /// insert batch, not per row. Unknown orgs get [`DEFAULT_TTL_DAYS`].
-    pub fn days_for_each(&self, org_ids: impl IntoIterator<Item = Uuid>) -> Vec<u16> {
+    /// Windows for each org under a single read lock — one acquisition per
+    /// insert batch, not per row. Unknown orgs get [`DEFAULT`].
+    pub fn days_for_each(&self, org_ids: impl IntoIterator<Item = Uuid>) -> Vec<RetentionDays> {
         let snap = self.snapshot.read().expect("org ttl snapshot poisoned");
         org_ids
             .into_iter()
-            .map(|id| snap.get(&id).copied().unwrap_or(DEFAULT_TTL_DAYS))
+            .map(|id| snap.get(&id).copied().unwrap_or(DEFAULT))
             .collect()
     }
 
     /// Replace the snapshot from the shared retention reader, so physical TTL
-    /// and the read-side window resolve `raw_days` through the same path.
+    /// and the read-side window resolve the plan through the same path.
     pub async fn refresh(&self, pool: &PgPool) -> Result<usize> {
-        let next = raw_ttl_days_by_org(pool).await?;
+        let next = retention_days_by_org(pool).await?;
         let n = next.len();
         *self.snapshot.write().expect("org ttl snapshot poisoned") = next;
         Ok(n)

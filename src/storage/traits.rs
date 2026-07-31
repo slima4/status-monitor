@@ -7,6 +7,7 @@ use crate::api::types::{
     PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount,
     TargetsSummary,
 };
+use crate::domain::agent_wire::FlowRunRecord;
 use crate::domain::{
     CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
 };
@@ -26,6 +27,22 @@ pub trait ResultSink: Send + Sync {
         _agent_id: &str,
     ) -> Result<()> {
         self.write_batch(results).await
+    }
+}
+
+/// Where a flow run's trace and page snapshot go. Infallible by signature: a
+/// run is telemetry about a check, never its verdict, which reaches storage by
+/// its own path. Implementations log and drop rather than hand back a failure a
+/// caller must not act on.
+#[async_trait]
+pub trait FlowRunSink: Send + Sync {
+    async fn write_runs(&self, runs: &[FlowRunRecord]);
+
+    /// Write runs attributed to the producing region, mirroring
+    /// [`ResultSink::write_batch_tagged`]. The default ignores the tag (home
+    /// path, where the sink already knows its own region).
+    async fn write_runs_tagged(&self, runs: &[FlowRunRecord], _region: &str) {
+        self.write_runs(runs).await;
     }
 }
 

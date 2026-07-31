@@ -2,12 +2,48 @@ use axum::Json;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
-use crate::domain::{CheckSpec, FlowStep, NotificationChannel, Target};
+use crate::domain::agent_wire::FlowEvidence;
+use crate::domain::{CheckSpec, FlowStep, NotificationChannel, Target, VarMap};
 
 /// Wire-level placeholder substituted for populated credentials in API responses.
 /// Re-submitting it on `PATCH` is rejected so a `GET → PATCH` round-trip cannot
 /// silently overwrite the real value with the sentinel.
 pub const REDACTED: &str = "***";
+
+/// Secret plaintexts in an org's variable map, for scrubbing whatever a probe
+/// captured. Short values are skipped: scrubbing a one or two character string
+/// would mangle unrelated text for no real protection.
+pub fn secret_values(vars: &VarMap) -> Vec<String> {
+    vars.values()
+        .filter(|v| v.is_secret && v.value.len() >= 4)
+        .map(|v| v.value.clone())
+        .collect()
+}
+
+pub fn redact_secrets(s: &mut String, secrets: &[String]) {
+    for secret in secrets {
+        if s.contains(secret.as_str()) {
+            *s = s.replace(secret.as_str(), REDACTED);
+        }
+    }
+}
+
+/// Strip resolved secrets from what a failed flow left on the page. The single
+/// place both probe paths scrub evidence: a test run before it is shown back,
+/// and a scheduled run before it is stored.
+pub fn scrub_flow_evidence(ev: &mut FlowEvidence, secrets: &[String]) {
+    if secrets.is_empty() {
+        return;
+    }
+    for field in [&mut ev.final_url, &mut ev.title, &mut ev.text_snippet] {
+        if let Some(v) = field.as_mut() {
+            redact_secrets(v, secrets);
+        }
+    }
+    for line in &mut ev.console {
+        redact_secrets(&mut line.text, secrets);
+    }
+}
 
 /// In-place credential redaction. Implemented by API-layer wrappers so callers
 /// can't serialize a `Target` to a client without going through `Redacted<T>`.

@@ -51,10 +51,13 @@ We do **not** use third-party analytics services that export your data (no Googl
 |---|---|---|
 | Email, display name, OAuth identity | Provide authentication | Contract |
 | Targets, check results | Provide monitoring service | Contract |
+| Browser flow runs and failure evidence | Show why a monitored journey broke | Contract |
 | Sessions, API tokens | Authenticate API requests | Contract |
 | Hashed IP, login attempts | Detect security threats | Legitimate interest |
 | Audit log | Compliance and accountability | Legitimate interest |
 | Aggregate analytics (marketing pages) | Understand site usage and improve content | Legitimate interest |
+
+**Browser flow monitors:** when a flow monitor you configured fails, we keep what the page showed at that moment — the URL the browser ended on, the page title, its visible text, and anything the page logged to the browser console. Because the flow signs in, that text can come from a page behind your own login. It is stored to explain the failure and for nothing else, it is never put into an alert or notification, and any value the flow typed from a secret variable is removed before it is stored. It is deleted on a shorter clock than the run itself.
 
 We do not engage in automated decision-making with significant effects on
 you (no profiling, no scoring).
@@ -68,6 +71,8 @@ you (no profiling, no scoring).
 | API tokens | Until you revoke them |
 | Check results (raw per-check detail) | 30 days |
 | Check result history (aggregated, hourly) | 13 months |
+| Browser flow runs (which steps ran, and how long each took) | 30 days |
+| Browser flow failure evidence (page URL, title, visible text, browser console) | 7 days |
 | Login attempts | 180 days |
 | Audit log | 2 years |
 | Quota events | 90 days |

@@ -73,9 +73,15 @@ const DRAIN_BATCH_LIMIT: i64 = 50;
 /// is never marked complete until `count()` proves the data is gone.
 const DRAIN_ROW_TIMEOUT: Duration = Duration::from_secs(60);
 
-/// The ClickHouse tables that carry per-org check data — raw plus both rollups.
+/// The ClickHouse tables that carry per-org monitoring data — raw results, both
+/// rollups, and browser-flow runs.
 /// Erasure must clear all of them before a queue row may settle.
-const CH_TENANT_TABLES: [&str; 3] = ["check_results", "check_results_1m", "check_results_1h"];
+const CH_TENANT_TABLES: [&str; 4] = [
+    "check_results",
+    "check_results_1m",
+    "check_results_1h",
+    "flow_runs",
+];
 
 /// Run one full purge cycle: cascade PG-side deletes for past-grace orgs,
 /// then drain whatever pending CH purges exist (including ones enqueued on

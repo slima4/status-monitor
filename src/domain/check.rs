@@ -357,7 +357,15 @@ pub struct FlowCheck {
 }
 
 impl FlowCheck {
+    /// Ceiling the engine is sized for, above any plan. A plan may allow fewer
+    /// steps but never more: the whole-run budget is what a longer journey
+    /// actually runs out of, and no plan column can buy more of it.
     pub const MAX_STEPS: usize = 30;
+
+    /// Steps this plan allows, never past the engine ceiling.
+    pub fn allowed_steps(plan_max: i32) -> usize {
+        (plan_max.max(1) as usize).min(Self::MAX_STEPS)
+    }
 }
 
 /// One action in a [`FlowCheck`]. `Fill.value` may carry a `{{secret}}` token

@@ -196,6 +196,9 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
     // rollup carries the aggregated history 13 months.
     const CHECK_RESULTS_RAW_DAYS: u32 = 30;
     const CHECK_RESULTS_HISTORY_MONTHS: u32 = 13;
+    // A flow run's trace lives the raw window; the page it captured on failure
+    // is content from behind the customer's own login, so it goes sooner.
+    const FLOW_EVIDENCE_DAYS: u32 = 7;
     let r = RetentionConfig::default();
     let s = SessionConfig::default();
     let grace = TenancyConfig::default().deletion_grace_period_days;
@@ -205,6 +208,12 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
         format!("| Check results (raw per-check detail) | {CHECK_RESULTS_RAW_DAYS} days"),
         format!(
             "| Check result history (aggregated, hourly) | {CHECK_RESULTS_HISTORY_MONTHS} months"
+        ),
+        format!(
+            "| Browser flow runs (which steps ran, and how long each took) | {CHECK_RESULTS_RAW_DAYS} days"
+        ),
+        format!(
+            "| Browser flow failure evidence (page URL, title, visible text, browser console) | {FLOW_EVIDENCE_DAYS} days"
         ),
         format!("| Login attempts | {} days", r.login_attempts_days),
         format!("| Quota events | {} days", r.quota_events_days),
@@ -235,5 +244,27 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
     assert!(
         m2.contains(&format!("INTERVAL {CHECK_RESULTS_HISTORY_MONTHS} MONTH")),
         "check_results_1h ClickHouse TTL must equal CHECK_RESULTS_HISTORY_MONTHS"
+    );
+    // Both flow windows are per-row, stamped from the plan; the DEFAULTs are
+    // what an org with no snapshot yet gets, so they are the disclosed numbers.
+    let m3 = include_str!("../migrations/clickhouse/003_flow_runs.sql");
+    assert!(
+        m3.contains(&format!(
+            "ttl_days        UInt16 DEFAULT {CHECK_RESULTS_RAW_DAYS}"
+        )) && m3.contains("TTL timestamp + toIntervalDay(ttl_days)"),
+        "flow_runs row retention must be the per-row ttl_days DEFAULT = CHECK_RESULTS_RAW_DAYS"
+    );
+    assert!(
+        m3.contains(&format!(
+            "evidence_days   UInt16 DEFAULT {FLOW_EVIDENCE_DAYS}"
+        )) && m3.contains("TTL timestamp + toIntervalDay(evidence_days)"),
+        "flow evidence must expire on its own per-column TTL = FLOW_EVIDENCE_DAYS"
+    );
+    let pg = include_str!("../migrations/postgres/034_flow_plan_limits.up.sql");
+    assert!(
+        pg.contains(&format!(
+            "evidence_days  INTEGER NOT NULL DEFAULT {FLOW_EVIDENCE_DAYS}"
+        )),
+        "the plan column the CH stamp reads must default to the disclosed window"
     );
 }

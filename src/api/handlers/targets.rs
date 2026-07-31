@@ -1064,6 +1064,7 @@ async fn run_ad_hoc(
     match tokio::time::timeout(crate::ad_hoc_dispatch::RESULT_WAIT, rx).await {
         Ok(Ok(mut delivered)) => {
             scrub_secrets(&mut delivered, &secrets);
+            store_check_now_flow_run(state, org, target_id, region, kind, &delivered).await;
             Ok(delivered)
         }
         _ => {
@@ -1074,6 +1075,41 @@ async fn run_ad_hoc(
             ))
         }
     }
+}
+
+/// Record a check-now flow run so the manual button and the schedule write the
+/// same history. Done here rather than beside the result persist: this is where
+/// both the agent and in-process paths converge already scrubbed. A `test` run
+/// belongs to no monitor and is never stored.
+async fn store_check_now_flow_run(
+    state: &AppState,
+    org: OrgId,
+    target_id: Option<Uuid>,
+    region: &str,
+    kind: DispatchKind,
+    delivered: &crate::ad_hoc_dispatch::DeliveredResult,
+) {
+    if kind != DispatchKind::CheckNow || delivered.flow_steps.is_empty() {
+        return;
+    }
+    let (Some(sink), Some(target_id)) = (state.flow_run_sink.as_ref(), target_id) else {
+        return;
+    };
+    let r = &delivered.result;
+    sink.write_runs_tagged(
+        &[crate::domain::agent_wire::FlowRunRecord {
+            org_id: org.0,
+            target_id,
+            timestamp: r.timestamp,
+            status: r.status,
+            duration_ms: r.duration_ms,
+            error: r.error.clone(),
+            steps: delivered.flow_steps.clone(),
+            evidence: delivered.flow_evidence.clone(),
+        }],
+        region,
+    )
+    .await;
 }
 
 /// Region to run a check-now in: the target's assigned region with a live
@@ -1198,7 +1234,7 @@ async fn resolve_spec_variables(
         }
         _ => spec,
     };
-    Ok((resolved, secret_values(&vars)))
+    Ok((resolved, crate::api::redaction::secret_values(&vars)))
 }
 
 /// Reject a monitor whose `{{var}}` references don't all resolve against the
@@ -1240,51 +1276,27 @@ async fn validate_variable_refs(state: &AppState, org: OrgId, check: &CheckSpec)
     Ok(())
 }
 
-/// Secret plaintexts in the org's map, used to scrub an interactive probe's
-/// captured response. Short values are skipped: scrubbing a one or two character
-/// string would mangle unrelated response text for no real protection.
-fn secret_values(vars: &crate::domain::VarMap) -> Vec<String> {
-    vars.values()
-        .filter(|v| v.is_secret && v.value.len() >= 4)
-        .map(|v| v.value.clone())
-        .collect()
-}
-
 /// Replace any resolved secret echoed back in an interactive probe's captured
 /// response (body snippet + header values) with `***`, so a value a secret
 /// variable supplied is never shown back through the test surface.
 fn scrub_secrets(delivered: &mut DeliveredResult, secrets: &[String]) {
-    fn redact(s: &mut String, secrets: &[String]) {
-        for secret in secrets {
-            if s.contains(secret.as_str()) {
-                *s = s.replace(secret.as_str(), "***");
-            }
-        }
-    }
+    use crate::api::redaction::{redact_secrets, scrub_flow_evidence};
     if secrets.is_empty() {
         return;
     }
     if let Some(snippet) = delivered.response_body_snippet.as_mut() {
-        redact(snippet, secrets);
+        redact_secrets(snippet, secrets);
     }
     for h in &mut delivered.response_headers_preview {
-        redact(&mut h.value, secrets);
+        redact_secrets(&mut h.value, secrets);
     }
     // A flow's error string is its main output and can echo a resolved secret
     // (e.g. a page that reflects a submitted value); scrub it like the rest.
     if let Some(err) = delivered.result.error.as_mut() {
-        redact(err, secrets);
+        redact_secrets(err, secrets);
     }
-    // Page content is the likeliest place a submitted value comes back.
     if let Some(ev) = delivered.flow_evidence.as_mut() {
-        for field in [&mut ev.final_url, &mut ev.title, &mut ev.text_snippet] {
-            if let Some(v) = field.as_mut() {
-                redact(v, secrets);
-            }
-        }
-        for line in &mut ev.console {
-            redact(&mut line.text, secrets);
-        }
+        scrub_flow_evidence(ev, secrets);
     }
 }
 
@@ -1304,13 +1316,25 @@ fn reject_passive_probe(check: &CheckSpec) -> Result<()> {
     Ok(())
 }
 
-/// Reject a flow monitor whose plan has not enabled the gated capability. Runs on
-/// every admission path (create, update, bulk).
+/// Apply the plan's flow limits: whether the kind is available at all, and how
+/// long a journey it may declare. Runs on every admission path (create, update,
+/// bulk, test) so a flow the plan would refuse to save is also refused a test.
 fn gate_flow(check: &CheckSpec, plan: &crate::domain::Plan) -> Result<()> {
-    if matches!(check, CheckSpec::Flow(_)) && plan.max_flow_checks <= 0 {
+    let CheckSpec::Flow(flow) = check else {
+        return Ok(());
+    };
+    if plan.max_flow_checks <= 0 {
         return Err(AppError::forbidden_code(
             codes::FLOW_CHECKS_DISABLED,
             "flow monitors are not available on your plan",
+        ));
+    }
+    let allowed = crate::domain::FlowCheck::allowed_steps(plan.max_flow_steps);
+    if flow.steps.len() > allowed {
+        return Err(AppError::bad_request_field(
+            codes::INVALID_FLOW_PARAMS,
+            format!("your plan allows at most {allowed} steps in a flow monitor"),
+            "check.steps",
         ));
     }
     Ok(())
@@ -2185,7 +2209,7 @@ mod tests {
                 is_secret: false,
             },
         );
-        let secrets = secret_values(&vars);
+        let secrets = crate::api::redaction::secret_values(&vars);
         assert_eq!(secrets, vec!["sk-live-secret".to_string()]);
     }
 
@@ -2213,6 +2237,50 @@ mod tests {
             basic_auth: None,
             bearer_token: None,
         })
+    }
+
+    fn plan_with_flow(max_checks: i32, max_steps: i32) -> crate::domain::Plan {
+        let mut p = crate::quotas::service::unlimited_plan();
+        p.max_flow_checks = max_checks;
+        p.max_flow_steps = max_steps;
+        p
+    }
+
+    fn flow_of(steps: usize) -> CheckSpec {
+        CheckSpec::Flow(crate::domain::FlowCheck {
+            start_url: url::Url::parse("https://example.com/login").unwrap(),
+            steps: (0..steps)
+                .map(|_| crate::domain::FlowStep::AssertUrl {
+                    contains: "/x".into(),
+                })
+                .collect(),
+            timeout: std::time::Duration::from_secs(30),
+            step_timeout: std::time::Duration::from_secs(10),
+            verify_tls: true,
+        })
+    }
+
+    #[test]
+    fn a_flow_longer_than_the_plan_allows_is_refused() {
+        let plan = plan_with_flow(5, 3);
+        gate_flow(&flow_of(3), &plan).expect("at the cap is fine");
+        let err = gate_flow(&flow_of(4), &plan).expect_err("over the cap must reject");
+        assert_bad_request_with_field(err, "check.steps");
+    }
+
+    #[test]
+    fn a_plan_cannot_buy_more_steps_than_the_engine_runs() {
+        // The whole-run budget is what a longer journey exhausts, and no plan
+        // column can buy more of it.
+        let plan = plan_with_flow(5, 500);
+        let over = crate::domain::FlowCheck::MAX_STEPS + 1;
+        let err = gate_flow(&flow_of(over), &plan).expect_err("engine ceiling still applies");
+        assert_bad_request_with_field(err, "check.steps");
+    }
+
+    #[test]
+    fn a_non_flow_check_ignores_the_flow_limits() {
+        gate_flow(&head_spec(None), &plan_with_flow(0, 1)).expect("http is not gated by flow caps");
     }
 
     #[test]

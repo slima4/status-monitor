@@ -7,12 +7,17 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+use std::collections::HashMap;
+
+use uuid::Uuid;
+
 use crate::ad_hoc_dispatch::DeliveredResult;
 use crate::api::error::codes;
 use crate::app::AppState;
+use crate::domain::OrgId;
 use crate::domain::agent_wire::{
     AgentTargetDto, AgentTargetsResponse, DispatchBatch, DispatchKind, DispatchReport,
-    IngestRequest, IngestResponse,
+    FlowRunRecord, IngestRequest, IngestResponse,
 };
 use crate::error::{AppError, Result};
 use crate::storage::admin::AdminRepo;
@@ -23,6 +28,9 @@ use crate::web::AgentIdentity;
 const DISPATCH_CLAIM_LIMIT: usize = 32;
 
 const INGEST_MAX_BATCH: usize = 10_000;
+/// Far tighter than the result cap: a monitor runs one every 300s at most, so a
+/// batch of thousands is a bug or an attempt to make us write rows on demand.
+const INGEST_MAX_FLOW_RUNS: usize = 256;
 /// Reject results timestamped further ahead than this. Past timestamps are
 /// allowed — an agent buffering through a control-plane outage legitimately
 /// drains older results — but a future timestamp would land in the wrong CH
@@ -98,6 +106,15 @@ pub async fn ingest_results(
             ),
         ));
     }
+    if req.flow_runs.len() > INGEST_MAX_FLOW_RUNS {
+        return Err(AppError::unprocessable(
+            codes::AGENT_BATCH_TOO_LARGE,
+            format!(
+                "batch of {} flow runs exceeds the {INGEST_MAX_FLOW_RUNS} cap",
+                req.flow_runs.len()
+            ),
+        ));
+    }
 
     // Idempotent retry: a batch_id we already committed is a no-op.
     if state.agent_ingest_dedup.get(&req.batch_id).is_some() {
@@ -149,6 +166,11 @@ pub async fn ingest_results(
         );
     }
 
+    // Before the early return below: a batch whose results were all dropped can
+    // still carry runs for targets this region serves, and the agent has already
+    // let go of them.
+    store_flow_runs(&state, req.flow_runs, &assigned, region).await;
+
     if results.is_empty() {
         // Nothing written → don't mark the batch consumed, so a resend after the
         // assignment settles is reprocessed rather than swallowed as a duplicate.
@@ -163,6 +185,46 @@ pub async fn ingest_results(
     // retriable.
     state.agent_ingest_dedup.insert(req.batch_id, ());
     Ok(accepted(results.len(), dropped, false))
+}
+
+/// Drop runs for targets this region is not assigned, and restamp the survivors'
+/// org from the assignment rather than trusting the body — the same anti-spoof
+/// rule the results go through.
+fn retain_assigned(runs: &mut Vec<FlowRunRecord>, assigned: &HashMap<Uuid, OrgId>) {
+    runs.retain_mut(|r| match assigned.get(&r.target_id) {
+        Some(org) => {
+            r.org_id = org.0;
+            true
+        }
+        None => false,
+    });
+}
+
+/// Persist the flow runs riding along with a result batch. Secrets are stripped
+/// by the sink itself, so every path that stores a run gets the same treatment.
+async fn store_flow_runs(
+    state: &AppState,
+    mut runs: Vec<FlowRunRecord>,
+    assigned: &HashMap<Uuid, OrgId>,
+    region: &str,
+) {
+    let Some(sink) = state.flow_run_sink.as_ref() else {
+        return;
+    };
+    let sent = runs.len();
+    retain_assigned(&mut runs, assigned);
+    if runs.len() < sent {
+        tracing::warn!(
+            region = %region,
+            sent,
+            dropped = sent - runs.len(),
+            "agent ingest dropped flow runs for unassigned targets"
+        );
+    }
+    if runs.is_empty() {
+        return;
+    }
+    sink.write_runs_tagged(&runs, region).await;
 }
 
 fn accepted(n: usize, dropped: usize, duplicate: bool) -> Response {
@@ -230,4 +292,54 @@ pub async fn submit_dispatch_result(
             .await?;
     }
     Ok(StatusCode::ACCEPTED.into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::CheckStatus;
+
+    fn run(target_id: Uuid, org_id: Uuid) -> FlowRunRecord {
+        FlowRunRecord {
+            org_id,
+            target_id,
+            timestamp: chrono::Utc::now(),
+            status: CheckStatus::Down,
+            duration_ms: 10,
+            error: None,
+            steps: Vec::new(),
+            evidence: None,
+        }
+    }
+
+    #[test]
+    fn runs_for_an_unassigned_target_are_dropped() {
+        let mine = Uuid::new_v4();
+        let theirs = Uuid::new_v4();
+        let owner = Uuid::new_v4();
+        let assigned = HashMap::from([(mine, OrgId(owner))]);
+
+        let mut runs = vec![run(theirs, owner), run(mine, owner)];
+        retain_assigned(&mut runs, &assigned);
+
+        assert_eq!(
+            runs.len(),
+            1,
+            "a target this region does not serve is spoof"
+        );
+        assert_eq!(runs[0].target_id, mine);
+    }
+
+    #[test]
+    fn the_org_comes_from_the_assignment_not_the_body() {
+        let target = Uuid::new_v4();
+        let owner = Uuid::new_v4();
+        let claimed = Uuid::new_v4();
+        let assigned = HashMap::from([(target, OrgId(owner))]);
+
+        let mut runs = vec![run(target, claimed)];
+        retain_assigned(&mut runs, &assigned);
+
+        assert_eq!(runs[0].org_id, owner, "a claimed org would cross tenants");
+    }
 }

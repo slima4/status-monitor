@@ -5,6 +5,7 @@ use async_trait::async_trait;
 use backoff::ExponentialBackoffBuilder;
 use chrono::{DateTime, TimeZone, Utc};
 use clickhouse::{Client, Row, query::Query};
+use metrics::counter;
 use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -14,11 +15,14 @@ use crate::api::types::{
     PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
+use crate::domain::agent_wire::{FlowRunRecord, StepOutcome};
 use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
 use crate::error::Result;
+use crate::observability::metrics::names;
+use crate::quotas::service::RetentionDays;
 use crate::storage::org_ttl::OrgTtlDays;
 use crate::storage::traits::{
-    ClampedRange, ResultSink, ResultsStore, TimeRange, UptimeStats, rollup_bucket_secs,
+    ClampedRange, FlowRunSink, ResultSink, ResultsStore, TimeRange, UptimeStats, rollup_bucket_secs,
 };
 
 const TABLE: &str = "check_results";
@@ -108,6 +112,15 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "002_check_results_1h.sql",
         include_str!("../../migrations/clickhouse/002_check_results_1h.sql"),
+    ),
+    // 003 `flow_runs`: one row per browser-flow run, carrying the step trace and
+    // — on a failure — the page snapshot. Two retention windows in one table via
+    // a per-column TTL driven by `evidence_days`, so page content is dropped
+    // ahead of the trace beside it with no second table and no mutation job.
+    // Org erasure must clear it too (see [`CH_TENANT_TABLES`]).
+    (
+        "003_flow_runs.sql",
+        include_str!("../../migrations/clickhouse/003_flow_runs.sql"),
     ),
 ];
 
@@ -410,6 +423,17 @@ struct CountRow {
     n: u64,
 }
 
+/// Retry budget for an insert. Bounded well under the agent's own request
+/// timeout so a stuck ClickHouse surfaces as a failed write rather than a
+/// hanging caller.
+fn insert_backoff() -> backoff::ExponentialBackoff {
+    ExponentialBackoffBuilder::new()
+        .with_initial_interval(Duration::from_millis(100))
+        .with_max_interval(Duration::from_secs(5))
+        .with_max_elapsed_time(Some(Duration::from_secs(30)))
+        .build()
+}
+
 pub struct ClickhouseResultSink {
     client: Client,
     /// Region + agent id stamped on results from this control plane's own
@@ -454,14 +478,10 @@ impl ClickhouseResultSink {
         let rows: Vec<CheckResultRow<'_>> = results
             .iter()
             .zip(ttls)
-            .map(|(r, ttl)| CheckResultRow::from_result(r, region, agent_id, ttl))
+            .map(|(r, ttl)| CheckResultRow::from_result(r, region, agent_id, ttl.row))
             .collect();
 
-        let backoff = ExponentialBackoffBuilder::new()
-            .with_initial_interval(Duration::from_millis(100))
-            .with_max_interval(Duration::from_secs(5))
-            .with_max_elapsed_time(Some(Duration::from_secs(30)))
-            .build();
+        let backoff = insert_backoff();
 
         // Full re-send on each retry is intentional and safe ONLY because the
         // `check_results` table sets `non_replicated_deduplication_window` (see
@@ -545,6 +565,143 @@ impl<'a> CheckResultRow<'a> {
             response_size: r.response_size,
             error: r.error.as_deref(),
             ttl_days,
+        }
+    }
+}
+
+const FLOW_TABLE: &str = "flow_runs";
+
+/// One row per browser-flow run. Unbatched: at the 300s interval floor these
+/// arrive too rarely for a batcher to earn its keep.
+pub struct ClickhouseFlowRunSink {
+    client: Client,
+    /// Region stamped on runs from this control plane's own scheduler.
+    /// Agent-submitted runs carry their own via [`FlowRunSink::write_runs_tagged`].
+    region: String,
+    org_ttl: OrgTtlDays,
+}
+
+impl ClickhouseFlowRunSink {
+    pub fn new(client: Client, region: String, org_ttl: OrgTtlDays) -> Self {
+        Self {
+            client,
+            region,
+            org_ttl,
+        }
+    }
+
+    async fn write_once(
+        &self,
+        rows: &[FlowRunRow<'_>],
+    ) -> std::result::Result<(), clickhouse::error::Error> {
+        let mut insert = self.client.insert::<FlowRunRow>(FLOW_TABLE).await?;
+        for row in rows {
+            insert.write(row).await?;
+        }
+        insert.end().await
+    }
+}
+
+#[async_trait]
+impl FlowRunSink for ClickhouseFlowRunSink {
+    async fn write_runs(&self, runs: &[FlowRunRecord]) {
+        self.write_inner(runs, &self.region).await;
+    }
+
+    async fn write_runs_tagged(&self, runs: &[FlowRunRecord], region: &str) {
+        self.write_inner(runs, region).await;
+    }
+}
+
+impl ClickhouseFlowRunSink {
+    async fn write_inner(&self, runs: &[FlowRunRecord], region: &str) {
+        if runs.is_empty() {
+            return;
+        }
+        let ttls = self.org_ttl.days_for_each(runs.iter().map(|r| r.org_id));
+        let rows: Vec<FlowRunRow<'_>> = runs
+            .iter()
+            .zip(ttls)
+            .map(|(r, ttl)| FlowRunRow::from_record(r, region, ttl))
+            .collect();
+
+        let backoff = insert_backoff();
+        let op = || async {
+            self.write_once(&rows)
+                .await
+                .map_err(backoff::Error::transient)
+        };
+        if let Err(err) = backoff::future::retry(backoff, op).await {
+            // The verdict landed by its own path, so this costs history only.
+            tracing::error!(
+                ?err,
+                count = rows.len(),
+                "flow run insert failed after retries"
+            );
+            counter!(names::STORAGE_DROPPED, "reason" => "flow_run_write_failed")
+                .increment(rows.len() as u64);
+        }
+    }
+}
+
+#[derive(Debug, Row, Serialize)]
+struct FlowRunRow<'a> {
+    #[serde(with = "clickhouse::serde::uuid")]
+    org_id: Uuid,
+    #[serde(with = "clickhouse::serde::uuid")]
+    target_id: Uuid,
+    region: &'a str,
+    timestamp: u32,
+    status: i8,
+    duration_ms: u32,
+    stopped_step: Option<u16>,
+    error: &'a str,
+    step_op: Vec<&'a str>,
+    step_outcome: Vec<i8>,
+    step_ms: Vec<u32>,
+    final_url: &'a str,
+    title: &'a str,
+    text_snippet: &'a str,
+    console_level: Vec<&'a str>,
+    console_text: Vec<&'a str>,
+    evidence_days: u16,
+    ttl_days: u16,
+}
+
+impl<'a> FlowRunRow<'a> {
+    fn from_record(r: &'a FlowRunRecord, region: &'a str, ttl: RetentionDays) -> Self {
+        let ev = r.evidence.as_ref();
+        let text = |o: &'a Option<String>| o.as_deref().unwrap_or_default();
+        Self {
+            org_id: r.org_id,
+            target_id: r.target_id,
+            region,
+            timestamp: to_unix_secs(r.timestamp),
+            status: r.status.as_enum8(),
+            duration_ms: r.duration_ms,
+            // The first entry that did not pass: the step it failed on, or the
+            // one it never got to when the budget ran out. Either way it is the
+            // step the error string names.
+            stopped_step: r
+                .steps
+                .iter()
+                .position(|s| s.outcome != StepOutcome::Passed)
+                .map(|i| i.min(usize::from(u16::MAX)) as u16),
+            error: r.error.as_deref().unwrap_or_default(),
+            step_op: r.steps.iter().map(|s| s.op.as_str()).collect(),
+            step_outcome: r.steps.iter().map(|s| s.outcome.as_enum8()).collect(),
+            step_ms: r.steps.iter().map(|s| s.duration_ms).collect(),
+            final_url: ev.map(|e| text(&e.final_url)).unwrap_or_default(),
+            title: ev.map(|e| text(&e.title)).unwrap_or_default(),
+            text_snippet: ev.map(|e| text(&e.text_snippet)).unwrap_or_default(),
+            console_level: ev
+                .map(|e| e.console.iter().map(|c| c.level.as_str()).collect())
+                .unwrap_or_default(),
+            console_text: ev
+                .map(|e| e.console.iter().map(|c| c.text.as_str()).collect())
+                .unwrap_or_default(),
+            evidence_days: ttl.evidence,
+            ttl_days: ttl.row,
         }
     }
 }

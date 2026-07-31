@@ -23,6 +23,9 @@ pub struct Plan {
     pub min_check_interval_secs: i32,
     pub retention_days: i32,
     pub raw_days: i32,
+    /// Days a failed flow run keeps its page snapshot, inside the `raw_days`
+    /// window the run itself lives in.
+    pub evidence_days: i32,
     pub max_members: i32,
     pub max_pending_invitations: i32,
     pub max_api_tokens_per_user: i32,
@@ -52,6 +55,8 @@ pub struct Plan {
     pub on_call_enabled: bool,
     /// Cap on browser-flow monitors; 0 both disables the kind and gates it.
     pub max_flow_checks: i32,
+    /// Steps one flow monitor may declare, clamped to the engine ceiling.
+    pub max_flow_steps: i32,
 
     // Metadata
     pub is_listed: bool,
@@ -100,9 +105,17 @@ pub fn raw_ttl_days(raw_days: i32) -> u16 {
     i64::from(raw_days).clamp(1, Plan::RAW_MAX_DAYS) as u16
 }
 
+/// Physical TTL (days) for a failed flow run's page snapshot. Clamped to the
+/// row's own window: outliving the run that owns it would leave page content
+/// with nothing to explain, which is the opposite of why it is kept.
+pub fn evidence_ttl_days(evidence_days: i32, raw_days: i32) -> u16 {
+    let row = raw_ttl_days(raw_days);
+    i64::from(evidence_days).clamp(1, i64::from(row)) as u16
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Plan, raw_ttl_days};
+    use super::{Plan, evidence_ttl_days, raw_ttl_days};
 
     #[test]
     fn raw_ttl_days_floors_at_one_and_caps_at_max() {
@@ -117,6 +130,22 @@ mod tests {
             "never retain past the disclosed max"
         );
         assert_eq!(raw_ttl_days(i32::MAX), max);
+    }
+
+    #[test]
+    fn evidence_ttl_days_never_outlives_the_row_it_explains() {
+        assert_eq!(evidence_ttl_days(7, 30), 7);
+        assert_eq!(evidence_ttl_days(0, 30), 1);
+        assert_eq!(evidence_ttl_days(-5, 30), 1);
+        // A plan configured to keep evidence longer than the run is clamped,
+        // not honoured — the row is gone either way.
+        assert_eq!(evidence_ttl_days(90, 30), 30);
+        assert_eq!(evidence_ttl_days(i32::MAX, 30), 30);
+        // The row's own ceiling still applies underneath.
+        assert_eq!(
+            evidence_ttl_days(i32::MAX, i32::MAX),
+            Plan::RAW_MAX_DAYS as u16
+        );
     }
 }
 

@@ -143,6 +143,9 @@ pub struct WorkerPool {
     in_flight: Arc<DashSet<Uuid>>,
     /// Browser-flow engine; `None` on nodes that don't run flow.
     flow_engine: Option<Arc<crate::worker::flow::engine::CdpEngine>>,
+    /// Where a flow run's trace and page snapshot go. `None` leaves the run
+    /// unrecorded, which costs history and nothing else.
+    flow_runs: Option<Arc<dyn crate::storage::traits::FlowRunSink>>,
 }
 
 impl WorkerPool {
@@ -166,6 +169,7 @@ impl WorkerPool {
             heartbeat: Arc::new(crate::worker::heartbeat::HeartbeatRuntime::default()),
             in_flight: Arc::new(DashSet::new()),
             flow_engine: None,
+            flow_runs: None,
         }
     }
 
@@ -175,6 +179,14 @@ impl WorkerPool {
         engine: Option<Arc<crate::worker::flow::engine::CdpEngine>>,
     ) -> Self {
         self.flow_engine = engine;
+        self
+    }
+
+    pub fn with_flow_runs(
+        mut self,
+        sink: Option<Arc<dyn crate::storage::traits::FlowRunSink>>,
+    ) -> Self {
+        self.flow_runs = sink;
         self
     }
 
@@ -311,6 +323,7 @@ impl WorkerPool {
         let throttle = self.host_throttle.clone();
         let domain_expiry = self.domain_expiry.clone();
         let flow_engine = self.flow_engine.clone();
+        let flow_runs = self.flow_runs.clone();
         let org_id = task.org_id;
 
         tokio::spawn(async move {
@@ -338,12 +351,22 @@ impl WorkerPool {
                 domain_expiry: &domain_expiry,
                 flow: flow_engine.as_deref(),
             };
-            let result =
-                crate::worker::execute(task.target.id, org_id.0, &task.target.check, &deps).await;
+            let (result, flow_run) = crate::worker::execute_recorded(
+                task.target.id,
+                org_id.0,
+                &task.target.check,
+                &deps,
+            )
+            .await;
             breaker.record(result.status);
             record_metrics(&result);
             drop(host_permit);
             fanout.dispatch(result);
+            // Detached so the permit is released on the verdict, not on the
+            // telemetry write behind it.
+            if let (Some(sink), Some(run)) = (flow_runs, flow_run) {
+                tokio::spawn(async move { sink.write_runs(&[run]).await });
+            }
         });
     }
 }

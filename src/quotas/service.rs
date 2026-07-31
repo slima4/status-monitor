@@ -22,26 +22,44 @@ use anyhow::Context;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::domain::quota::{Plan, raw_ttl_days};
+use crate::domain::quota::{Plan, evidence_ttl_days, raw_ttl_days};
 use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::{ClampedRange, TimeRange};
 
-/// Bulk `org_id → physical raw-retention days`, one query, the same ceiling as
-/// [`Plan::raw_window_days`] via [`raw_ttl_days`]. Feeds the write-path TTL
-/// snapshot ([`crate::storage::org_ttl`]), which must read every active org
-/// without thrashing the per-org plan cache. Plan-level: `raw_days` carries no
-/// per-org override or add-on today, so no override folding is applied.
-pub async fn raw_ttl_days_by_org(pool: &PgPool) -> Result<HashMap<Uuid, u16>> {
-    let rows: Vec<(Uuid, i32)> = sqlx::query_as(
-        "SELECT o.id, p.raw_days FROM organizations o JOIN plans p ON p.id = o.plan_id",
+/// The two physical windows a written row is stamped with: how long the row
+/// lives, and how long a failed flow run's page snapshot lives inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetentionDays {
+    pub row: u16,
+    pub evidence: u16,
+}
+
+/// Bulk `org_id → physical retention days`, one query, the same ceilings as
+/// [`Plan::raw_window_days`] via [`raw_ttl_days`] / [`evidence_ttl_days`]. Feeds
+/// the write-path TTL snapshot ([`crate::storage::org_ttl`]), which must read
+/// every active org without thrashing the per-org plan cache. Plan-level:
+/// neither column carries a per-org override or add-on today, so no override
+/// folding is applied.
+pub async fn retention_days_by_org(pool: &PgPool) -> Result<HashMap<Uuid, RetentionDays>> {
+    let rows: Vec<(Uuid, i32, i32)> = sqlx::query_as(
+        "SELECT o.id, p.raw_days, p.evidence_days \
+         FROM organizations o JOIN plans p ON p.id = o.plan_id",
     )
     .fetch_all(pool)
     .await
-    .context("load raw_days by org")?;
+    .context("load retention days by org")?;
     Ok(rows
         .into_iter()
-        .map(|(id, raw)| (id, raw_ttl_days(raw)))
+        .map(|(id, raw, evidence)| {
+            (
+                id,
+                RetentionDays {
+                    row: raw_ttl_days(raw),
+                    evidence: evidence_ttl_days(evidence, raw),
+                },
+            )
+        })
         .collect())
 }
 
@@ -92,6 +110,7 @@ struct PlanRow {
     min_check_interval_secs: i32,
     retention_days: i32,
     raw_days: i32,
+    evidence_days: i32,
     max_members: i32,
     max_pending_invitations: i32,
     max_api_tokens_per_user: i32,
@@ -116,6 +135,7 @@ struct PlanRow {
     incident_narration_enabled: bool,
     on_call_enabled: bool,
     max_flow_checks: i32,
+    max_flow_steps: i32,
     is_listed: bool,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
@@ -131,6 +151,7 @@ impl From<PlanRow> for Plan {
             min_check_interval_secs: r.min_check_interval_secs,
             retention_days: r.retention_days,
             raw_days: r.raw_days,
+            evidence_days: r.evidence_days,
             max_members: r.max_members,
             max_pending_invitations: r.max_pending_invitations,
             max_api_tokens_per_user: r.max_api_tokens_per_user,
@@ -155,6 +176,7 @@ impl From<PlanRow> for Plan {
             incident_narration_enabled: r.incident_narration_enabled,
             on_call_enabled: r.on_call_enabled,
             max_flow_checks: r.max_flow_checks,
+            max_flow_steps: r.max_flow_steps,
             is_listed: r.is_listed,
             created_at: r.created_at,
             updated_at: r.updated_at,
@@ -222,7 +244,7 @@ impl QuotaService {
                 // costs zero queries (the cache TTL bounds staleness).
                 let p: PlanRow = sqlx::query_as(
                     "SELECT p.id, p.name, p.description, p.max_targets, \
-                     p.min_check_interval_secs, p.retention_days, p.raw_days, \
+                     p.min_check_interval_secs, p.retention_days, p.raw_days, p.evidence_days, \
                      p.max_members, \
                      p.max_pending_invitations, p.max_api_tokens_per_user, \
                      p.max_public_components, p.max_status_pages, \
@@ -236,7 +258,7 @@ impl QuotaService {
                      p.test_now_per_minute, p.check_now_per_minute, \
                      p.custom_domain_enabled, p.white_label_enabled, \
                      p.sms_alerts_enabled, p.incident_narration_enabled, \
-                     p.on_call_enabled, p.max_flow_checks, \
+                     p.on_call_enabled, p.max_flow_checks, p.max_flow_steps, \
                      p.is_listed, p.created_at, p.updated_at \
                      FROM organizations o JOIN plans p ON p.id = o.plan_id \
                      WHERE o.id = $1",
@@ -802,7 +824,7 @@ async fn org_addons(db: &PgPool, org: OrgId) -> Result<Addons, sqlx::Error> {
 
 /// Unlimited plan used when there is no `plans` table to consult (DB-less
 /// in-memory test/dev fixtures). Every cap is `i32::MAX`.
-fn unlimited_plan() -> Plan {
+pub(crate) fn unlimited_plan() -> Plan {
     let now = chrono::Utc::now();
     Plan {
         id: "self-host".into(),
@@ -812,6 +834,7 @@ fn unlimited_plan() -> Plan {
         min_check_interval_secs: 1,
         retention_days: i32::MAX,
         raw_days: i32::MAX,
+        evidence_days: i32::MAX,
         max_members: i32::MAX,
         max_pending_invitations: i32::MAX,
         max_api_tokens_per_user: i32::MAX,
@@ -837,6 +860,7 @@ fn unlimited_plan() -> Plan {
         on_call_enabled: true,
         // Dark until launch enables flow per-plan; self-host flips it in the DB.
         max_flow_checks: 0,
+        max_flow_steps: 30,
         is_listed: false,
         created_at: now,
         updated_at: now,

@@ -29,10 +29,10 @@ use uptimepage::{
     },
     scheduler::{Scheduler, TargetRegistry},
     storage::{
-        self, ClickhouseResultSink, ClickhouseResultsStore, IncidentNarrationStore,
-        MaintenanceStore, NotificationChannelStore, PgIncidentNarrationStore, PgMaintenanceStore,
-        PgNotificationChannelStore, PostgresTargetStore, ResultSink, ResultsStore, TargetStore,
-        admin::AdminRepo,
+        self, ClickhouseFlowRunSink, ClickhouseResultSink, ClickhouseResultsStore,
+        IncidentNarrationStore, MaintenanceStore, NotificationChannelStore,
+        PgIncidentNarrationStore, PgMaintenanceStore, PgNotificationChannelStore,
+        PostgresTargetStore, ResultSink, ResultsStore, TargetStore, admin::AdminRepo,
     },
     worker::{ResultFanout, WorkerPool},
 };
@@ -217,6 +217,22 @@ async fn main() -> Result<()> {
         org_ttl.clone(),
     ));
     let result_sink_for_state = result_sink.clone();
+    // Flow runs bypass the result batcher: at the 300s interval floor they
+    // arrive far too rarely to be worth buffering. Wrapped so no path can store
+    // a page snapshot that still holds one of the org's secrets.
+    let flow_run_sink: Arc<dyn uptimepage::storage::traits::FlowRunSink> =
+        Arc::new(uptimepage::storage::ScrubbedFlowRunSink::new(
+            Arc::new(ClickhouseFlowRunSink::new(
+                clickhouse_client.clone(),
+                cfg.scheduler.region.clone(),
+                org_ttl.clone(),
+            )),
+            Arc::new(uptimepage::storage::PgVariableStore::new(
+                pg_pool.clone(),
+                cipher.clone(),
+            )),
+        ));
+    let flow_run_sink_for_state = flow_run_sink.clone();
     let ch_client_for_public = clickhouse_client.clone();
     let ch_client_for_purge = clickhouse_client.clone();
     let ch_client_for_sampler = clickhouse_client.clone();
@@ -287,7 +303,8 @@ async fn main() -> Result<()> {
             host_throttle.clone(),
             domain_expiry_runtime,
         )
-        .with_flow_engine(flow_engine),
+        .with_flow_engine(flow_engine)
+        .with_flow_runs(Some(flow_run_sink)),
     );
     // With in-process probing disabled the scheduler still runs, fed only the
     // passive heartbeat set (agents can't evaluate that state). Both sources
@@ -657,6 +674,7 @@ async fn main() -> Result<()> {
         cipher,
     );
     let state = state
+        .with_flow_run_sink(flow_run_sink_for_state)
         .with_telegram_send_budget(telegram_send_budget)
         .with_incident_signals(incident_signal_tx)
         .with_subscription_unsubscribe_secret(unsubscribe_secret)
