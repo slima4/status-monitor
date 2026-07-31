@@ -110,9 +110,30 @@ pub struct ConsoleLine {
     pub text: String,
 }
 
+/// How one declared step ended. `Skipped` means the run stopped before the step
+/// was reached; anything the run did reach and did not pass is `Failed`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StepOutcome {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+/// One entry per declared step, positional, so an entry's index is its step
+/// index. Carried in full whenever the run reached the step list at all; a run
+/// that died before then — no engine on the node, browser never started —
+/// carries none rather than a partial one.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct StepTrace {
+    pub op: String,
+    pub outcome: StepOutcome,
+    pub duration_ms: u32,
+}
+
 /// Result an agent posts back for one claimed check. `result` is always present
 /// (a failed probe still yields a `CheckResult`); the probe preview is HTTP
-/// `test` detail only, and the evidence flow `test` detail only.
+/// `test` detail only, and the evidence and step trace flow `test` detail only.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DispatchReport {
     pub check_id: Uuid,
@@ -123,4 +144,6 @@ pub struct DispatchReport {
     pub response_body_snippet: Option<String>,
     #[serde(default)]
     pub flow_evidence: Option<FlowEvidence>,
+    #[serde(default)]
+    pub flow_steps: Vec<StepTrace>,
 }

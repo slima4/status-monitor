@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use chromiumoxide::Page;
 
 use crate::domain::FlowStep;
+use crate::domain::agent_wire::{StepOutcome, StepTrace};
 
 /// Terminal result of running the step list.
 pub enum RunResult {
@@ -20,6 +21,13 @@ pub enum RunResult {
         op: &'static str,
         reason: String,
     },
+    /// The whole-run budget ran out at `step`, which either never started or
+    /// was still waiting when the deadline arrived. Nothing was learned about
+    /// the target, but the page is still alive to be snapshotted.
+    Budget {
+        step: usize,
+        op: &'static str,
+    },
     /// The engine/CDP transport broke: not a verdict on the target, an error.
     Engine(String),
 }
@@ -30,21 +38,69 @@ enum StepError {
     Engine(String),
 }
 
-pub async fn run_steps(page: &Page, steps: &[FlowStep], step_timeout: Duration) -> RunResult {
+pub async fn run_steps(
+    page: &Page,
+    steps: &[FlowStep],
+    step_timeout: Duration,
+    deadline: Instant,
+) -> (RunResult, Vec<StepTrace>) {
+    let mut trace: Vec<StepTrace> = steps
+        .iter()
+        .map(|s| StepTrace {
+            op: step_op(s).to_string(),
+            outcome: StepOutcome::Skipped,
+            duration_ms: 0,
+        })
+        .collect();
+
     for (i, step) in steps.iter().enumerate() {
-        match drive(page, step, step_timeout).await {
-            Ok(()) => {}
-            Err(StepError::Failed(reason)) => {
-                return RunResult::Failed {
-                    step: i,
-                    op: step_op(step),
-                    reason,
-                };
+        let op = step_op(step);
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return (RunResult::Budget { step: i, op }, trace);
+        }
+        // Clamping keeps a step's own wait from outliving the run it is inside,
+        // so the budget is what ends the run rather than a bogus step failure.
+        let clamped = remaining <= step_timeout;
+        let started = Instant::now();
+        let outcome = drive(page, step, step_timeout.min(remaining)).await;
+        let took = millis(started.elapsed());
+        match outcome {
+            Ok(()) => {
+                trace[i].outcome = StepOutcome::Passed;
+                trace[i].duration_ms = took;
             }
-            Err(StepError::Engine(e)) => return RunResult::Engine(e),
+            // A broken transport is no verdict on this step, so the trace keeps
+            // none: the page never answered either way.
+            Err(StepError::Engine(e)) => return (RunResult::Engine(e), trace),
+            Err(StepError::Failed(reason)) => {
+                trace[i].outcome = StepOutcome::Failed;
+                trace[i].duration_ms = took;
+                // Only a step that was still waiting can have been cut short by
+                // the clamp. The rest answer in one round trip, so their failure
+                // is about the page however little budget was left.
+                let result = if waits(step) && clamped && Instant::now() >= deadline {
+                    RunResult::Budget { step: i, op }
+                } else {
+                    RunResult::Failed {
+                        step: i,
+                        op,
+                        reason,
+                    }
+                };
+                return (result, trace);
+            }
         }
     }
-    RunResult::Passed
+    (RunResult::Passed, trace)
+}
+
+fn millis(d: Duration) -> u32 {
+    d.as_millis().min(u128::from(u32::MAX)) as u32
+}
+
+fn waits(step: &FlowStep) -> bool {
+    !matches!(step, FlowStep::Fill { .. } | FlowStep::Click { .. })
 }
 
 fn step_op(step: &FlowStep) -> &'static str {
@@ -61,13 +117,21 @@ fn step_op(step: &FlowStep) -> &'static str {
 async fn drive(page: &Page, step: &FlowStep, step_timeout: Duration) -> Result<(), StepError> {
     match step {
         FlowStep::Goto { url } => {
-            page.goto(url.as_str())
-                .await
-                .map_err(|e| StepError::Engine(format!("goto: {e}")))?;
-            page.wait_for_navigation()
-                .await
-                .map_err(|e| StepError::Engine(format!("goto nav: {e}")))?;
-            Ok(())
+            let nav = async {
+                page.goto(url.as_str())
+                    .await
+                    .map_err(|e| StepError::Engine(format!("goto: {e}")))?;
+                page.wait_for_navigation()
+                    .await
+                    .map_err(|e| StepError::Engine(format!("goto nav: {e}")))?;
+                Ok(())
+            };
+            // A slow origin would otherwise run past the whole-run deadline and
+            // cost the trace the backstop cannot preserve.
+            match tokio::time::timeout(step_timeout, nav).await {
+                Ok(r) => r,
+                Err(_) => Err(StepError::Failed(format!("timed out loading {url}"))),
+            }
         }
         FlowStep::Fill { selector, value } => {
             match eval_string(page, &js_fill(selector, value)).await? {

@@ -245,6 +245,14 @@ fn register_descriptions() {
         "HTTP requests currently being served. Climbing alongside flat throughput means handlers are blocking on something (usually a downstream pool); a release-valve signal for upstream contention"
     );
     describe_counter!(
+        "uptimepage_flow_runs_total",
+        "Browser flow runs completed, labelled by outcome: passed, failed (a step failed — the journey is down), budget (the whole-run deadline arrived first), engine (CDP or the browser process broke), unconfigured (the check reached a node with no engine). Only `failed` is a verdict on the target"
+    );
+    describe_histogram!(
+        "uptimepage_flow_step_duration_ms",
+        "Wall-clock duration of one flow step in milliseconds, labelled by op (goto/fill/click/wait_for/assert_text/assert_url). Steps the run never reached are excluded. A wait_for p95 climbing toward step_timeout is the early warning before the journey starts failing"
+    );
+    describe_counter!(
         "uptimepage_ratelimit_drops_total",
         "Per-org and per-user rate-limit rejections (HTTP 429), labelled by `scope` (the same string carried in the error response — e.g. `per_org_api_writes`, `per_user_bulk_ops`). Abuse signal: a sudden rate growth on one scope is the first indicator of a single tenant hammering the API"
     );
@@ -306,4 +314,6 @@ pub mod names {
     pub const HTTP_REQUEST_DURATION_MS: &str = "uptimepage_http_request_duration_ms";
     pub const HTTP_RESPONSES_INFLIGHT: &str = "uptimepage_http_responses_inflight";
     pub const RATELIMIT_DROPS: &str = "uptimepage_ratelimit_drops_total";
+    pub const FLOW_RUNS: &str = "uptimepage_flow_runs_total";
+    pub const FLOW_STEP_DURATION_MS: &str = "uptimepage_flow_step_duration_ms";
 }

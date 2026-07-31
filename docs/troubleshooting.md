@@ -95,14 +95,32 @@ The check reached a process where `flow.enabled` is false or the engine binary i
 
 Normally the routing prevents it, because a flow monitor's regions are clamped to the flow-capable set when it is saved and an agent that reports no engine never receives one in its config pull. Seeing this means a node's config changed after the monitor was saved. Either turn the engine back on there, or re-save the monitor so its regions are clamped again.
 
+## Flow monitor errors with `step N/M <op>: run budget spent`
+
+The whole-run budget ran out while that step was waiting, or just before it started. `timeout` caps the entire run, not each step, and a browser reaching a slow origin can spend it before the last assertion. Raise `timeout`, or shorten the flow.
+
+It reads like a step failure but is recorded `Error`, not `Down`: the target never got to answer. The step trace shows how far the run got and where the time went, and the page snapshot is collected the same as for a real failure — check whether the named step was waiting for something that never renders, or whether the steps before it were simply slow.
+
+A `wait_for` p95 climbing toward `step_timeout` on `uptimepage_flow_step_duration_ms` is the same signal before it becomes an outage.
+
+## Flow monitor errors with `run budget spent before the first step ran`
+
+The budget went on starting the browser and loading the start URL, leaving nothing for the steps. No step is named because none ran.
+
+Usually the start URL itself is slow, so probe it with an HTTP monitor first. A node under load starts the browser more slowly too — check `uptimepage_flow_runs_total{outcome="budget"}` against one node rather than reading a single run.
+
 ## Flow monitor errors instead of failing, with no step named
 
-The run never got far enough to blame a step. Two common causes:
+The run broke rather than reaching a verdict. None of these collect a page snapshot: after the transport breaks, the page no longer says anything trustworthy about the target.
 
-- The whole-run budget ran out. `timeout` caps the entire run, not each step, and a browser reaching a slow origin can spend it before the last assertion. Raise `timeout`, or shorten the flow.
-- The run crossed `flow.mem_limit_mb` and was killed. One page pulling in a heavy bundle is enough. Raise the ceiling for that node, or set `flow.max_response_mb` so a single oversized asset is refused before it costs the whole budget.
+- CDP broke mid-run. The trace still shows the steps that passed before the break; the step it broke on gets no outcome, because the page never answered either way.
+- It crossed `flow.mem_limit_mb` and was killed. One page pulling in a heavy bundle is enough. Raise the ceiling for that node, or set `flow.max_response_mb` so a single oversized asset is refused before it costs the whole budget.
+- The browser process never started (`spawn lightpanda`, `engine did not start after retries`, `no free port`). Repeated cases point at the node, not the target.
+- `engine stopped responding after its N ms budget` — a CDP call never returned, so the run sailed past its own deadline and the outer backstop ended it.
 
-Both are recorded `Error` on purpose. The target did not fail; this node declined to keep paying for the answer.
+The last three end the run before or outside the step list, so they carry no trace at all.
+
+All are recorded `Error` on purpose. The target did not fail; this node declined, or was unable, to keep paying for the answer.
 
 ## A flow `fill` step passes but the form behaves as if nothing was typed
 

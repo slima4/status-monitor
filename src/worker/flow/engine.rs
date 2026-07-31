@@ -19,7 +19,21 @@ use tokio::sync::Semaphore;
 use super::evidence::EvidenceCollector;
 use super::executor::{RunResult, run_steps};
 use crate::domain::FlowCheck;
-use crate::domain::agent_wire::FlowEvidence;
+use crate::domain::agent_wire::{FlowEvidence, StepTrace};
+
+/// Headroom over the flow's own budget for the outer backstop. The deadline
+/// inside a run ends it with a trace and a live page to snapshot, so the
+/// backstop should only ever fire for a CDP call that stopped returning to it.
+const BACKSTOP_GRACE: Duration = Duration::from_secs(5);
+
+/// Evidence is telemetry about a failure, so reading it must never cost the
+/// verdict and trace already in hand. Sits inside the backstop grace, which it
+/// spends after the run's own budget is gone.
+const EVIDENCE_BUDGET: Duration = Duration::from_secs(3);
+
+/// What one attempt produced: a verdict, the page state behind a failure, and
+/// one entry per declared step.
+type Attempt = (RunResult, Option<FlowEvidence>, Vec<StepTrace>);
 
 pub struct FlowEngineConfig {
     pub binary: PathBuf,
@@ -68,68 +82,82 @@ impl CdpEngine {
     }
 
     /// Elapsed excludes queue wait. Steps must already be variable-resolved.
-    pub async fn run(&self, flow: &FlowCheck) -> (RunResult, Option<FlowEvidence>, u32) {
+    pub async fn run(
+        &self,
+        flow: &FlowCheck,
+    ) -> (RunResult, Option<FlowEvidence>, Vec<StepTrace>, u32) {
         let _permit = match self.sem.acquire().await {
             Ok(p) => p,
-            Err(_) => return (RunResult::Engine("flow engine shut down".into()), None, 0),
+            Err(_) => {
+                return (
+                    RunResult::Engine("flow engine shut down".into()),
+                    None,
+                    Vec::new(),
+                    0,
+                );
+            }
         };
         // Clock and deadline both start only once a slot is held, so time spent
         // queued for a permit is never charged against the flow's own budget.
         let started = Instant::now();
-        let (result, evidence) = match tokio::time::timeout(flow.timeout, self.run_once(flow)).await
+        let deadline = started + flow.timeout;
+        let (result, evidence, steps) = match tokio::time::timeout(
+            flow.timeout + BACKSTOP_GRACE,
+            self.run_once(flow, deadline),
+        )
+        .await
         {
-            Ok(pair) => pair,
+            Ok(attempt) => attempt,
             Err(_) => (
                 RunResult::Engine(format!(
-                    "flow exceeded its {} ms budget",
+                    "engine stopped responding after its {} ms budget",
                     flow.timeout.as_millis()
                 )),
                 None,
+                Vec::new(),
             ),
         };
         let elapsed = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
-        (result, evidence, elapsed)
+        (result, evidence, steps, elapsed)
     }
 
     /// One flow attempt, retried on a fresh port when the engine dies during
     /// startup — a freed ephemeral port can be taken before Lightpanda binds it.
-    async fn run_once(&self, flow: &FlowCheck) -> (RunResult, Option<FlowEvidence>) {
+    /// Retries share the run's deadline, so a slow start is charged to the run.
+    async fn run_once(&self, flow: &FlowCheck, deadline: Instant) -> Attempt {
         let mut last = String::new();
         for _ in 0..3 {
             let port = match free_port() {
                 Ok(p) => p,
-                Err(e) => return (RunResult::Engine(format!("no free port: {e}")), None),
+                Err(e) => return engine_error(format!("no free port: {e}")),
             };
             let mut child = match self.spawn(port, flow.verify_tls) {
                 Ok(c) => c,
-                Err(e) => return (RunResult::Engine(format!("spawn lightpanda: {e}")), None),
+                Err(e) => return engine_error(format!("spawn lightpanda: {e}")),
             };
             // A heavy page can't OOM the node: if RSS crosses the ceiling the
             // watchdog wins the race and the process is torn down.
-            let (result, evidence) = match (child.id(), self.mem_limit_bytes) {
+            let attempt = match (child.id(), self.mem_limit_bytes) {
                 (Some(pid), limit) if limit > 0 => tokio::select! {
-                    r = drive(&mut child, port, flow) => r,
-                    _ = watch_rss(pid, limit) => (RunResult::Engine(format!(
+                    r = drive(&mut child, port, flow, deadline) => r,
+                    _ = watch_rss(pid, limit) => engine_error(format!(
                         "engine exceeded {} MB memory limit",
                         limit / (1024 * 1024)
-                    )), None),
+                    )),
                 },
-                _ => drive(&mut child, port, flow).await,
+                _ => drive(&mut child, port, flow, deadline).await,
             };
             let _ = child.start_kill();
             let _ = child.wait().await;
-            if let RunResult::Engine(e) = &result
+            if let RunResult::Engine(e) = &attempt.0
                 && let Some(startup) = e.strip_prefix(STARTUP_FAILED)
             {
                 last = startup.to_string();
                 continue;
             }
-            return (result, evidence);
+            return attempt;
         }
-        (
-            RunResult::Engine(format!("engine did not start after retries: {last}")),
-            None,
-        )
+        engine_error(format!("engine did not start after retries: {last}"))
     }
 
     fn spawn(&self, port: u16, verify_tls: bool) -> std::io::Result<Child> {
@@ -176,15 +204,15 @@ impl CdpEngine {
 /// retries on a fresh port instead of reporting a false verdict on the target.
 const STARTUP_FAILED: &str = "engine did not start: ";
 
-async fn drive(
-    child: &mut Child,
-    port: u16,
-    flow: &FlowCheck,
-) -> (RunResult, Option<FlowEvidence>) {
+fn engine_error(reason: String) -> Attempt {
+    (RunResult::Engine(reason), None, Vec::new())
+}
+
+async fn drive(child: &mut Child, port: u16, flow: &FlowCheck, deadline: Instant) -> Attempt {
     let ws = format!("ws://127.0.0.1:{port}/");
     let (browser, mut handler) = match connect_with_retry(child, &ws).await {
         Ok(pair) => pair,
-        Err(e) => return (RunResult::Engine(format!("{STARTUP_FAILED}{e}")), None),
+        Err(e) => return engine_error(format!("{STARTUP_FAILED}{e}")),
     };
     let pump = tokio::spawn(async move { while handler.next().await.is_some() {} });
 
@@ -198,25 +226,35 @@ async fn drive(
         let _ = page.execute(RuntimeEnable::default()).await;
         let _ = page.execute(NetworkEnable::default()).await;
         let collector = EvidenceCollector::attach(&page).await;
-        page.wait_for_navigation()
-            .await
-            .map_err(|e| format!("initial navigation: {e}"))?;
+        // The first load is inside the run's budget like everything else. On
+        // expiry the step loop below is what reports it, so a slow origin ends
+        // the run on its deadline rather than on the backstop.
+        if let Ok(Err(e)) =
+            tokio::time::timeout_at(deadline.into(), page.wait_for_navigation()).await
+        {
+            return Err(format!("initial navigation: {e}"));
+        }
 
-        let result = run_steps(&page, &flow.steps, flow.step_timeout).await;
+        let (result, steps) = run_steps(&page, &flow.steps, flow.step_timeout, deadline).await;
         // A pass has nothing to explain; after an engine break the page state
-        // is not trustworthy.
+        // is not trustworthy. A spent budget leaves both a live page and the
+        // question of what it was still waiting for.
         let evidence = match &result {
-            RunResult::Failed { .. } => Some(collector.finish(&page).await),
+            RunResult::Failed { .. } | RunResult::Budget { .. } => {
+                tokio::time::timeout(EVIDENCE_BUDGET, collector.finish(&page))
+                    .await
+                    .ok()
+            }
             _ => None,
         };
-        Ok::<(RunResult, Option<FlowEvidence>), String>((result, evidence))
+        Ok::<Attempt, String>((result, evidence, steps))
     }
     .await;
 
     pump.abort();
     match outcome {
-        Ok(pair) => pair,
-        Err(e) => (RunResult::Engine(e), None),
+        Ok(attempt) => attempt,
+        Err(e) => engine_error(e),
     }
 }
 

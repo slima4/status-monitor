@@ -261,6 +261,7 @@ impl AgentDispatchClient {
                 response_headers_preview: probe.response_headers_preview,
                 response_body_snippet: probe.response_body_snippet,
                 flow_evidence: probe.flow_evidence,
+                flow_steps: probe.flow_steps,
             };
             self.post_result(&payload).await?;
         }

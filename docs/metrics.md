@@ -26,6 +26,7 @@ these names verbatim.
 | `uptimepage_host_throttle_drops_total` | counter | host-bulkhead rejections — `kind=host` over-cap checks recorded as `degraded` without firing alerts. RDAP drops do NOT increment this counter; they fall through to the sticky last-good path (see `domain_expiry_stale_served_total`) |
 | `uptimepage_rdap_singleflight_total{outcome}` | counter | registry-lookup singleflight outcome per domain (RDAP or WHOIS) — `hit` (cached, no outbound request) or `miss` (fetcher invoked) |
 | `uptimepage_domain_expiry_stale_served_total{kind}` | counter | times the domain-expiry executor served a cached last-good answer instead of a fresh probe. `kind` distinguishes the cause: `throttled`, `timeout`, `lookup_error`, or `fresh_error` (no usable last-good — emitted as a real `Error` instead) |
+| `uptimepage_flow_runs_total{outcome}` | counter | browser flow runs completed, by `outcome`: `passed`, `failed` (a step failed — the journey is down), `budget` (the whole-run deadline arrived first), `engine` (CDP or the browser process broke), `unconfigured` (the check reached a node with no engine). Only `failed` is a verdict on the target; the rest mean this node stopped paying for an answer |
 | `uptimepage_domain_expiry_state_write_failed_total` | counter | failures writing the last-good cache row after a successful probe. Sustained values mean the sticky cache is going cold even though probes succeed — typical cause is Postgres write degradation |
 | `uptimepage_scheduler_refresh_failed_total` | counter | registry refresh ticks that returned an error from Postgres. Alert on a sustained rate above your normal noise floor; persistent failures put the scheduler into exponential backoff (capped at 10× the configured refresh interval) and keep workers running with cached `ScheduledTarget` snapshots |
 | `uptimepage_rdap_singleflight_slots` | gauge | live entries in the in-process registry-lookup singleflight cache. Bounded under normal load by the set of monitored domains; sudden growth signals a code path feeding non-target domains into the cache |
@@ -37,6 +38,7 @@ these names verbatim.
 | `uptimepage_check_connect_ms` | histogram | TCP connect latency (every HTTP check connects fresh) |
 | `uptimepage_check_tls_ms` | histogram | TLS handshake latency (per HTTPS check) |
 | `uptimepage_check_ttfb_ms` | histogram | time-to-first-byte: request sent to response headers |
+| `uptimepage_flow_step_duration_ms{op}` | histogram | wall time of one flow step, by `op` (`goto`/`fill`/`click`/`wait_for`/`assert_text`/`assert_url`). Steps the run never reached are excluded, so the distribution only covers work that happened. A `wait_for` p95 climbing toward the monitor's `step_timeout` is the early warning before the journey starts failing |
 | `uptimepage_storage_batch_size` | histogram | flush batch sizes |
 | `uptimepage_storage_write_duration_ms` | histogram | flush durations |
 | `uptimepage_telegram_send_wait_ms` | histogram | wait imposed on a Telegram send by the send budget before its slot opened |

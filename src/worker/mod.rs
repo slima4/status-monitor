@@ -178,6 +178,7 @@ pub(crate) struct ProbeDetail {
     pub response_headers_preview: Vec<crate::domain::agent_wire::HeaderPreview>,
     pub response_body_snippet: Option<String>,
     pub flow_evidence: Option<crate::domain::agent_wire::FlowEvidence>,
+    pub flow_steps: Vec<crate::domain::agent_wire::StepTrace>,
 }
 
 impl From<HttpProbe> for ProbeDetail {
@@ -186,6 +187,7 @@ impl From<HttpProbe> for ProbeDetail {
             response_headers_preview: p.response_headers_preview,
             response_body_snippet: p.response_body_snippet,
             flow_evidence: None,
+            flow_steps: Vec::new(),
         }
     }
 }
@@ -203,12 +205,13 @@ pub(crate) async fn execute_with_probe(
             (r, p.into())
         }
         CheckSpec::Flow(flow) => {
-            let (r, evidence) =
+            let (r, probe) =
                 flow::execute_flow_check_probe(target_id, org_id, flow, deps.flow).await;
             (
                 r,
                 ProbeDetail {
-                    flow_evidence: evidence,
+                    flow_evidence: probe.evidence,
+                    flow_steps: probe.steps,
                     ..Default::default()
                 },
             )

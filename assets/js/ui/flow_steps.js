@@ -128,6 +128,7 @@
 
     function clearRow(row) {
         row.classList.remove(...STEP_STATES);
+        row.removeAttribute("title");
         const st = row.querySelector("[data-flow-status]");
         if (st) st.textContent = "";
         const rs = row.querySelector("[data-flow-reason]");
@@ -183,33 +184,39 @@
         walkTimer = setTimeout(advance, WALK_MS);
     }
 
-    function reconcilePlayback(result) {
+    // The walk snaps to the trace of what actually ran. A trace that does not
+    // line up with the rows on screen is not describing them — a run that died
+    // before the step list carries none, and the author may have edited the
+    // rows mid-test — so it is discarded and the result banner speaks alone.
+    function reconcilePlayback(result, steps) {
         if (walkTimer) {
             clearTimeout(walkTimer);
             walkTimer = null;
         }
         const list = rows();
         if (list.length === 0) return;
-        const status = (result && result.status) || "";
-        const err = (result && result.error) || "";
-        if (status === "up") {
-            list.forEach((row) => setRow(row, "flow-step--pass", MARK_PASS));
+        const trace = Array.isArray(steps) ? steps : [];
+        if (trace.length !== list.length) {
+            resetPlayback();
             return;
         }
-        const m = err.match(/^step (\d+)\/\d+ /);
-        const failIdx = m ? parseInt(m[1], 10) - 1 : -1;
-        if (status === "down" && failIdx >= 0 && failIdx < list.length) {
-            const reason = err.replace(/^step \d+\/\d+ \S+: /, "");
-            list.forEach((row, i) => {
-                if (i < failIdx) setRow(row, "flow-step--pass", MARK_PASS);
-                else if (i === failIdx) setRow(row, "flow-step--fail", MARK_FAIL, reason);
-                else setRow(row, "flow-step--skip", "");
-            });
-            return;
-        }
-        // Engine error (startup/timeout) or an unparseable verdict: no trustworthy
-        // per-step boundary — clear the walk and let the result banner speak.
-        resetPlayback();
+        // Only a per-step verdict carries a per-step reason. An engine-level
+        // error is about the run, so its text stays in the banner rather than
+        // being pinned on a row that never got a verdict.
+        const named = ((result && result.error) || "").match(/^step \d+\/\d+ \S+: ([\s\S]+)$/);
+        const reason = named ? named[1] : "";
+        trace.forEach((step, i) => {
+            const row = list[i];
+            if (step.outcome === "passed") {
+                setRow(row, "flow-step--pass", MARK_PASS);
+            } else if (step.outcome === "failed") {
+                setRow(row, "flow-step--fail", MARK_FAIL, reason);
+            } else {
+                setRow(row, "flow-step--skip", "");
+                return;
+            }
+            row.title = `${step.op} · ${step.duration_ms} ms`;
+        });
     }
 
     window.smFlowTestStart = startPlayback;

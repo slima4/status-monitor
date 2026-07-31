@@ -119,6 +119,10 @@ pub struct TestResponse {
     /// engine error, where the page state says nothing about the target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub flow_evidence: Option<crate::domain::agent_wire::FlowEvidence>,
+    /// One entry per declared step, flow only. Positional, so an entry's index
+    /// is its step index, and steps the run never reached are `skipped`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub flow_steps: Vec<crate::domain::agent_wire::StepTrace>,
     /// Region the test ran in, echoed so a fan-out caller can correlate rows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub region: Option<String>,

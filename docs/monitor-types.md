@@ -165,7 +165,9 @@ The last two are what make the check meaningful. Without an assertion the flow r
 
 The click selector is worth a second look. That page's submit control is `<button class="radius" type="submit"><i class="fa fa-2x fa-sign-in"> Login</i></button>`, so a recorder writes down the `<i>`, not the button. The step targets the button because that is what a real click activates, which is the same rewrite the import performs.
 
-`timeout` caps the whole run at 30 seconds. `step_timeout` caps how long a step will wait for what it is looking for, at 10 seconds. It applies to the steps that wait: `wait_for`, `assert_text` and `assert_url` poll until it runs out. `fill` and `click` do not wait at all, so if a field is rendered late, raising the step timeout will not help. Put a `wait_for` in front of the fill instead. A slow app needs that, not a higher interval.
+`timeout` caps the whole run at 30 seconds. `step_timeout` caps how long a step will wait for what it is looking for, at 10 seconds. It applies to the steps that wait: `wait_for`, `assert_text` and `assert_url` poll until it runs out, and `goto` gives up on a page that will not load in it. `fill` and `click` do not wait at all, so if a field is rendered late, raising the step timeout will not help. Put a `wait_for` in front of the fill instead. A slow app needs that, not a higher interval.
+
+The two interact. A waiting step never waits past the whole-run budget, so on a long journey the last steps get whatever is left of it rather than a full `step_timeout` each. When the budget is what ran out, the run says so and names the step it was on. When it ran out getting the browser and the first page up, it says that instead, because no step ran.
 
 ### When a step fails
 
@@ -181,6 +183,8 @@ Title       The Internet
 Page text   Your password is invalid!
 Console     (nothing logged)
 ```
+
+Every declared step is recorded, not just the failing one: what it was, whether it passed, and how long it took. Steps after the failure are marked as never reached. That is what tells you a journey is drifting before it breaks, when a wait that used to take 200 ms starts taking four seconds.
 
 The step names the fault, the URL says the submit never took, and the page says why in its own words. The console is where a broken bundle or an expired client-side token announces itself, but plenty of apps log nothing at all, and this one does not need to. The listener also attaches a moment after the first page starts loading, so a message logged during that first load can be missed. Anything logged from a later step is captured.
 

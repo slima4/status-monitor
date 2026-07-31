@@ -912,6 +912,7 @@ pub async fn test_check(
         response_headers_preview: view.response_headers_preview,
         response_body_snippet: view.response_body_snippet,
         flow_evidence: view.flow_evidence,
+        flow_steps: view.flow_steps,
         region: Some(region),
     }))
 }
@@ -2111,6 +2112,7 @@ mod tests {
                 value: "sk-live-secret".into(),
             }],
             flow_evidence: None,
+            flow_steps: vec![],
         };
         scrub_secrets(&mut delivered, &["sk-live-secret".to_string()]);
         assert_eq!(
@@ -2141,6 +2143,7 @@ mod tests {
                     text: format!("auth failed for {secret}"),
                 }],
             }),
+            flow_steps: vec![],
         };
         scrub_secrets(&mut delivered, &[secret.to_string()]);
 

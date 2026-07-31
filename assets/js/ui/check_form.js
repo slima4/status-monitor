@@ -718,6 +718,7 @@
     // `resultEl` via the shared .test-result renderers.
     // `state` folds the expectation match into the status: ok / warn / bad.
     async function runTest(resultEl, check, region) {
+        const failed = () => ({ result: null, steps: [], state: "bad" });
         let res;
         try {
             res = await fetch("/api/v1/targets/test", {
@@ -727,14 +728,14 @@
             });
         } catch (err) {
             window.smRenderCheckError(resultEl, `Network error: ${err.message || err}`);
-            return { result: null, state: "bad" };
+            return failed();
         }
         if (res.status === 429) {
             const retry = res.headers.get("retry-after");
             window.smRenderCheckError(resultEl, retry
                 ? `Rate limited — retry in ${retry}s`
                 : "Rate limited — slow down");
-            return { result: null, state: "bad" };
+            return failed();
         }
         // Read once as text, then try to parse: error responses are not always
         // our JSON envelope. A body-deserialize rejection (e.g. a missing
@@ -750,11 +751,11 @@
                 || "Test rejected.";
             const message = detail.length > 300 ? `${detail.slice(0, 300)}…` : detail;
             window.smRenderCheckError(resultEl, `${code}: ${message}`);
-            return { result: null, state: "bad" };
+            return failed();
         }
         if (!body) {
             window.smRenderCheckError(resultEl, "Bad JSON in test response.");
-            return { result: null, state: "bad" };
+            return failed();
         }
         const result = body.result || {};
         window.smRenderCheckResult(resultEl, result, {
@@ -767,7 +768,7 @@
         const state = !matched || result.status === "down"
             ? "bad"
             : result.status === "degraded" ? "warn" : "ok";
-        return { result, state };
+        return { result, steps: body.flow_steps || [], state };
     }
 
     const sheet = form.querySelector("[data-test-sheet]");
@@ -869,7 +870,7 @@
                 // No region selector (single-region plan) → test the default region.
                 window.smRenderCheckRunning(resultEl);
                 const outcome = await runTest(resultEl, built.check, null);
-                if (paintFlow) window.smFlowTestResult?.(outcome.result);
+                if (paintFlow) window.smFlowTestResult?.(outcome.result, outcome.steps);
                 const { state, label } = summarize([outcome], regions);
                 // A clean pass needs no reading; anything else opens itself.
                 showSheet(state, label, state !== "ok");
@@ -877,7 +878,7 @@
             }
             const rows = window.smRenderRegionTestRunning(resultEl, regions);
             const outcomes = await Promise.all(regions.map((r) => runTest(rows[r.id], built.check, r.id)));
-            if (paintFlow) window.smFlowTestResult?.(outcomes[0].result);
+            if (paintFlow) window.smFlowTestResult?.(outcomes[0].result, outcomes[0].steps);
             const { state, label } = summarize(outcomes, regions);
             showSheet(state, label, state !== "ok");
         } finally {

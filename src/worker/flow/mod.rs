@@ -8,12 +8,22 @@ mod evidence;
 mod executor;
 
 use chrono::Utc;
+use metrics::{counter, histogram};
 use uuid::Uuid;
 
-use crate::domain::agent_wire::FlowEvidence;
+use crate::domain::agent_wire::{FlowEvidence, StepOutcome, StepTrace};
 use crate::domain::{CheckResult, CheckStatus, FlowCheck};
+use crate::observability::metrics::names;
 use engine::CdpEngine;
 use executor::RunResult;
+
+/// Everything a run produced beyond the verdict: the page behind a failure, and
+/// where the run got to.
+#[derive(Debug, Default)]
+pub struct FlowProbe {
+    pub evidence: Option<FlowEvidence>,
+    pub steps: Vec<StepTrace>,
+}
 
 pub async fn execute_flow_check(
     target_id: Uuid,
@@ -26,38 +36,53 @@ pub async fn execute_flow_check(
         .0
 }
 
-/// Same run, plus what the page said when a step failed. Backs the test-check
-/// UI, where the error string alone rarely places the fault.
+/// Same run, plus what the page said when a step failed and how far the run
+/// got. Backs the test-check UI, where the error string alone rarely places
+/// the fault.
 pub async fn execute_flow_check_probe(
     target_id: Uuid,
     org_id: Uuid,
     flow: &FlowCheck,
     engine: Option<&CdpEngine>,
-) -> (CheckResult, Option<FlowEvidence>) {
+) -> (CheckResult, FlowProbe) {
     let Some(engine) = engine else {
+        counter!(names::FLOW_RUNS, "outcome" => "unconfigured").increment(1);
         return (
             CheckResult::error(target_id, org_id, "flow engine not configured on this node"),
-            None,
+            FlowProbe::default(),
         );
     };
 
     let started = Utc::now();
     // `run` applies the flow deadline internally, after it holds a concurrency
     // slot, and returns the elapsed probe time excluding any queue wait.
-    let (run, evidence, elapsed) = engine.run(flow).await;
+    let (run, evidence, steps, elapsed) = engine.run(flow).await;
 
-    let (status, error) = match run {
-        RunResult::Passed => (CheckStatus::Up, None),
+    let total = flow.steps.len();
+    let (outcome, status, error) = match run {
+        RunResult::Passed => ("passed", CheckStatus::Up, None),
         RunResult::Failed { step, op, reason } => (
+            "failed",
             CheckStatus::Down,
-            Some(format!(
-                "step {}/{} {op}: {reason}",
-                step + 1,
-                flow.steps.len()
-            )),
+            Some(step_line(step, total, op, &reason)),
         ),
-        RunResult::Engine(e) => (CheckStatus::Error, Some(e)),
+        // Shaped like a step failure because that is how it reads to an
+        // operator, but reported Error: the target never got to answer. With
+        // nothing reached there is no step to name — the run spent its budget
+        // getting the browser and the first page up.
+        RunResult::Budget { step, op } => (
+            "budget",
+            CheckStatus::Error,
+            Some(if reached(&steps) == 0 {
+                "run budget spent before the first step ran".to_string()
+            } else {
+                step_line(step, total, op, "run budget spent")
+            }),
+        ),
+        RunResult::Engine(e) => ("engine", CheckStatus::Error, Some(e)),
     };
+
+    record_run(target_id, outcome, elapsed, &steps, error.as_deref());
 
     let result = CheckResult {
         target_id,
@@ -73,7 +98,54 @@ pub async fn execute_flow_check_probe(
         response_size: None,
         error,
     };
-    (result, evidence)
+    (result, FlowProbe { evidence, steps })
+}
+
+fn step_line(step: usize, total: usize, op: &str, reason: &str) -> String {
+    format!("step {}/{total} {op}: {reason}", step + 1)
+}
+
+fn reached(steps: &[StepTrace]) -> usize {
+    steps
+        .iter()
+        .filter(|s| s.outcome != StepOutcome::Skipped)
+        .count()
+}
+
+/// A skipped step is time nobody spent, so it stays out of the op histogram;
+/// including it would drag every op's distribution toward zero.
+fn record_run(
+    target_id: Uuid,
+    outcome: &'static str,
+    elapsed_ms: u32,
+    steps: &[StepTrace],
+    error: Option<&str>,
+) {
+    counter!(names::FLOW_RUNS, "outcome" => outcome).increment(1);
+    for step in steps {
+        if step.outcome != StepOutcome::Skipped {
+            histogram!(names::FLOW_STEP_DURATION_MS, "op" => step.op.clone())
+                .record(f64::from(step.duration_ms));
+        }
+    }
+    let reached = reached(steps);
+    match outcome {
+        "passed" => tracing::debug!(
+            %target_id,
+            steps = steps.len(),
+            elapsed_ms,
+            "flow run passed"
+        ),
+        _ => tracing::warn!(
+            %target_id,
+            outcome,
+            reached,
+            steps = steps.len(),
+            elapsed_ms,
+            error = error.unwrap_or_default(),
+            "flow run did not pass"
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -147,8 +219,156 @@ mod tests {
             step_timeout: Duration::from_secs(10),
             verify_tls: true,
         };
-        let r = execute_flow_check(Uuid::nil(), Uuid::nil(), &flow, Some(&engine)).await;
+        let (r, probe) =
+            execute_flow_check_probe(Uuid::nil(), Uuid::nil(), &flow, Some(&engine)).await;
         assert_eq!(r.status, CheckStatus::Up, "error={:?}", r.error);
+        assert_eq!(probe.steps.len(), flow.steps.len());
+        assert!(
+            probe.steps.iter().all(|s| s.outcome == StepOutcome::Passed),
+            "a passing run must trace every step: {:?}",
+            probe.steps
+        );
+        assert!(probe.evidence.is_none(), "a pass has nothing to explain");
+    }
+
+    // A budget too small to outlast the browser starting up must say so rather
+    // than blaming the step that would have run first.
+    #[tokio::test]
+    #[ignore]
+    async fn budget_spent_before_any_step_names_no_step() {
+        let Ok(bin) = std::env::var("FLOW_LIGHTPANDA_BIN") else {
+            eprintln!("FLOW_LIGHTPANDA_BIN unset; skipping");
+            return;
+        };
+        let (addr, server) = serve_page("<html><body>never reached</body></html>").await;
+
+        let flow = FlowCheck {
+            start_url: url::Url::parse(&format!("http://{addr}/")).unwrap(),
+            steps: vec![FlowStep::AssertText {
+                selector: None,
+                contains: "never reached".into(),
+            }],
+            timeout: Duration::from_millis(1),
+            step_timeout: Duration::from_secs(5),
+            verify_tls: false,
+        };
+        let (result, probe) = execute_flow_check_probe(
+            Uuid::nil(),
+            Uuid::nil(),
+            &flow,
+            Some(&sandbox_engine(&bin, false)),
+        )
+        .await;
+        server.abort();
+
+        assert_eq!(
+            result.status,
+            CheckStatus::Error,
+            "error={:?}",
+            result.error
+        );
+        assert_eq!(
+            result.error.as_deref(),
+            Some("run budget spent before the first step ran")
+        );
+        assert_eq!(
+            probe.steps.iter().map(|s| s.outcome).collect::<Vec<_>>(),
+            vec![StepOutcome::Skipped]
+        );
+    }
+
+    // The budget, not the step timeout, must end a run that outlives it — and
+    // the page has to survive that so the failure still explains itself.
+    #[tokio::test]
+    #[ignore]
+    async fn spent_budget_names_the_step_and_keeps_the_page() {
+        let Ok(bin) = std::env::var("FLOW_LIGHTPANDA_BIN") else {
+            eprintln!("FLOW_LIGHTPANDA_BIN unset; skipping");
+            return;
+        };
+        let (addr, server) =
+            serve_page("<html><head><title>Stuck</title></head><body>waiting room</body></html>")
+                .await;
+
+        let flow = FlowCheck {
+            start_url: url::Url::parse(&format!("http://{addr}/")).unwrap(),
+            steps: vec![
+                FlowStep::AssertText {
+                    selector: None,
+                    contains: "waiting room".into(),
+                },
+                FlowStep::WaitFor {
+                    selector: "#never".into(),
+                },
+                FlowStep::AssertUrl {
+                    contains: "/done".into(),
+                },
+            ],
+            timeout: Duration::from_secs(6),
+            step_timeout: Duration::from_secs(60),
+            verify_tls: false,
+        };
+        let (result, probe) = execute_flow_check_probe(
+            Uuid::nil(),
+            Uuid::nil(),
+            &flow,
+            Some(&sandbox_engine(&bin, false)),
+        )
+        .await;
+        server.abort();
+
+        assert_eq!(
+            result.status,
+            CheckStatus::Error,
+            "error={:?}",
+            result.error
+        );
+        assert_eq!(
+            result.error.as_deref(),
+            Some("step 2/3 wait_for: run budget spent")
+        );
+        assert!(
+            result.duration_ms < 11_000,
+            "the backstop must not be what ended the run: {} ms",
+            result.duration_ms
+        );
+        let outcomes: Vec<_> = probe.steps.iter().map(|s| s.outcome).collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                StepOutcome::Passed,
+                StepOutcome::Failed,
+                StepOutcome::Skipped
+            ]
+        );
+        let ev = probe
+            .evidence
+            .expect("a spent budget must still snapshot the page");
+        assert_eq!(ev.title.as_deref(), Some("Stuck"));
+    }
+
+    /// Serves one fixed page on loopback until the returned task is aborted.
+    async fn serve_page(body: &'static str) -> (std::net::SocketAddr, tokio::task::JoinHandle<()>) {
+        use tokio::io::AsyncWriteExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            loop {
+                let Ok((mut sock, _)) = listener.accept().await else {
+                    return;
+                };
+                let mut buf = [0u8; 2048];
+                let _ = sock.readable().await;
+                let _ = sock.try_read(&mut buf);
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{body}",
+                    body.len(),
+                );
+                let _ = sock.write_all(resp.as_bytes()).await;
+            }
+        });
+        (addr, task)
     }
 
     fn sandbox_engine(bin: &str, block: bool) -> CdpEngine {
@@ -233,7 +453,7 @@ mod tests {
             step_timeout: Duration::from_secs(2),
             verify_tls: false,
         };
-        let (result, evidence) = execute_flow_check_probe(
+        let (result, probe) = execute_flow_check_probe(
             Uuid::nil(),
             Uuid::nil(),
             &flow,
@@ -243,7 +463,10 @@ mod tests {
         server.abort();
 
         assert_eq!(result.status, CheckStatus::Down, "error={:?}", result.error);
-        let ev = evidence.expect("a failed step must carry evidence");
+        assert_eq!(probe.steps.len(), 1);
+        assert_eq!(probe.steps[0].op, "assert_text");
+        assert_eq!(probe.steps[0].outcome, StepOutcome::Failed);
+        let ev = probe.evidence.expect("a failed step must carry evidence");
         assert_eq!(ev.title.as_deref(), Some("Sign in"));
         assert!(
             ev.final_url
@@ -276,31 +499,11 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn egress_sandbox_blocks_loopback_but_not_public() {
-        use tokio::io::AsyncWriteExt;
-
         let Ok(bin) = std::env::var("FLOW_LIGHTPANDA_BIN") else {
             eprintln!("FLOW_LIGHTPANDA_BIN unset; skipping");
             return;
         };
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            loop {
-                let Ok((mut sock, _)) = listener.accept().await else {
-                    return;
-                };
-                let mut buf = [0u8; 2048];
-                let _ = sock.readable().await;
-                let _ = sock.try_read(&mut buf);
-                let body = "<html><body>flowmarker</body></html>";
-                let resp = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{}",
-                    body.len(),
-                    body
-                );
-                let _ = sock.write_all(resp.as_bytes()).await;
-            }
-        });
+        let (addr, server) = serve_page("<html><body>flowmarker</body></html>").await;
         let url = format!("http://{addr}/");
 
         let reached = run_loopback_flow(&sandbox_engine(&bin, false), &url).await;
