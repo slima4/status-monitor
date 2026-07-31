@@ -25,16 +25,4 @@
     <span class="status-badge status-badge--tag mr-1">{{ tag }}</span>
   {% endfor %}
 </div>
-{% if last_status == "down" %}
-<div class="alert-card alert-card--error" role="alert" aria-live="polite">
-  <strong>Monitor is down.</strong> An active incident may be open — see the Incidents tab for details.
-</div>
-{% else if last_status == "error" %}
-<div class="alert-card alert-card--error" role="alert" aria-live="polite">
-  <strong>Monitor check failed.</strong> The last check couldn't complete — see the Incidents tab for details.
-</div>
-{% else if last_status == "degraded" %}
-<div class="alert-card alert-card--warn" role="alert" aria-live="polite">
-  <strong>Monitor is degraded.</strong> Response times are elevated or partial failures are occurring.
-</div>
-{% endif %}
+{% include "targets/partials/_status_banner.html" %}

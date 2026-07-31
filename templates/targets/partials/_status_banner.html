@@ -1,0 +1,20 @@
+{# Current-state banner, shared by the operator and share headers so the two
+   cannot drift apart. Needs `last_status` and `ongoing_count` in scope.
+   A count of zero is also what a failed count reads as, so nothing here
+   asserts that no incident exists — only that one is open when it is. #}
+{% if last_status == "down" %}
+<div class="alert-card alert-card--error" role="alert" aria-live="polite">
+  <strong>Monitor is down.</strong>
+  {%- if ongoing_count > 0 %} An incident is open — see the Incidents tab for details.
+  {%- else %} An incident opens once the failures persist.{% endif %}
+</div>
+{% else if last_status == "error" %}
+<div class="alert-card alert-card--error" role="alert" aria-live="polite">
+  <strong>Monitor check failed.</strong> The last check couldn't complete, so nothing was learned about the target.
+  {%- if ongoing_count > 0 %} See the Incidents tab for details.{% endif %}
+</div>
+{% else if last_status == "degraded" %}
+<div class="alert-card alert-card--warn" role="alert" aria-live="polite">
+  <strong>Monitor is degraded.</strong> Response times are elevated or partial failures are occurring.
+</div>
+{% endif %}

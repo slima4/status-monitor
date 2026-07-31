@@ -15,14 +15,15 @@ use crate::api::types::{
     PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown,
 };
 use crate::config::ClickhouseConfig;
-use crate::domain::agent_wire::{FlowRunRecord, StepOutcome};
+use crate::domain::agent_wire::{ConsoleLine, FlowEvidence, FlowRunRecord, StepOutcome, StepTrace};
 use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
 use crate::error::Result;
 use crate::observability::metrics::names;
 use crate::quotas::service::RetentionDays;
 use crate::storage::org_ttl::OrgTtlDays;
 use crate::storage::traits::{
-    ClampedRange, FlowRunSink, ResultSink, ResultsStore, TimeRange, UptimeStats, rollup_bucket_secs,
+    ClampedRange, FlowRunSink, FlowRunView, ResultSink, ResultsStore, TimeRange, UptimeStats,
+    rollup_bucket_secs,
 };
 
 const TABLE: &str = "check_results";
@@ -722,6 +723,74 @@ impl ClickhouseResultsStore {
 }
 
 #[derive(Debug, Row, Deserialize)]
+struct StoredFlowRunRow {
+    timestamp: u32,
+    region: String,
+    status: i8,
+    duration_ms: u32,
+    stopped_step: Option<u16>,
+    error: String,
+    step_op: Vec<String>,
+    step_outcome: Vec<i8>,
+    step_ms: Vec<u32>,
+    final_url: String,
+    title: String,
+    text_snippet: String,
+    console_level: Vec<String>,
+    console_text: Vec<String>,
+    evidence_expired: u8,
+}
+
+/// An expired evidence column reads empty, so it maps back to absent rather
+/// than to a blank string the page would render as real.
+fn some_if_filled(s: String) -> Option<String> {
+    (!s.is_empty()).then_some(s)
+}
+
+impl From<StoredFlowRunRow> for FlowRunView {
+    fn from(r: StoredFlowRunRow) -> Self {
+        let steps = r
+            .step_op
+            .into_iter()
+            .zip(r.step_outcome)
+            .zip(r.step_ms)
+            .map(|((op, outcome), duration_ms)| StepTrace {
+                op,
+                outcome: StepOutcome::from_enum8(outcome),
+                duration_ms,
+            })
+            .collect();
+        let console: Vec<ConsoleLine> = r
+            .console_level
+            .into_iter()
+            .zip(r.console_text)
+            .map(|(level, text)| ConsoleLine { level, text })
+            .collect();
+        let final_url = some_if_filled(r.final_url);
+        let title = some_if_filled(r.title);
+        let text_snippet = some_if_filled(r.text_snippet);
+        let has_page =
+            final_url.is_some() || title.is_some() || text_snippet.is_some() || !console.is_empty();
+        Self {
+            timestamp: from_unix_secs(r.timestamp),
+            region: r.region,
+            status: CheckStatus::from_enum8(r.status),
+            duration_ms: r.duration_ms,
+            stopped_step: r.stopped_step.map(usize::from),
+            error: some_if_filled(r.error),
+            steps,
+            evidence_expired: r.evidence_expired != 0,
+            evidence: has_page.then_some(FlowEvidence {
+                final_url,
+                title,
+                text_snippet,
+                console,
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Row, Deserialize)]
 struct IncidentRow {
     #[serde(with = "clickhouse::serde::uuid")]
     target_id: Uuid,
@@ -853,6 +922,66 @@ fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
 
 #[async_trait]
 impl ResultsStore for ClickhouseResultsStore {
+    async fn flow_runs(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+        region: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<FlowRunView>> {
+        let limit = limit.min(500) as u64;
+        let region_clause = if region.is_some() {
+            "AND region = ? "
+        } else {
+            ""
+        };
+        // The newest runs answer "is it healthy now"; the newest failures answer
+        // "what went wrong", and at the interval floor those are rarely the same
+        // rows — a page of newest-only reaches back hours while the table holds
+        // weeks. UNION DISTINCT folds a run that is both into one row.
+        // The page columns read empty both when they expired and when the run
+        // never captured one, so each branch decides which from the window the
+        // row itself carries. The outer select reads that answer back by name;
+        // `evidence_days` is not projected, so it cannot recompute it.
+        let cols = "timestamp, region, status, duration_ms, stopped_step, error, \
+             step_op, step_outcome, step_ms, final_url, title, text_snippet, \
+             console_level, console_text";
+        let branch_cols =
+            format!("{cols}, timestamp < now() - toIntervalDay(evidence_days) AS evidence_expired");
+        let outer_cols = format!("{cols}, evidence_expired");
+        let scope = format!(
+            "org_id = ? AND target_id = ? \
+             AND timestamp >= fromUnixTimestamp(?) AND timestamp < fromUnixTimestamp(?) \
+             {region_clause}"
+        );
+        let mut q = self.client.query(&format!(
+            "SELECT {outer_cols} FROM (\
+                 SELECT {branch_cols} FROM {FLOW_TABLE} WHERE {scope} \
+                 ORDER BY timestamp DESC LIMIT {limit} \
+                 UNION DISTINCT \
+                 SELECT {branch_cols} FROM {FLOW_TABLE} WHERE {scope} AND status != 'up' \
+                 ORDER BY timestamp DESC LIMIT {limit}\
+             ) ORDER BY timestamp DESC"
+        ));
+        // Bound twice: once per branch of the union, in source order.
+        for _ in 0..2 {
+            q = q
+                .bind(org.0)
+                .bind(target_id)
+                .bind(range.from.timestamp())
+                .bind(range.to.timestamp());
+            if let Some(r) = region {
+                q = q.bind(r);
+            }
+        }
+        let rows: Vec<StoredFlowRunRow> = q
+            .fetch_all()
+            .await
+            .context("clickhouse flow_runs for target")?;
+        Ok(rows.into_iter().map(FlowRunView::from).collect())
+    }
+
     async fn ping(&self) -> Result<()> {
         self.client
             .query("SELECT 1")

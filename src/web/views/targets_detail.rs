@@ -12,6 +12,7 @@ use uuid::Uuid;
 use crate::api::error::codes;
 use crate::api::types::AvailabilityBucket;
 use crate::app::AppState;
+use crate::domain::agent_wire::StepOutcome;
 use crate::domain::{
     CheckResult, CheckSpec, Incident, OrgId, confirmed_downtime_secs, uptime_pct_from_downtime,
 };
@@ -51,17 +52,19 @@ pub(crate) const INCIDENT_RANGE_KEYS: [&str; 4] = ["24h", "7d", "30d", "90d"];
 pub(crate) const INCIDENT_DEFAULT_RANGE: &str = "30d";
 const INCIDENTS_PAGE_LIMIT: usize = 100;
 
-pub(crate) fn ongoing_from_status(status: &str) -> usize {
-    // Loose semantic: badge tracks "current state is bad", not a
-    // separate CH scan. Misses the "fixed 30s ago, badge still set"
-    // case in exchange for zero extra queries on the highest-traffic
-    // page. Coalesce only ever opens one trailing run per target so
-    // the count is 0 or 1.
-    if matches!(status, "down" | "error") {
-        1
-    } else {
-        0
-    }
+/// Open incidents for this monitor. Counted, never inferred from the last
+/// check: a monitor that fails once and recovers opens no incident, so
+/// inferring would badge a tab with nothing in it. That accuracy costs one
+/// indexed round trip per render, which the inferred version deliberately
+/// avoided — worth it only because the inferred answer was wrong often enough
+/// to send readers to an empty tab. A store error reads as 0, so the banner
+/// hedges rather than asserting an incident it could not confirm.
+pub(crate) async fn ongoing_for_target(state: &AppState, org: OrgId, target_id: Uuid) -> usize {
+    state
+        .incident_narration_store
+        .count_ongoing_for_target(org, target_id)
+        .await
+        .unwrap_or(0) as usize
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -251,6 +254,129 @@ pub struct DetailPage {
     /// Ping-URL card for heartbeat monitors; `None` for every other kind.
     /// Shares the API handler's projection so the two surfaces can't diverge.
     pub heartbeat: Option<crate::api::handlers::targets::HeartbeatInfo>,
+    /// Stored runs, newest first. Empty for every kind but flow, which is what
+    /// keeps the panel and its query off the other seven.
+    pub flow_runs: Vec<FlowRunRow>,
+}
+
+/// Enough to see a pattern across a day at the interval floor, without paging.
+const FLOW_RUNS_SHOWN: usize = 25;
+
+pub struct FlowStepRow {
+    pub number: usize,
+    pub op: String,
+    /// Playback class shared with the builder, so a step reads the same on both.
+    pub state: &'static str,
+    pub marker: &'static str,
+    pub ms_label: String,
+    /// Blank on every step but the one the run stopped at.
+    pub reason: String,
+}
+
+pub struct FlowRunRow {
+    pub at_iso: String,
+    pub at_utc: String,
+    pub region: String,
+    pub status: &'static str,
+    pub duration_label: String,
+    /// What the run did, in the collapsed header.
+    pub summary: String,
+    /// Shown when no step carries it — a run that never reached the step list.
+    pub error: String,
+    pub steps: Vec<FlowStepRow>,
+    /// `None` on a pass, and on a failure old enough to have shed its page.
+    pub evidence: Option<FlowEvidenceView>,
+    /// A step failure whose page has passed its window. A run that broke before
+    /// the step list never captured one, which is a different thing.
+    pub evidence_expired: bool,
+}
+
+pub struct FlowEvidenceView {
+    pub final_url: String,
+    pub title: String,
+    pub text_snippet: String,
+    pub console: Vec<String>,
+}
+
+impl FlowRunRow {
+    fn from_view(v: crate::storage::traits::FlowRunView) -> Self {
+        let stopped = v.stopped_step;
+        let total = v.steps.len();
+        let reason = strip_step_prefix(v.error.as_deref().unwrap_or_default());
+        let steps = v
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let (state, marker) = match s.outcome {
+                    StepOutcome::Passed => ("flow-step--pass", "✓"),
+                    StepOutcome::Failed => ("flow-step--fail", "✗"),
+                    StepOutcome::Skipped => ("flow-step--skip", "·"),
+                };
+                FlowStepRow {
+                    number: i + 1,
+                    op: s.op.clone(),
+                    state,
+                    marker,
+                    ms_label: format!("{} ms", s.duration_ms),
+                    reason: if Some(i) == stopped {
+                        reason.clone()
+                    } else {
+                        String::new()
+                    },
+                }
+            })
+            .collect();
+        let evidence = v.evidence.map(|e| FlowEvidenceView {
+            final_url: e.final_url.unwrap_or_default(),
+            title: e.title.unwrap_or_default(),
+            text_snippet: e.text_snippet.unwrap_or_default(),
+            console: e
+                .console
+                .into_iter()
+                .map(|c| format!("{}: {}", c.level, c.text))
+                .collect(),
+        });
+        // Only a run that reached a step could have had a page to lose, and only
+        // the store knows whether the window is what took it.
+        let evidence_expired = v.evidence_expired && evidence.is_none() && stopped.is_some();
+        let summary = match stopped {
+            Some(i) => format!(
+                "stopped at step {}/{total} {}",
+                i + 1,
+                v.steps.get(i).map(|s| s.op.as_str()).unwrap_or_default()
+            ),
+            None if total > 0 => format!("all {total} steps passed"),
+            None => "never reached its steps".to_string(),
+        };
+        Self {
+            at_iso: v.timestamp.to_rfc3339(),
+            at_utc: v.timestamp.format("%Y-%m-%d %H:%M:%S UTC").to_string(),
+            region: v.region,
+            status: v.status.as_str(),
+            duration_label: format!("{} ms", v.duration_ms),
+            summary,
+            // A trace pins the reason to the step it belongs to; without one
+            // the run-level line is the only thing that can explain it.
+            error: if total > 0 {
+                String::new()
+            } else {
+                v.error.unwrap_or_default()
+            },
+            steps,
+            evidence,
+            evidence_expired,
+        }
+    }
+}
+
+/// Drops the "step 4/5 assert_url: " prefix: the row already names that step.
+fn strip_step_prefix(error: &str) -> String {
+    error
+        .split_once(": ")
+        .filter(|(head, _)| head.starts_with("step "))
+        .map(|(_, rest)| rest.to_string())
+        .unwrap_or_else(|| error.to_string())
 }
 
 /// One row of the per-region breakdown table on the monitor detail page.
@@ -922,7 +1048,7 @@ pub async fn index(
     } else {
         Vec::new()
     };
-    let ongoing_count = ongoing_from_status(live.last_status);
+    let ongoing_count = ongoing_for_target(&state, org, target.id).await;
     let registered_domain = match &target.check {
         CheckSpec::DomainExpiry(d) => d.reduced_domain_hint(),
         _ => None,
@@ -940,6 +1066,35 @@ pub async fn index(
         .monitor_share_store
         .count_active_for_target(org, target.id)
         .await? as usize;
+    let flow_runs = if matches!(target.check, CheckSpec::Flow(_)) {
+        // Same window the rest of the page is showing, clamped to what the plan
+        // retains, so the panel never claims history the charts do not have.
+        let window = state
+            .quotas
+            .clamp_raw(
+                org,
+                TimeRange {
+                    from,
+                    to: to.min(Utc::now()),
+                },
+            )
+            .await?;
+        state
+            .results_store
+            .flow_runs(
+                org,
+                target.id,
+                window,
+                selected_region.as_deref(),
+                FLOW_RUNS_SHOWN,
+            )
+            .await?
+            .into_iter()
+            .map(FlowRunRow::from_view)
+            .collect()
+    } else {
+        Vec::new()
+    };
     let heartbeat = if target.check.is_passive() {
         Some(crate::api::handlers::targets::heartbeat_info(&state, org, target.id).await?)
     } else {
@@ -985,6 +1140,7 @@ pub async fn index(
         selected_region,
         region_breakdown,
         heartbeat,
+        flow_runs,
     })
 }
 
@@ -1284,11 +1440,9 @@ pub(crate) async fn load_incidents_data(
     if has_more {
         incidents.truncate(INCIDENTS_PAGE_LIMIT);
     }
-    // Tab badge: prefer the live-status signal so the count matches what the
-    // Monitor tab shows. Fall back to counting open incidents in the list when
-    // the user narrowed to a window where last_status is stale.
-    let ongoing_count = ongoing_from_status(last_status)
-        .max(incidents.iter().filter(|i| i.ended_at.is_none()).count());
+    // Counted org-wide for the monitor, not from the page above it: an open
+    // incident that started before the selected window is still open now.
+    let ongoing_count = ongoing_for_target(state, org, target_id).await;
 
     Ok(IncidentsData {
         last_status,
@@ -1374,6 +1528,7 @@ pub(crate) fn resolve_incident_window(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::CheckStatus;
 
     #[test]
     fn region_breakdown_greys_dead_region_keeps_live() {
@@ -1508,6 +1663,7 @@ mod tests {
                 },
             ]),
             ribbon_oob: false,
+            flow_runs: Vec::new(),
             config_json: r#"{"type":"http"}"#.into(),
             range: "24h",
             range_options: build_range_options("24h", &RANGE_KEYS),
@@ -1625,6 +1781,218 @@ mod tests {
             !html.contains(r#"<span class="dashboard-kpi-card__unit">%</span>"#),
             "no percent unit without a rate to qualify"
         );
+    }
+
+    fn trace(op: &str, outcome: StepOutcome, ms: u32) -> crate::domain::agent_wire::StepTrace {
+        crate::domain::agent_wire::StepTrace {
+            op: op.into(),
+            outcome,
+            duration_ms: ms,
+        }
+    }
+
+    fn failed_run() -> crate::storage::traits::FlowRunView {
+        crate::storage::traits::FlowRunView {
+            timestamp: chrono::Utc::now(),
+            region: "eu-helsinki".into(),
+            status: CheckStatus::Down,
+            duration_ms: 2570,
+            stopped_step: Some(1),
+            error: Some("step 2/3 assert_url: url does not contain \"/secure\"".into()),
+            steps: vec![
+                trace("fill", StepOutcome::Passed, 12),
+                trace("assert_url", StepOutcome::Failed, 2000),
+                trace("assert_text", StepOutcome::Skipped, 0),
+            ],
+            evidence: Some(crate::domain::agent_wire::FlowEvidence {
+                final_url: Some("https://app.example.com/login".into()),
+                title: Some("Sign in".into()),
+                text_snippet: Some("Your password is invalid!".into()),
+                console: vec![crate::domain::agent_wire::ConsoleLine {
+                    level: "error".into(),
+                    text: "token expired".into(),
+                }],
+            }),
+            evidence_expired: false,
+        }
+    }
+
+    fn flow_page(runs: Vec<crate::storage::traits::FlowRunView>) -> DetailPage {
+        let mut p = sample_page();
+        p.kind = "FLOW";
+        p.flow_runs = runs.into_iter().map(FlowRunRow::from_view).collect();
+        p
+    }
+
+    #[test]
+    fn flow_run_panel_shows_the_trace_and_the_page_behind_a_failure() {
+        let html = flow_page(vec![failed_run()]).render().unwrap();
+        assert!(html.contains("flow runs"));
+        assert!(html.contains("stopped at step 2/3 assert_url"));
+        assert!(html.contains("flow-step--pass"));
+        assert!(html.contains("flow-step--fail"));
+        assert!(html.contains("flow-step--skip"));
+        assert!(html.contains("2000 ms"));
+        assert!(html.contains("url does not contain"));
+        assert!(!html.contains("step 2/3 assert_url: url"));
+        assert!(html.contains("Your password is invalid!"));
+        assert!(html.contains("token expired"));
+    }
+
+    // Page text is whatever the customer's site rendered, so it reaches the
+    // template as content and never as markup.
+    #[test]
+    fn captured_page_text_cannot_inject_markup() {
+        let run = crate::storage::traits::FlowRunView {
+            evidence: Some(crate::domain::agent_wire::FlowEvidence {
+                final_url: Some("https://app.example.com/?q=<img src=x onerror=alert(1)>".into()),
+                title: Some("<script>alert('title')</script>".into()),
+                text_snippet: Some("<script>alert('body')</script>".into()),
+                console: vec![crate::domain::agent_wire::ConsoleLine {
+                    level: "error".into(),
+                    text: "<iframe src=javascript:alert(1)>".into(),
+                }],
+            }),
+            ..failed_run()
+        };
+        let html = flow_page(vec![run]).render().unwrap();
+        assert!(
+            !html.contains("<script>alert"),
+            "page text reached the DOM as markup"
+        );
+        assert!(
+            !html.contains("<iframe"),
+            "console text reached the DOM as markup"
+        );
+        assert!(
+            !html.contains("<img src=x"),
+            "url reached the DOM as markup"
+        );
+        assert!(html.contains("alert("), "the text itself is still shown");
+    }
+
+    #[test]
+    fn a_passing_run_lists_its_steps_and_no_page() {
+        let run = crate::storage::traits::FlowRunView {
+            status: CheckStatus::Up,
+            stopped_step: None,
+            error: None,
+            evidence: None,
+            steps: vec![trace("fill", StepOutcome::Passed, 12)],
+            ..failed_run()
+        };
+        let html = flow_page(vec![run]).render().unwrap();
+        assert!(html.contains("all 1 steps passed"));
+        assert!(!html.contains("flow-evidence"), "a pass captured no page");
+        assert!(
+            !html.contains("retention window"),
+            "a pass never had a page to expire"
+        );
+    }
+
+    // Trace kept, page gone: an ordinary older run, not an error.
+    #[test]
+    fn a_failure_past_its_evidence_window_says_so() {
+        let run = crate::storage::traits::FlowRunView {
+            evidence: None,
+            evidence_expired: true,
+            ..failed_run()
+        };
+        assert!(run.stopped_step.is_some(), "it stopped at a step");
+        let html = flow_page(vec![run]).render().unwrap();
+        assert!(html.contains("retention window"));
+        assert!(html.contains("flow-step--fail"), "the trace still renders");
+    }
+
+    // The browser never started, so there is no step list and no page. It must
+    // not read as a clean run, and its reason has nowhere else to go.
+    #[test]
+    fn a_run_that_never_reached_its_steps_explains_itself() {
+        let run = crate::storage::traits::FlowRunView {
+            status: CheckStatus::Error,
+            stopped_step: None,
+            steps: Vec::new(),
+            evidence: None,
+            error: Some("engine did not start after retries: exit status 1".into()),
+            ..failed_run()
+        };
+        let html = flow_page(vec![run]).render().unwrap();
+        assert!(
+            !html.contains("all 0 steps passed"),
+            "an error is not a pass"
+        );
+        assert!(html.contains("never reached its steps"));
+        assert!(html.contains("engine did not start after retries"));
+        assert!(
+            !html.contains("retention window"),
+            "it never captured a page, so nothing of it expired"
+        );
+    }
+
+    // Evidence capture is best-effort, so a page that died can leave a
+    // seconds-old failure with nothing captured. That is not an expiry.
+    #[test]
+    fn a_failure_that_captured_nothing_is_not_called_expired() {
+        let run = crate::storage::traits::FlowRunView {
+            evidence: None,
+            evidence_expired: false,
+            ..failed_run()
+        };
+        let html = flow_page(vec![run]).render().unwrap();
+        assert!(
+            !html.contains("retention window"),
+            "nothing expired — the run never captured a page"
+        );
+        assert!(html.contains("flow-step--fail"), "the trace still renders");
+    }
+
+    #[test]
+    fn a_flow_with_no_runs_yet_renders_an_empty_state() {
+        let html = flow_page(Vec::new()).render().unwrap();
+        assert!(html.contains("No runs recorded yet"));
+    }
+
+    #[test]
+    fn the_run_panel_is_flow_only() {
+        let html = sample_page().render().unwrap();
+        assert!(
+            !html.contains("flow runs"),
+            "an HTTP monitor must not render the flow panel"
+        );
+    }
+
+    // A monitor that fails once and recovers opens no incident, so the banner
+    // must not send the reader to an empty tab.
+    #[test]
+    fn a_failing_check_with_no_open_incident_does_not_point_at_the_tab() {
+        let mut p = sample_page();
+        p.last_status = "error";
+        p.ongoing_count = 0;
+        let html = p.render().unwrap();
+        assert!(html.contains("Monitor check failed"));
+        assert!(
+            !html.contains("Incidents tab"),
+            "there is no incident to go and read"
+        );
+
+        let mut p = sample_page();
+        p.last_status = "down";
+        p.ongoing_count = 0;
+        let html = p.render().unwrap();
+        // A count of zero is also what a failed count reads as, so the banner
+        // says how incidents come about rather than that none exists.
+        assert!(html.contains("An incident opens once the failures persist"));
+        assert!(!html.contains("Incidents tab"));
+    }
+
+    #[test]
+    fn an_open_incident_is_what_points_at_the_tab() {
+        let mut p = sample_page();
+        p.last_status = "down";
+        p.ongoing_count = 1;
+        let html = p.render().unwrap();
+        assert!(html.contains("An incident is open"));
+        assert!(html.contains("Incidents tab"));
     }
 
     #[test]

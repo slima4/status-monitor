@@ -1,0 +1,69 @@
+<section class="sticker-card overflow-hidden">
+  <div class="flex items-baseline justify-between px-5 pt-5 pb-3">
+    <h2 class="panel-label">flow runs</h2>
+    <span class="cli-brackets font-mono text-xs text-quiet">last {{ flow_runs.len() }}</span>
+  </div>
+
+  {% if flow_runs.is_empty() %}
+  <p class="px-5 pb-5 text-sm text-muted">No runs recorded yet. The first one appears after this monitor's next check.</p>
+  {% else %}
+  <ul class="divide-y divide-[color:var(--theme-line)] border-t border-[color:var(--theme-line)]">
+    {% for run in flow_runs %}
+    <li>
+      <details class="flow-run" {% if loop.first %}open{% endif %}>
+        <summary class="flow-run__head">
+          <span class="dashboard-dot dashboard-dot--{{ run.status }}"></span>
+          <time datetime="{{ run.at_iso }}" data-tz="exact" class="flow-run__at">{{ run.at_utc }}</time>
+          <span class="flow-run__region">{{ run.region }}</span>
+          <span class="flow-run__stopped">{{ run.summary }}</span>
+          <span class="flow-run__ms">{{ run.duration_label }}</span>
+        </summary>
+
+        <div class="flow-run__body">
+          {% if !run.error.is_empty() %}
+          <p class="flow-run__error">{{ run.error }}</p>
+          {% endif %}
+          <ol class="flow-trace">
+            {% for step in run.steps %}
+            <li class="flow-trace__step {{ step.state }}">
+              <span class="flow-trace__num">{{ step.number }}</span>
+              <span class="flow-step__status">{{ step.marker }}</span>
+              <span class="flow-trace__op">{{ step.op }}</span>
+              <span class="flow-trace__ms">{{ step.ms_label }}</span>
+              {% if !step.reason.is_empty() %}
+              <span class="flow-step__reason">{{ step.reason }}</span>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ol>
+
+          {% if let Some(ev) = run.evidence %}
+          <dl class="flow-evidence">
+            {% if !ev.final_url.is_empty() %}
+            <dt>URL</dt><dd class="break-all">{{ ev.final_url }}</dd>
+            {% endif %}
+            {% if !ev.title.is_empty() %}
+            <dt>Title</dt><dd>{{ ev.title }}</dd>
+            {% endif %}
+            {% if !ev.text_snippet.is_empty() %}
+            <dt>Page text</dt><dd>{{ ev.text_snippet }}</dd>
+            {% endif %}
+            <dt>Console</dt>
+            <dd>
+              {%- if ev.console.is_empty() -%}
+              nothing logged
+              {%- else -%}
+              {% for line in ev.console %}<span class="flow-evidence__line">{{ line }}</span>{% endfor %}
+              {%- endif -%}
+            </dd>
+          </dl>
+          {% else if run.evidence_expired %}
+          <p class="flow-run__note">The page this run captured has passed its retention window. The steps above are kept longer.</p>
+          {% endif %}
+        </div>
+      </details>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</section>

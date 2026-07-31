@@ -46,6 +46,22 @@ pub trait FlowRunSink: Send + Sync {
     }
 }
 
+/// One stored flow run. `evidence` is `None` both once its shorter window has
+/// passed and when the run never captured a page — `evidence_expired` is what
+/// tells the two apart, decided by the table that applied the window.
+#[derive(Debug, Clone)]
+pub struct FlowRunView {
+    pub timestamp: DateTime<Utc>,
+    pub region: String,
+    pub status: CheckStatus,
+    pub duration_ms: u32,
+    pub stopped_step: Option<usize>,
+    pub error: Option<String>,
+    pub steps: Vec<crate::domain::agent_wire::StepTrace>,
+    pub evidence: Option<crate::domain::agent_wire::FlowEvidence>,
+    pub evidence_expired: bool,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct TargetFilter {
     pub limit: Option<usize>,
@@ -323,6 +339,21 @@ impl UptimeStats {
 pub trait ResultsStore: Send + Sync {
     /// Liveness probe for `/readyz` — connection-level, not tenant data.
     async fn ping(&self) -> Result<()>;
+    /// Newest first, within the range: up to `limit` most recent runs plus up
+    /// to `limit` most recent failures, merged — at the interval floor a page of
+    /// newest-only reaches back hours while the table holds weeks, so a failure
+    /// would otherwise be unreachable. Defaults to empty so a store without the
+    /// table simply has no history rather than every fixture reimplementing it.
+    async fn flow_runs(
+        &self,
+        _org: OrgId,
+        _target_id: Uuid,
+        _range: ClampedRange,
+        _region: Option<&str>,
+        _limit: usize,
+    ) -> Result<Vec<FlowRunView>> {
+        Ok(Vec::new())
+    }
     async fn list_results(
         &self,
         org: OrgId,

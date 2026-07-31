@@ -45,7 +45,7 @@ use crate::web::views::targets_detail::{
     DEFAULT_RANGE, DetailParams, INCIDENT_DEFAULT_RANGE, INCIDENT_RANGE_KEYS, IncidentRow,
     KpiTrend, RANGE_KEYS, ResultRow, SUBTAB_INCIDENTS, SUBTAB_MONITOR, UptimeStatsView,
     WindowLabels, fmt_error_display, load_incidents_data, load_live_data_cached,
-    ongoing_from_status, resolve_incident_window, resolve_window,
+    ongoing_for_target, resolve_incident_window, resolve_window,
 };
 use crate::web::views::{RangeOption, build_range_options, describe_check, resolve_range_key};
 
@@ -202,7 +202,7 @@ pub async fn detail(
         None,
     )
     .await?;
-    let ongoing_count = ongoing_from_status(live.last_status);
+    let ongoing_count = ongoing_for_target(&state, resolved.org, resolved.target_id).await;
     let config_json = serde_json::to_string_pretty(&target.check)
         .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;
     let (kind, address) = describe_check(&target.check);

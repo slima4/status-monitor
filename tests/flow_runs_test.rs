@@ -13,8 +13,16 @@ use uptimepage::domain::CheckStatus;
 use uptimepage::domain::agent_wire::{
     ConsoleLine, FlowEvidence, FlowRunRecord, StepOutcome, StepTrace,
 };
-use uptimepage::storage::ClickhouseFlowRunSink;
 use uptimepage::storage::traits::FlowRunSink;
+use uptimepage::storage::{ClampedRange, ClickhouseFlowRunSink, TimeRange};
+
+/// Wide enough to hold every run these tests write.
+fn any_time() -> ClampedRange {
+    ClampedRange::unclamped(TimeRange {
+        from: Utc::now() - Duration::days(365),
+        to: Utc::now() + Duration::days(1),
+    })
+}
 
 fn step(op: &str, outcome: StepOutcome, ms: u32) -> StepTrace {
     StepTrace {
@@ -224,4 +232,210 @@ async fn page_evidence_expires_while_the_trace_survives() {
         new.text_snippet, "Your password is invalid!",
         "a run inside the window keeps its page"
     );
+}
+
+#[tokio::test]
+#[ignore]
+async fn the_monitor_page_reads_runs_newest_first() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let sink = ClickhouseFlowRunSink::new(
+        client.clone(),
+        "eu-helsinki".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
+
+    let mut older = failed_login(org_id, target_id);
+    older.timestamp = Utc::now() - Duration::days(10);
+    let mut passing = failed_login(org_id, target_id);
+    passing.timestamp = Utc::now();
+    passing.status = CheckStatus::Up;
+    passing.error = None;
+    passing.evidence = None;
+    passing.steps = vec![step("fill", StepOutcome::Passed, 12)];
+    sink.write_runs(&[older, passing]).await;
+    client
+        .query("OPTIMIZE TABLE flow_runs FINAL")
+        .execute()
+        .await
+        .expect("optimize flow_runs");
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    let runs = store
+        .flow_runs(OrgId(org_id), target_id, any_time(), None, 50)
+        .await
+        .expect("read flow runs");
+
+    assert_eq!(runs.len(), 2);
+    assert_eq!(runs[0].status, CheckStatus::Up, "newest first");
+    assert!(runs[0].error.is_none());
+    assert!(runs[0].evidence.is_none(), "a pass captured no page");
+    assert_eq!(runs[0].stopped_step, None);
+    assert_eq!(runs[0].steps.len(), 1);
+
+    let old = &runs[1];
+    assert_eq!(old.status, CheckStatus::Down);
+    assert_eq!(old.region, "eu-helsinki");
+    assert_eq!(old.stopped_step, Some(3));
+    assert_eq!(old.steps.len(), 5);
+    assert_eq!(old.steps[3].outcome, StepOutcome::Failed);
+    assert_eq!(old.steps[4].outcome, StepOutcome::Skipped);
+    assert!(
+        old.error
+            .as_deref()
+            .is_some_and(|e| e.contains("assert_url"))
+    );
+    assert!(
+        old.evidence.is_none(),
+        "past its window the page reads absent, not blank: {:?}",
+        old.evidence
+    );
+    assert!(
+        old.evidence_expired,
+        "the window is what took it, which the panel must be able to say"
+    );
+    assert!(!runs[0].evidence_expired, "a fresh run has lost nothing");
+}
+
+// Region is a filter on the same key prefix, not a post-filter.
+#[tokio::test]
+#[ignore]
+async fn reading_one_region_excludes_the_others() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let ttl = uptimepage::storage::OrgTtlDays::new();
+    for region in ["eu-helsinki", "us-east"] {
+        ClickhouseFlowRunSink::new(client.clone(), region.into(), ttl.clone())
+            .write_runs(&[failed_login(org_id, target_id)])
+            .await;
+    }
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    let all = store
+        .flow_runs(OrgId(org_id), target_id, any_time(), None, 50)
+        .await
+        .unwrap();
+    assert_eq!(all.len(), 2);
+
+    let one = store
+        .flow_runs(OrgId(org_id), target_id, any_time(), Some("us-east"), 50)
+        .await
+        .unwrap();
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].region, "us-east");
+}
+
+// The panel shows the range the page is on, so a run outside it is not listed
+// even though the row is still stored.
+#[tokio::test]
+#[ignore]
+async fn a_run_outside_the_selected_range_is_not_listed() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let sink = ClickhouseFlowRunSink::new(
+        client.clone(),
+        "eu-helsinki".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
+    let mut old = failed_login(org_id, target_id);
+    old.timestamp = Utc::now() - Duration::days(20);
+    let recent = failed_login(org_id, target_id);
+    sink.write_runs(&[old, recent]).await;
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    assert_eq!(
+        store
+            .flow_runs(OrgId(org_id), target_id, any_time(), None, 50)
+            .await
+            .unwrap()
+            .len(),
+        2,
+        "both rows are stored"
+    );
+
+    let last_day = ClampedRange::unclamped(TimeRange {
+        from: Utc::now() - Duration::days(1),
+        to: Utc::now() + Duration::minutes(1),
+    });
+    let listed = store
+        .flow_runs(OrgId(org_id), target_id, last_day, None, 50)
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1, "only the run inside the range is listed");
+}
+
+// At the interval floor the newest page reaches back hours while the table
+// holds weeks, so a failure older than that must still be listed.
+#[tokio::test]
+#[ignore]
+async fn an_old_failure_is_listed_even_when_newer_runs_fill_the_page() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    use uptimepage::domain::OrgId;
+    use uptimepage::storage::traits::ResultsStore;
+
+    let org_id = Uuid::new_v4();
+    let target_id = Uuid::new_v4();
+    let sink = ClickhouseFlowRunSink::new(
+        client.clone(),
+        "eu-helsinki".into(),
+        uptimepage::storage::OrgTtlDays::new(),
+    );
+
+    let mut runs = Vec::new();
+    let mut old = failed_login(org_id, target_id);
+    old.timestamp = Utc::now() - Duration::days(6);
+    runs.push(old);
+    for i in 0..20 {
+        let mut ok = failed_login(org_id, target_id);
+        ok.timestamp = Utc::now() - Duration::minutes(i * 5);
+        ok.status = CheckStatus::Up;
+        ok.error = None;
+        ok.evidence = None;
+        ok.steps = vec![step("fill", StepOutcome::Passed, 12)];
+        runs.push(ok);
+    }
+    sink.write_runs(&runs).await;
+
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+    // A page smaller than the run of passes above it: newest-only would stop
+    // long before reaching the failure.
+    let listed = store
+        .flow_runs(OrgId(org_id), target_id, any_time(), None, 5)
+        .await
+        .unwrap();
+
+    assert!(
+        listed.iter().any(|r| r.status == CheckStatus::Down),
+        "the failure this monitor is kept for was not listed: {:?}",
+        listed.iter().map(|r| r.status).collect::<Vec<_>>()
+    );
+    assert_eq!(listed[0].status, CheckStatus::Up, "still newest first");
+    let times: Vec<_> = listed.iter().map(|r| r.timestamp).collect();
+    let mut sorted = times.clone();
+    sorted.sort_by(|a, b| b.cmp(a));
+    assert_eq!(times, sorted, "the merged list stays chronological");
 }

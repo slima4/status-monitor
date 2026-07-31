@@ -180,6 +180,10 @@
   {% include "targets/partials/_coverage.html" %}
   {% endif %}
 
+  {% if kind == "FLOW" %}
+  {% include "targets/partials/_flow_runs.html" %}
+  {% endif %}
+
   <section class="sticker-card overflow-hidden" data-collapsible>
     <header class="bg-[color:var(--theme-surface-sunk)] px-5 py-2.5">
       <button type="button" data-collapse-toggle aria-expanded="false"

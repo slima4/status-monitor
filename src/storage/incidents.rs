@@ -59,6 +59,10 @@ pub trait IncidentNarrationStore: Send + Sync {
     async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>>;
     /// Count of open incidents (`ended_at IS NULL`) for the nav health pill.
     async fn count_active(&self, org: OrgId) -> Result<u32>;
+    /// Open incidents for one monitor. The tab badge counts these rather than
+    /// inferring from the last check: a monitor that fails once and recovers
+    /// never opens one, so inferring would badge an empty tab.
+    async fn count_ongoing_for_target(&self, org: OrgId, target_id: Uuid) -> Result<u32>;
     /// Confirmed incidents for one target overlapping `range`, newest first. An
     /// incident still open at `range.to` is included; `ongoing_only` keeps only those.
     async fn list_for_target(
@@ -329,6 +333,19 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         Ok(n.max(0) as u32)
     }
 
+    async fn count_ongoing_for_target(&self, org: OrgId, target_id: Uuid) -> Result<u32> {
+        let n: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM incidents \
+             WHERE org_id = $1 AND target_id = $2 AND ended_at IS NULL",
+        )
+        .bind(org.0)
+        .bind(target_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("count_ongoing_for_target incidents: {e}"))?;
+        Ok(n.max(0) as u32)
+    }
+
     async fn list_for_target(
         &self,
         org: OrgId,
@@ -453,6 +470,16 @@ impl InMemoryIncidentNarrationStore {
 
 #[async_trait]
 impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
+    async fn count_ongoing_for_target(&self, _org: OrgId, target_id: Uuid) -> Result<u32> {
+        Ok(self
+            .inner
+            .lock()
+            .incidents
+            .iter()
+            .filter(|i| i.target_id == target_id && i.ended_at.is_none())
+            .count() as u32)
+    }
+
     async fn get(&self, _org: OrgId, id: Uuid) -> Result<Option<Incident>> {
         Ok(self
             .inner

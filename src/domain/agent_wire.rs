@@ -152,6 +152,15 @@ impl StepOutcome {
             Self::Skipped => 3,
         }
     }
+
+    /// An unknown value reads as not-reached: claim less about a step, not more.
+    pub fn from_enum8(v: i8) -> Self {
+        match v {
+            1 => Self::Passed,
+            2 => Self::Failed,
+            _ => Self::Skipped,
+        }
+    }
 }
 
 /// One entry per declared step, positional, so an entry's index is its step
