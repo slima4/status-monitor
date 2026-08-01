@@ -802,6 +802,14 @@ docker compose up -d"#,
                 href: "/docs/variables",
             },
             ResourceLink {
+                label: "Four ways a login breaks while checks stay green",
+                href: "/blog/monitor-the-login-not-the-login-page",
+            },
+            ResourceLink {
+                label: "Why your E2E login test never runs in production",
+                href: "/blog/your-login-test-never-runs-in-production",
+            },
+            ResourceLink {
                 label: "Stop one bad probe waking you at 3 a.m.",
                 href: "/blog/stop-false-uptime-alerts",
             },

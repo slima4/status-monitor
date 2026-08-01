@@ -218,6 +218,8 @@ const EMBEDS: &[(&str, &str)] = &[
     ("mk-embed-quorum", "js/marketing/quorum.js"),
     ("mk-embed-gate", "js/marketing/gate.js"),
     ("mk-embed-silence", "js/marketing/silence.js"),
+    ("mk-embed-flow-break", "js/marketing/flow_break.js"),
+    ("mk-embed-ci-vs-prod", "js/marketing/ci_vs_prod.js"),
 ];
 
 /// Sanitising Markdown render. CommonMark + tables → HTML → ammonia

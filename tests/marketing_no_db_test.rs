@@ -164,9 +164,37 @@ async fn post_with_a_figure_loads_only_its_own_script() {
         "a post that embeds the figure must load the script that fills it"
     );
 
+    let (status, body, _) = get("/blog/monitor-the-login-not-the-login-page").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains(r#"class="mk-embed-flow-break""#),
+        "the figure's mount must survive sanitising all the way to the page"
+    );
+    assert!(
+        body.contains("/static/js/marketing/flow_break.js"),
+        "a post that embeds the figure must load the script that fills it"
+    );
+
+    let (status, body, _) = get("/blog/your-login-test-never-runs-in-production").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains(r#"class="mk-embed-ci-vs-prod""#),
+        "the figure's mount must survive sanitising all the way to the page"
+    );
+    assert!(
+        body.contains("/static/js/marketing/ci_vs_prod.js"),
+        "a post that embeds the figure must load the script that fills it"
+    );
+    assert!(
+        !body.contains("flow_break.js"),
+        "a post must load only the figure it embeds"
+    );
+
     let (_, other, _) = get("/blog/boring-uptime").await;
     assert!(
-        !other.contains("quorum.js"),
+        !other.contains("quorum.js")
+            && !other.contains("flow_break.js")
+            && !other.contains("ci_vs_prod.js"),
         "a post without the figure must not pay for its script"
     );
 }

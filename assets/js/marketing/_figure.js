@@ -36,6 +36,22 @@ export function picker(label, options, selected){
     </span>`;
 }
 
+// Radio groups need a name that survives two mounts of the same figure on one page.
+let group = 0;
+
+/** The picker's settings as a row of chips, for options too wordy for a select. */
+export function choices(label, options, selected){
+  const name = `mk-opt-${++group}`;
+  return `
+    <div class="mk-fig__opts" role="radiogroup" aria-label="${label}">
+      ${options.map(o => `
+        <label class="mk-fig__opt">
+          <input type="radio" name="${name}" value="${o.value}"${o.value === selected ? ' checked' : ''}>
+          <span>${o.label}</span>
+        </label>`).join('')}
+    </div>`;
+}
+
 /** Timers the figure can drop all at once when the viewer scrubs or pauses. */
 export function timers(){
   const pending = [];

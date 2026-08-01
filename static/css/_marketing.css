@@ -1609,14 +1609,19 @@ html:has(.marketing-shell) {
     overflow-x: auto;
     margin: 1.5rem 0;
 }
+/* Cells wrap: a table whose cells carry sentences would otherwise scroll off
+   the column rather than fold into it. Code keeps its old nowrap, since a
+   broken identifier reads as two identifiers. */
 .mk-article th,
 .mk-article td {
     padding: 0.5rem 0.85rem;
     border-bottom: 1px solid var(--mk-rule);
     text-align: left;
     vertical-align: top;
-    white-space: nowrap;
+    text-wrap: pretty;
 }
+.mk-article th code,
+.mk-article td code { white-space: nowrap; }
 .mk-article thead th {
     background: var(--mk-bg-2);
     color: var(--mk-quiet);
@@ -1626,9 +1631,6 @@ html:has(.marketing-shell) {
     letter-spacing: 0.06em;
 }
 .mk-article tbody td:first-child { color: var(--mk-ink); }
-/* The last column carries prose ("what it is"), so let it wrap instead of
-   forcing horizontal scroll. */
-.mk-article td:last-child { white-space: normal; }
 /* The tool round-up leads with our own row; tint it green so ours reads as
    ours at a glance, the way the comparison matrices mark their column. */
 .mk-article--best-self-hosted-uptime-monitoring-tools tbody tr:first-child td {
@@ -2588,6 +2590,55 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
 }
 .mk-fig__pick:hover { border-color: var(--mk-rule-hover); background: var(--mk-bg-2); }
 .mk-fig__pick:focus-visible { outline: 2px solid var(--mk-ok); outline-offset: 1px; }
+
+/* The picker as chips, for options too wordy to read inside a select. Sits on
+   its own row because five of them never fit the head. */
+.mk-fig__opts {
+    display: flex;
+    flex-wrap: wrap;
+    /* Row gap clears the hit areas below, which reach past the chip they belong to. */
+    gap: 0.8rem 0.35rem;
+    /* Same gutter as the head above it, which the flow figures widen. */
+    padding: 0.55rem var(--mk-pad, 1rem);
+    border-bottom: 1px solid var(--mk-rule);
+}
+/* Positioned so the off-screen radio anchors here and focus cannot jump the page. */
+.mk-fig__opt { position: relative; display: inline-flex; }
+/* Off-screen rather than hidden, so the radio keeps its keyboard behaviour. */
+.mk-fig__opt input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+.mk-fig__opt span {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    height: 28px;
+    padding: 0 0.6rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    color: var(--mk-quiet);
+    background: var(--mk-bg);
+    font-size: 0.63rem;
+    cursor: pointer;
+    transition-property: border-color, background-color, color, transform;
+    transition-duration: 160ms;
+    transition-timing-function: cubic-bezier(.2,0,0,1);
+}
+/* Reaches a thumb-sized target without making the chip itself any bigger. */
+.mk-fig__opt span::after { content: ""; position: absolute; inset: -6px 0; }
+.mk-fig__opt span:hover { border-color: var(--mk-rule-hover); background: var(--mk-bg-2); color: var(--mk-ink); }
+.mk-fig__opt:active span { transform: scale(0.96); }
+.mk-fig__opt input:checked + span {
+    border-color: var(--mk-ink);
+    background: var(--mk-bg-2);
+    color: var(--mk-ink);
+    font-weight: 650;
+}
+.mk-fig__opt input:focus-visible + span { outline: 2px solid var(--mk-ok); outline-offset: 1px; }
 .mk-quorum__barneed {
     margin-left: auto;
     color: var(--mk-ink);
@@ -2910,9 +2961,10 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
 @media (prefers-reduced-motion: reduce) {
     .mk-quorum, .mk-quorum__lane, .mk-quorum__cell, .mk-fig__pip,
     .mk-quorum__seat, .mk-fig__btn, .mk-fig__big, .mk-fig__chip,
-    .mk-quorum__bar, .mk-quorum__barneed, .mk-fig__pick,
+    .mk-quorum__bar, .mk-quorum__barneed, .mk-fig__pick, .mk-fig__opt span,
     .mk-fig__pickwrap::after, .mk-gate__lane, .mk-gate__cell,
     .mk-silence__lane, .mk-silence__tick, .mk-silence__brain { transition: none; }
+    .mk-fig__opt:active span { transform: none; }
 }
 
 /* ---- Browser-flow figures (landing) ------------------------------------ */
@@ -3002,7 +3054,9 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
 .mk-flow__detail, .mk-ev__reason { color: var(--mk-quiet); font-size: 0.76rem; }
 .mk-flow__ms { margin-left: auto; color: var(--mk-faint); font-size: 0.76rem; font-variant-numeric: tabular-nums; }
 .mk-ev__reason { flex-basis: 100%; padding-left: 1.5rem; color: var(--mk-down); }
-.mk-flow__aside { margin: 0; color: var(--mk-faint); font-size: 0.74rem; line-height: 1.5; }
+.mk-flow__aside { margin: 0; color: var(--mk-faint); font-size: 0.74rem; line-height: 1.5; text-wrap: pretty; }
+/* Sits between two ruled rows as a direct child, so it carries its own gutter. */
+.mk-flow__why { padding: 0.85rem var(--mk-pad) 0; }
 
 /* A browser bar the flow drives, so the reader can watch the URL not change. */
 .mk-flow__bar {
@@ -3063,6 +3117,8 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     font-size: 0.92rem;
     font-weight: 650;
     letter-spacing: 0.03em;
+    /* "step 2/5" swaps digits as the fault changes; fixed widths stop the jitter. */
+    font-variant-numeric: tabular-nums;
     transition: color 220ms ease, background 220ms ease, border-color 220ms ease;
 }
 .mk-fig .mk-flow__badge[data-state="ok"] {
