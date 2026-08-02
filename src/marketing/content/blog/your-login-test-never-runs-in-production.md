@@ -1,10 +1,12 @@
 +++
 title = "Your E2E login test never runs in production"
 date = "2026-08-01"
+updated = "2026-08-02"
 slug = "your-login-test-never-runs-in-production"
 excerpt = "Your end to end login test runs in CI, against staging, at merge time. The faults that lock real customers out cannot happen there."
 tags = ["qa", "e2e", "synthetic-monitoring", "testing", "playwright"]
 draft = false
+og_image = "/static/marketing/og-login-test-production.png"
 
 [[faqs]]
 q = "Is this just my end to end tests running in production?"
@@ -41,6 +43,10 @@ On a pull request. On a merge. Maybe at night. Against staging, or against a con
 
 Production at three in the morning on a Sunday, with the real login provider, the real CDN, the real bot vendor and a secret that expired at midnight, is somewhere your suite has never been. Not rarely. Never.
 
+![A passing CI login test compared with a broken production login caused by real secrets, CDN assets, cookie rules and bot protection.](/static/marketing/blog-login-ci-production-gap.webp)
+
+*The same test passes. Only one environment contains the failure.*
+
 ## The faults CI cannot copy
 
 Take the [four ways a login breaks while every check stays green](/blog/monitor-the-login-not-the-login-page) and try to write a CI test for each one.
@@ -69,19 +75,24 @@ Running the same journey against production on a schedule has a name, synthetic 
 | When it fails | the pipeline turns red | someone gets a message |
 | Catches | code that broke the login | everything else that broke the login |
 
+![CI runs a login test once per pull request, while production monitoring repeats the journey every five to fifteen minutes and alerts when it fails.](/static/marketing/blog-login-two-clocks.webp)
+
+*CI protects the deploy. Monitoring protects the hours after it.*
+
 Google's SRE book has a name for this too, [black-box monitoring](https://sre.google/sre-book/monitoring-distributed-systems/), which it defines as testing externally visible behaviour as a user would see it. Your suite already does that. It just does it somewhere safe.
 
-A flow is a list of steps, not a script, and the list is short on purpose: open a page, fill a field, click, wait for a selector, check text, check the URL. A login is five of them.
+A flow is a list of steps, not a script, and the list is short on purpose: open a page, fill a field, click, wait for a selector, check text, check the URL.
 
-```
-start url    https://app.example.com/login
+This is not code to copy. Every app uses different fields, buttons and URLs. You add the journey in the flow builder, or [import a Chrome recording](/docs/monitor-types#importing-a-recording), then tell the monitor what a successful login must look like:
 
-fill         #email     monitor@example.com
-fill         #password  {{login_password}}
-click        button[type=submit]
-assert_url   contains /dashboard
-assert_text  contains "Signed in as"
-```
+| What you configure | Example | Why it is there |
+|---|---|---|
+| Start at the login page | `https://app.example.com/login` | begin outside an existing session |
+| Fill the email field | `#email` with `monitor@example.com` | prove the field exists and accepts a value |
+| Fill the password field | `#password` with the `login_password` secret | keep the credential out of the monitor configuration |
+| Click the sign-in button | `button[type=submit]` | prove the control exists and submits the form |
+| Check the destination URL | it contains `/dashboard` | prove authentication succeeded and the session survived the redirect |
+| Check the signed-in page | it contains `Signed in as` | prove the page behind the login rendered |
 
 Check two things and stop there. The URL contains the path behind the login, and one string that only the signed-in page shows. Do not check a greeting with the user's name or the time of day in it, or your own copywriter will wake you up at midnight. And do not skip the checks. Without one, a login that quietly refuses you passes forever, which is why a flow without an assertion is refused instead of saved.
 
@@ -99,6 +110,10 @@ Three things, in the order teams meet them. All three have a way through.
 
 **A CAPTCHA or bot wall in front of the form.** If the wall challenges your check, you are no longer watching your login. You are watching the vendor. Let the login path or that one account through the rule, the same way you already let CI through. If your policy will not allow that, put a plain HTTP check on an endpoint behind the login instead, and accept that you are covering less.
 
+![Three practical monitoring paths: verify the two-factor code screen, verify the magic-link confirmation page, or bypass a bot wall or monitor a reachable endpoint.](/static/marketing/blog-login-day-one-blockers.webp)
+
+*A useful check stops at the last proof it can reach reliably.*
+
 ## Selectors that do not rot
 
 The [Chrome Recorder](https://developer.chrome.com/docs/devtools/recorder) writes [several candidate selectors](https://developer.chrome.com/docs/devtools/recorder/reference) for each step: CSS, ARIA, text, XPath and pierce. The import keeps the plain CSS one. It cannot replay the `aria/`, `text/` or `pierce/` candidates at all. An `xpath/` candidate converts only when every part of it is something the import can translate, so ids and indexes come across and anything cleverer does not. And when the only selector recorded is a bare tag, the import flags the row and asks you to make it specific, because `button` matches the first button on the page, which is usually the cookie banner.
@@ -111,11 +126,19 @@ So the difference between a clean import and a lost afternoon is decided before 
 
 Two limits are worth checking at the same time, because they decide whether the login can be watched at all. Every step finds its element with [`document.querySelector`](https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelector) on the top level document, so a login widget inside an iframe, or built on a [shadow root](https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM), is invisible to all of them. And there is no key press step, so a form you submit with Enter needs a real click on the submit button instead. The import tells you about both, instead of letting you find out three days later.
 
+![Broad and fragile browser selectors compared with a stable data-testid hook, with iframe and shadow DOM boundaries marked as unreachable.](/static/marketing/blog-login-selector-durability.webp)
+
+*Name the control once. Keep the check through every redesign.*
+
 ## But will it not be flaky?
 
 This is the right question, and it is why most teams never point an end to end test at production. A suite that fails once a week for no reason is annoying in CI. Wired to a pager, it is a reason to turn the pager off, and a pager somebody turned off is worse than no pager at all.
 
 One failing run wakes nobody. A region has to fail twice in a row before it counts as failing, so a single bad minute lands in the run history instead of on someone's phone at four in the morning.
+
+![One failed browser run is recorded without paging anyone; a second consecutive failure confirms the incident, sends an alert and preserves scrubbed page evidence.](/static/marketing/blog-login-alert-evidence.webp)
+
+*Noise stays in history. Repeated failure reaches a human.*
 
 Wait for what you need, never sleep and hope. Steps that wait have their own timeout, under a budget for the whole run, and a failed run tells you which of the two ran out. When a field renders late, put a `wait_for` in front of the fill. A longer interval will not help, and a longer step timeout will not either, because `fill` and `click` do not wait at all.
 
