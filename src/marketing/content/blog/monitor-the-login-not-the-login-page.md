@@ -1,10 +1,12 @@
 +++
 title = "Your login page returns 200. Nobody can sign in."
 date = "2026-08-01"
+updated = "2026-08-02"
 slug = "monitor-the-login-not-the-login-page"
 excerpt = "A 200 proves the page was sent. It proves nothing about the form. Four ways a login breaks while every check stays green, and how to tell them apart."
 tags = ["monitoring", "login", "trust", "uptime"]
 draft = false
+og_image = "/static/marketing/og-login-returns-200.png"
 
 [[faqs]]
 q = "Why does my monitor say up when customers cannot log in?"
@@ -43,6 +45,10 @@ So it proves three things. The server answered. The process was alive. The page 
 
 Everything a person does next happens where the check never goes. Typing in the fields. Pressing the button. The request that carries the password. The reply that sets the session cookie. The jump to the page behind the login. Your monitor saw none of it, because it left as soon as it read the status line.
 
+![HTTP monitoring stops at 200 OK, leaving the login form, authentication, session cookie and dashboard untested.](/static/marketing/blog-login-http-stops-at-200.webp)
+
+*The HTTP check reaches 200 OK. The customer journey has only just begun.*
+
 ## Four ways a login breaks while every check stays green
 
 None of these are rare. Each one is a normal Tuesday.
@@ -54,6 +60,10 @@ None of these are rare. Each one is a normal Tuesday.
 **The session cookie stops being set.** Someone changes a [cookie attribute](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) like `SameSite` or `Domain`, or the app moves to a new subdomain, or a proxy starts stripping a header. The password is accepted, the server is happy, the redirect happens. Then the app sends the user straight back to the login page, because it cannot find the session. From outside it looks like a wrong password. Support gets a queue of people who swear they typed it correctly. They did.
 
 **Bot protection starts blocking real users.** You turn on a rule, or your vendor changes a default. Now some visitors get a challenge page where the form should be. Checking your browser, and then nothing. Cloudflare says [most visitors pass a challenge without interaction](https://developers.cloudflare.com/waf/reference/cloudflare-challenges/), and that is the trap: a challenge is selective, so your check, which asks for one page from one place every few minutes, may never be challenged at all. Your uptime graph stays flat and green. The people locked out are usually on a company VPN or an older browser, which often means your biggest customers.
+
+![Four login failures that keep HTTP monitoring green: an expired OAuth secret, missing JavaScript, a dropped session cookie and a bot challenge.](/static/marketing/blog-login-four-failures.webp)
+
+*Four different failures, one identical dashboard: green.*
 
 ### Which one is it? The support tickets will tell you
 
@@ -92,30 +102,28 @@ The second reason is the clock. When a server dies, you know in a minute. When a
 
 Most of that cost never becomes a ticket. The people who write to you already pay you and already care. The rest just leave. The trial that could not get back in. The signup that gave up on the second try. The buyer who was comparing you with someone else on a Sunday afternoon. Nothing in your dashboard ever mentions them.
 
+![A server outage triggers an immediate alert, while a broken login stays green until failed attempts and support reports expose it.](/static/marketing/blog-login-detection-gap.webp)
+
+*The server outage speaks first. The broken login waits for a customer to report it.*
+
 ## What checking the whole journey looks like
 
-A browser flow check runs a real browser through the steps a person takes. Google's SRE book calls this [black-box monitoring](https://sre.google/sre-book/monitoring-distributed-systems/), or testing what a user would see. Here is a complete one:
+A browser flow check runs a real browser through the steps a person takes. Google's SRE book calls this [black-box monitoring](https://sre.google/sre-book/monitoring-distributed-systems/), or testing what a user would see.
 
-```
-start url    https://app.example.com/login
+This is not code to copy. Every app uses different fields, buttons and URLs. You add the journey in the flow builder, or [import a Chrome recording](/docs/monitor-types#importing-a-recording), then tell the monitor what a successful login must look like:
 
-fill         #email     monitor@example.com
-fill         #password  {{login_password}}
-click        button[type=submit]
-assert_url   contains /dashboard
-assert_text  contains "Signed in as"
-```
+| What you configure | Example | What it proves |
+|---|---|---|
+| Start at the login page | `https://app.example.com/login` | the browser begins outside an existing session |
+| Fill the email field | `#email` with `monitor@example.com` | the field exists and accepts a value |
+| Fill the password field | `#password` with the `login_password` secret | the credential stays out of the monitor configuration |
+| Click the sign-in button | `button[type=submit]` | the control exists and submits the form |
+| Check the destination URL | it contains `/dashboard` | authentication succeeded and the session survived the redirect |
+| Check the signed-in page | it contains `Signed in as` | the page behind the login actually rendered |
 
-A start URL and five steps. Each step is a claim about your product that can now fail loudly.
+![A five-step browser login check fills both fields, submits the form, then verifies the dashboard URL and text to prove sign-in worked.](/static/marketing/blog-login-five-claims.webp)
 
-Read it as five claims, each of which can now fail out loud.
-
-| The line | What it proves |
-|---|---|
-| the two `fill` steps | the fields still exist under those names, so the redesign that renamed them fails here |
-| `click` | the button is still there and still submits |
-| `assert_url` | the app really moved you behind the login. This is what fails when the password is rejected or the session is lost |
-| `assert_text` | the page behind the login rendered. This catches a URL that changes and then errors anyway |
+*A click says the button worked. The assertions prove the login did.*
 
 The assertions are the point. Without them, the check passes as long as no step errors, so a login that quietly refuses you still looks fine. A check that cannot fail is not a check, which is why ours will not save a flow without one.
 

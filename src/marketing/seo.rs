@@ -111,6 +111,7 @@ pub struct OpenGraph {
     pub og_type: String,
     pub url: String,
     pub image: String,
+    pub image_alt: String,
 }
 
 impl OpenGraph {
@@ -121,6 +122,7 @@ impl OpenGraph {
             og_type: "website".to_string(),
             url: url.to_string(),
             image: absolute_asset(canonical_origin, DEFAULT_OG_CARD),
+            image_alt: title.to_string(),
         }
     }
 
@@ -137,6 +139,7 @@ impl OpenGraph {
             og_type: "article".to_string(),
             url: format!("{canonical_origin}/blog/{slug}"),
             image: absolute_asset(canonical_origin, og_image.unwrap_or(DEFAULT_OG_CARD)),
+            image_alt: title.to_string(),
         }
     }
 }
