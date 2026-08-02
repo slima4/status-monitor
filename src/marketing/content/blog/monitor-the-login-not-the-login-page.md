@@ -110,16 +110,7 @@ Most of that cost never becomes a ticket. The people who write to you already pa
 
 A browser flow check runs a real browser through the steps a person takes. Google's SRE book calls this [black-box monitoring](https://sre.google/sre-book/monitoring-distributed-systems/), or testing what a user would see.
 
-This is not code to copy. Every app uses different fields, buttons and URLs. You add the journey in the flow builder, or [import a Chrome recording](/docs/monitor-types#importing-a-recording), then tell the monitor what a successful login must look like:
-
-| What you configure | Example | What it proves |
-|---|---|---|
-| Start at the login page | `https://app.example.com/login` | the browser begins outside an existing session |
-| Fill the email field | `#email` with `monitor@example.com` | the field exists and accepts a value |
-| Fill the password field | `#password` with the `login_password` secret | the credential stays out of the monitor configuration |
-| Click the sign-in button | `button[type=submit]` | the control exists and submits the form |
-| Check the destination URL | it contains `/dashboard` | authentication succeeded and the session survived the redirect |
-| Check the signed-in page | it contains `Signed in as` | the page behind the login actually rendered |
+You do not write it as code. You add the journey in the flow builder, or [import a Chrome recording](/docs/monitor-types#importing-a-recording), and a login comes out as six lines. Start at the login page. Fill the email field. Fill the password field from a secret. Click the button. Then two checks: the URL you landed on, and one string that only the signed-in page shows. The [post for test engineers](/blog/your-login-test-never-runs-in-production) sets out each line and why it is there.
 
 ![A five-step browser login check fills both fields, submits the form, then verifies the dashboard URL and text to prove sign-in worked.](/static/marketing/blog-login-five-claims.webp)
 
