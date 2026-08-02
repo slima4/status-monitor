@@ -1,6 +1,13 @@
 // Client-side cron parser: validates a standard 5-field expression, describes
 // it in plain English, and computes the next run times in the viewer's local
 // timezone. No backend — the server ships a static reference table + default.
+import { toolError, toolUsed } from "./_tool_event.js";
+
+const TOOL = "cron";
+// Wait for typing to settle; half-typed input isn't a failed expectation.
+const SETTLE_MS = 1_200;
+// Shape only. Parser messages quote user tokens, so they can't be reported.
+const MAX_FIELDS = 12;
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const DOWS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTH_NAMES = { JAN: 1, FEB: 2, MAR: 3, APR: 4, MAY: 5, JUN: 6, JUL: 7, AUG: 8, SEP: 9, OCT: 10, NOV: 11, DEC: 12 };
@@ -186,7 +193,7 @@ function render(input, descNode, nextList) {
     descNode.textContent = err.message;
     descNode.classList.add("tool-cron__desc--error");
     nextList.replaceChildren();
-    return;
+    return false;
   }
   input.setAttribute("aria-invalid", "false");
   descNode.textContent = describe(f.raw);
@@ -203,6 +210,7 @@ function render(input, descNode, nextList) {
       })
     : [Object.assign(document.createElement("li"), { className: "tool-cron__run mk-quiet", textContent: "no runs in the next year" })];
   nextList.replaceChildren(...items);
+  return true;
 }
 
 function init() {
@@ -212,20 +220,39 @@ function init() {
   const nextList = document.getElementById("cron-next");
   const presets = document.querySelectorAll(".tool-cron-presets .tool-preset");
 
+  let settle;
   const run = () => {
-    render(input, descNode, nextList);
+    const valid = render(input, descNode, nextList);
     const current = input.value.trim();
     for (const b of presets) {
       const on = b.dataset.cron === current;
       b.classList.toggle("is-active", on);
       b.setAttribute("aria-pressed", on);
     }
+    return valid;
   };
-  input.addEventListener("input", run);
+
+  input.addEventListener("input", () => {
+    const valid = run();
+    toolUsed(TOOL, { mode: "expression" });
+    clearTimeout(settle);
+    if (valid) return;
+    settle = setTimeout(() => {
+      const expr = input.value.trim();
+      if (!expr) return;
+      toolError(TOOL, {
+        fields: Math.min(expr.split(/\s+/).length, MAX_FIELDS),
+        macro: expr.startsWith("@"),
+      });
+    }, SETTLE_MS);
+  });
+
   for (const b of presets) {
     b.addEventListener("click", () => {
       input.value = b.dataset.cron;
       run();
+      clearTimeout(settle);
+      toolUsed(TOOL, { mode: "preset", preset: b.dataset.cron });
     });
   }
   run();

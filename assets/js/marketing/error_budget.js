@@ -1,6 +1,9 @@
 // Live SLO -> error-budget + burn-rate calculator. The page ships a fully
 // server-rendered default state, so this only upgrades it to recompute on
 // input. Math mirrors the Rust side so hydration never changes the numbers.
+import { toolUsed } from "./_tool_event.js";
+
+const TOOL = "error-budget";
 function humanDuration(secs) {
   if (!(secs > 0)) return "0s";
   if (secs < 1) return `${Math.round(secs * 1000)}ms`;
@@ -339,7 +342,11 @@ function init() {
     wireCrosshair(svg, ctx);
   }
 
-  const run = () => recompute(sloInput, measuredInput, windowGroup, ctx);
+  const recalc = () => recompute(sloInput, measuredInput, windowGroup, ctx);
+  const run = () => {
+    recalc();
+    toolUsed(TOOL);
+  };
 
   sloInput.addEventListener("input", run);
   measuredInput.addEventListener("input", run);
@@ -357,7 +364,8 @@ function init() {
     });
   }
 
-  run();
+  // Hydration, not use.
+  recalc();
 }
 
 if (document.readyState === "loading") {

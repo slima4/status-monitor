@@ -1,6 +1,9 @@
 // Live uptime -> allowed-downtime calculator. The page ships a fully
 // server-rendered default state, so this only upgrades it to recompute on
 // input. Math mirrors the Rust side so hydration never changes the numbers.
+import { toolUsed } from "./_tool_event.js";
+
+const TOOL = "uptime-sla";
 const DAY = 86_400;
 const WEEK = 604_800;
 const MONTH = 2_592_000; // 30 days
@@ -73,7 +76,7 @@ function recomputeReverse(input, unitGroup, periodGroup, out) {
   out.textContent = Number.isFinite(uptime) ? formatPct(Math.max(uptime, 0)) : "—";
 }
 
-function wireGroup(group, run) {
+function wireGroup(group, run, onUse) {
   for (const btn of group.querySelectorAll(".tool-preset")) {
     btn.addEventListener("click", () => {
       for (const b of group.querySelectorAll(".tool-preset")) {
@@ -82,6 +85,7 @@ function wireGroup(group, run) {
         b.setAttribute("aria-pressed", on);
       }
       run();
+      onUse();
     });
   }
 }
@@ -93,13 +97,18 @@ function init() {
     const checksNode = document.getElementById("tool-checks");
     const presets = document.querySelectorAll(".tool-presets .tool-preset");
     const run = () => recompute(input, valueNodes, checksNode, presets);
-    input.addEventListener("input", run);
+    input.addEventListener("input", () => {
+      run();
+      toolUsed(TOOL, { mode: "uptime-to-downtime" });
+    });
     for (const chip of presets) {
       chip.addEventListener("click", () => {
         input.value = chip.dataset.uptime;
         run();
+        toolUsed(TOOL, { mode: "uptime-to-downtime", preset: chip.dataset.uptime });
       });
     }
+    // Hydration, not use.
     run();
   }
 
@@ -109,9 +118,13 @@ function init() {
   const out = document.getElementById("down-uptime");
   if (down && unitGroup && periodGroup && out) {
     const runReverse = () => recomputeReverse(down, unitGroup, periodGroup, out);
-    down.addEventListener("input", runReverse);
-    wireGroup(unitGroup, runReverse);
-    wireGroup(periodGroup, runReverse);
+    const usedReverse = () => toolUsed(TOOL, { mode: "downtime-to-uptime" });
+    down.addEventListener("input", () => {
+      runReverse();
+      usedReverse();
+    });
+    wireGroup(unitGroup, runReverse, usedReverse);
+    wireGroup(periodGroup, runReverse, usedReverse);
     runReverse();
   }
 }
