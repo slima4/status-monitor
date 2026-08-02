@@ -345,6 +345,8 @@ async fn finish_login(
         tracing::warn!(error = %err, "login_audit write failed (non-fatal)");
     }
 
+    crate::analytics::track_login(&state, method, resolved.is_new_user, client_ip, &headers);
+
     cookies.add(session_store::build_cookie(
         &state.cfg.auth.session,
         created.cookie_token,

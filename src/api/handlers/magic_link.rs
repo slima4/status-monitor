@@ -180,6 +180,7 @@ pub struct ConfirmForm {
 #[template(path = "auth/magic_link_invalid.html")]
 struct MagicLinkInvalidPage {
     expiry_minutes: u32,
+    analytics: Option<&'static str>,
 }
 
 /// The one-click confirmation served on GET so a mail link-scanner's prefetch
@@ -191,6 +192,7 @@ struct MagicLinkConfirmPage {
     email: String,
     token: String,
     csrf: String,
+    analytics: Option<&'static str>,
 }
 
 /// Failed redemptions render the indistinguishable invalid page. Status is
@@ -202,6 +204,7 @@ fn invalid_page(state: &AppState, status: StatusCode) -> Response {
         status,
         MagicLinkInvalidPage {
             expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
+            analytics: crate::analytics::website_id(&state.cfg.auth.public_base_url),
         },
     )
         .into_response()
@@ -266,6 +269,7 @@ pub async fn verify_landing(
         email: row.email,
         token: q.token.trim().to_string(),
         csrf: nonce,
+        analytics: crate::analytics::website_id(&state.cfg.auth.public_base_url),
     }
     .into_response();
     // Token-bearing page: never let an intermediary cache it.
@@ -423,6 +427,15 @@ pub async fn verify_confirm(
         tracing::warn!(error = %err, "magic_link audit write failed (non-fatal)");
     }
 
+    // Invited bootstrap is the one path where a link mints an account.
+    crate::analytics::track_login(
+        &state,
+        LoginMethod::MagicLink,
+        bootstrapped,
+        client_ip,
+        &headers,
+    );
+
     cookies.add(session_store::build_cookie(
         &state.cfg.auth.session,
         created.cookie_token,
@@ -493,4 +506,62 @@ async fn bootstrap_invited_user(
         tracing::info!(user_id = %user_id.0, via = "invitation", "magic-link bootstrap created account");
     }
     Ok(Some((user_id, created)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirm_page_scrubs_the_token_from_every_analytics_send() {
+        let html = MagicLinkConfirmPage {
+            email: "who@example.com".into(),
+            token: "s3cret-token".into(),
+            csrf: "nonce".into(),
+            analytics: Some("website-id"),
+        }
+        .render()
+        .expect("renders");
+        // The page URL holds a single-use credential.
+        assert!(html.contains(r#"data-before-send="smScrubAuthUrl""#));
+        assert!(html.contains("auth_url_scrub.js"));
+        assert!(html.contains(r#"data-umami-event="magic-link-confirmed""#));
+    }
+
+    #[test]
+    fn auth_pages_load_no_tracker_when_analytics_is_off() {
+        let confirm = MagicLinkConfirmPage {
+            email: "who@example.com".into(),
+            token: "s3cret-token".into(),
+            csrf: "nonce".into(),
+            analytics: None,
+        }
+        .render()
+        .expect("renders");
+        assert!(!confirm.contains("analytics.uptimepage.dev"));
+
+        let invalid = MagicLinkInvalidPage {
+            expiry_minutes: 15,
+            analytics: None,
+        }
+        .render()
+        .expect("renders");
+        assert!(!invalid.contains("analytics.uptimepage.dev"));
+        assert!(!invalid.contains("auth_analytics.js"));
+    }
+
+    #[test]
+    fn invalid_page_reports_the_failure_without_revealing_the_cause() {
+        let html = MagicLinkInvalidPage {
+            expiry_minutes: 15,
+            analytics: Some("website-id"),
+        }
+        .render()
+        .expect("renders");
+        assert!(html.contains(r#"data-auth-event="login-error""#));
+        assert!(html.contains(r#"data-auth-event-reason="link-invalid""#));
+        assert!(html.contains("auth_analytics.js"));
+        // A fixed reason cannot leak which of the three cases happened.
+        assert_eq!(html.matches("data-auth-event-reason").count(), 1);
+    }
 }

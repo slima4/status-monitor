@@ -45,6 +45,8 @@ pub struct LoginPage {
     /// Cached, timeout-bounded `target_store.ping()` — same dependency check
     /// as `/readyz`, non-sensitive (no tenant scope). See [`login_ready`].
     pub ready: bool,
+    /// Umami website id, or `None` on self-hosted and dev.
+    pub analytics: Option<&'static str>,
 }
 
 /// Start-URL with the carried-through login params (redirect_after, invitation).
@@ -92,6 +94,7 @@ pub async fn login(
         last_magic: last == Some(LoginMethod::MagicLink.as_db_str()),
         invitation_hint: q.invitation,
         ready: login_ready(&state).await,
+        analytics: crate::analytics::website_id(&state.cfg.auth.public_base_url),
     }
 }
 
@@ -760,6 +763,7 @@ mod tests {
             last_magic: false,
             invitation_hint: None,
             ready: true,
+            analytics: None,
         }
     }
 
@@ -776,6 +780,35 @@ mod tests {
         // Login page suppresses the user-area nav so a not-yet-authenticated
         // visitor doesn't see broken "Settings"/"Log out" controls.
         assert!(!html.contains("Log out"));
+    }
+
+    #[test]
+    fn login_page_tags_every_method_for_the_funnel() {
+        let mut page = login_page(true, true, true);
+        page.last_google = true;
+        let html = page.render().unwrap();
+        assert!(html.contains(r#"data-umami-event-method="github""#));
+        assert!(html.contains(r#"data-umami-event-method="google""#));
+        // The email form has no attribute event; its script reads this instead.
+        assert!(html.contains(r#"data-last-used="false""#));
+        assert!(html.contains(r#"data-umami-event-last-used="true""#));
+    }
+
+    #[test]
+    fn login_page_loads_the_tracker_only_when_analytics_is_on() {
+        assert!(
+            !login_page(true, true, true)
+                .render()
+                .unwrap()
+                .contains("analytics.uptimepage.dev")
+        );
+        let mut page = login_page(true, true, true);
+        page.analytics = Some("website-id");
+        let html = page.render().unwrap();
+        assert!(html.contains(r#"data-website-id="website-id""#));
+        assert!(html.contains(r#"data-domains="app.uptimepage.dev""#));
+        // /login?invitation=<token> must not reach the analytics database.
+        assert!(html.contains(r#"data-before-send="smScrubAuthUrl""#));
     }
 
     #[test]

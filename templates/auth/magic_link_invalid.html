@@ -1,8 +1,11 @@
 {% extends "chromeless_base.html" %}
 {# One indistinguishable state — never reveal wrong vs used vs no-account. #}
 {% block title %}Link expired{% endblock %}
+{% block head_scripts %}{% include "auth/_analytics.html" %}{% endblock %}
 {% block main %}
-    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+    {# One fixed reason: the event must not distinguish the failure either. #}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center"
+          data-auth-event="login-error" data-auth-event-reason="link-invalid">
         <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>link expired</h1>
         <p class="text-sm text-muted">
             This sign-in link is invalid, already used, or has expired.

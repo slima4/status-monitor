@@ -1,5 +1,6 @@
 {% extends "chromeless_base.html" %}
 {% block title %}Confirm sign-in{% endblock %}
+{% block head_scripts %}{% include "auth/_analytics.html" %}{% endblock %}
 {% block main %}
     <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
         <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>confirm sign-in</h1>
@@ -11,8 +12,11 @@
         <form method="post" action="/auth/magic-link/verify" class="space-y-0">
             <input type="hidden" name="token" value="{{ token }}">
             <input type="hidden" name="csrf" value="{{ csrf }}">
+            {# On the press, not the load: this page is a GET from an email link,
+               so a mail scanner's prefetch would inflate a page-load count. #}
             <button type="submit"
-                    class="sticker-btn sticker-btn--accent inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
+                    class="sticker-btn sticker-btn--accent inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium"
+                    data-umami-event="magic-link-confirmed">
                 confirm sign-in
             </button>
         </form>

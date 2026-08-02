@@ -41,7 +41,9 @@ We collect data in three ways:
 - Session cookie (`_sm_session`) — necessary for authentication
 - IP address (hashed before storage; never stored raw)
 
-**Analytics (public marketing pages only):** We run self-hosted, cookieless analytics (Umami) on our own EU infrastructure. It records aggregate page views, referrer, browser, operating system, device type, and coarse location (country and region) derived from a daily-rotating hash of your IP address and user agent. It sets no cookies, never stores your raw IP, and cannot identify you or follow you across sites or sessions. The data stays on our infrastructure and is never sent to a third party.
+**Analytics (public marketing and sign-in pages only):** We run self-hosted, cookieless analytics (Umami) on our own EU infrastructure. It records aggregate page views, referrer, browser, operating system, device type, and coarse location (country and region). Visits are grouped by a hash of your IP address and user agent mixed with a secret value that rotates every month, so within one month repeat visits from the same network and browser count as one returning visitor. It sets no cookies, never stores your raw IP, cannot tell us who you are, and cannot follow you to other websites. The data stays on our infrastructure and is never sent to a third party.
+
+On the sign-in page this also records which sign-in method you chose (GitHub, Google, or email link) and whether signing in succeeded, so we can tell how many people who set out to sign in actually got in. Once you are signed in, no page of the product is tracked: there is no analytics on your dashboard, monitors, incidents, or settings.
 
 We do **not** use third-party analytics services that export your data (no Google Analytics, no Mixpanel, no tracking pixels).
 
@@ -55,7 +57,7 @@ We do **not** use third-party analytics services that export your data (no Googl
 | Sessions, API tokens | Authenticate API requests | Contract |
 | Hashed IP, login attempts | Detect security threats | Legitimate interest |
 | Audit log | Compliance and accountability | Legitimate interest |
-| Aggregate analytics (marketing pages) | Understand site usage and improve content | Legitimate interest |
+| Aggregate analytics (marketing and sign-in pages) | Understand site usage and improve content and sign-in | Legitimate interest |
 
 **Browser flow monitors:** when a flow monitor you configured fails, we keep what the page showed at that moment — the URL the browser ended on, the page title, its visible text, and anything the page logged to the browser console. Because the flow signs in, that text can come from a page behind your own login. It is stored to explain the failure and for nothing else, it is never put into an alert or notification, and any value the flow typed from a secret variable is removed before it is stored. It is deleted on a shorter clock than the run itself.
 
@@ -78,7 +80,7 @@ you (no profiling, no scoring).
 | Quota events | 90 days |
 | Server access logs | 30 days |
 | Application error logs | 30 days |
-| Aggregate analytics (marketing pages) | Indefinite (aggregate only; no identifiers that single you out) |
+| Aggregate analytics (marketing and sign-in pages) | Indefinite (aggregate only; no identifiers that single you out) |
 
 Deleted accounts are recoverable for 30 days, after which data is
 permanently purged.

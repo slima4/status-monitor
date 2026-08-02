@@ -37,13 +37,26 @@
                 const msg = await window.smApiErrorMessage(res, `request failed (${res.status})`);
                 window.smRenderClientError(banner, msg);
                 btn.disabled = false;
+                window.umami?.track("login-error", {
+                    reason: res.status === 429 ? "rate-limited" : "request-failed",
+                    method: "magic-link",
+                });
                 return;
             }
             form.classList.add("hidden");
             sent.classList.remove("hidden");
+            // OAuth fires on click; for email, an accepted request is the commit.
+            window.umami?.track("login-method", {
+                method: "magic-link",
+                "last-used": form.dataset.lastUsed === "true",
+            });
         } catch {
             window.smRenderClientError(banner, "Network error — try again.");
             btn.disabled = false;
+            window.umami?.track("login-error", {
+                reason: "network",
+                method: "magic-link",
+            });
         }
     });
 })();

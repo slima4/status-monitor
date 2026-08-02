@@ -1,0 +1,9 @@
+{# Cookieless analytics — hosted sign-in pages only; `analytics` is unset on
+   dev/self-host. Gates itself so no caller can forget to. #}
+{% if let Some(website_id) = analytics %}
+{# Scrubber first: deferred scripts run in document order, and it must be
+   installed before the tracker's first send. #}
+<script defer src="{{ "js/ui/auth_url_scrub.js"|asset }}"></script>
+<script defer src="{{ "js/ui/auth_analytics.js"|asset }}"></script>
+<script defer src="https://analytics.uptimepage.dev/script.js" data-website-id="{{ website_id }}" data-domains="app.uptimepage.dev" data-before-send="smScrubAuthUrl"></script>
+{% endif %}
