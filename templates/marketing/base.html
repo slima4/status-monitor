@@ -40,7 +40,7 @@
     <header class="mk-header sticky top-0 z-30">
         <nav aria-label="Primary" class="container mx-auto flex items-center gap-4 px-4 py-4">
             {% include "marketing/_brand_lockup.html" %}
-            <div class="mk-nav-desk hidden items-center gap-5 md:ml-4 md:flex">
+            <div class="mk-nav-desk hidden items-center gap-5 md:ml-4 md:flex" data-link-region="nav-desktop">
                 {% include "marketing/_nav_desktop.html" %}
             </div>
             <div class="ml-auto flex items-center gap-4 sm:gap-5">
@@ -58,7 +58,7 @@
                 </a>
                 <details class="mk-menu md:hidden">
                     <summary aria-label="Menu"><span class="mk-menu__bars"></span></summary>
-                    <div class="mk-menu__panel">
+                    <div class="mk-menu__panel" data-link-region="nav-mobile">
                         {% include "marketing/_nav_mobile.html" %}
                     </div>
                 </details>
@@ -91,7 +91,7 @@
         </div>
     </div>
 
-    <footer class="mk-footer">
+    <footer class="mk-footer" data-link-region="footer">
         <div class="container mx-auto grid gap-x-6 gap-y-10 px-4 py-12 sm:grid-cols-2 lg:grid-cols-12">
             <div class="lg:col-span-2">
                 <p class="mk-footer__heading">product</p>

@@ -1,6 +1,8 @@
 // Progressive enhancement for the marketing header. Everything degrades to
 // plain <details> disclosures when this script is absent: the mobile menu and
 // each desktop dropdown stay click-toggleable with native keyboard support.
+// Sitewide script, so it also carries the delegated link reporting.
+import "./_link_event.js";
 (() => {
     const desktop = matchMedia("(min-width: 768px)");
 

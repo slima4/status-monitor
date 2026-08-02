@@ -20,7 +20,7 @@
     {% if posts.is_empty() %}
     <p class="mk-card text-center mk-quiet">No posts yet. Check back soon.</p>
     {% else %}
-    <div>
+    <div data-link-region="blog-index">
         {% for p in posts %}
         <a href="/blog/{{ p.slug }}" class="mk-blog-row">
             <p class="mk-blog-row__date">{{ p.date }}</p>
