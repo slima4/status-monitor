@@ -421,3 +421,68 @@ pub(crate) fn body_etag(body: &str) -> HeaderValue {
     // SHA-256 hex + quotes is pure ASCII, safe for HeaderValue.
     HeaderValue::try_from(formatted).expect("ascii etag")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cfg_for(canonical_origin: &str) -> MarketingCfg {
+        MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: canonical_origin.into(),
+            blog_enabled: true,
+            mcp_url: None,
+        }
+    }
+
+    fn landing_html(canonical_origin: &str) -> String {
+        // Renders straight past the per-process cache, so origin can vary.
+        String::from_utf8(render_landing(&cfg_for(canonical_origin)).body.to_vec())
+            .expect("utf8 body")
+    }
+
+    fn not_found_html(canonical_origin: &str) -> String {
+        String::from_utf8(render_not_found(&cfg_for(canonical_origin)).body.to_vec())
+            .expect("utf8 body")
+    }
+
+    fn architecture_html(canonical_origin: &str) -> String {
+        String::from_utf8(
+            render_architecture(&cfg_for(canonical_origin))
+                .body
+                .to_vec(),
+        )
+        .expect("utf8 body")
+    }
+
+    /// The tracker is what defines `window.umami`, and every event helper on
+    /// the site calls it optionally, so this one gate decides whether a
+    /// deployment reports anything at all. Self-hosted must report nothing.
+    #[test]
+    fn analytics_renders_only_on_the_hosted_origin() {
+        let hosted = landing_html("https://uptimepage.dev");
+        assert!(hosted.contains("analytics.uptimepage.dev"));
+        assert!(hosted.contains("data-website-id"));
+        // A canonical carrying a path is the common case; the bare origin is
+        // only the home page.
+        assert!(architecture_html("https://uptimepage.dev").contains("data-website-id"));
+        assert!(not_found_html("https://uptimepage.dev").contains("data-website-id"));
+
+        for origin in [
+            "https://status.acme.example",
+            "http://localhost:8080",
+            "https://uptimepage.dev.evil.example",
+        ] {
+            for body in [landing_html(origin), not_found_html(origin)] {
+                assert!(
+                    !body.contains("analytics.uptimepage.dev"),
+                    "{origin} would report to our analytics"
+                );
+                assert!(
+                    !body.contains("data-website-id"),
+                    "{origin} would report to our analytics"
+                );
+            }
+        }
+    }
+}

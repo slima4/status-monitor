@@ -13,9 +13,8 @@
     <link rel="stylesheet" href="{{ "css/app.css"|asset }}">
     <meta name="robots" content="noindex">
     {% include "marketing/_analytics.html" %}
-    {% if canonical_url.starts_with("https://uptimepage.dev") %}
+    {# Inert without the tracker above, so it needs no second copy of its gate. #}
     <script defer src="{{ "js/marketing/not_found.js"|asset }}"></script>
-    {% endif %}
 </head>
 <body class="marketing-shell antialiased">
     <main class="container mx-auto max-w-xl px-4 py-24 text-center">
