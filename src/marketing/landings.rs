@@ -5413,18 +5413,25 @@ pub fn mount(router: Router<Arc<MarketingCfg>>) -> Router<Arc<MarketingCfg>> {
             get(move |state, headers| serve(state, headers, landing)),
         );
     }
-    // Old name for Better Stack; searchers still use it, alias 301s to the one page.
-    r = r.route(
-        "/vs/better-uptime",
-        get(|| async { Redirect::permanent("/vs/better-stack") }),
-    );
-    // /automation split the same Terraform intent as the page below and the same
-    // MCP intent as /mcp-server, so it competed with both. Folded into the one page.
-    r.route(
-        "/automation",
-        get(|| async { Redirect::permanent("/terraform-uptime-monitoring") }),
-    )
+    for (from, to) in ALIASES {
+        r = r.route(from, get(move || async move { Redirect::permanent(to) }));
+    }
+    r
 }
+
+/// Paths that earn traffic but should not be pages: retired URLs and the
+/// spellings visitors guess. One source, so a test can prove every target is
+/// still a real landing.
+const ALIASES: &[(&str, &str)] = &[
+    // Old name for Better Stack; searchers still use it.
+    ("/vs/better-uptime", "/vs/better-stack"),
+    // /automation split the same Terraform intent as the page below and the same
+    // MCP intent as /mcp-server, so it competed with both.
+    ("/automation", "/terraform-uptime-monitoring"),
+    // Both spellings show up as 404s in analytics; the intent is /vs/pingdom.
+    ("/pingdom-alternatives", "/vs/pingdom"),
+    ("/vs/pingdom-alternatives", "/vs/pingdom"),
+];
 
 #[cfg(test)]
 mod tests {
@@ -5436,6 +5443,22 @@ mod tests {
         for l in LANDINGS {
             assert!(l.path.starts_with('/'), "{} must be absolute", l.path);
             assert!(seen.insert(l.path), "duplicate path {}", l.path);
+        }
+    }
+
+    /// A redirect to a page that no longer exists trades one 404 for a slower
+    /// one, and an alias that shadows a real path hides that page entirely.
+    #[test]
+    fn alias_targets_are_real_pages() {
+        for (from, to) in ALIASES {
+            assert!(
+                LANDINGS.iter().any(|l| l.path == *to),
+                "{to} is a redirect target but not a landing"
+            );
+            assert!(
+                !LANDINGS.iter().any(|l| l.path == *from),
+                "{from} is both a landing and an alias"
+            );
         }
     }
 

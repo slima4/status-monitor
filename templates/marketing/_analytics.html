@@ -3,5 +3,5 @@
    with ours. #}
 {% if canonical_url == "https://uptimepage.dev" || canonical_url.starts_with("https://uptimepage.dev/") %}
 <script defer src="{{ "js/marketing/referral_source.js"|asset }}"></script>
-<script defer src="https://analytics.uptimepage.dev/script.js" data-website-id="2ef8ae40-ba4a-40a4-90bf-6d6b2b1eae2e" data-domains="uptimepage.dev" data-before-send="tagReferralSource"></script>
+<script defer src="https://analytics.uptimepage.dev/script.js" data-website-id="2ef8ae40-ba4a-40a4-90bf-6d6b2b1eae2e" data-domains="uptimepage.dev" data-tag="{{ crate::marketing::config::ANALYTICS_TAG }}" data-performance="true" data-before-send="tagReferralSource"></script>
 {% endif %}

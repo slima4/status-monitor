@@ -50,7 +50,7 @@ pub async fn api_catalog(State(cfg): State<Arc<MarketingCfg>>) -> Response {
 pub async fn mcp_server_card(State(cfg): State<Arc<MarketingCfg>>) -> Response {
     match cfg.mcp_url.as_deref() {
         Some(mcp) => Redirect::temporary(&format!("{}{CARD_PATH}", origin_of(mcp))).into_response(),
-        None => super::pages::not_found(State(cfg)).await,
+        None => super::pages::not_found_page(&cfg),
     }
 }
 

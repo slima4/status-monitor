@@ -9,6 +9,16 @@
 /// anything machine-generated.
 pub const BRAND: &str = "Uptimepage";
 
+/// Home screenshot gallery, hidden to test whether its absence lifts signups.
+/// One switch: the flag gates the section, the tag splits every report the
+/// analytics UI can draw, so a traffic swing can't be read as the variant.
+pub const GALLERY_VISIBLE: bool = false;
+pub const ANALYTICS_TAG: &str = if GALLERY_VISIBLE {
+    "gallery-on"
+} else {
+    "gallery-off"
+};
+
 /// Short one-line pitch. Used by llms.txt and as the in-image subtitle
 /// on the OG card.
 pub const TAGLINE: &str = "Uptime monitoring and public status pages that just work.";

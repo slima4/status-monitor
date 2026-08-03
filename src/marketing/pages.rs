@@ -12,8 +12,9 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::http::HeaderValue;
 use axum::http::StatusCode;
+use axum::http::Uri;
 use axum::http::header::{CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_NONE_MATCH};
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use bytes::Bytes;
 
 use crate::marketing::seo::{
@@ -160,7 +161,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         og,
         version: env!("CARGO_PKG_VERSION"),
         faqs: FAQS,
-        show_gallery: false,
+        show_gallery: super::config::GALLERY_VISIBLE,
         shots: shot_views(),
     };
     let body = page
@@ -196,8 +197,38 @@ fn render_landing_markdown(cfg: &MarketingCfg) -> CachedRender {
     }
 }
 
-pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
-    let cached = NF_CACHED.get_or_init(|| render_not_found(&cfg));
+/// Trailing-slash form of a real page, or `None` when there is nothing to
+/// redirect to. Every route is registered bare, so `/blog/` 404s where `/blog`
+/// serves. A leading `//` would make the browser read the target as
+/// protocol-relative and leave the site, so it stays a 404.
+fn slash_redirect(uri: &Uri) -> Option<String> {
+    let path = uri.path();
+    if !path.ends_with('/') {
+        return None;
+    }
+    let trimmed = path.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed.starts_with("//") {
+        return None;
+    }
+    Some(match uri.query() {
+        Some(q) => format!("{trimmed}?{q}"),
+        None => trimmed.to_string(),
+    })
+}
+
+/// Router fallback: nothing matched at all, so a slash fixup is worth trying
+/// before giving up.
+pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>, uri: Uri) -> Response {
+    match slash_redirect(&uri) {
+        Some(target) => Redirect::permanent(&target).into_response(),
+        None => not_found_page(&cfg),
+    }
+}
+
+/// The 404 itself. Handlers that matched a route but not a slug render this
+/// directly — their path is already canonical, so there is nothing to fix up.
+pub fn not_found_page(cfg: &MarketingCfg) -> Response {
+    let cached = NF_CACHED.get_or_init(|| render_not_found(cfg));
     (
         StatusCode::NOT_FOUND,
         [
@@ -626,6 +657,46 @@ mod tests {
                     "{origin} would report to our analytics"
                 );
             }
+        }
+    }
+
+    /// Both attributes are pure opt-ins in the tracker, and their absence is
+    /// silent: the columns simply stay empty, which is how they went unnoticed.
+    #[test]
+    fn tracker_opts_into_web_vitals_and_the_variant_tag() {
+        let hosted = landing_html("https://uptimepage.dev");
+        assert!(hosted.contains(r#"data-performance="true""#));
+        assert!(hosted.contains(&format!(
+            r#"data-tag="{}""#,
+            super::super::config::ANALYTICS_TAG
+        )));
+    }
+
+    #[test]
+    fn trailing_slash_redirects_to_the_bare_path() {
+        let redirect = |s: &str| slash_redirect(&s.parse::<Uri>().expect("valid uri"));
+
+        assert_eq!(redirect("/blog/").as_deref(), Some("/blog"));
+        assert_eq!(
+            redirect("/docs/self-hosting/").as_deref(),
+            Some("/docs/self-hosting")
+        );
+        assert_eq!(
+            redirect("/blog/?utm_source=x").as_deref(),
+            Some("/blog?utm_source=x")
+        );
+
+        for already_fine in ["/", "/blog", "/blog?a=1"] {
+            assert_eq!(
+                redirect(already_fine),
+                None,
+                "{already_fine} needs no fixup"
+            );
+        }
+        // `//host/` in a Location header is protocol-relative: the browser
+        // would leave the site entirely.
+        for off_site in ["//evil.example/", "///"] {
+            assert_eq!(redirect(off_site), None, "{off_site} would leave the site");
         }
     }
 }

@@ -27,7 +27,7 @@ use axum::routing::get;
 
 use super::config::{BRAND, MarketingCfg};
 use super::md::TocEntry;
-use super::pages::{CachedRender, cached_render, not_found, serve_cached};
+use super::pages::{CachedRender, cached_render, not_found_page, serve_cached};
 use super::seo::{
     JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_breadcrumb_trail, json_ld_tech_article,
 };
@@ -659,7 +659,7 @@ async fn page(
                 .expect("DOCS drives both");
             super::negotiate::serve(&headers, cached, source, &DOCS_CACHE_CONTROL)
         }
-        None => not_found(State(cfg)).await,
+        None => not_found_page(&cfg),
     }
 }
 

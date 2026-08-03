@@ -22,7 +22,7 @@ use include_dir::{Dir, include_dir};
 use serde::Deserialize;
 
 use super::config::{AUTHOR, Author, BRAND, MarketingCfg};
-use super::pages::{CachedRender, cached_render, not_found, serve_cached};
+use super::pages::{CachedRender, cached_render, not_found_page, serve_cached};
 use super::seo::{
     JsonLd, OpenGraph, json_ld_blog, json_ld_blog_posting, json_ld_breadcrumb, json_ld_faqpage,
     json_ld_item_list,
@@ -501,7 +501,7 @@ pub async fn post(
                 .expect("same post list");
             super::negotiate::serve(&headers, cached, source, &POST_CACHE_CONTROL)
         }
-        None => not_found(State(cfg)).await,
+        None => not_found_page(&cfg),
     }
 }
 
