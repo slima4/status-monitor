@@ -121,7 +121,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/status-page-for-saas",
         created: "2026-06-16",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-03",
         title: "Status Page & Uptime Monitoring for SaaS",
         eyebrow: "for saas teams",
         h1: "A status page your SaaS customers actually trust",
@@ -184,6 +184,10 @@ pub const LANDINGS: &[Landing] = &[
             ResourceLink {
                 label: "Uptime SLA calculator",
                 href: "/tools/uptime-sla-calculator",
+            },
+            ResourceLink {
+                label: "Incident update generator",
+                href: "/tools/incident-update-generator",
             },
             ResourceLink {
                 label: "Versus Statuspage",
@@ -610,7 +614,7 @@ docker compose up -d"#,
     Landing {
         path: "/uptime-monitoring-for-developers",
         created: "2026-07-01",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-03",
         title: "Uptime Monitoring for Developers, as Code",
         eyebrow: "for developers",
         h1: "Uptime monitoring built for developers",
@@ -702,6 +706,14 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Uptime SLA calculator",
                 href: "/tools/uptime-sla-calculator",
+            },
+            ResourceLink {
+                label: "Cron expression generator",
+                href: "/tools/cron-expression-generator",
+            },
+            ResourceLink {
+                label: "Error budget calculator",
+                href: "/tools/error-budget-calculator",
             },
             ResourceLink {
                 label: "Open-source monitors you can self-host",
@@ -1557,7 +1569,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-healthchecks",
         created: "2026-07-14",
-        lastmod: "2026-07-14",
+        lastmod: "2026-08-03",
         title: "Uptime Kuma vs Healthchecks",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Healthchecks: they don't do the same job",
@@ -1599,6 +1611,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "The self-hosted field, compared",
                 href: "/vs/self-hosted-monitoring",
+            },
+            ResourceLink {
+                label: "Cron expression generator",
+                href: "/tools/cron-expression-generator",
             },
             ResourceLink {
                 label: "Open-source monitoring tools",

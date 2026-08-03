@@ -1,7 +1,7 @@
 +++
 title = "Your monitors can talk to an AI, with your permission"
 date = "2026-06-03"
-updated = "2026-07-19"
+updated = "2026-08-03"
 slug = "mcp-server"
 excerpt = "Uptimepage now speaks MCP, so an LLM can answer \"what's broken and since when?\" in plain language, plus what we did to stop it from wrecking things."
 tags = ["mcp", "ai", "monitoring", "security", "api"]
@@ -73,5 +73,7 @@ We've [written before](/blog/boring-uptime) about why a monitor should be the du
 The MCP server adds a new way to *ask questions* and a tightly-fenced way to *take actions*. It does not add a new way for your monitoring to surprise you, lie to you, or fall over. The model can read everything it's allowed to and change nothing without your say-so. When it's wrong, it's wrong in a chat window, not in production.
 
 It's the same monitoring you can [manage entirely as code](/blog/monitoring-as-code): queried by an assistant over MCP on one side, declared in a pull request with Terraform on the other. Two front doors, one tenant-isolated data layer behind both.
+
+Other monitoring tools are shipping MCP servers too, and they differ mostly in what they let a model change rather than read. [The monitoring MCP servers, compared](/compare/mcp-servers) lays out where each one draws that line.
 
 Point your assistant at it and ask it what's broken. Worst case, it tells you everything's fine, and you didn't have to open a single dashboard to find out.

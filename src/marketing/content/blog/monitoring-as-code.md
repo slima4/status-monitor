@@ -1,7 +1,7 @@
 +++
 title = "Your monitoring config belongs in a pull request"
 date = "2026-06-16"
-updated = "2026-07-19"
+updated = "2026-08-03"
 slug = "monitoring-as-code"
 excerpt = "Click-created monitors rot: nobody recalls why a threshold is set, and the reasoning leaves with its author. Terraform fixes that, and bites back in places."
 tags = ["terraform", "infrastructure-as-code", "monitoring", "devops"]
@@ -119,6 +119,6 @@ And the same monitors you declare in code, an AI assistant can [read back over M
 
 ## Boring, in code too
 
-We've [argued before](/blog/boring-uptime) that your monitor should be the dullest, most trustworthy thing you own. Configuration is part of that, and it's worth weighing when you pick a tool: of [the open-source and self-hosted options](/blog/best-self-hosted-uptime-monitoring-tools), the ones that keep their config in a file you can commit age better than the ones that hide it behind clicks. A monitor whose definition you can read, review, diff, and roll back is a more boring monitor than one assembled from clicks that nobody remembers, and boring, here, is the entire compliment.
+We've [argued before](/blog/boring-uptime) that your monitor should be the dullest, most trustworthy thing you own. Configuration is part of that, and it's worth weighing when you pick a tool: of [the open-source and self-hosted options](/blog/best-self-hosted-uptime-monitoring-tools), the ones that keep their config in a file you can commit age better than the ones that hide it behind clicks. Worth checking who actually maintains the provider, too, since plenty of tools claim Terraform support and leave it to a volunteer; [the monitoring Terraform providers, compared](/compare/terraform-providers) sets out who publishes what. A monitor whose definition you can read, review, diff, and roll back is a more boring monitor than one assembled from clicks that nobody remembers, and boring, here, is the entire compliment.
 
 Put the config in the repo. Let a second person read the diff. Your future self, squinting at a 47-second interval eighteen months from now, will at least be able to run `git blame` and find out it was you.

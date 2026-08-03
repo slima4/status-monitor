@@ -1,7 +1,7 @@
 +++
 title = "Best open-source, self-hosted uptime monitors (2026)"
 date = "2026-06-20"
-updated = "2026-07-15"
+updated = "2026-08-03"
 slug = "best-self-hosted-uptime-monitoring-tools"
 excerpt = "A fair look at the open-source, self-hostable tools for watching sites and APIs in 2026: what each is good at, where it stops, and how to pick one."
 tags = ["open-source", "self-hosted", "monitoring", "status-page"]
@@ -95,7 +95,7 @@ The operational cost is the stack: a Node.js backend plus MongoDB, run through D
 
 OneUptime is the everything platform: monitoring, status pages, on-call, incident management, and logs in one open-source project. If you want to replace several paid tools at once and you have the operational capacity to run it, it does a lot.
 
-But doing so much is also the problem. It is heavier than a single-binary tool and expects you to be comfortable with Docker or Kubernetes and a real chunk of resources. On a small VPS it is the wrong tool. For a platform team that already runs Kubernetes and wants one open-source system to own the whole incident lifecycle, it is worth the extra work.
+But doing so much is also the problem. It is heavier than a single-binary tool and expects you to be comfortable with Docker or Kubernetes and a real chunk of resources. On a small VPS it is the wrong tool. For a platform team that already runs Kubernetes and wants one open-source system to own the whole incident lifecycle, it is worth the extra work. [OneUptime against Uptime Kuma](/compare/uptime-kuma-vs-oneuptime) works through that trade in detail.
 
 ## Apache HertzBeat
 
@@ -107,7 +107,7 @@ The cost is complexity. A production deployment is a Java application plus a rel
 
 These two cover the status-page corner. Cachet is a long-running, PHP-based status page going through a rebuild, and the rebuild is where the caveats live: v3 is still in development with no stable release, the newest tagged release remains v2.4.1 from 2023, and the v3 branch ships under a custom source-available license rather than the BSD one 2.x carried. What it does well is the status-page job itself, now including confirmed email subscribers. It is a page first: v3 added a basic HTTP check, but you schedule it yourself and a failure colours a component rather than opening an incident, so in practice you still feed it from elsewhere. Statping-ng is a community-kept fork of the older Statping, a single Go binary that does both monitoring and a status page, with a smaller community behind it.
 
-Pick these if a status page is the actual product you need and the monitoring is secondary or already handled.
+Pick these if a status page is the actual product you need and the monitoring is secondary or already handled. [Cachet against Uptime Kuma](/compare/uptime-kuma-vs-cachet) sets out what you give up on the checking side.
 
 ## A note on Beszel
 
@@ -115,7 +115,7 @@ Beszel comes up in every "Kuma alternative" thread, so let us save you time: it 
 
 ## Prometheus and Blackbox exporter
 
-Not a product, a pattern, and worth naming because plenty of teams already work this way. If you run Prometheus, the Blackbox exporter probes HTTP, TCP, DNS, and ICMP, and Alertmanager handles the alerting. You get enormous power and you build the experience yourself, including the status page and the on-call flow. For a team that is already deep in Prometheus, adding uptime checks is a small step. For anyone else it is a lot of work to put together.
+Not a product, a pattern, and worth naming because plenty of teams already work this way. If you run Prometheus, the Blackbox exporter probes HTTP, TCP, DNS, and ICMP, and Alertmanager handles the alerting. You get enormous power and you build the experience yourself, including the status page and the on-call flow. For a team that is already deep in Prometheus, adding uptime checks is a small step. For anyone else it is a lot of work to put together. [The Blackbox exporter against Uptime Kuma](/compare/blackbox-exporter-vs-uptime-kuma) counts up what the assembled version actually costs.
 
 ## OpenStatus
 
