@@ -1,6 +1,7 @@
 +++
 title = "Why I chose Rust over Go for an uptime monitor"
 date = "2026-07-18"
+updated = "2026-08-03"
 slug = "choosing-rust-for-an-uptime-monitor"
 excerpt = "Go is the usual pick for a service like this. I chose Rust for one reason: a monitor sells clean timing, and its own runtime must not add random delay."
 tags = ["rust", "go", "monitoring", "devops"]
@@ -90,3 +91,5 @@ It is also why Uptimepage is open source and self-hostable. You can read the cod
 ## The honest version
 
 The honest version is not "Rust beats Go." It is "for a tool that lives or dies by timing and runs at high concurrency, Rust fit better." Pick the language for the job in front of you. Mine happened to be a job that Rust is very good at.
+
+If you want to see what that decision produced rather than the reasoning behind it, the [live architecture map](/architecture) traces a request and a check through every hop of the running system.

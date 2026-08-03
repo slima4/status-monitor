@@ -367,7 +367,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/open-source-uptime-monitoring",
         created: "2026-07-11",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-03",
         title: "Open-Source Uptime Monitoring, Self-Hosted",
         eyebrow: "open source",
         h1: "An open-source uptime monitor you run yourself",
@@ -422,6 +422,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "vs Uptime Kuma",
                 href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "How it is built, end to end",
+                href: "/architecture",
             },
             ResourceLink {
                 label: "Best open-source monitors, ranked",
@@ -722,6 +726,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Built in Rust",
                 href: "/blog/building-an-uptime-monitor-in-rust",
+            },
+            ResourceLink {
+                label: "How it is built, end to end",
+                href: "/architecture",
             },
         ],
         cta: "Start free",

@@ -1,6 +1,7 @@
 +++
 title = "Postgres vs ClickHouse is the wrong question. I use both."
 date = "2026-07-08"
+updated = "2026-08-03"
 slug = "postgres-vs-clickhouse-uptime-monitor"
 excerpt = "My uptime monitor runs Postgres and ClickHouse side by side. Which data goes where comes down to one question, and four database tricks fall out of it."
 tags = ["postgres", "clickhouse", "databases", "rust", "monitoring"]
@@ -146,4 +147,4 @@ Reach for the second store only when one table stops looking like the rest of yo
 
 The rule I would give my past self: do not split by "which database is faster". Split by how the data is written. Rows that change and must stay correct want Postgres. An append-only stream you only ever summarize wants a column store like ClickHouse. Most of the tricks above are that one idea pushed down into the schema.
 
-Uptimepage is open source, AGPL-3.0, and both schemas are in the repo: [github.com/uptimepage/uptimepage](https://github.com/uptimepage/uptimepage). The probe that writes those rows is [its own post](https://uptimepage.dev/blog/http-prober-in-rust-no-reqwest), and the wider build story, one binary and two databases, is [here](https://uptimepage.dev/blog/building-an-uptime-monitor-in-rust). Or [start free on the hosted tier](https://uptimepage.dev) and point a check at something.
+Uptimepage is open source, AGPL-3.0, and both schemas are in the repo: [github.com/uptimepage/uptimepage](https://github.com/uptimepage/uptimepage). The probe that writes those rows is [its own post](https://uptimepage.dev/blog/http-prober-in-rust-no-reqwest), and the wider build story, one binary and two databases, is [here](https://uptimepage.dev/blog/building-an-uptime-monitor-in-rust). To see where both stores sit in the whole system, and which path a check result takes to reach them, there is a [live map of the architecture](/architecture). Or [start free on the hosted tier](https://uptimepage.dev) and point a check at something.
