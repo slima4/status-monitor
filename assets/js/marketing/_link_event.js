@@ -1,9 +1,14 @@
 // Nav, footer and outbound clicks. One delegated listener rather than an
 // attribute on each of ~60 links, and Umami's own handler ignores anything
 // without data-umami-event, so outbound needs reporting here too.
-const site = location.hostname.split(".").slice(-2).join(".");
+// A trailing dot is a valid FQDN and survives URL parsing, so it would slip the suffix match.
+const bare = (host) => host.replace(/\.$/, "");
+const site = bare(location.hostname).split(".").slice(-2).join(".");
 
-const ours = (host) => host === site || host.endsWith(`.${site}`);
+const ours = (host) => {
+    const h = bare(host);
+    return h === site || h.endsWith(`.${site}`);
+};
 
 document.addEventListener("click", (e) => {
     const link = e.target.closest("a[href]");
