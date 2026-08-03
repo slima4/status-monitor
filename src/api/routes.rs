@@ -355,6 +355,9 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/me",
             get(handlers::me::me).delete(handlers::account::delete_account),
         )
+        // Not `BrowserUser`-gated like its neighbours: the caller's account is
+        // soft-deleted, which every other extractor reads as signed out.
+        .route("/me/restore", post(handlers::account::restore_account))
         .route("/me/data-export", get(handlers::account::data_export))
         .route("/me/usage", get(handlers::usage::get_me_usage))
         .route(

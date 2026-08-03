@@ -104,6 +104,10 @@ pub fn routes(state: AppState) -> Router {
         )
         .route("/web/partials/nav", get(views::nav::context))
         .route("/login", get(views::auth::login))
+        // Both reachable without an active account: the first with a session
+        // whose user is soft-deleted, the second with no session at all.
+        .route("/account/restore", get(views::auth::restore_page))
+        .route("/account/deleted", get(views::auth::deleted_page))
         .route(
             "/invitations/accept",
             get(views::invitations::accept_landing),

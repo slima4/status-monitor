@@ -140,6 +140,60 @@ async fn login_ready(state: &AppState) -> bool {
     ready
 }
 
+/// Renders the bare header: an account every other route treats as deleted has
+/// no org context to hang a nav on.
+const TAB_RECOVER: &str = "recover";
+
+#[derive(Template, WebTemplate)]
+#[template(path = "auth/restore.html")]
+pub struct RestorePage {
+    pub active_tab: &'static str,
+    pub purge_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Where a sign-in on a soft-deleted account lands. Cancelling the deletion is
+/// a second, deliberate click; the alternative is a deletion nobody can
+/// complete, because the only way back in undoes it.
+pub async fn restore_page(
+    State(state): State<AppState>,
+    pending: Option<crate::web::PendingDeletionUser>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let Some(pending) = pending else {
+        return axum::response::Redirect::to("/login").into_response();
+    };
+    let grace = i64::from(state.cfg.tenancy.deletion_grace_period_days);
+    RestorePage {
+        active_tab: TAB_RECOVER,
+        purge_at: pending.deleted_at + chrono::Duration::days(grace),
+    }
+    .into_response()
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "auth/deleted.html")]
+pub struct DeletedPage {
+    pub active_tab: &'static str,
+    /// `None` once the receipt cookie expires; the copy drops the date rather
+    /// than inventing one.
+    pub purge_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// Signed-out confirmation that the deletion landed, so the flow ends
+/// somewhere other than a login form.
+pub async fn deleted_page(
+    State(state): State<AppState>,
+    cookies: tower_cookies::Cookies,
+) -> DeletedPage {
+    DeletedPage {
+        active_tab: TAB_RECOVER,
+        purge_at: crate::web::deletion_receipt::take(
+            &cookies,
+            &state.cfg.auth.session.cookie_domain,
+        ),
+    }
+}
+
 /// First char upper-cased, the rest unchanged. Empty input → empty string.
 fn capitalize_first(s: &str) -> String {
     let mut c = s.chars();

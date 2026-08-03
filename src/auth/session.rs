@@ -235,6 +235,29 @@ pub async fn set_active_org_by_hash(
     Ok(res.rows_affected() > 0)
 }
 
+/// Stamp `org` onto every live session of `user` that has no active org.
+///
+/// A sign-in during the deletion grace window resolves no org (theirs is
+/// tombstoned) and `active_org_id` is fixed at insert time, so those sessions
+/// would 401 on `CurrentOrg` forever. The restore repairs all of them, not just
+/// the one that clicked: the user may have signed in on another device first.
+pub async fn adopt_org_for_orphan_sessions(
+    pool: &PgPool,
+    user: UserId,
+    org: crate::domain::OrgId,
+) -> Result<u64> {
+    let res = sqlx::query(
+        "UPDATE sessions SET active_org_id = $2 \
+         WHERE user_id = $1 AND active_org_id IS NULL AND expires_at > now()",
+    )
+    .bind(user.0)
+    .bind(org.0)
+    .execute(pool)
+    .await
+    .context("session::adopt_org_for_orphan_sessions")?;
+    Ok(res.rows_affected())
+}
+
 /// Logout / pre-login destroy. Takes the raw cookie value the caller already
 /// holds (from the inbound request) and hashes it before the DELETE.
 pub async fn destroy(pool: &PgPool, cookie_token: &str) -> Result<u64> {

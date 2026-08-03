@@ -3,7 +3,7 @@
 //! Each tick runs the org cascade/outbox below, then a back-pressured
 //! hard-delete of soft-deleted users whose grace window has elapsed
 //! (`deleted_at < now() - grace_days`, the sole gate — within the window the
-//! user restores by re-authenticating). The user row's FK `ON DELETE CASCADE`
+//! user can still restore). The user row's FK `ON DELETE CASCADE`
 //! erases memberships, oauth_identities, api_tokens, invitations, sessions and
 //! re-auth grants; rows that reference the user as an actor (`login_attempts`,
 //! `org_audit_log`, `quota_events`, `plan_overrides`) keep their rows with the
@@ -353,8 +353,8 @@ pub async fn purge_queue_depth<'e>(executor: impl sqlx::PgExecutor<'e>) -> Resul
 }
 
 /// Hard-delete soft-deleted users whose grace window has elapsed. The window
-/// is gated solely by `deleted_at` age — within it the user restores by
-/// re-authenticating. The same `PURGE_BATCH_LIMIT` back-pressure as the org
+/// is gated solely by `deleted_at` age — within it the user can still restore.
+/// The same `PURGE_BATCH_LIMIT` back-pressure as the org
 /// cascade caps a runaway mass-deletion. The `users` FK cascade erases
 /// dependent rows; `login_attempts` / `org_audit_log` keep theirs with the
 /// actor nulled.

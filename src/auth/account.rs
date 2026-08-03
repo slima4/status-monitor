@@ -35,8 +35,8 @@ pub struct BlockingOrg {
 #[derive(Debug, Clone)]
 pub struct DeletionOutcome {
     pub email: String,
-    /// The grace boundary: the account can be restored (by re-authenticating)
-    /// until this instant, after which the hard purge runs.
+    /// The grace boundary: [`restore_account`] works until this instant, after
+    /// which the hard purge runs.
     pub grace_deadline: DateTime<Utc>,
 }
 
@@ -224,8 +224,8 @@ pub async fn request_deletion(
 
     // Grace boundary, anchored to the single `deleted_at` stamp so this and the
     // purge job agree by construction rather than re-deriving "30 days". The
-    // soft-deleted user restores by re-authenticating (see `undelete_in_tx`)
-    // within this window; the purge job hard-deletes after it.
+    // soft-deleted user can restore (see `restore_account`) within this window;
+    // the purge job hard-deletes after it.
     let grace_deadline = deleted_at + chrono::Duration::days(i64::from(grace_days));
 
     tx.commit().await.context("delete_account: commit")?;
@@ -236,15 +236,35 @@ pub async fn request_deletion(
     })
 }
 
-/// Un-delete a soft-deleted user **inside the caller's transaction**: clear
-/// `users.deleted_at`, lift the tombstone on the orgs they solo-own, and audit
-/// it. Called from the OAuth callback when a soft-deleted user signs in again —
-/// re-authentication IS the restore (the grace window is just the purge delay).
+#[derive(Debug, Clone)]
+pub struct RestoreOutcome {
+    pub email: String,
+    pub orgs: Vec<Uuid>,
+}
+
+/// Restore a soft-deleted account. Signing in does NOT do this: undoing an
+/// erasure the user deliberately asked for must be its own deliberate act.
 ///
-/// Runs in the callback's Phase C tx so a crash rolls back the whole restore.
-/// The `deleted_at IS NOT NULL` guard makes it a no-op for an already-active
-/// row (a benign race), never an error.
-pub async fn undelete_in_tx(tx: &mut Transaction<'_, Postgres>, user_id: UserId) -> Result<()> {
+/// `None` when the account was already active, so a double-submit doesn't mail
+/// the user twice.
+pub async fn restore_account(pool: &PgPool, user_id: UserId) -> Result<Option<RestoreOutcome>> {
+    let mut tx = pool.begin().await.context("restore: begin")?;
+    let restored = undelete_in_tx(&mut tx, user_id).await?;
+    let Some(outcome) = restored else {
+        tx.rollback().await.ok();
+        return Ok(None);
+    };
+    tx.commit().await.context("restore: commit")?;
+    Ok(Some(outcome))
+}
+
+/// Clear `users.deleted_at`, lift the tombstone on the orgs they solo-own, and
+/// audit it. `None` when the row was already active — a benign race, not an
+/// error.
+async fn undelete_in_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: UserId,
+) -> Result<Option<RestoreOutcome>> {
     // Serialise against the daily purge (same per-user lock): without it a
     // restore and a same-user purge can interleave on the last grace day, the
     // org cascade wiping tenant data microseconds before this clears
@@ -253,14 +273,18 @@ pub async fn undelete_in_tx(tx: &mut Transaction<'_, Postgres>, user_id: UserId)
         .await
         .context("undelete: user advisory lock")?;
 
-    sqlx::query(
+    let row: Option<(String,)> = sqlx::query_as(
         "UPDATE users SET deleted_at = NULL, updated_at = now() \
-         WHERE id = $1 AND deleted_at IS NOT NULL",
+         WHERE id = $1 AND deleted_at IS NOT NULL \
+         RETURNING email::text",
     )
     .bind(user_id.0)
-    .execute(&mut **tx)
+    .fetch_optional(&mut **tx)
     .await
     .context("undelete: un-delete user")?;
+    let Some((email,)) = row else {
+        return Ok(None);
+    };
 
     // Lift the tombstone on every org the user still owns (the solo orgs whose
     // owner membership we deliberately kept at deletion time).
@@ -291,7 +315,10 @@ pub async fn undelete_in_tx(tx: &mut Transaction<'_, Postgres>, user_id: UserId)
         .context("undelete: audit")?;
     }
 
-    Ok(())
+    Ok(Some(RestoreOutcome {
+        email,
+        orgs: restored.into_iter().map(|(id,)| id).collect(),
+    }))
 }
 
 /// `last_seen_at` is the session-touched activity timestamp (cookie auth,

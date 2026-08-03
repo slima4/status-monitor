@@ -8,6 +8,7 @@ pub mod assets;
 pub mod auth;
 pub mod avatar;
 pub mod client_ip;
+pub mod deletion_receipt;
 pub mod display_prefs;
 pub mod error;
 pub mod filters;
@@ -29,6 +30,6 @@ pub use auth::authz::{
     VariablesWrite,
 };
 pub use auth::operator::OperatorAuth;
-pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, Session, User};
+pub use auth::{AuthedBrowser, CurrentOrg, CurrentUser, PendingDeletionUser, Session, User};
 pub use host::{ResolvedStatusPage, StatusPageHost, extract_status_slug};
 pub use routes::routes;

@@ -220,6 +220,7 @@ pub mod codes {
     pub const OWNS_SHARED_ORGS: &str = "OWNS_SHARED_ORGS";
     /// A second deletion of an already-soft-deleted account.
     pub const ACCOUNT_ALREADY_DELETED: &str = "ACCOUNT_ALREADY_DELETED";
+    pub const ACCOUNT_NOT_DELETED: &str = "ACCOUNT_NOT_DELETED";
     // Operator (instance-admin) surface — regions + agents.
     /// Operator surface addressed but `operator.admin_token` is unset (404 —
     /// the surface is invisible when disabled).

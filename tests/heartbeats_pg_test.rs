@@ -201,7 +201,7 @@ async fn dead_tokens_stop_recording_and_sync_heals_rows_live_pg() {
         .unwrap()
         .token
         .unwrap();
-    assert!(targets.delete(org_a, doomed).await.unwrap());
+    assert!(targets.delete(org_a, doomed, None).await.unwrap());
     assert!(
         store
             .record_ping_by_token(&tok_doomed)

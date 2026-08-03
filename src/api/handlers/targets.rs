@@ -25,10 +25,11 @@ use crate::domain::{
     TargetUpdate, min_interval_secs_for_kind,
 };
 use crate::error::{AppError, Result};
+use crate::observability::metrics::names;
 use crate::security::SsrfGuard;
 use crate::storage::TargetFilter;
 use crate::web::{
-    Authorized, CurrentOrg, RequestSource, TargetsDelete, TargetsExecute, TargetsRead,
+    Authorized, CurrentOrg, CurrentUser, RequestSource, TargetsDelete, TargetsExecute, TargetsRead,
     TargetsWrite, TokenScopes,
 };
 
@@ -589,6 +590,7 @@ pub async fn get_heartbeat(
 pub async fn delete(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<TargetsDelete>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     // Resolve curated pages before the FK cascade clears the join rows.
@@ -597,16 +599,35 @@ pub async fn delete(
         .pages_for_targets(org, &[id])
         .await
         .unwrap_or_default();
-    if state.target_store.delete(org, id).await? {
+    if state.target_store.delete(org, id, Some(user)).await? {
         for page in pages {
             state.public_source.invalidate(page).await;
         }
+        note_if_emptied(&state, org, 1).await;
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(
             codes::TARGET_NOT_FOUND,
             "target not found",
         ))
+    }
+}
+
+/// An org clearing its whole inventory is a customer walking out, and reads as
+/// routine tidying until the account is already cold. `deleted` gates the
+/// signal here rather than at each call site, so a delete that hit nothing
+/// can't report an org as newly emptied.
+async fn note_if_emptied(state: &AppState, org: OrgId, deleted: usize) {
+    if deleted == 0 {
+        return;
+    }
+    match state.target_store.summary(org).await {
+        Ok(summary) if summary.total == 0 => {
+            metrics::counter!(names::ORGS_EMPTIED).increment(1);
+            tracing::warn!(org_id = %org.0, "org has no monitors left after a delete");
+        }
+        Ok(_) => {}
+        Err(err) => tracing::warn!(error = %err, "emptied-org check failed (non-fatal)"),
     }
 }
 
@@ -774,6 +795,7 @@ pub async fn bulk_create(
 pub async fn bulk_action(
     State(state): State<AppState>,
     CurrentOrg(org): CurrentOrg,
+    CurrentUser(user): CurrentUser,
     scopes: TokenScopes,
     Json(req): Json<BulkActionRequest>,
 ) -> Result<Json<BulkActionResponse>> {
@@ -804,10 +826,14 @@ pub async fn bulk_action(
                 .pages_for_targets(org, &req.ids)
                 .await
                 .unwrap_or_default();
-            let succeeded = state.target_store.delete_bulk(org, &req.ids).await?;
+            let succeeded = state
+                .target_store
+                .delete_bulk(org, &req.ids, Some(user))
+                .await?;
             for page in pages {
                 state.public_source.invalidate(page).await;
             }
+            note_if_emptied(&state, org, succeeded.len()).await;
             succeeded
         }
         BulkAction::TagAdd { tags } => {

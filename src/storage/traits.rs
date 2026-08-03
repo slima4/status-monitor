@@ -9,7 +9,7 @@ use crate::api::types::{
 };
 use crate::domain::agent_wire::FlowRunRecord;
 use crate::domain::{
-    CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
+    CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, UserId, WriteSource,
 };
 use crate::error::Result;
 
@@ -146,7 +146,9 @@ pub trait TargetStore: Send + Sync {
         update: TargetUpdate,
         source: WriteSource,
     ) -> Result<Option<Target>>;
-    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool>;
+    /// A monitor is a hard delete, so the `target.deleted` audit row written in
+    /// the same transaction is the only surviving record that it existed.
+    async fn delete(&self, org: OrgId, id: Uuid, actor: Option<UserId>) -> Result<bool>;
     /// Remove every alert binding to `channel_id` across the org's targets.
     /// Channel deletion calls this so a dangling binding can't poison later
     /// whole-array alert updates. Returns the number of targets touched.
@@ -175,8 +177,15 @@ pub trait TargetStore: Send + Sync {
     async fn summary(&self, org: OrgId) -> Result<TargetsSummary>;
     /// Atomically enable or disable each id; returns the set that existed.
     async fn set_enabled(&self, org: OrgId, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>>;
-    /// Atomically delete each id; returns the set that existed.
-    async fn delete_bulk(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>>;
+    /// Atomically delete each id; returns the set that existed. One
+    /// `target.bulk_deleted` audit row, not one per id: a 10 000-id call must
+    /// not flood the log it is meant to be recorded in.
+    async fn delete_bulk(
+        &self,
+        org: OrgId,
+        ids: &[Uuid],
+        actor: Option<UserId>,
+    ) -> Result<Vec<Uuid>>;
     /// Adds `tags` to every named target; returns the set that existed.
     async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
     /// Removes `tags` from every named target; returns the set that existed.

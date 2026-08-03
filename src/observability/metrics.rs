@@ -256,6 +256,14 @@ fn register_descriptions() {
         "uptimepage_ratelimit_drops_total",
         "Per-org and per-user rate-limit rejections (HTTP 429), labelled by `scope` (the same string carried in the error response — e.g. `per_org_api_writes`, `per_user_bulk_ops`). Abuse signal: a sudden rate growth on one scope is the first indicator of a single tenant hammering the API"
     );
+    describe_counter!(
+        "uptimepage_account_deletions_requested_total",
+        "Self-service account deletions requested. Churn signal, not a health signal: every increment is a customer leaving inside a grace window that is still reversible, and nothing else in the stack observes it"
+    );
+    describe_counter!(
+        "uptimepage_orgs_emptied_total",
+        "Deletes that took an organisation from having monitors to having none. The shape a customer walking out leaves behind when they clear the account by hand instead of deleting it"
+    );
 }
 
 pub mod names {
@@ -310,6 +318,8 @@ pub mod names {
     pub const PROCESS_RESIDENT_BYTES: &str = "uptimepage_process_resident_bytes";
     pub const CLICKHOUSE_MAX_PART_COUNT: &str =
         "uptimepage_clickhouse_max_part_count_for_partition";
+    pub const ACCOUNT_DELETIONS_REQUESTED: &str = "uptimepage_account_deletions_requested_total";
+    pub const ORGS_EMPTIED: &str = "uptimepage_orgs_emptied_total";
     pub const HTTP_REQUESTS_TOTAL: &str = "uptimepage_http_requests_total";
     pub const HTTP_REQUEST_DURATION_MS: &str = "uptimepage_http_request_duration_ms";
     pub const HTTP_RESPONSES_INFLIGHT: &str = "uptimepage_http_responses_inflight";

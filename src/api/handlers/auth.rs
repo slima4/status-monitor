@@ -31,6 +31,10 @@ pub struct LoginQuery {
     pub invitation: Option<String>,
 }
 
+/// Signing in must never be the thing that cancels a deletion, so the choice
+/// gets its own page.
+pub const RESTORE_PATH: &str = "/account/restore";
+
 /// Per-provider plumbing the shared runners dispatch on.
 struct ProviderParts<'a> {
     cfg: &'a OauthClientConfig,
@@ -287,8 +291,12 @@ async fn finish_login(
             tracing::warn!(error = %e, provider = provider.as_db_str(), "oauth callback: phase C failed");
             e
         })?;
-    if resolved.restored {
-        tracing::info!(user_id = %resolved.user_id.0, "re-auth restored a soft-deleted account");
+    if let Some(deleted_at) = resolved.pending_deletion {
+        tracing::info!(
+            user_id = %resolved.user_id.0,
+            deleted_at = %deleted_at,
+            "sign-in on an account scheduled for deletion; routing to the restore choice"
+        );
     }
     if resolved.is_new_user
         && let Some(org) = resolved.signup_org_id
@@ -364,20 +372,18 @@ async fn finish_login(
     crate::web::flash::set(
         &cookies,
         crate::web::flash::Flash {
-            restored: resolved.restored,
+            restored: false,
             invite_missed,
         },
         state.cfg.auth.session.cookie_secure,
         &state.cfg.auth.session.cookie_domain,
     );
-    // Joined org outranks redirect_after — the invitation is why they came.
-    let redirect = if let Some(j) = joined {
+    // Outranks every other target: the session only proves who is asking.
+    let redirect = if resolved.pending_deletion.is_some() {
+        RESTORE_PATH.to_string()
+    } else if let Some(j) = joined {
         format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug))
     } else if invite_missed {
-        "/".to_string()
-    } else if resolved.restored {
-        // Banner outranks redirect_after — the user must learn the account
-        // came back.
         "/".to_string()
     } else {
         consumed

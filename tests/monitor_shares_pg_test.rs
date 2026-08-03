@@ -466,7 +466,7 @@ async fn deleted_target_cascades_and_cross_org_create_is_rejected_live_pg() {
             .is_some()
     );
     let target_store = PostgresTargetStore::from_pool(pool.clone(), None);
-    assert!(target_store.delete(org_a, target_a).await.unwrap());
+    assert!(target_store.delete(org_a, target_a, None).await.unwrap());
     assert!(
         store
             .resolve_active(&created.token)

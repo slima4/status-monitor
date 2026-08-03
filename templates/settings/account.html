@@ -141,8 +141,7 @@
         </button>
         <p class="text-sm text-muted">
           Permanently delete your account and every organisation you solely own.
-          Recoverable for a grace period by signing in again — permanent after
-          that.
+          Reversible during a grace period — permanent after that.
         </p>
       </div>
     </div>
@@ -158,10 +157,14 @@
     <h2 class="text-lg font-semibold text-state-bad">Delete your account?</h2>
     <p class="text-sm text-muted" style="line-height: 1.55;">
       This deactivates your account immediately and schedules a permanent
-      purge after the grace period. Sessions are signed out, API tokens
-      revoked, pending invitations withdrawn, and organisations you solely own
-      are scheduled for deletion too. To restore it, just sign in again before
-      the purge date.
+      purge after the grace period. <span class="font-medium text-body">Monitoring
+      stops right away</span> — your checks stop running and no alerts are
+      sent. Sessions are signed out, API tokens revoked, pending invitations
+      withdrawn, and organisations you solely own are scheduled for deletion
+      too. Changed your mind before the purge date?
+      Sign in and choose <span class="font-medium text-body">restore my
+      account</span> on the page that appears — signing in on its own will not
+      cancel the deletion.
     </p>
 
     <div id="delete-blocking" class="hidden alert-card alert-card--warn space-y-3">
@@ -250,14 +253,11 @@
         const body = window.smJson(xhr) || {};
 
         if (xhr.status === 200) {
-          const when = body.scheduled_purge_at
-            ? new Date(body.scheduled_purge_at).toUTCString() : 'the grace period';
           result.className = 'flash-text flash-text--ok';
-          result.textContent = 'Account scheduled for deletion. Sign in again '
-            + 'before ' + when + ' to restore it. Signing out…';
+          result.textContent = 'Account scheduled for deletion. Signing out…';
           document.getElementById('confirm-delete').disabled = true;
           document.getElementById('delete-confirm-input').disabled = true;
-          setTimeout(() => { window.location.href = '/login'; }, 4000);
+          setTimeout(() => { window.location.href = '/account/deleted'; }, 1500);
           return;
         }
 

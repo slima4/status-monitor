@@ -75,9 +75,9 @@ pub struct ResolvedIdentity {
     pub user_id: UserId,
     pub signup_org_id: Option<OrgId>,
     pub is_new_user: bool,
-    /// True when this sign-in un-deleted a soft-deleted account — re-auth IS the
-    /// restore. The caller surfaces a "welcome back" notice.
-    pub restored: bool,
+    /// `deleted_at` when this sign-in landed on a soft-deleted account. The
+    /// sign-in does not undo it; the caller routes to the restore choice.
+    pub pending_deletion: Option<DateTime<Utc>>,
 }
 
 /// Capped-body HTTP fetch shared by the provider modules' Phase B calls.
@@ -108,9 +108,9 @@ pub(crate) async fn fetch_limited(
 
 /// Phase C of the callback. Find-or-create the user, link the identity, and —
 /// for fresh users — create the signup org plus the owner membership. A
-/// soft-deleted account that signs in again is un-deleted in this same tx
-/// (re-authentication is the restore). Caller follows with `session::create`.
-/// All work runs inside one tx, no upstream calls.
+/// soft-deleted account stays deleted here and is reported via
+/// `pending_deletion`. Caller follows with `session::create`. All work runs
+/// inside one tx, no upstream calls.
 pub async fn upsert_identity_and_signup_org(
     pool: &PgPool,
     provider: OauthProvider,
@@ -118,8 +118,8 @@ pub async fn upsert_identity_and_signup_org(
 ) -> Result<ResolvedIdentity> {
     let mut tx = pool.begin().await.context("phase C: begin tx")?;
 
-    // deleted_at travels with the lookup so a soft-deleted user is restored
-    // (un-deleted in this tx) rather than silently logged in over a tombstone.
+    // deleted_at travels with the lookup so a soft-deleted account routes to
+    // the restore choice instead of into the app.
     let existing: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
         "SELECT oi.user_id, u.deleted_at \
          FROM oauth_identities oi JOIN users u ON u.id = oi.user_id \
@@ -132,12 +132,6 @@ pub async fn upsert_identity_and_signup_org(
     .context("phase C: identity lookup")?;
 
     if let Some((user_id, deleted_at)) = existing {
-        let restored = deleted_at.is_some();
-        if restored {
-            // Re-auth = restore: un-delete the account + lift its org tombstones
-            // in this tx, then log in normally.
-            crate::auth::account::undelete_in_tx(&mut tx, UserId(user_id)).await?;
-        }
         sqlx::query(
             "UPDATE oauth_identities SET last_login_at = now(), provider_username = $3 \
              WHERE provider = $1 AND provider_user_id = $2",
@@ -149,14 +143,12 @@ pub async fn upsert_identity_and_signup_org(
         .await
         .context("phase C: bump last_login_at")?;
         tx.commit().await.context("phase C: commit (existing)")?;
-        // Resolve AFTER commit so a just-restored org's lifted tombstone is
-        // visible (resolve_signup_org runs on its own pool connection).
         let signup_org_id = users_store::resolve_signup_org(pool, UserId(user_id)).await?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
             signup_org_id,
             is_new_user: false,
-            restored,
+            pending_deletion: deleted_at,
         });
     }
 
@@ -171,8 +163,8 @@ pub async fn upsert_identity_and_signup_org(
     // ::citext cast is load-bearing — sqlx binds &str as TEXT, which would
     // select the case-sensitive operator. Tombstones included: a verified
     // email proves ownership, so a soft-deleted account reached via a new
-    // provider restores instead of spawning a duplicate row (email unique
-    // index is partial). Active row first, then newest tombstone.
+    // provider resolves to that row instead of spawning a duplicate (email
+    // unique index is partial). Active row first, then newest tombstone.
     let by_email: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
         "SELECT id, deleted_at FROM users WHERE email = $1::citext \
          ORDER BY (deleted_at IS NULL) DESC, created_at DESC LIMIT 1",
@@ -183,10 +175,6 @@ pub async fn upsert_identity_and_signup_org(
     .context("phase C: user-by-email")?;
 
     if let Some((user_id, deleted_at)) = by_email {
-        let restored = deleted_at.is_some();
-        if restored {
-            crate::auth::account::undelete_in_tx(&mut tx, UserId(user_id)).await?;
-        }
         sqlx::query(
             "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
              VALUES ($1, $2, $3, $4) \
@@ -208,14 +196,12 @@ pub async fn upsert_identity_and_signup_org(
             // Already verified — no-op.
         }
         tx.commit().await.context("phase C: commit (linked)")?;
-        // Resolve AFTER commit — a just-lifted org tombstone must be visible
-        // (resolve_signup_org runs on its own pool connection).
         let signup_org_id = users_store::resolve_signup_org(pool, UserId(user_id)).await?;
         return Ok(ResolvedIdentity {
             user_id: UserId(user_id),
             signup_org_id,
             is_new_user: false,
-            restored,
+            pending_deletion: deleted_at,
         });
     }
 
@@ -260,7 +246,7 @@ pub async fn upsert_identity_and_signup_org(
         user_id: UserId(new_user_id),
         signup_org_id: Some(org_id),
         is_new_user: true,
-        restored: false,
+        pending_deletion: None,
     })
 }
 

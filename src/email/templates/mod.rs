@@ -1,4 +1,5 @@
 pub mod account_deletion;
+pub mod account_restored;
 pub mod channel_verification;
 pub mod incident_alert;
 pub mod invitation;

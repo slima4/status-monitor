@@ -9,7 +9,7 @@ use crate::api::types::{
     TargetsSummary,
 };
 use crate::domain::{
-    CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, WriteSource,
+    CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, UserId, WriteSource,
 };
 use crate::error::Result;
 use crate::storage::traits::{
@@ -842,7 +842,7 @@ impl TargetStore for InMemoryTargetStore {
         Ok(Some(t.clone()))
     }
 
-    async fn delete(&self, _org: OrgId, id: Uuid) -> Result<bool> {
+    async fn delete(&self, _org: OrgId, id: Uuid, _actor: Option<UserId>) -> Result<bool> {
         let mut guard = self.targets.lock();
         let before = guard.len();
         guard.retain(|t| t.id != id);
@@ -968,7 +968,12 @@ impl TargetStore for InMemoryTargetStore {
         Ok(hit)
     }
 
-    async fn delete_bulk(&self, _org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn delete_bulk(
+        &self,
+        _org: OrgId,
+        ids: &[Uuid],
+        _actor: Option<UserId>,
+    ) -> Result<Vec<Uuid>> {
         let mut guard = self.targets.lock();
         let hit: Vec<Uuid> = guard
             .iter()

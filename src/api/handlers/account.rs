@@ -1,8 +1,9 @@
 //! GDPR account endpoints: data export and deletion.
 //!
 //! - `GET  /api/v1/me/data-export`      — everything we hold about the caller.
-//! - `DELETE /api/v1/me`                — soft-delete + 30-day grace. The
-//!   account is restored by signing in again within the window (re-auth).
+//! - `DELETE /api/v1/me`                — soft-delete + 30-day grace.
+//! - `POST /api/v1/me/restore`          — separate from signing in, so the only
+//!   route back into the product isn't also the one that undoes leaving it.
 //!
 //! Cross-user / cross-org redaction is deliberate here: the export is the one
 //! place that legitimately reads other members' rows, so it never reuses the
@@ -25,6 +26,7 @@ use crate::auth::account;
 use crate::domain::{UserId, strip_served_stale};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
+use crate::observability::metrics::names;
 use crate::storage::postgres_secrets::{RawTargetRow, RedactedTarget};
 use crate::web::{BrowserUser, CurrentUser};
 
@@ -465,7 +467,7 @@ fn db_err(what: &'static str) -> impl Fn(sqlx::Error) -> AppError {
 #[derive(Debug, Serialize, ToSchema)]
 pub struct DeletionConfirmation {
     pub scheduled_purge_at: DateTime<Utc>,
-    /// The account can be restored by signing in again until this instant.
+    /// The account can be restored (sign in, then confirm) until this instant.
     pub can_recover_until: DateTime<Utc>,
 }
 
@@ -479,8 +481,10 @@ pub struct DeletionConfirmation {
                    deletes API tokens, declines pending invitations, and \
                    tombstones organisations the user solely owns. Rejects with \
                    422 OWNS_SHARED_ORGS if the user solely owns organisations \
-                   that still have other members. The account can be restored \
-                   within the grace window by signing in again.",
+                   that still have other members. Within the grace window the \
+                   account can be restored by signing in and confirming at \
+                   POST /api/v1/me/restore; signing in alone does not cancel \
+                   the deletion.",
     responses(
         (status = 200, body = DeletionConfirmation),
         (status = 409, body = ApiError, description = "Account already scheduled for deletion"),
@@ -489,6 +493,7 @@ pub struct DeletionConfirmation {
 )]
 pub async fn delete_account(
     State(state): State<AppState>,
+    cookies: tower_cookies::Cookies,
     BrowserUser(CurrentUser(user_id)): BrowserUser,
 ) -> Result<Json<DeletionConfirmation>> {
     let pool = state.require_db()?;
@@ -496,8 +501,25 @@ pub async fn delete_account(
 
     let outcome = account::request_deletion(pool, user_id, grace_days).await?;
 
+    // Nothing else in the stack observes a customer leaving.
+    metrics::counter!(names::ACCOUNT_DELETIONS_REQUESTED).increment(1);
+    tracing::warn!(
+        user_id = %user_id.0,
+        scheduled_purge_at = %outcome.grace_deadline,
+        "account deletion requested"
+    );
+
+    // The deletion dropped every session, so the confirmation page has no
+    // other way to read the purge date.
+    crate::web::deletion_receipt::set(
+        &cookies,
+        outcome.grace_deadline,
+        state.cfg.auth.session.cookie_secure,
+        &state.cfg.auth.session.cookie_domain,
+    );
+
     // Notify post-commit: a mail failure must not roll back the deletion the
-    // user asked for. No link — restoring is done by signing in again.
+    // user asked for. No link — restoring runs through a signed-in choice.
     let outgoing = TransactionalEmail {
         from: EmailAddress::new(
             state.cfg.email.from_address.clone(),
@@ -516,4 +538,82 @@ pub async fn delete_account(
         scheduled_purge_at: outcome.grace_deadline,
         can_recover_until: outcome.grace_deadline,
     }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/me/restore",
+    tag = "account",
+    summary = "Cancel a pending account deletion",
+    description = "Clears the deletion stamp on the caller's account and lifts \
+                   the tombstone on every organisation they solely own. \
+                   Requires a session for the soft-deleted account — that is \
+                   what signing in during the grace window produces. Returns \
+                   409 if the account is not scheduled for deletion.",
+    responses(
+        (status = 204, description = "Restored"),
+        (status = 401, body = ApiError, description = "No session for a soft-deleted account"),
+        (status = 409, body = ApiError, description = "Account is not scheduled for deletion"),
+    ),
+)]
+pub async fn restore_account(
+    State(state): State<AppState>,
+    cookies: tower_cookies::Cookies,
+    pending: crate::web::PendingDeletionUser,
+) -> Result<StatusCode> {
+    let pool = state.require_db()?;
+    let Some(outcome) = account::restore_account(pool, pending.user_id).await? else {
+        return Err(AppError::conflict(
+            crate::api::error::codes::ACCOUNT_NOT_DELETED,
+            "This account is not scheduled for deletion.",
+        ));
+    };
+
+    // Sessions minted while every org was tombstoned carry no active org and
+    // would 401 on `CurrentOrg` forever; `active_org_id` is fixed at insert
+    // time, so the restore has to go back and fill them in. Everything from
+    // here is post-commit follow-up: the restore already happened, so no
+    // failure below may turn it into an error response.
+    match crate::storage::users::resolve_signup_org(pool, pending.user_id).await {
+        Ok(Some(org)) => {
+            match crate::auth::session::adopt_org_for_orphan_sessions(pool, pending.user_id, org)
+                .await
+            {
+                Ok(n) => tracing::debug!(sessions = n, "restore: adopted org for orphan sessions"),
+                Err(err) => tracing::warn!(error = %err, "restore: org adoption failed"),
+            }
+        }
+        Ok(None) => {}
+        Err(err) => tracing::warn!(error = %err, "restore: org resolve failed"),
+    }
+
+    tracing::info!(
+        user_id = %pending.user_id.0,
+        orgs = outcome.orgs.len(),
+        "account restored from a pending deletion"
+    );
+
+    crate::web::flash::set(
+        &cookies,
+        crate::web::flash::Flash {
+            restored: true,
+            invite_missed: false,
+        },
+        state.cfg.auth.session.cookie_secure,
+        &state.cfg.auth.session.cookie_domain,
+    );
+
+    let outgoing = TransactionalEmail {
+        from: EmailAddress::new(
+            state.cfg.email.from_address.clone(),
+            state.cfg.email.from_name.clone(),
+        ),
+        to: EmailAddress::new(outcome.email.clone(), outcome.email.clone()),
+        template: EmailTemplate::AccountRestored,
+    };
+    if let Err(err) = state.email_sender.send(outgoing).await {
+        tracing::warn!(error = %err, "account-restored confirmation email send failed");
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }

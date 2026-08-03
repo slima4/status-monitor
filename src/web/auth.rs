@@ -34,7 +34,7 @@ pub fn bearer_from_headers(headers: &axum::http::HeaderMap) -> Option<&str> {
         .map(str::trim)
 }
 
-use axum::extract::{FromRef, FromRequestParts};
+use axum::extract::{FromRef, FromRequestParts, OptionalFromRequestParts};
 use axum::http::HeaderName;
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Redirect, Response};
@@ -135,13 +135,10 @@ where
         let Some(pool) = app_state.db.as_ref() else {
             return Ok(Session::default());
         };
-        let Some(cookies) = parts.extensions.get::<Cookies>().cloned() else {
+        let Some((cookies, cookie_val)) = session_cookie(parts, &app_state) else {
             return Ok(Session::default());
         };
         let cookie_name = app_state.cfg.auth.session.cookie_name.as_str();
-        let Some(cookie_val) = cookies.get(cookie_name).map(|c| c.value().to_string()) else {
-            return Ok(Session::default());
-        };
 
         match session_store::lookup(pool, &app_state.cfg.auth.session, &cookie_val).await {
             Ok(session_store::LookupOutcome::Active(row)) => {
@@ -176,6 +173,83 @@ where
             }
         }
     }
+}
+
+/// A signed-in user whose account is soft-deleted and inside its grace window.
+/// Every other extractor treats them as signed out ([`load_user`] filters
+/// `deleted_at IS NULL`), so this is the only door a pending-deletion session
+/// opens: the restore choice and the restore itself.
+#[derive(Debug, Clone)]
+pub struct PendingDeletionUser {
+    pub user_id: UserId,
+    pub deleted_at: chrono::DateTime<chrono::Utc>,
+    /// `sessions.id_hash` for this request — the restore stamps the
+    /// just-untombstoned org onto it, since the session was minted while every
+    /// org of theirs was still hidden.
+    pub session_id_hash: String,
+}
+
+impl<S> FromRequestParts<S> for PendingDeletionUser
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+        let app_state = AppState::from_ref(state);
+        let pool = app_state.require_db()?;
+        let (_, cookie_val) = session_cookie(parts, &app_state).ok_or(AppError::Unauthorized)?;
+        let row = match session_store::lookup(pool, &app_state.cfg.auth.session, &cookie_val).await
+        {
+            Ok(session_store::LookupOutcome::Active(row)) => row,
+            _ => return Err(AppError::Unauthorized),
+        };
+        // Not `load_user`: that hides deleted accounts, this finds them.
+        let deleted_at: Option<(chrono::DateTime<chrono::Utc>,)> =
+            sqlx::query_as("SELECT deleted_at FROM users WHERE id = $1 AND deleted_at IS NOT NULL")
+                .bind(row.user_id.0)
+                .fetch_optional(pool)
+                .await
+                .map_err(|e| AppError::Other(anyhow::anyhow!("pending-deletion lookup: {e}")))?;
+        let (deleted_at,) = deleted_at.ok_or(AppError::Unauthorized)?;
+        Ok(PendingDeletionUser {
+            user_id: row.user_id,
+            deleted_at,
+            session_id_hash: row.id,
+        })
+    }
+}
+
+/// Browser-facing gate for the restore page: no pending deletion sends the
+/// visitor to `/login` rather than rendering [`AppError`]'s JSON envelope in
+/// their tab. Same split as [`CurrentUser`] and [`AuthedBrowser`].
+impl<S> OptionalFromRequestParts<S> for PendingDeletionUser
+where
+    S: Send + Sync,
+    AppState: FromRef<S>,
+{
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
+    ) -> Result<Option<Self>, Self::Rejection> {
+        Ok(
+            <PendingDeletionUser as FromRequestParts<S>>::from_request_parts(parts, state)
+                .await
+                .ok(),
+        )
+    }
+}
+
+/// The request's session cookie jar and raw cookie value, if it carries one.
+fn session_cookie(parts: &Parts, app_state: &AppState) -> Option<(Cookies, String)> {
+    let cookies = parts.extensions.get::<Cookies>().cloned()?;
+    let value = cookies
+        .get(app_state.cfg.auth.session.cookie_name.as_str())
+        .map(|c| c.value().to_string())?;
+    Some((cookies, value))
 }
 
 async fn load_user(pool: &sqlx::PgPool, user_id: UserId) -> Option<User> {

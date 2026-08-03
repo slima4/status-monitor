@@ -13,7 +13,8 @@
 //!   `auth.magic_link.rate_limit_seconds` regardless of source.
 //! - `GET  /auth/magic-link/verify?token=…` — atomically consumes the token,
 //!   destroys any pre-login session bound to the browser (fixation defence),
-//!   mints a fresh session cookie, and redirects to `/`.
+//!   mints a fresh session cookie, and redirects: `/account/restore` for an
+//!   account scheduled for deletion, else the joined org, else `/`.
 
 use anyhow::Context;
 use askama::Template;
@@ -280,7 +281,8 @@ pub async fn verify_landing(
 
 /// `POST /auth/magic-link/verify`. Validates the double-submit nonce, then
 /// atomically consumes the token, destroys any pre-login session bound to the
-/// browser (fixation defence), creates a fresh session, and redirects to `/`.
+/// browser (fixation defence), creates a fresh session, and redirects by the
+/// same priority as the OAuth callback.
 pub async fn verify_confirm(
     State(state): State<AppState>,
     crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
@@ -324,41 +326,38 @@ pub async fn verify_confirm(
     };
     clear_confirm_nonce(&cookies, &state.cfg.auth.session);
 
-    // Tombstone-inclusive: a verified link proves email ownership, so
-    // re-auth restores a soft-deleted account like the OAuth callbacks do.
-    let (user_id, restored, bootstrapped) = match orgs_store::find_user_by_email_including_deleted(
-        pool, &row.email,
-    )
-    .await?
-    {
-        Some((user_id, deleted_at)) => {
-            let restored = deleted_at.is_some();
-            if restored {
-                let mut tx = pool.begin().await.context("magic-link restore: begin tx")?;
-                crate::auth::account::undelete_in_tx(&mut tx, user_id).await?;
-                tx.commit().await.context("magic-link restore: commit")?;
-                tracing::info!(user_id = %user_id.0, "magic-link re-auth restored a soft-deleted account");
+    // Tombstone-inclusive: a verified link proves email ownership. Resolving
+    // the row is not restoring it — same as the OAuth callbacks.
+    let (user_id, pending_deletion, bootstrapped) =
+        match orgs_store::find_user_by_email_including_deleted(pool, &row.email).await? {
+            Some((user_id, deleted_at)) => {
+                if let Some(deleted_at) = deleted_at {
+                    tracing::info!(
+                        user_id = %user_id.0,
+                        deleted_at = %deleted_at,
+                        "magic-link sign-in on an account scheduled for deletion; routing to the restore choice"
+                    );
+                }
+                (user_id, deleted_at.is_some(), false)
             }
-            (user_id, restored, false)
-        }
-        // Unknown email: bootstrap an account ONLY for a valid carried
-        // invitation whose address matches — the inviter's explicit
-        // allowlist. Everything else stays the indistinguishable page.
-        None => match bootstrap_invited_user(&state, &row).await? {
-            Some((user_id, created)) => (user_id, false, created),
-            None => {
-                login_audit::record_failure_anon(
-                    pool,
-                    LoginMethod::MagicLink,
-                    ip_hash.as_deref(),
-                    ua_hash.as_deref(),
-                    "no_user_for_email",
-                )
-                .await;
-                return Ok(invalid_page(&state, StatusCode::GONE));
-            }
-        },
-    };
+            // Unknown email: bootstrap an account ONLY for a valid carried
+            // invitation whose address matches — the inviter's explicit
+            // allowlist. Everything else stays the indistinguishable page.
+            None => match bootstrap_invited_user(&state, &row).await? {
+                Some((user_id, created)) => (user_id, false, created),
+                None => {
+                    login_audit::record_failure_anon(
+                        pool,
+                        LoginMethod::MagicLink,
+                        ip_hash.as_deref(),
+                        ua_hash.as_deref(),
+                        "no_user_for_email",
+                    )
+                    .await;
+                    return Ok(invalid_page(&state, StatusCode::GONE));
+                }
+            },
+        };
 
     // Redeem a carried invitation before the session is minted so the
     // session opens in the joined org. Soft-fails — login never breaks.
@@ -455,15 +454,17 @@ pub async fn verify_confirm(
     crate::web::flash::set(
         &cookies,
         crate::web::flash::Flash {
-            restored,
+            restored: false,
             invite_missed,
         },
         state.cfg.auth.session.cookie_secure,
         &state.cfg.auth.session.cookie_domain,
     );
-    let redirect = if let Some(j) = joined {
+    let redirect = if pending_deletion {
+        crate::api::handlers::auth::RESTORE_PATH.to_string()
+    } else if let Some(j) = joined {
         format!("/?joined={}", crate::auth::url::url_encode(&j.org_slug))
-    } else if restored || invite_missed {
+    } else if invite_missed {
         "/".to_string()
     } else {
         row.redirect_after

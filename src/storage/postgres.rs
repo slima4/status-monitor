@@ -11,7 +11,9 @@ use uuid::Uuid;
 
 use crate::api::types::{TagCount, TargetsSummary};
 use crate::config::PostgresConfig;
-use crate::domain::{CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate, WriteSource};
+use crate::domain::{
+    CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate, UserId, WriteSource,
+};
 use crate::error::{AppError, Result};
 use crate::security::Cipher;
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
@@ -568,14 +570,31 @@ impl TargetStore for PostgresTargetStore {
         }
     }
 
-    async fn delete(&self, org: OrgId, id: Uuid) -> Result<bool> {
-        let res = sqlx::query("DELETE FROM targets WHERE id = $1 AND org_id = $2")
-            .bind(id)
-            .bind(org.0)
-            .execute(&self.pool)
-            .await
-            .context("delete target")?;
-        Ok(res.rows_affected() > 0)
+    async fn delete(&self, org: OrgId, id: Uuid, actor: Option<UserId>) -> Result<bool> {
+        let mut tx = self.pool.begin().await.context("delete target: begin")?;
+        // RETURNING, not a prior read: after the commit there is nothing left
+        // to read the name from.
+        let removed: Option<(String, String)> = sqlx::query_as(
+            "DELETE FROM targets WHERE id = $1 AND org_id = $2 \
+             RETURNING name, check_spec->>'type'",
+        )
+        .bind(id)
+        .bind(org.0)
+        .fetch_optional(&mut *tx)
+        .await
+        .context("delete target")?;
+        if let Some((name, kind)) = &removed {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "target.deleted",
+                serde_json::json!({ "target_id": id, "name": name, "kind": kind }),
+            )
+            .await?;
+        }
+        tx.commit().await.context("delete target: commit")?;
+        Ok(removed.is_some())
     }
 
     async fn unbind_channel(&self, org: OrgId, channel_id: Uuid) -> Result<u64> {
@@ -866,19 +885,48 @@ impl TargetStore for PostgresTargetStore {
         Ok(rows.into_iter().map(|(id,)| id).collect())
     }
 
-    async fn delete_bulk(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
+    async fn delete_bulk(
+        &self,
+        org: OrgId,
+        ids: &[Uuid],
+        actor: Option<UserId>,
+    ) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        let rows: Vec<(Uuid,)> = sqlx::query_as(
-            r#"DELETE FROM targets WHERE id = ANY($1) AND org_id = $2 RETURNING id"#,
+        let mut tx = self.pool.begin().await.context("bulk delete: begin")?;
+        let rows: Vec<(Uuid, String)> = sqlx::query_as(
+            r#"DELETE FROM targets WHERE id = ANY($1) AND org_id = $2 RETURNING id, name"#,
         )
         .bind(ids)
         .bind(org.0)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
         .context("bulk delete")?;
-        Ok(rows.into_iter().map(|(id,)| id).collect())
+        if !rows.is_empty() {
+            // A 10 000-entry JSONB blob answers "what did they wipe" no better
+            // than the count plus a readable sample.
+            const SAMPLE: usize = 100;
+            let sample: Vec<serde_json::Value> = rows
+                .iter()
+                .take(SAMPLE)
+                .map(|(id, name)| serde_json::json!({ "id": id, "name": name }))
+                .collect();
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "target.bulk_deleted",
+                serde_json::json!({
+                    "count": rows.len(),
+                    "targets": sample,
+                    "truncated": rows.len() > SAMPLE,
+                }),
+            )
+            .await?;
+        }
+        tx.commit().await.context("bulk delete: commit")?;
+        Ok(rows.into_iter().map(|(id, _)| id).collect())
     }
 
     async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {

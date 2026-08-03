@@ -189,7 +189,7 @@ async fn upsert_links_existing_user_on_email_match() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn upsert_restores_soft_deleted_user_on_reauth() {
+async fn upsert_reports_pending_deletion_without_restoring_on_reauth() {
     let Some((db_url, name)) = fresh_pg().await else {
         return;
     };
@@ -197,8 +197,8 @@ async fn upsert_restores_soft_deleted_user_on_reauth() {
     MIGRATOR.run(&pool).await.expect("migrate");
 
     // Seed a user + identity, then soft-delete the user. A subsequent GitHub
-    // OAuth sign-in for the same provider_user_id un-deletes (restores) the
-    // account in place — re-auth IS the restore.
+    // OAuth sign-in for the same provider_user_id resolves to that row and
+    // reports the pending deletion — signing in must not cancel it.
     let (user_id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO users (email, terms_version, privacy_version) \
          VALUES ('Carol@Example.test', 'v1', 'v1') RETURNING id",
@@ -229,22 +229,24 @@ async fn upsert_restores_soft_deleted_user_on_reauth() {
     let resolved =
         oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
             .await
-            .expect("soft-deleted identity is restored on re-auth");
+            .expect("soft-deleted identity resolves on re-auth");
     assert_eq!(resolved.user_id.0, user_id);
     assert!(
-        resolved.restored,
-        "re-auth must restore the soft-deleted account"
+        resolved.pending_deletion.is_some(),
+        "re-auth must report the pending deletion"
     );
     assert!(!resolved.is_new_user, "must not create a parallel user");
 
-    // The account is active again, and no parallel user was created.
     let (deleted_at,): (Option<chrono::DateTime<Utc>>,) =
         sqlx::query_as("SELECT deleted_at FROM users WHERE id = $1")
             .bind(user_id)
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert!(deleted_at.is_none(), "account must be un-deleted");
+    assert!(
+        deleted_at.is_some(),
+        "signing in must not cancel the deletion"
+    );
     let (user_count,): (i64,) =
         sqlx::query_as("SELECT count(*) FROM users WHERE email = $1::citext")
             .bind("carol@example.test")
@@ -308,7 +310,7 @@ async fn upsert_links_google_identity_to_github_user_on_same_email() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn upsert_restores_tombstoned_user_via_email_match_on_new_provider() {
+async fn upsert_matches_tombstoned_user_by_email_on_new_provider() {
     let Some((db_url, name)) = fresh_pg().await else {
         return;
     };
@@ -316,8 +318,9 @@ async fn upsert_restores_tombstoned_user_via_email_match_on_new_provider() {
     MIGRATOR.run(&pool).await.expect("migrate");
 
     // GitHub signup, then account deletion. A first-ever Google sign-in with
-    // the same verified email must restore this account, not mint a duplicate
-    // user row (the email unique index is partial — active rows only).
+    // the same verified email must resolve to this account, not mint a
+    // duplicate user row (the email unique index is partial — active rows
+    // only). It must not cancel the deletion either.
     let github_id = RemoteIdentity {
         provider_user_id: "888".into(),
         provider_username: Some("gail".into()),
@@ -343,9 +346,9 @@ async fn upsert_restores_tombstoned_user_via_email_match_on_new_provider() {
     let resolved =
         oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &google_id)
             .await
-            .expect("google email-match restore");
+            .expect("google email-match");
     assert_eq!(resolved.user_id.0, first.user_id.0);
-    assert!(resolved.restored);
+    assert!(resolved.pending_deletion.is_some());
     assert!(!resolved.is_new_user);
 
     let (user_count,): (i64,) =
@@ -362,7 +365,7 @@ async fn upsert_restores_tombstoned_user_via_email_match_on_new_provider() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn upsert_restores_soft_deleted_user_on_google_reauth() {
+async fn upsert_reports_pending_deletion_on_google_reauth() {
     let Some((db_url, name)) = fresh_pg().await else {
         return;
     };
@@ -399,9 +402,9 @@ async fn upsert_restores_soft_deleted_user_on_google_reauth() {
     let resolved =
         oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &identity)
             .await
-            .expect("google re-auth restores");
+            .expect("google re-auth resolves");
     assert_eq!(resolved.user_id.0, user_id);
-    assert!(resolved.restored);
+    assert!(resolved.pending_deletion.is_some());
 
     pool.close().await;
     drop_pg(&name).await;

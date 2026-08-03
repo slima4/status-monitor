@@ -193,13 +193,10 @@ async fn deletion_then_restore_round_trip() {
         other => panic!("expected ACCOUNT_ALREADY_DELETED, got {other:?}"),
     }
 
-    // Restore = re-auth: the OAuth callback un-deletes in its own tx. Exercise
-    // that path's core directly.
-    let mut tx = pool.begin().await.unwrap();
-    account::undelete_in_tx(&mut tx, uid)
+    account::restore_account(&pool, uid)
         .await
-        .expect("undelete succeeds");
-    tx.commit().await.unwrap();
+        .expect("restore succeeds")
+        .expect("account was scheduled for deletion");
     assert_user_deleted(&pool, user, false).await;
     assert_org_deleted(&pool, org, false).await;
 
@@ -207,11 +204,10 @@ async fn deletion_then_restore_round_trip() {
     drop_pg(&name).await;
 }
 
-/// `undelete_in_tx` on an already-active account is a harmless no-op (a benign
-/// race), not an error.
+/// An already-active account reports "nothing to restore", not an error.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn undelete_active_account_is_noop() {
+async fn restore_active_account_is_noop() {
     let Some((db, name)) = fresh_pg().await else {
         return;
     };
@@ -222,11 +218,13 @@ async fn undelete_active_account_is_noop() {
     let uid = uptimepage::domain::UserId(user);
     let org = seed_org(&pool, "active-org", user).await;
 
-    let mut tx = pool.begin().await.unwrap();
-    account::undelete_in_tx(&mut tx, uid)
+    let restored = account::restore_account(&pool, uid)
         .await
-        .expect("undelete is a no-op");
-    tx.commit().await.unwrap();
+        .expect("restore is a no-op");
+    assert!(
+        restored.is_none(),
+        "an active account has nothing to restore"
+    );
     assert_user_deleted(&pool, user, false).await;
     assert_org_deleted(&pool, org, false).await;
 
@@ -234,13 +232,13 @@ async fn undelete_active_account_is_noop() {
     drop_pg(&name).await;
 }
 
-/// `undelete_in_tx` and the purge both take the per-user delete lock, so a
-/// restore cannot run while a purge holds it (the race that wiped data into a
-/// 'restored' account). Hold the lock on one connection and assert undelete
+/// The restore and the purge both take the per-user delete lock, so a restore
+/// cannot run while a purge holds it (the race that wiped data into a
+/// 'restored' account). Hold the lock on one connection and assert the restore
 /// blocks until it's released.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn undelete_blocks_while_user_delete_lock_held() {
+async fn restore_blocks_while_user_delete_lock_held() {
     use uptimepage::storage::locks::{advisory_xact_lock, user_delete_lock_key};
 
     let Some((db, name)) = fresh_pg().await else {
@@ -262,21 +260,20 @@ async fn undelete_blocks_while_user_delete_lock_held() {
         .await
         .unwrap();
 
-    // While held, undelete must not make progress.
-    let mut blocked_tx = pool.begin().await.unwrap();
+    // While held, the restore must not make progress.
     let blocked = tokio::time::timeout(
         std::time::Duration::from_millis(500),
-        account::undelete_in_tx(&mut blocked_tx, uid),
+        account::restore_account(&pool, uid),
     )
     .await;
-    assert!(blocked.is_err(), "undelete ran while delete lock was held");
-    drop(blocked_tx);
+    assert!(blocked.is_err(), "restore ran while delete lock was held");
 
-    // Release, then undelete succeeds.
+    // Release, then the restore succeeds.
     holder.commit().await.unwrap();
-    let mut tx = pool.begin().await.unwrap();
-    account::undelete_in_tx(&mut tx, uid).await.unwrap();
-    tx.commit().await.unwrap();
+    account::restore_account(&pool, uid)
+        .await
+        .unwrap()
+        .expect("account was scheduled for deletion");
     assert_user_deleted(&pool, user, false).await;
 
     pool.close().await;

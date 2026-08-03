@@ -40,7 +40,7 @@ Incidents and their timelines live with your organization and are kept until you
 
 Deleting a monitor removes it from the UI and the API immediately. Its check history ages out on the windows above rather than being erased on the spot.
 
-Deleting your account suspends it immediately and purges it permanently after 30 days. Signing back in during those 30 days restores the account as it was. See [Account settings](../ui.md) for where both actions live.
+Deleting your account suspends it immediately, stops your monitoring, and purges it permanently after 30 days. Within those 30 days you can restore it: sign back in and confirm on the page that appears. Signing in on its own does not cancel the deletion. See [Account settings](../ui.md) for where both actions live.
 
 One blocker to know about: you cannot delete your account while you are the sole owner of an organization that still has other members (the API answers `422 OWNS_SHARED_ORGS`). Transfer ownership or remove the members first; an org where you are the only member is deleted along with the account.
 

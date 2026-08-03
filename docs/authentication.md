@@ -43,14 +43,17 @@ fetch differs. The callback is split into three strict phases:
    No DB connection is held.
 3. **Phase C** — a fresh transaction materialises the user + identity,
    links a new provider to an existing account on verified-email match
-   (restoring a soft-deleted account if needed), auto-creates a signup
-   org if this is a new sign-up, and commits. The user's default org
-   (oldest active membership) is resolved after commit for the session
-   row.
+   (a soft-deleted account matches, and stays deleted), auto-creates a
+   signup org if this is a new sign-up, and commits. The user's default
+   org (oldest active membership) is resolved after commit for the
+   session row.
 
 After commit, the previous session cookie (if any) is destroyed for
 session-fixation defence, a fresh session row is INSERTed, the cookie is
-set, and the user is redirected. Failure modes:
+set, and the user is redirected. A sign-in on an account scheduled for
+deletion redirects to `/account/restore` and nothing else: signing in
+proves who is asking, and cancelling the deletion is a separate,
+deliberate `POST /api/v1/me/restore`. Failure modes:
 
 - Invalid or expired state → 400 `INVALID_STATE`, logged to
   `login_attempts`.
@@ -119,13 +122,13 @@ Available only when `auth.enabled_methods` contains `"magic_link"`:
    malformed emails — `{"sent": true}`.
 2. `GET /auth/magic-link/verify?token=…` — atomically marks the row
    `used_at = now()`, destroys any pre-login session, mints a new
-   session (restoring a soft-deleted account — email ownership is the
-   re-auth proof), auto-accepts a carried invitation, and redirects by
-   priority: `/?joined=<slug>` → `/?invite=missed` (carried invitation
-   failed to redeem) → `/?restored=1` (welcome-back banner) → carried
-   `redirect_after` → `/`. An invalid, used, or expired token renders
-   an HTML "link expired" page with status 410 — one indistinguishable
-   state, no JSON error envelope.
+   session, auto-accepts a carried invitation, and redirects by
+   priority: `/account/restore` (the account is scheduled for deletion;
+   signing in does not cancel that, so the choice gets its own page) →
+   `/?joined=<slug>` → `/?invite=missed` (carried invitation failed to
+   redeem) → carried `redirect_after` → `/`. An invalid, used, or
+   expired token renders an HTML "link expired" page with status 410 —
+   one indistinguishable state, no JSON error envelope.
 
 The schema and email template ship in v1 even when the flow is gated, so
 flipping the config doesn't require a migration.
@@ -173,6 +176,8 @@ with the same argon2id parameters as API tokens).
 | `GET`  | `/invitations/accept`          | optional session | Emailed accept link (HTML; redeems with session, else login bounce) |
 | `GET`  | `/invitations/decline`         | none    | Emailed decline link (HTML confirm page; POST does the decline) |
 | `GET`  | `/api/v1/me`                   | session/token | Current user info |
+| `DELETE` | `/api/v1/me`                 | session | Delete account (soft, 30-day grace) |
+| `POST` | `/api/v1/me/restore`           | session for a soft-deleted account | Cancel a pending account deletion |
 | `GET`  | `/api/v1/me/sessions`          | session | List active sessions |
 | `DELETE` | `/api/v1/me/sessions/{id}`   | session | Revoke a session |
 | `GET`  | `/api/v1/me/api-tokens`        | session | List tokens (prefix only) |

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Account scheduled for deletion · Uptimepage{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-xl space-y-6 py-8">
+  <header class="space-y-2">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>account scheduled for deletion</h1>
+    <p class="text-sm text-muted">
+      You signed in to an account that is scheduled for permanent deletion on
+      <time datetime="{{ purge_at|iso_ts }}" data-tz="exact">{{ purge_at|human_ts }}</time>.
+      Signing in does not cancel that.
+    </p>
+  </header>
+
+  <div class="sticker-card space-y-5 p-5">
+    <div class="space-y-2">
+      <h2 class="panel-label">keep the deletion</h2>
+      <p class="text-sm text-muted">
+        Nothing more to do. Monitoring stays stopped, the account and
+        everything in it is erased on the date above, and this sign-in changes
+        nothing.
+      </p>
+      <a href="/auth/logout" class="btn-ghost inline-flex px-3 py-1.5 text-sm font-medium">
+        sign out and leave it scheduled
+      </a>
+    </div>
+
+    <div class="space-y-2 border-t border-[color:var(--theme-line)] pt-5">
+      <h2 class="panel-label">restore the account</h2>
+      <p class="text-sm text-muted">
+        Cancels the deletion and brings back your organisations, monitors, and
+        status pages. Monitoring resumes within a minute.
+      </p>
+      <button type="button" id="restore-account"
+              class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">
+        restore my account
+      </button>
+      <p id="restore-result" class="text-sm" aria-live="polite"></p>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function () {
+    const btn = document.getElementById('restore-account');
+    const result = document.getElementById('restore-result');
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      result.className = 'flash-text flash-text--muted';
+      result.textContent = 'Restoring…';
+      try {
+        const resp = await fetch('/api/v1/me/restore', {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'uptimepage' },
+        });
+        if (resp.ok) {
+          window.location.href = '/';
+          return;
+        }
+        const body = await resp.json().catch(() => null);
+        result.className = 'flash-text flash-text--bad';
+        result.textContent = (body && body.error && body.error.message)
+          || 'Could not restore the account.';
+      } catch (e) {
+        result.className = 'flash-text flash-text--bad';
+        result.textContent = 'Could not restore the account.';
+      }
+      btn.disabled = false;
+    });
+  })();
+</script>
+{% endblock %}

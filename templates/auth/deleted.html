@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Account deleted · Uptimepage{% endblock %}
+{% block content %}
+<section class="mx-auto max-w-xl space-y-6 py-8">
+  <header class="space-y-2">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>account deleted</h1>
+    <p class="text-sm text-muted">
+      Your account is deactivated and every organisation you solely own is
+      scheduled for erasure
+      {% if let Some(ts) = purge_at %}on
+      <time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% endif %}.
+      Nothing else is needed from you.
+    </p>
+  </header>
+
+  <div class="sticker-card space-y-3 p-5 text-sm text-muted">
+    <p>
+      Monitoring has stopped. We have emailed you a copy of this confirmation
+      with the exact date.
+    </p>
+    <p>
+      Changed your mind before then? Sign in again and choose
+      <span class="font-medium text-body">restore my account</span> on the page
+      that appears. Signing in on its own will not cancel the deletion.
+    </p>
+  </div>
+
+  <p class="text-sm">
+    <a href="/login" class="btn-ghost inline-flex px-3 py-1.5 font-medium">back to sign in</a>
+  </p>
+</section>
+{% endblock %}

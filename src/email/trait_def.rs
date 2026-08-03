@@ -61,9 +61,11 @@ pub enum EmailTemplate {
         expires_in_minutes: u32,
         ip_hint: Option<String>,
     },
-    /// Account-deletion notification. Restoring is done by signing in again
+    /// Account-deletion notification. Restoring is a signed-in confirmation
     /// before the data is permanently purged on `scheduled_purge_at`.
     AccountDeletion { scheduled_purge_at: DateTime<Utc> },
+    /// So an account never comes back without its owner hearing about it.
+    AccountRestored,
     /// Confirms an `email` notification channel's address before any alert
     /// is delivered to it. `org_name` names the org that added the address and
     /// `decline_url` lets the recipient refuse in one click.
@@ -143,6 +145,7 @@ impl EmailTemplate {
             EmailTemplate::AccountDeletion { scheduled_purge_at } => {
                 templates::account_deletion::render(site_name, *scheduled_purge_at)
             }
+            EmailTemplate::AccountRestored => templates::account_restored::render(site_name),
             EmailTemplate::ChannelVerification {
                 channel_name,
                 verify_url,
@@ -221,7 +224,7 @@ impl EmailTemplate {
         match self {
             EmailTemplate::Invitation { accept_url, .. } => Some(accept_url),
             EmailTemplate::MagicLink { url, .. } => Some(url),
-            EmailTemplate::AccountDeletion { .. } => None,
+            EmailTemplate::AccountDeletion { .. } | EmailTemplate::AccountRestored => None,
             EmailTemplate::ChannelVerification { verify_url, .. } => Some(verify_url),
             EmailTemplate::IncidentAlert { .. } => None,
             EmailTemplate::SubscriberConfirm { confirm_url, .. } => Some(confirm_url),

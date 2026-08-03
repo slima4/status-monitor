@@ -371,7 +371,8 @@ async fn tombstone_lookup_and_undelete_restore_for_magic_link_verify() {
             .is_none()
     );
 
-    // The verify path's lookup sees the tombstone and restores it.
+    // The verify path's lookup sees the tombstone; restoring is a later,
+    // separate confirmation.
     let (found, deleted_at) =
         orgs_store::find_user_by_email_including_deleted(&pool, "frank@example.test")
             .await
@@ -380,11 +381,10 @@ async fn tombstone_lookup_and_undelete_restore_for_magic_link_verify() {
     assert_eq!(found.0, user_id);
     assert!(deleted_at.is_some());
 
-    let mut tx = pool.begin().await.unwrap();
-    uptimepage::auth::account::undelete_in_tx(&mut tx, found)
+    uptimepage::auth::account::restore_account(&pool, found)
         .await
-        .expect("undelete");
-    tx.commit().await.unwrap();
+        .expect("restore")
+        .expect("account was scheduled for deletion");
 
     assert_eq!(
         orgs_store::find_user_by_email(&pool, "frank@example.test")

@@ -170,6 +170,7 @@ use crate::storage::UptimeStats;
         handlers::shares::revoke_share,
         handlers::account::data_export,
         handlers::account::delete_account,
+        handlers::account::restore_account,
         handlers::api_tokens::list,
         handlers::api_tokens::create,
         handlers::api_tokens::rename,
