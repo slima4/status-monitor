@@ -1,37 +1,29 @@
-import {COLUMNS, NODES, FLOWS} from "./_data.js";
+import {NODES, FLOWS} from "./_data.js";
 import {wireGeometry, BADGE_R} from "./_layout.js";
 
 /* ── render ───────────────────────────────────────── */
 const root = document.querySelector('.archmap');
 const colsEl = document.getElementById('cols');
+// Nodes and flows arrive server-rendered so a crawler sees them; this only
+// adopts that markup and binds behaviour to it.
 const nodeEl = {};
-for (const c of COLUMNS){
-  const d = document.createElement('div');
-  d.className = 'col';
-  d.innerHTML = `<h2>${c.label}</h2>`;
-  for (const n of NODES.filter(n=>n.col===c.id)){
-    const b = document.createElement('div');
-    b.className='node'; b.style.setProperty('--nc', c.color); b.dataset.id=n.id;
-    b.tabIndex = 0; b.setAttribute('role','button');
-    b.innerHTML = `<b>${n.t}</b><span>${n.s}</span>`;
-    b.addEventListener('click', ()=>filterByNode(n.id));
-    b.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();filterByNode(n.id);} });
-    d.appendChild(b); nodeEl[n.id]=b;
-  }
-  colsEl.appendChild(d);
+for (const n of NODES){
+  const b = colsEl.querySelector(`.node[data-id="${n.id}"]`);
+  if (!b) continue;
+  b.addEventListener('click', ()=>filterByNode(n.id));
+  b.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();filterByNode(n.id);} });
+  nodeEl[n.id]=b;
 }
 
 const flowListEl = document.getElementById('flowList');
 const flowEl = {};
 for (const f of FLOWS){
-  const d = document.createElement('div');
-  d.className='flow'; d.dataset.id=f.id;
-  d.tabIndex = 0; d.setAttribute('role','button');
-  d.innerHTML = `<b>${f.name}</b><span>${f.desc}</span>`;
+  const d = flowListEl.querySelector(`.flow[data-id="${f.id}"]`);
+  if (!d) continue;
   d.addEventListener('click', ()=>select(f.id));
   d.addEventListener('keydown', e=>{ if(e.key==='Enter'||e.key===' '){e.preventDefault();select(f.id);} });
   d.addEventListener('focus', ()=>d.scrollIntoView({block:'nearest'}));
-  flowListEl.appendChild(d); flowEl[f.id]=d;
+  flowEl[f.id]=d;
 }
 
 const svg = document.getElementById('wires');
@@ -52,18 +44,22 @@ function select(id){
   draw();
 }
 
+// Step prose carries literal angle brackets (Option<Uuid>, /bot<token>/); through
+// innerHTML the browser eats those as unknown tags and the words disappear.
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
 function renderSteps(){
   stepListEl.innerHTML = '';
   if (!current){
-    stepListEl.innerHTML = '<div class="empty">No flow selected. Pick one above — the map will show the ordered hops, and hovering a step thickens its wire.</div>';
+    stepListEl.innerHTML = '<div class="empty">No flow selected. Pick one above and the map will show the ordered hops. Hovering a step thickens its wire.</div>';
     return;
   }
   current.steps.forEach((s,i)=>{
     const d = document.createElement('div');
     d.className='step';
     d.innerHTML = `<div class="n">${i+1}</div><div>
-      <div class="hop"><b>${title(s.f)}</b> → <b>${title(s.t)}</b></div>
-      <div class="t">${s.h}</div><div class="d">${s.d}</div></div>`;
+      <div class="hop"><b>${esc(title(s.f))}</b> → <b>${esc(title(s.t))}</b></div>
+      <div class="t">${esc(s.h)}</div><div class="d">${esc(s.d)}</div></div>`;
     d.tabIndex = 0; d.setAttribute('role','button');
     d.addEventListener('mouseenter', ()=>hot(i,true));
     d.addEventListener('mouseleave', ()=>hot(i,false));

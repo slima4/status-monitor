@@ -210,7 +210,124 @@ pub async fn not_found(State(cfg): State<Arc<MarketingCfg>>) -> Response {
 }
 
 pub(crate) const ARCHITECTURE_PATH: &str = "/architecture";
-pub(crate) const ARCHITECTURE_LASTMOD: &str = "2026-07-29";
+pub(crate) const ARCHITECTURE_LASTMOD: &str = "2026-08-03";
+
+/// The map's own data, shared with `assets/js/architecture/_data.js` so the
+/// crawlable HTML and the interactive map cannot describe different systems.
+const ARCH_DATA: &str = include_str!("../../assets/js/architecture/flows.json");
+
+#[derive(serde::Deserialize)]
+pub struct ArchColumn {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ArchNode {
+    pub id: String,
+    pub col: String,
+    pub t: String,
+    pub s: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ArchStep {
+    pub f: String,
+    pub t: String,
+    pub h: String,
+    pub d: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ArchFlow {
+    pub id: String,
+    pub name: String,
+    pub desc: String,
+    pub steps: Vec<ArchStep>,
+}
+
+#[derive(serde::Deserialize)]
+struct ArchData {
+    columns: Vec<ArchColumn>,
+    nodes: Vec<ArchNode>,
+    flows: Vec<ArchFlow>,
+}
+
+/// A column with its nodes already grouped, so the template does not filter.
+pub struct ArchColumnView {
+    pub id: String,
+    pub label: String,
+    pub nodes: Vec<ArchNode>,
+}
+
+static ARCH_PARSED: OnceLock<(Vec<ArchColumnView>, Vec<ArchFlow>)> = OnceLock::new();
+
+fn arch_data() -> &'static (Vec<ArchColumnView>, Vec<ArchFlow>) {
+    ARCH_PARSED.get_or_init(|| {
+        let data: ArchData =
+            serde_json::from_str(ARCH_DATA).expect("architecture flows.json must parse");
+        let mut remaining = data.nodes;
+        let mut columns = Vec::with_capacity(data.columns.len());
+        for c in data.columns {
+            let (mine, rest) = remaining.into_iter().partition(|n| n.col == c.id);
+            remaining = rest;
+            columns.push(ArchColumnView {
+                id: c.id,
+                label: c.label,
+                nodes: mine,
+            });
+        }
+        // A node in no column would silently never reach the page.
+        assert!(
+            remaining.is_empty(),
+            "architecture nodes reference unknown columns: {:?}",
+            remaining.iter().map(|n| &n.id).collect::<Vec<_>>()
+        );
+        (columns, data.flows)
+    })
+}
+
+/// The map carries every flow; only these earn a written entry, because each
+/// one teaches something the others do not.
+const REFERENCE_FLOWS: &[&str] = &["sched-http", "agent", "incident", "status", "erasure"];
+
+#[cfg(test)]
+mod arch_tests {
+    use super::*;
+
+    #[test]
+    fn every_node_lands_in_a_column_and_every_hop_resolves() {
+        let (columns, flows) = arch_data();
+        let ids: std::collections::HashSet<&str> = columns
+            .iter()
+            .flat_map(|c| c.nodes.iter().map(|n| n.id.as_str()))
+            .collect();
+        // A hop pointing at a node that is not rendered leaves the map with a
+        // wire to nowhere and no handler bound.
+        for f in flows {
+            for s in &f.steps {
+                assert!(
+                    ids.contains(s.f.as_str()),
+                    "{}: unknown from {:?}",
+                    f.id,
+                    s.f
+                );
+                assert!(ids.contains(s.t.as_str()), "{}: unknown to {:?}", f.id, s.t);
+            }
+        }
+    }
+
+    #[test]
+    fn every_reference_flow_exists() {
+        let (_, flows) = arch_data();
+        for id in REFERENCE_FLOWS {
+            assert!(
+                flows.iter().any(|f| f.id == *id),
+                "reference flow {id:?} is not in flows.json"
+            );
+        }
+    }
+}
 
 #[derive(Template, WebTemplate)]
 #[template(path = "marketing/architecture.html")]
@@ -218,6 +335,9 @@ struct ArchitecturePage {
     app_url: String,
     canonical_url: String,
     og: OpenGraph,
+    columns: &'static [ArchColumnView],
+    flows: &'static [ArchFlow],
+    reference: Vec<&'static ArchFlow>,
     version: &'static str,
 }
 
@@ -235,10 +355,18 @@ fn render_architecture(cfg: &MarketingCfg) -> CachedRender {
         "{}/static/marketing/og-architecture.png",
         cfg.canonical_origin
     );
+    let (columns, flows) = arch_data();
+    let reference = REFERENCE_FLOWS
+        .iter()
+        .filter_map(|id| flows.iter().find(|f| f.id == *id))
+        .collect();
     let body = ArchitecturePage {
         app_url: cfg.app_url.clone(),
         canonical_url,
         og,
+        columns,
+        flows,
+        reference,
         version: env!("CARGO_PKG_VERSION"),
     }
     .render()

@@ -3229,3 +3229,10 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     .mk-ev__step[data-state="run"], .mk-ev__step[data-state="down"] { transform: none; }
     .mk-flow__bar[data-state="load"] .mk-flow__sweep { animation: none; }
 }
+
+/* Written companion to the map: readable on its own, and what a crawler gets. */
+.arch-prose, .arch-ref { margin-top: 3.5rem; }
+.arch-ref__desc { display: block; margin-top: .25rem; color: var(--mk-quiet); font-weight: 400; font-size: .8125rem; }
+.arch-ref__steps { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: .5rem; list-style: decimal; }
+.arch-ref__steps li { color: var(--mk-quiet); font-size: .8125rem; line-height: 1.55; }
+.arch-ref__steps b { color: var(--mk-ink); font-weight: 600; }

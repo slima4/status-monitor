@@ -76,6 +76,14 @@
         margin:0 0 8px;padding-bottom:5px;border-bottom:1px solid var(--line)}
 .archmap .node{border:1px solid var(--line);border-left:2px solid var(--nc,var(--line));border-radius:2px;background:var(--elev);
       padding:6px 8px;margin:0 0 8px;cursor:pointer;transition:opacity .12s,border-color .12s,background .12s}
+/* Column tint by class, not an inline style: the marketing CSP is style-src 'self'. */
+.archmap .col--actor .node{--nc:var(--c-actor)}
+.archmap .col--edge .node{--nc:var(--c-edge)}
+.archmap .col--handler .node{--nc:var(--c-handler)}
+.archmap .col--core .node{--nc:var(--c-core)}
+.archmap .col--probe .node{--nc:var(--c-probe)}
+.archmap .col--store .node{--nc:var(--c-store)}
+.archmap .col--ext .node{--nc:var(--c-ext)}
 .archmap .node b{display:block;font-weight:500;font-size:12px;color:var(--ink);letter-spacing:.01em}
 .archmap .node span{display:block;font-size:10.5px;color:var(--faint);margin-top:1px;line-height:1.35}
 .archmap .node:hover{border-color:var(--muted)}

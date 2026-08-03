@@ -970,3 +970,40 @@ async fn docs_nav_is_identical_across_pages() {
         }
     }
 }
+
+#[tokio::test]
+async fn architecture_serves_the_map_content_as_html() {
+    let (status, body, _) = get("/architecture").await;
+    assert_eq!(status, StatusCode::OK);
+    for node in ["Operator browser", "Region agent process"] {
+        assert!(body.contains(node), "node {node:?} must be server-rendered");
+    }
+    for flow in [
+        "Scheduled HTTP check",
+        "Control plane probes a monitor in its own region",
+    ] {
+        assert!(body.contains(flow), "flow {flow:?} must be server-rendered");
+    }
+    assert!(
+        body.contains("Full re-list of enabled targets for this region"),
+        "step prose must be server-rendered, not left for flows.js"
+    );
+    assert!(
+        body.matches(r#"class="node""#).count() >= 50,
+        "every node must reach the HTML, got {}",
+        body.matches(r#"class="node""#).count()
+    );
+
+    // The map carries all 17 flows; the written reference is curated, or the
+    // page turns back into a wall of generated text nobody reads.
+    let written = body.matches(r#"class="mk-faq arch-ref__flow""#).count();
+    assert_eq!(written, 5, "the reference must stay curated, got {written}");
+    assert!(
+        body.contains("Domain expiry with sticky last-good"),
+        "an unwritten flow must still be selectable on the map"
+    );
+    assert!(
+        !body.contains("Hard floor is twelve hours"),
+        "an unwritten flow must not have its steps in the reference"
+    );
+}

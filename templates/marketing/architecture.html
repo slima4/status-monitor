@@ -45,14 +45,27 @@
   <div class="shell">
     <div id="map">
       <svg id="wires"></svg>
-      <div id="cols"></div>
+      <div id="cols">
+        {% for c in columns %}
+        <div class="col col--{{ c.id }}">
+          <h2>{{ c.label }}</h2>
+          {% for n in c.nodes %}
+          <div class="node" data-id="{{ n.id }}" tabindex="0" role="button"><b>{{ n.t }}</b><span>{{ n.s }}</span></div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </div>
       <svg id="badges"></svg>
     </div>
 
     <aside>
       <div class="panel" id="flows">
         <h2>Flows</h2>
-        <div class="scroll" id="flowList"></div>
+        <div class="scroll" id="flowList">
+          {% for f in flows %}
+          <div class="flow" data-id="{{ f.id }}" tabindex="0" role="button"><b>{{ f.name }}</b><span>{{ f.desc }}</span></div>
+          {% endfor %}
+        </div>
         <button id="clear">Clear selection</button>
       </div>
       <div class="panel" id="stepsPanel">
@@ -79,11 +92,48 @@
           </button>
           <span class="tp-count" id="stepCount" aria-live="polite" role="status"></span>
         </div>
-        <div class="scroll" id="stepList"><div class="empty">No flow selected. Pick one above — the map will show the ordered hops, and hovering a step thickens its wire.</div></div>
+        <div class="scroll" id="stepList"><div class="empty">No flow selected. Pick one above and the map will show the ordered hops. Hovering a step thickens its wire.</div></div>
       </div>
     </aside>
   </div>
 </div>
+
+<section class="arch-prose mx-auto max-w-2xl space-y-5">
+  <h2 class="mk-h2">How it fits together</h2>
+
+  <p class="mk-body">Uptimepage is one Rust binary, and it keeps two databases. The split is not about which one is faster. A monitor is a row you edit, so it lives in Postgres with its constraints and transactions. A check result is written once and never touched again, so it goes to ClickHouse. Most of the rest of this map follows from that single line.</p>
+
+  <p class="mk-body">The probes run from outside your infrastructure. A monitor that sits next to the thing it watches will miss the outage that takes down both, and that is the outage your customers notice. Regional agents are stateless: they pull their config, run their checks, and post the results back. An agent holds no database. Its region and its identity come from its token and never from the payload it sends, so an agent cannot claim to be somewhere it is not.</p>
+
+  <p class="mk-body">The scheduler is a min-heap rather than a cron. Each target pops at its interval plus a jitter derived from its own id, which stops ten thousand monitors on a 60 second interval from all firing in the same second. The channel feeding it is bounded at eight. That number is small on purpose. If a Postgres refresh gets slow, I would rather the refresh wait than let a backlog build up behind the dispatcher.</p>
+
+  <p class="mk-body">A failing check is not an incident. Detection applies a region quorum before anything opens, so you decide whether one region failing counts or whether a majority has to agree. Only the race winner opens the incident and pages, which is what stops two workers waking the same person twice. Who is on call is worked out at the moment of paging and never stored, so a rota change takes effect straight away instead of at the next incident.</p>
+
+  <p class="mk-body">Here is what that design gives up. Detection is a poller on a 30 second tick, not an event listener. It costs a little latency, and it buys a system that cannot quietly stop noticing.</p>
+
+  <p class="mk-body">One detail I am glad I got right early: when a notification fails, the error is stored with every URL cut back to scheme and host first. Slack puts its secret in the path and Telegram puts its bot token in <code>/bot&lt;token&gt;/</code>, so a naive error log writes working credentials into your own database.</p>
+
+  <p class="mk-body">Deleting an account has to hold in both stores. Removing the Postgres rows first and the ClickHouse rows second would orphan data if the worker died in between, invisible to every query and resident on disk forever. So erasure runs through a queue, and the queue row only clears once a count proves zero rows across the raw table and both rollups.</p>
+</section>
+
+<section class="arch-ref mx-auto max-w-2xl space-y-4">
+  <header class="space-y-2">
+    <h2 class="mk-h2">Five flows worth reading</h2>
+    <p class="mk-body mk-quiet">The map animates every path. These five carry the ideas above. Open one to see what is passed at each hop.</p>
+  </header>
+  {% for f in reference %}
+  <details class="mk-faq arch-ref__flow">
+    <summary>{{ f.name }}<span class="arch-ref__desc">{{ f.desc }}</span></summary>
+    <div class="mk-faq__body">
+      <ol class="arch-ref__steps">
+        {% for s in f.steps %}
+        <li><b>{{ s.h }}</b> <span>{{ s.d }}</span></li>
+        {% endfor %}
+      </ol>
+    </div>
+  </details>
+  {% endfor %}
+</section>
 
 <script defer src="{{ "js/architecture/flows.js"|asset }}"></script>
 {% endblock %}
