@@ -54,6 +54,8 @@ pub struct Post {
     /// Origin-relative path to a post-specific social card; the shared
     /// site card is used when absent.
     pub og_image: Option<String>,
+    /// Unset on engineering posts: that audience is not choosing a monitor.
+    pub cta_label: Option<String>,
     pub body_html: String,
     pub embed_scripts: Vec<&'static str>,
     /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
@@ -86,6 +88,7 @@ struct FrontMatter {
     #[serde(default)]
     faqs: Vec<FaqEntry>,
     og_image: Option<String>,
+    cta_label: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -196,6 +199,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         list_items: fm.list_items,
         faqs: fm.faqs.into_iter().map(|f| (f.q, f.a)).collect(),
         og_image: fm.og_image,
+        cta_label: fm.cta_label,
         embed_scripts: embed_scripts(&body_html),
         body_html,
         body_md: body.trim().to_string(),
@@ -342,6 +346,7 @@ struct BlogPostPage {
     author: &'static Author,
     tags: Vec<String>,
     body_html: String,
+    cta_label: Option<String>,
     embed_scripts: Vec<&'static str>,
     related: Vec<RelatedLink>,
     version: &'static str,
@@ -467,6 +472,7 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         author: &AUTHOR,
         tags: post.tags.clone(),
         body_html: post.body_html.clone(),
+        cta_label: post.cta_label.clone(),
         embed_scripts: post.embed_scripts.clone(),
         related: related_posts(post, RELATED_LIMIT),
         version: env!("CARGO_PKG_VERSION"),
@@ -582,6 +588,37 @@ mod tests {
                     "{}: ItemList entry {item:?} not found in the article body",
                     post.slug
                 );
+            }
+        }
+    }
+
+    #[test]
+    fn only_in_market_posts_carry_a_cta() {
+        const IN_MARKET: &[&str] = &[
+            "is-98-uptime-good",
+            "how-much-downtime-is-99-9-uptime",
+            "how-much-downtime-is-99-95-uptime",
+            "how-much-downtime-is-99-99-uptime",
+            "best-self-hosted-uptime-monitoring-tools",
+            "pingdom-alternatives",
+            "do-i-need-an-uptime-monitor",
+        ];
+        for post in load_posts() {
+            match &post.cta_label {
+                Some(label) => {
+                    assert!(!label.trim().is_empty(), "{}: blank cta_label", post.slug);
+                    assert!(
+                        IN_MARKET.contains(&post.slug.as_str()),
+                        "{}: carries a CTA but is not on the in-market list; add it \
+                         deliberately or drop the cta_label",
+                        post.slug
+                    );
+                }
+                None => assert!(
+                    !IN_MARKET.contains(&post.slug.as_str()),
+                    "{}: listed as in-market but has no cta_label",
+                    post.slug
+                ),
             }
         }
     }

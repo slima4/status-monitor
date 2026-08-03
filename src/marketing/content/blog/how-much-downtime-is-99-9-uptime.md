@@ -6,6 +6,7 @@ excerpt = "99.9% uptime allows 43 minutes of downtime a month and 8 hours 46 min
 tags = ["sla", "uptime", "slo", "downtime"]
 draft = false
 og_image = "/static/marketing/og-99-9-uptime.png"
+cta_label = "Measure your own 43 minutes"
 
 [[faqs]]
 q = "How much downtime is 99.9% uptime?"

@@ -6,6 +6,7 @@ slug = "best-self-hosted-uptime-monitoring-tools"
 excerpt = "A fair look at the open-source, self-hostable tools for watching sites and APIs in 2026: what each is good at, where it stops, and how to pick one."
 tags = ["open-source", "self-hosted", "monitoring", "status-page"]
 draft = false
+cta_label = "Try the hosted tier free"
 list_items = [
     "Uptime Kuma",
     "Gatus",

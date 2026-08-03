@@ -594,9 +594,33 @@ async fn sitemap_lists_the_tools() {
     );
 }
 
-/// A post with broken front matter is skipped silently, so every other test
-/// stays green while the URL 404s. Fetch each SLA guide and the calculator
-/// links that point at it.
+#[tokio::test]
+async fn in_market_posts_offer_a_tracked_signup_cta() {
+    let (status, body, _) = get("/blog/how-much-downtime-is-99-9-uptime").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("Measure your own 43 minutes"),
+        "the post's own CTA copy must render, not a generic label"
+    );
+    assert!(
+        body.contains(r#"data-umami-event="signup-start""#)
+            && body.contains(r#"data-umami-event-position="blog-closing""#),
+        "the CTA must carry the tracking attributes or the conversion stays unmeasurable"
+    );
+    assert!(
+        body.contains("https://app.uptimepage.dev/login"),
+        "the CTA must point at the app, not another marketing page"
+    );
+
+    let (status, engineering, _) = get("/blog/clickhouse-system-tables-filled-disk").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !engineering.contains(r#"data-umami-event-position="blog-closing""#),
+        "an engineering write-up must not end in a sales box"
+    );
+}
+
+/// Broken front matter skips a post silently, leaving every other test green.
 #[tokio::test]
 async fn sla_guides_render_and_the_calculator_links_to_them() {
     let guides = [

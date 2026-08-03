@@ -1,11 +1,13 @@
 +++
 title = "Do I need an uptime monitor? Count what downtime costs you"
 date = "2026-07-22"
+updated = "2026-08-03"
 slug = "do-i-need-an-uptime-monitor"
 excerpt = "An uptime monitor is cheap. One outage you find out about from a customer is not. How to price your own downtime, and what to watch besides the homepage."
 tags = ["uptime", "monitoring", "downtime", "reliability"]
 draft = false
 og_image = "/static/marketing/og-need-uptime-monitor.png"
+cta_label = "Set up your first monitor"
 
 [[faqs]]
 q = "Do I really need an uptime monitor?"

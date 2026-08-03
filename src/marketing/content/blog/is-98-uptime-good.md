@@ -1,12 +1,13 @@
 +++
 title = "Is 98% uptime good? It allows 7.3 days of downtime a year"
 date = "2026-07-17"
-updated = "2026-08-02"
+updated = "2026-08-03"
 slug = "is-98-uptime-good"
 excerpt = "98% uptime sounds high, but it allows 7.3 days of downtime a year. When 98% is enough, what to aim for instead, and a downtime table for every target."
 tags = ["sla", "uptime", "reliability", "downtime"]
 draft = false
 og_image = "/static/marketing/og-98-uptime.png"
+cta_label = "Measure your real uptime"
 
 [[faqs]]
 q = "How much downtime is 98% uptime?"

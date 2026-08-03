@@ -82,10 +82,7 @@ const UPTIME_SLA_FAQS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Per-level prose sections, one per SLA target people actually search for.
-/// The numbers come from the same math as the table so copy never drifts;
-/// only the context line is hand-written. The third field points at the
-/// standalone guide for that target where one exists.
+/// Numbers come from the same math as the table so the copy never drifts.
 const SLA_LEVELS: &[(f64, &str, Option<&str>)] = &[
     (
         98.0,
@@ -131,7 +128,6 @@ const SLA_LEVELS: &[(f64, &str, Option<&str>)] = &[
     ),
 ];
 
-/// One rendered per-target section, with an optional link to its guide.
 pub struct SlaLevelSection {
     pub anchor: String,
     pub heading: String,
@@ -140,7 +136,6 @@ pub struct SlaLevelSection {
     pub guide: Option<GuideLink>,
 }
 
-/// Link from a level section to its standalone guide.
 pub struct GuideLink {
     pub href: &'static str,
     pub label: String,
@@ -1092,8 +1087,7 @@ mod tests {
         anchors.dedup();
         assert_eq!(anchors.len(), levels.len(), "anchor collision");
         let three_nines = levels.iter().find(|l| l.anchor == "sla-99-9").unwrap();
-        // Must not restate a guide's title verbatim, or the two pages bid
-        // against each other for the same query.
+        // Restating a guide's title here makes the two pages bid on one query.
         assert_eq!(three_nines.heading, "Downtime allowed at 99.9%");
         assert!(three_nines.lede.contains("43m 12s"));
         let half = levels.iter().find(|l| l.anchor == "sla-99-5").unwrap();
