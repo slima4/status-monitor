@@ -133,6 +133,9 @@
             <h3 class="mk-h3">{{ lvl.heading }}</h3>
             <p class="mk-body">{{ lvl.lede }}</p>
             <p class="mk-body mk-quiet">{{ lvl.note }}</p>
+            {% if let Some(g) = lvl.guide %}
+            <p><a href="{{ g.href }}" class="mk-footer-link mk-footer-link--inline">{{ g.label }}</a></p>
+            {% endif %}
         </div>
         {% endfor %}
     </section>

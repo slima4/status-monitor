@@ -594,6 +594,47 @@ async fn sitemap_lists_the_tools() {
     );
 }
 
+/// A post with broken front matter is skipped silently, so every other test
+/// stays green while the URL 404s. Fetch each SLA guide and the calculator
+/// links that point at it.
+#[tokio::test]
+async fn sla_guides_render_and_the_calculator_links_to_them() {
+    let guides = [
+        (
+            "/blog/how-much-downtime-is-99-9-uptime",
+            "43 minutes 12 seconds",
+        ),
+        (
+            "/blog/how-much-downtime-is-99-95-uptime",
+            "21 minutes 36 seconds",
+        ),
+        (
+            "/blog/how-much-downtime-is-99-99-uptime",
+            "4 minutes 19 seconds",
+        ),
+    ];
+    let (calc_status, calculator, _) = get("/tools/uptime-sla-calculator").await;
+    assert_eq!(calc_status, StatusCode::OK);
+    let (sitemap_status, sitemap, _) = get("/sitemap.xml").await;
+    assert_eq!(sitemap_status, StatusCode::OK);
+    for (path, budget) in guides {
+        let (status, body, _) = get(path).await;
+        assert_eq!(status, StatusCode::OK, "{path} must render");
+        assert!(
+            body.contains(budget),
+            "{path} must state its monthly budget of {budget}"
+        );
+        assert!(
+            calculator.contains(&format!("href=\"{path}\"")),
+            "the calculator must hand {path} the query it cannot rank for itself"
+        );
+        assert!(
+            sitemap.contains(&format!("https://uptimepage.dev{path}")),
+            "sitemap must list {path}"
+        );
+    }
+}
+
 /// Spot-checking landings by hand-typed path lets a retired page rot a test
 /// instead of failing it. Drive the render off the table that mounts them.
 #[tokio::test]

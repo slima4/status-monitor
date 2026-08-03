@@ -1,6 +1,7 @@
 +++
 title = "Is 98% uptime good? It allows 7.3 days of downtime a year"
 date = "2026-07-17"
+updated = "2026-08-02"
 slug = "is-98-uptime-good"
 excerpt = "98% uptime sounds high, but it allows 7.3 days of downtime a year. When 98% is enough, what to aim for instead, and a downtime table for every target."
 tags = ["sla", "uptime", "reliability", "downtime"]
@@ -97,11 +98,13 @@ The practical rule: promise a number you have measured, not a number that sounds
 
 ## What to aim for instead
 
-99.9% is the default target for customer-facing services for a reason. 43 minutes a month is enough room for a bad deploy and a couple of small failures, and it is achievable by a small team without heroics. Above that, each nine costs roughly ten times more engineering and most users cannot feel the difference.
+[99.9%](/blog/how-much-downtime-is-99-9-uptime) is the default target for customer-facing services for a reason. 43 minutes a month is enough room for a bad deploy and a couple of small failures, and it is achievable by a small team without heroics. Above that, each nine costs roughly ten times more engineering and most users cannot feel the difference.
 
 ![Four steps rising from 98% to 99.99%, each labelled with its downtime per 30-day month, from 14.4 hours down to 4.3 minutes. The 99.9% step is outlined in green and tagged aim here. The caption reads: each step to the right costs about ten times more engineering.](/static/marketing/blog-98-nines-ladder.webp)
 
 Pick the target from the table, then measure against it. The measuring part is what [external uptime monitoring](/uptime-monitoring-for-developers) does: it checks your service from outside, the way a user reaches it, and records every failure whether you were watching or not. The measured number only stays honest if your status page shows it directly, which is the idea behind [a status page you cannot fake](/blog/status-page-you-cant-fake).
+
+Each of the common targets has its own breakdown: [99.9% allows 43 minutes 12 seconds a month](/blog/how-much-downtime-is-99-9-uptime), [99.95% allows 21 minutes 36 seconds](/blog/how-much-downtime-is-99-95-uptime), and [99.99% allows 4 minutes 19 seconds](/blog/how-much-downtime-is-99-99-uptime).
 
 Run your own numbers in the [uptime SLA calculator](/tools/uptime-sla-calculator), or work out how fast an outage spends your budget in the [error budget calculator](/tools/error-budget-calculator). If the downtime column next to your current target surprises you, that is the sign you picked a percentage instead of a promise.
 

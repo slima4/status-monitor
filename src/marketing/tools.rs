@@ -27,7 +27,7 @@ const TOOL_CACHE_CONTROL: HeaderValue =
 
 pub const UPTIME_SLA_PATH: &str = "/tools/uptime-sla-calculator";
 const UPTIME_SLA_CREATED: &str = "2026-07-09";
-const UPTIME_SLA_LASTMOD: &str = "2026-07-14";
+const UPTIME_SLA_LASTMOD: &str = "2026-08-02";
 pub const UPTIME_SLA_TITLE: &str = "Uptime SLA & Downtime Calculator";
 pub const UPTIME_SLA_DESCRIPTION: &str = "Turn an uptime percentage into allowed downtime per day, week, month and year. A free SLA and SLO calculator with the full nines reference table.";
 
@@ -84,51 +84,66 @@ const UPTIME_SLA_FAQS: &[(&str, &str)] = &[
 
 /// Per-level prose sections, one per SLA target people actually search for.
 /// The numbers come from the same math as the table so copy never drifts;
-/// only the context line is hand-written.
-const SLA_LEVELS: &[(f64, &str)] = &[
+/// only the context line is hand-written. The third field points at the
+/// standalone guide for that target where one exists.
+const SLA_LEVELS: &[(f64, &str, Option<&str>)] = &[
     (
         98.0,
         "Fine for an internal tool or a staging box. In a contract it reads as \
          more than fourteen hours of monthly downtime, which is a hard sell.",
+        Some("/blog/is-98-uptime-good"),
     ),
     (
         99.0,
         "Two nines. Almost a full working day of downtime every month, and \
          most of it tends to arrive in business hours.",
+        None,
     ),
     (
         99.5,
         "Where single-server setups without failover usually land. A weekly \
          maintenance window still fits, barely.",
+        None,
     ),
     (
         99.9,
         "Three nines, the most common SaaS commitment. One bad deploy a month \
          can eat the whole budget.",
+        Some("/blog/how-much-downtime-is-99-9-uptime"),
     ),
     (
         99.95,
         "The usual internal target behind a 99.9% contract. It leaves room for \
          one short incident a month, not two.",
+        Some("/blog/how-much-downtime-is-99-95-uptime"),
     ),
     (
         99.99,
         "Four nines. No human pages fast enough for this; recovery has to be \
          automatic before anyone reads the alert.",
+        Some("/blog/how-much-downtime-is-99-99-uptime"),
     ),
     (
         99.999,
         "Five nines is telecom territory. Five minutes a year needs redundant \
          everything, and few web products earn back what that costs.",
+        None,
     ),
 ];
 
-/// One rendered "how much downtime is X%" section.
+/// One rendered per-target section, with an optional link to its guide.
 pub struct SlaLevelSection {
     pub anchor: String,
     pub heading: String,
     pub lede: String,
     pub note: &'static str,
+    pub guide: Option<GuideLink>,
+}
+
+/// Link from a level section to its standalone guide.
+pub struct GuideLink {
+    pub href: &'static str,
+    pub label: String,
 }
 
 /// One reference-table row: an uptime target and its allowed downtime per period.
@@ -263,17 +278,21 @@ fn reference_rows() -> Vec<SlaRow> {
 fn sla_level_sections() -> Vec<SlaLevelSection> {
     SLA_LEVELS
         .iter()
-        .map(|&(pct, note)| {
+        .map(|&(pct, note, guide)| {
             let d = sla_result(pct);
             SlaLevelSection {
                 anchor: format!("sla-{pct}").replace('.', "-"),
-                heading: format!("How much downtime is {pct}% uptime?"),
+                heading: format!("Downtime allowed at {pct}%"),
                 lede: format!(
                     "A {pct}% SLA allows {} of downtime per day, {} per week, \
                      {} per month and {} per year.",
                     d.daily, d.weekly, d.monthly, d.yearly,
                 ),
                 note,
+                guide: guide.map(|href| GuideLink {
+                    href,
+                    label: format!("The full guide to {pct}% uptime"),
+                }),
             }
         })
         .collect()
@@ -1052,14 +1071,14 @@ mod tests {
 
     #[test]
     fn level_targets_stay_subsets_of_the_table_and_presets() {
-        for (pct, _) in SLA_LEVELS {
+        for (pct, _, _) in SLA_LEVELS {
             assert!(
                 REFERENCE_NINES.contains(pct),
                 "{pct}% has a prose section but no table row"
             );
         }
         for pct in PRESETS {
-            let covered = SLA_LEVELS.iter().any(|(p, _)| p == pct);
+            let covered = SLA_LEVELS.iter().any(|(p, _, _)| p == pct);
             assert!(covered, "preset {pct}% has no prose section");
         }
     }
@@ -1073,7 +1092,9 @@ mod tests {
         anchors.dedup();
         assert_eq!(anchors.len(), levels.len(), "anchor collision");
         let three_nines = levels.iter().find(|l| l.anchor == "sla-99-9").unwrap();
-        assert_eq!(three_nines.heading, "How much downtime is 99.9% uptime?");
+        // Must not restate a guide's title verbatim, or the two pages bid
+        // against each other for the same query.
+        assert_eq!(three_nines.heading, "Downtime allowed at 99.9%");
         assert!(three_nines.lede.contains("43m 12s"));
         let half = levels.iter().find(|l| l.anchor == "sla-99-5").unwrap();
         assert!(half.lede.contains("3h 36m"));
