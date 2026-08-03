@@ -194,7 +194,7 @@ pub const LANDINGS: &[Landing] = &[
                 href: "/vs/statuspage",
             },
             ResourceLink {
-                label: "White-label pages",
+                label: "White-label status pages",
                 href: "/white-label-uptime-monitoring",
             },
         ],
@@ -203,7 +203,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/status-page-for-agencies",
         created: "2026-06-16",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-03",
         title: "Status Pages for Agencies & Client Sites",
         eyebrow: "for agencies",
         h1: "One account. A branded status page for every client.",
@@ -268,7 +268,7 @@ pub const LANDINGS: &[Landing] = &[
                 href: "/status-page-for-saas",
             },
             ResourceLink {
-                label: "White-label pages",
+                label: "White-label status pages",
                 href: "/white-label-uptime-monitoring",
             },
         ],
@@ -536,12 +536,12 @@ docker compose up -d"#,
     Landing {
         path: "/white-label-uptime-monitoring",
         created: "2026-07-01",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-03",
         title: "White-Label Uptime Monitoring & Status Pages",
         eyebrow: "white label",
-        h1: "White-label uptime monitoring for your brand",
+        h1: "White-label uptime monitoring and status pages",
         meta_description: "White-label uptime monitoring and branded status pages for resellers and MSPs. Your logo, colours and subdomain per client. Free to start, no card.",
-        lede: "Put your own brand on the monitoring. Give every client a branded status page on your own subdomain with your logo and colours, all from one account. On Pro or a self-hosted instance the vendor badge comes off entirely, so your clients only ever see your name.",
+        lede: "Put your own brand on the monitoring. Give every client a branded status page on your own subdomain with your logo and colours, all from one account. On Pro or a self-hosted instance you can take the vendor badge off entirely, so your clients only ever see your name.",
         features: &[
             Feature {
                 label: "Branding",
@@ -570,11 +570,15 @@ docker compose up -d"#,
         ],
         sections: &[
             Section {
-                heading: "Your brand, not ours",
-                body: "Each status page carries your logo and colours on a subdomain you choose, so it reads as yours from the first visit. On Pro or a self-hosted instance the powered-by badge comes off too, and the tool behind the page disappears completely. What the client sees is your name and your uptime record.",
+                heading: "A white-label status page on your own subdomain",
+                body: "Each status page carries your logo and colours on a subdomain you choose, so it reads as yours from the first visit. On Pro or a self-hosted instance you can switch the powered-by badge off too, and the tool behind the page disappears completely. What the client sees is your name and your uptime record.",
             },
             Section {
-                heading: "A page per client, one account",
+                heading: "What your client actually sees",
+                body: "Set a display name and that is what the header shows, so the account name you use internally never has to appear. The description under it is per client as well, not one blurb reused across every page. And when you switch the powered-by line off, it is dropped on the server rather than hidden with CSS, so it is gone from the markup too. Self-hosting gives you that switch outright. On the hosted tier a Pro plan unlocks it.",
+            },
+            Section {
+                heading: "A branded status page per client, one account",
                 body: "Add every client as a monitor, group them by client, and hand each one its own branded page from the same dashboard. No per-client tool to stand up, no per-client invoice to pass on, and no wall of browser tabs to click through in the morning.",
             },
             Section {
