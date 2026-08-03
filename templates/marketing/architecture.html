@@ -5,6 +5,8 @@
 
 {% block head %}
 <link rel="stylesheet" href="{{ "architecture/flows.css"|asset }}">
+<script type="application/ld+json">{{ breadcrumb_json_ld.as_str()|safe }}</script>
+<script type="application/ld+json">{{ article_json_ld.as_str()|safe }}</script>
 {% endblock %}
 
 {% block content %}

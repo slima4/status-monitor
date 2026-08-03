@@ -18,7 +18,8 @@ use bytes::Bytes;
 
 use crate::marketing::seo::{
     JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_organization,
-    json_ld_software_application, json_ld_software_source_code, json_ld_webpage, json_ld_website,
+    json_ld_software_application, json_ld_software_source_code, json_ld_tech_article,
+    json_ld_webpage, json_ld_website,
 };
 use crate::web::filters;
 
@@ -335,6 +336,8 @@ struct ArchitecturePage {
     app_url: String,
     canonical_url: String,
     og: OpenGraph,
+    breadcrumb_json_ld: JsonLd,
+    article_json_ld: JsonLd,
     columns: &'static [ArchColumnView],
     flows: &'static [ArchFlow],
     reference: Vec<&'static ArchFlow>,
@@ -345,12 +348,10 @@ static ARCH_CACHED: OnceLock<CachedRender> = OnceLock::new();
 
 fn render_architecture(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = format!("{}{ARCHITECTURE_PATH}", cfg.canonical_origin);
-    let mut og = OpenGraph::default_for(
-        &format!("How {BRAND} is built: architecture and flows"),
-        &canonical_url,
-        &cfg.canonical_origin,
-    );
-    og.description = "An interactive map of Uptimepage, the open-source uptime monitor: click a runtime flow and watch it light up across every process, surface, service and store.".to_string();
+    let title = format!("How {BRAND} is built: architecture and flows");
+    let description = "An interactive map of Uptimepage, the open-source uptime monitor: click a runtime flow and watch it light up across every process, surface, service and store.";
+    let mut og = OpenGraph::default_for(&title, &canonical_url, &cfg.canonical_origin);
+    og.description = description.to_string();
     og.image = format!(
         "{}/static/marketing/og-architecture.png",
         cfg.canonical_origin
@@ -364,6 +365,20 @@ fn render_architecture(cfg: &MarketingCfg) -> CachedRender {
         app_url: cfg.app_url.clone(),
         canonical_url,
         og,
+        breadcrumb_json_ld: json_ld_breadcrumb(
+            &cfg.canonical_origin,
+            "Architecture",
+            ARCHITECTURE_PATH,
+        ),
+        // TechArticle, not WebPage: the page explains how the system works and
+        // carries an author, which is what a citation needs.
+        article_json_ld: json_ld_tech_article(
+            &cfg.canonical_origin,
+            ARCHITECTURE_PATH,
+            &title,
+            description,
+            ARCHITECTURE_LASTMOD,
+        ),
         columns,
         flows,
         reference,

@@ -972,6 +972,47 @@ async fn docs_nav_is_identical_across_pages() {
 }
 
 #[tokio::test]
+async fn architecture_carries_structured_data() {
+    let (status, body, _) = get("/architecture").await;
+    assert_eq!(status, StatusCode::OK);
+    let blocks: Vec<&str> = body
+        .split(r#"<script type="application/ld+json">"#)
+        .skip(1)
+        .filter_map(|s| s.split("</script>").next())
+        .collect();
+    assert_eq!(
+        blocks.len(),
+        2,
+        "expected a breadcrumb and an article block"
+    );
+    let types: Vec<String> = blocks
+        .iter()
+        .map(|b| {
+            let v: serde_json::Value = serde_json::from_str(b).expect("JSON-LD must parse");
+            v["@type"].as_str().unwrap_or_default().to_string()
+        })
+        .collect();
+    assert!(
+        types.contains(&"BreadcrumbList".to_string()),
+        "got {types:?}"
+    );
+    assert!(types.contains(&"TechArticle".to_string()), "got {types:?}");
+    let article: serde_json::Value = serde_json::from_str(
+        blocks
+            .iter()
+            .find(|b| b.contains("TechArticle"))
+            .expect("article block"),
+    )
+    .unwrap();
+    // The citation-relevant edges: who wrote it and what it is about.
+    assert!(article["author"].is_object(), "TechArticle needs an author");
+    assert_eq!(
+        article["about"]["@id"], "https://uptimepage.dev/#software",
+        "the article must point at the product node"
+    );
+}
+
+#[tokio::test]
 async fn architecture_serves_the_map_content_as_html() {
     let (status, body, _) = get("/architecture").await;
     assert_eq!(status, StatusCode::OK);
