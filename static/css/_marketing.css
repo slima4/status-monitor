@@ -1119,14 +1119,10 @@ html:has(.marketing-shell) {
     box-shadow: 1px 0 0 var(--mk-rule);
 }
 .cmp thead th:first-child { background: var(--mk-bg-2); }
+/* Our column is marked by weight and ink alone. Boxing it in ink read as a
+   black frame drawn around one column, loudest exactly where it lands last. */
 .cmp .us { color: var(--mk-ink); font-weight: 600; }
-/* Ink rules, not a fill, which fought the green `yes` cells inside the column. */
-.cmp .col-us { border-left-color: var(--mk-ink); }
-/* Right wall; `:last-child` closes it when the marked column is the final one. */
-.cmp .col-us + th, .cmp .col-us + td { border-left-color: var(--mk-ink); }
-.cmp .col-us:last-child { border-right: 1px solid var(--mk-ink); }
-.cmp thead th.col-us { color: var(--mk-ink); box-shadow: inset 0 -2px 0 var(--mk-ink); }
-.cmp tbody tr:last-child .col-us { box-shadow: inset 0 -1px 0 var(--mk-ink); }
+.cmp thead th.col-us { color: var(--mk-ink); }
 .cmp tbody tr:hover > * { background: var(--mk-bg-2); }
 .cmp .yes { color: var(--mk-ok); }
 .cmp .no { color: var(--mk-quiet); }
