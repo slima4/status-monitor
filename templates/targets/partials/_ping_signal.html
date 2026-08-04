@@ -1,0 +1,11 @@
+{# One signal form of a heartbeat's ping URL, with its own copy button. The id
+   is derived from the label so each row addresses its own code element. #}
+{% macro signal(url, suffix, label, desc) %}
+<dt class="flex items-center gap-2">
+  <code id="hb-ping-url-{{ label }}"
+        class="min-w-0 flex-1 break-all rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1.5 font-mono text-xs">{{ url }}/{{ suffix }}</code>
+  <button type="button" data-copy="#hb-ping-url-{{ label }}" aria-label="Copy {{ label }} URL"
+          class="sticker-btn shrink-0 px-2 py-1 font-mono text-xs">copy</button>
+</dt>
+<dd class="text-muted">{{ desc }}</dd>
+{% endmacro %}

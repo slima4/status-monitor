@@ -193,6 +193,14 @@ seed-fixtures:
 seed-latency-demo:
     bash scripts/seed-latency-demo.sh
 
+# Seed six heartbeat monitors covering every state the ping card renders: a
+# healthy one, both cadence-advice cases, a job that reported failure with its
+# own output, an open run past its max runtime, and one with too little history
+# to advise on. Tokens are minted by the running app, so this needs `just
+# up-app` + `just dev-login` first. Idempotent: tagged rows wiped (PG + CH).
+seed-heartbeats:
+    bash scripts/seed-heartbeats.sh
+
 # Seed a photogenic operator tenant (40 monitors, 90d up history, resolved
 # incidents) for shooting the marketing screenshot gallery. Stop the dev-region
 # agents first; see the script header for the shoot-time stale-window override.

@@ -9,8 +9,8 @@ use crate::api::types::{
 };
 use crate::domain::agent_wire::FlowRunRecord;
 use crate::domain::{
-    CheckResult, CheckStatus, HeartbeatPingRecord, NewTarget, OrgId, Target, TargetUpdate, UserId,
-    WriteSource,
+    CheckResult, CheckStatus, HeartbeatPingRecord, NewTarget, ObservedCadence, OrgId, Target,
+    TargetUpdate, UserId, WriteSource,
 };
 use crate::error::Result;
 
@@ -47,9 +47,9 @@ pub trait FlowRunSink: Send + Sync {
     }
 }
 
-/// Where an accepted heartbeat signal's history goes. Infallible by signature
-/// for the same reason as [`FlowRunSink`]: the ping already moved the state the
-/// verdict is read from, so a failed write costs history, never correctness.
+/// Infallible by signature for the same reason as [`FlowRunSink`]: the ping
+/// already moved the state the verdict reads, so a failed write costs history,
+/// never correctness.
 #[async_trait]
 pub trait HeartbeatPingSink: Send + Sync {
     async fn write_ping(&self, ping: &HeartbeatPingRecord);
@@ -372,16 +372,26 @@ pub trait ResultsStore: Send + Sync {
     ) -> Result<Vec<FlowRunView>> {
         Ok(Vec::new())
     }
-    /// What the job printed on the failure recorded at `at`. Matched on the
-    /// exact instant Postgres holds rather than "the newest failure", so a ping
-    /// whose log write was lost shows no output instead of the previous run's.
-    /// Defaults to `None` so a store without the table simply has no output.
+    /// What the job printed on the failure recorded at `at`. Matched on that
+    /// exact instant, never "the newest failure", so a lost log write shows no
+    /// output instead of the previous run's.
     async fn heartbeat_failure_output(
         &self,
         _org: OrgId,
         _target_id: Uuid,
         _at: DateTime<Utc>,
     ) -> Result<Option<String>> {
+        Ok(None)
+    }
+    /// Gaps between this heartbeat's successes over the last `days`. A ping
+    /// landing inside its window writes no check result, so this log is the
+    /// only record of how often the job really runs.
+    async fn heartbeat_cadence(
+        &self,
+        _org: OrgId,
+        _target_id: Uuid,
+        _days: u16,
+    ) -> Result<Option<ObservedCadence>> {
         Ok(None)
     }
     /// One series per declared step, bucketed over the range: the mean

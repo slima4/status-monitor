@@ -38,7 +38,7 @@ pub use escalation_policy::{
     EscalationTarget, EscalationTargetType, NewEscalationPolicy, NewEscalationStep,
     NewEscalationTarget, next_step,
 };
-pub use heartbeat::{HeartbeatPingRecord, Ping, PingSignal};
+pub use heartbeat::{CadenceAdvice, HeartbeatPingRecord, ObservedCadence, Ping, PingSignal};
 pub use incident::{
     ActionItem, ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentMetrics,
     IncidentNarrationUpdate, IncidentNotification, IncidentOrigin, IncidentPostmortem,

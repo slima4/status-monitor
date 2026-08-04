@@ -1095,10 +1095,11 @@ pub async fn index(
     } else {
         Vec::new()
     };
-    let heartbeat = if target.check.is_passive() {
-        Some(crate::api::handlers::targets::heartbeat_info(&state, org, target.id).await?)
-    } else {
-        None
+    let heartbeat = match target.check.as_heartbeat() {
+        Some(check) => Some(
+            crate::api::handlers::targets::heartbeat_info(&state, org, target.id, check).await?,
+        ),
+        None => None,
     };
     // Passive kinds have no probe region, so no region selector.
     let regions = if target.check.is_passive() {
@@ -1690,22 +1691,32 @@ mod tests {
             last_fail_at: Some(chrono::Utc::now()),
             last_exit_code: Some(137),
             last_failure_output: Some("rsync: connection unexpectedly closed".into()),
+            declared_period_secs: 600,
+            observed_period_secs: Some(4980),
+            cadence_advice: Some(crate::api::handlers::targets::CadenceAdviceView {
+                kind: "too_tight".into(),
+                suggested_period_secs: 5400,
+            }),
         });
         let html = p.render().unwrap();
         assert!(html.contains("https://app.example.com/ping/tok123"));
         assert!(html.contains(r##"data-copy="#hb-ping-url""##));
-        assert!(html.contains("last success:"));
+        assert!(html.contains("last success"));
         assert!(html.contains("never"));
         assert!(html.contains("https://app.example.com/ping/tok123/start"));
-        assert!(
-            html.contains("(exit 137)"),
-            "a failure names its exit status"
-        );
+        assert!(html.contains("exit 137"), "a failure names its exit status");
         assert!(
             html.contains("rsync: connection unexpectedly closed"),
-            "the job's own account of the failure is the point of keeping it"
+            "the job's own account of the failure"
         );
-        assert!(!html.contains("last start:"), "no start recorded, no row");
+        assert!(!html.contains("last start"), "no start recorded, no row");
+        assert!(html.contains("runs less often than you told us"));
+        assert!(html.contains("83m"), "the observed cadence");
+        assert!(
+            html.contains("10m"),
+            "the declared cadence it disagrees with"
+        );
+        assert!(html.contains("90m"), "the period to set instead");
         // No probe surfaces for a passive kind.
         assert!(!html.contains("data-detail-test-now"));
         assert!(!html.contains("latency (p50/p95/p99)"));

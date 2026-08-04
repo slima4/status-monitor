@@ -18,7 +18,8 @@ use crate::api::types::{
 use crate::config::ClickhouseConfig;
 use crate::domain::agent_wire::{ConsoleLine, FlowEvidence, FlowRunRecord, StepOutcome, StepTrace};
 use crate::domain::{
-    CheckResult, CheckStatus, HeartbeatPingRecord, Incident, OrgId, coalesce_incidents,
+    CheckResult, CheckStatus, HeartbeatPingRecord, Incident, ObservedCadence, OrgId,
+    coalesce_incidents,
 };
 use crate::error::Result;
 use crate::observability::metrics::names;
@@ -127,9 +128,8 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../../migrations/clickhouse/003_flow_runs.sql"),
     ),
     // 004 `heartbeat_pings`: the job's own account of its runs, which
-    // `check_results` cannot hold. Job output gets the shorter `evidence_days`
-    // window, same split as `flow_runs`. Org erasure must clear it too (see
-    // [`CH_TENANT_TABLES`]).
+    // `check_results` cannot hold. Job output takes the shorter `evidence_days`
+    // window, same split as `flow_runs`. Org erasure must clear it too.
     (
         "004_heartbeat_pings.sql",
         include_str!("../../migrations/clickhouse/004_heartbeat_pings.sql"),
@@ -720,9 +720,8 @@ impl<'a> FlowRunRow<'a> {
 
 const HEARTBEAT_PING_TABLE: &str = "heartbeat_pings";
 
-/// One row per accepted heartbeat signal. Unbatched: a job pings on its own
-/// schedule, and the period floor is 60s, so these arrive too rarely for a
-/// batcher to earn its keep.
+/// Unbatched: the 60s period floor keeps these too rare for a batcher to earn
+/// its keep.
 pub struct ClickhouseHeartbeatPingSink {
     client: Client,
     org_ttl: OrgTtlDays,
@@ -760,6 +759,12 @@ impl HeartbeatPingSink for ClickhouseHeartbeatPingSink {
                 .increment(1);
         }
     }
+}
+
+#[derive(Debug, Row, Deserialize)]
+struct CadenceRow {
+    samples: u64,
+    median_gap_secs: u32,
 }
 
 #[derive(Debug, Row, Serialize)]
@@ -1164,8 +1169,7 @@ impl ResultsStore for ClickhouseResultsStore {
         target_id: Uuid,
         at: DateTime<Utc>,
     ) -> Result<Option<String>> {
-        // `received_at` is second-granularity, so the microseconds Postgres
-        // keeps have to go before the instants can be compared.
+        // `received_at` is second-granularity; Postgres microseconds must go.
         let body: Vec<String> = self
             .client
             .query(&format!(
@@ -1179,9 +1183,48 @@ impl ResultsStore for ClickhouseResultsStore {
             .fetch_all::<String>()
             .await
             .context("clickhouse heartbeat failure output")?;
-        // An expired `body` column reads empty, same as a ping that carried
-        // none; neither is worth a panel.
+        // An expired `body` reads empty, same as a ping that carried none.
         Ok(body.into_iter().next().filter(|b| !b.is_empty()))
+    }
+
+    async fn heartbeat_cadence(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        days: u16,
+    ) -> Result<Option<ObservedCadence>> {
+        // Successes only: a `/start` says a run began, not that the schedule
+        // came round. The first row has no predecessor, so drop its epoch lag.
+        let rows: Vec<CadenceRow> = self
+            .client
+            .query(&format!(
+                "SELECT count() AS samples, \
+                        toUInt32(quantileExact(0.5)(gap)) AS median_gap_secs \
+                 FROM ( \
+                     SELECT dateDiff('second', prev, received_at) AS gap FROM ( \
+                         SELECT received_at, lagInFrame(received_at) OVER ( \
+                                    ORDER BY received_at ASC \
+                                    ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) AS prev \
+                         FROM {HEARTBEAT_PING_TABLE} \
+                         WHERE org_id = ? AND target_id = ? AND signal = 'success' \
+                           AND received_at >= now() - toIntervalDay(?) \
+                     ) WHERE prev > toDateTime(0) \
+                 )"
+            ))
+            .bind(org.0)
+            .bind(target_id)
+            .bind(days)
+            .fetch_all::<CadenceRow>()
+            .await
+            .context("clickhouse heartbeat cadence")?;
+        Ok(rows
+            .into_iter()
+            .next()
+            .filter(|r| r.samples > 0)
+            .map(|r| ObservedCadence {
+                samples: r.samples.min(u64::from(u32::MAX)) as u32,
+                median_gap: Duration::from_secs(u64::from(r.median_gap_secs)),
+            }))
     }
 
     async fn ping(&self) -> Result<()> {

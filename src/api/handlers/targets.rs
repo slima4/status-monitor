@@ -21,8 +21,8 @@ use crate::app::AppState;
 use crate::auth::scope::Scope;
 use crate::domain::agent_wire::{DispatchKind, DispatchedCheck};
 use crate::domain::{
-    CheckResult, CheckSpec, NewTarget, OrgId, RegionIncidentPolicy, Target, TargetAlerts,
-    TargetUpdate, min_interval_secs_for_kind,
+    CadenceAdvice, CheckResult, CheckSpec, HeartbeatCheck, NewTarget, OrgId, RegionIncidentPolicy,
+    Target, TargetAlerts, TargetUpdate, min_interval_secs_for_kind,
 };
 use crate::error::{AppError, Result};
 use crate::observability::metrics::names;
@@ -515,40 +515,77 @@ pub async fn set_target_regions(
     Ok(Json(TargetRegions { regions }))
 }
 
-/// Ping surface of a heartbeat monitor: the inbound URL the customer's system
-/// calls, and what its signals last reported.
+/// A heartbeat's ping URL and what its signals last reported.
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct HeartbeatInfo {
-    /// Full ping URL. `null` when the stored token can't be decrypted (KEK
-    /// rotated out).
+    /// `null` when the stored token can't be decrypted (KEK rotated out).
     pub ping_url: Option<String>,
-    /// Last success. A `/start` does not count: it opens a run, it does not
-    /// report one.
+    /// Last success. A `/start` opens a run, it does not report one.
     pub last_ping_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_start_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_fail_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_exit_code: Option<u8>,
-    /// What the job printed on that failure, if it posted anything and the
-    /// output is still inside its window.
+    /// What the job printed on that failure, while inside its window.
     pub last_failure_output: Option<String>,
+    pub declared_period_secs: u64,
+    /// Median gap between successes, `null` until a second one gives it a gap.
+    pub observed_period_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cadence_advice: Option<CadenceAdviceView>,
 }
 
-/// Read-only projection of a heartbeat's ping surface, shared by the API
-/// handler and the detail page. Never mints: `ping_url` is `None` while the
-/// row is still provisioning or when the token can't be decrypted.
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CadenceAdviceView {
+    /// `too_tight` or `too_loose`.
+    pub kind: String,
+    pub suggested_period_secs: u64,
+}
+
+/// Wide enough for a daily job to clear the sample floor, narrow enough that a
+/// schedule changed last week stops counting.
+const CADENCE_WINDOW_DAYS: u16 = 14;
+
+impl From<CadenceAdvice> for CadenceAdviceView {
+    fn from(a: CadenceAdvice) -> Self {
+        let (kind, period) = match a {
+            CadenceAdvice::TooTight { suggested_period } => ("too_tight", suggested_period),
+            CadenceAdvice::TooLoose { suggested_period } => ("too_loose", suggested_period),
+        };
+        Self {
+            kind: kind.to_string(),
+            suggested_period_secs: period.as_secs(),
+        }
+    }
+}
+
+/// Shared by the API handler and the detail page. Never mints, so `ping_url`
+/// is `None` while the row is still provisioning.
 pub(crate) async fn heartbeat_info(
     state: &AppState,
     org: OrgId,
     target_id: Uuid,
+    check: &HeartbeatCheck,
 ) -> Result<HeartbeatInfo> {
     let hb = state.heartbeat_store.get(org, target_id).await?;
+    // Both reads are commentary on state Postgres already holds, so a
+    // ClickHouse outage costs the commentary rather than the whole page.
+    let observed = state
+        .results_store
+        .heartbeat_cadence(org, target_id, CADENCE_WINDOW_DAYS)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "heartbeat cadence unavailable");
+            None
+        });
     let last_failure_output = match hb.as_ref().and_then(|h| h.last_fail_at) {
-        Some(at) => {
-            state
-                .results_store
-                .heartbeat_failure_output(org, target_id, at)
-                .await?
-        }
+        Some(at) => state
+            .results_store
+            .heartbeat_failure_output(org, target_id, at)
+            .await
+            .unwrap_or_else(|err| {
+                tracing::warn!(error = %err, "heartbeat failure output unavailable");
+                None
+            }),
         None => None,
     };
     Ok(HeartbeatInfo {
@@ -563,6 +600,11 @@ pub(crate) async fn heartbeat_info(
         last_fail_at: hb.as_ref().and_then(|h| h.last_fail_at),
         last_exit_code: hb.and_then(|h| h.last_exit_code),
         last_failure_output,
+        declared_period_secs: check.period.as_secs(),
+        observed_period_secs: observed.map(|o| o.median_gap.as_secs()),
+        cadence_advice: observed
+            .and_then(|o| o.advice(check.period + check.grace))
+            .map(Into::into),
     })
 }
 
@@ -585,13 +627,13 @@ pub async fn get_heartbeat(
         .get(org, id)
         .await?
         .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
-    if !target.check.is_passive() {
+    let Some(check) = target.check.as_heartbeat() else {
         return Err(AppError::not_found(
             codes::HEARTBEAT_NOT_CONFIGURED,
             "this monitor is not a heartbeat",
         ));
-    }
-    Ok(Json(heartbeat_info(&state, org, id).await?))
+    };
+    Ok(Json(heartbeat_info(&state, org, id, check).await?))
 }
 
 #[utoipa::path(

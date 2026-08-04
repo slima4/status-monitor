@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "targets/partials/_ping_signal.html" as ping %}
 {% block title %}{{ name }} · Uptimepage{% endblock %}
 {% block nav_crumb %}
 <span class="nav-crumb">
@@ -32,28 +33,30 @@
   {% endif %}
 
   {% if let Some(hb) = heartbeat %}
-  <section class="sticker-card space-y-2 p-5">
+  <section class="sticker-card space-y-4 p-5">
     <h2 class="panel-label">ping url</h2>
     {% if let Some(url) = hb.ping_url %}
-    <div class="flex flex-wrap items-center gap-2">
-      <code id="hb-ping-url"
-            class="min-w-0 flex-1 break-all rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1.5 font-mono text-xs">{{ url }}</code>
-      <button type="button" data-copy="#hb-ping-url" aria-label="Copy ping URL"
-              class="sticker-btn px-3 py-1.5 text-sm font-medium">copy</button>
+    <div class="space-y-2">
+      <div class="flex flex-wrap items-center gap-2">
+        <code id="hb-ping-url"
+              class="min-w-0 flex-1 break-all rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1.5 font-mono text-xs">{{ url }}</code>
+        <button type="button" data-copy="#hb-ping-url" aria-label="Copy ping URL"
+                class="sticker-btn px-3 py-1.5 text-sm font-medium">copy</button>
+      </div>
+      <p class="text-xs text-muted">
+        Call it as the last step of the job, for example <code class="font-mono">curl -fsS</code>.
+        GET and POST both count, and a POST body is kept as that run's output.
+      </p>
     </div>
-    <p class="text-xs text-muted">
-      Call it from the thing being watched, for example <code>curl -fsS</code>
-      this URL as the last step of the job. GET or POST both count as a ping,
-      and a POST body is kept as that run's output.
-    </p>
-    <dl class="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr]">
-      <dt class="font-mono text-muted">{{ url }}/start</dt>
-      <dd class="text-muted">before the work, so a run that never finishes is visible</dd>
-      <dt class="font-mono text-muted">{{ url }}/fail</dt>
-      <dd class="text-muted">the job knows it failed; opens the incident now</dd>
-      <dt class="font-mono text-muted">{{ url }}/$?</dt>
-      <dd class="text-muted">exit status: 0 succeeds, anything else fails</dd>
-    </dl>
+
+    <div class="space-y-1.5 border-t border-[color:var(--theme-line)] pt-3">
+      <p class="panel-label">signals</p>
+      <dl class="space-y-2 text-xs">
+        {% call ping::signal(url, "start", "start", "before the work, so a run that never finishes is visible") %}{% endcall %}
+        {% call ping::signal(url, "fail", "fail", "the job knows it failed; opens the incident now") %}{% endcall %}
+        {% call ping::signal(url, "$?", "exit-status", "exit status: 0 succeeds, anything else fails") %}{% endcall %}
+      </dl>
+    </div>
     {% else %}
     <p class="text-xs text-muted">
       Ping URL not available yet. It is provisioned within moments of
@@ -61,18 +64,54 @@
       rotation, recreate the monitor to mint a new token.
     </p>
     {% endif %}
-    <p class="font-mono text-xs text-muted">last success:
-      {% if let Some(ts) = hb.last_ping_at %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}never{% endif %}
-    </p>
-    {% if let Some(ts) = hb.last_start_at %}
-    <p class="font-mono text-xs text-muted">last start:
-      <time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>
-    </p>
+
+    <dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-1.5 border-t border-[color:var(--theme-line)] pt-3 text-xs">
+      <dt class="text-muted">expected</dt>
+      <dd class="font-mono">every {{ hb.declared_period_secs|exact_dur }}</dd>
+      {% if let Some(observed) = hb.observed_period_secs %}
+      <dt class="text-muted">observed</dt>
+      <dd class="font-mono">every {{ observed|exact_dur }}</dd>
+      {% endif %}
+      <dt class="text-muted">last success</dt>
+      <dd class="font-mono">
+        {% if let Some(ts) = hb.last_ping_at %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}never{% endif %}
+      </dd>
+      {% if let Some(ts) = hb.last_start_at %}
+      <dt class="text-muted">last start</dt>
+      <dd class="font-mono"><time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time></dd>
+      {% endif %}
+    </dl>
+
+    {% if let Some(observed) = hb.observed_period_secs %}
+    {% if let Some(advice) = hb.cadence_advice %}
+    <div class="space-y-1 border-l-2 border-[color:var(--theme-state-warn-line)] pl-3">
+      {% if advice.kind == "too_tight" %}
+      <p class="text-xs">
+        <span class="hl">This job runs less often than you told us.</span>
+        Over the last two weeks it pinged about every {{ observed|exact_dur }}, but the
+        monitor expects every {{ hb.declared_period_secs|exact_dur }}, and even with the
+        grace on top an ordinary run arrives late and pages you. Set the period to
+        <span class="font-mono">{{ advice.suggested_period_secs|exact_dur }}</span>.
+      </p>
+      {% else %}
+      <p class="text-xs">
+        <span class="hl">This monitor is looser than it needs to be.</span>
+        The job pings about every {{ observed|exact_dur }}, but the monitor allows
+        {{ hb.declared_period_secs|exact_dur }} plus its grace before calling it down, so a
+        job that dies goes unnoticed far longer than it has to. Set the period to
+        <span class="font-mono">{{ advice.suggested_period_secs|exact_dur }}</span>.
+      </p>
+      {% endif %}
+    </div>
     {% endif %}
+    {% endif %}
+
     {% if let Some(ts) = hb.last_fail_at %}
-    <div class="space-y-1 border-l-2 border-[color:var(--theme-state-bad-line)] pl-3">
-      <p class="font-mono text-xs text-muted">last failure:
-        <time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% if let Some(code) = hb.last_exit_code %} (exit {{ code }}){% endif %}
+    <div class="space-y-1.5 border-l-2 border-[color:var(--theme-state-bad-line)] pl-3">
+      <p class="text-xs">
+        <span class="text-muted">last failure</span>
+        <time class="font-mono" datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% if let Some(code) = hb.last_exit_code %}
+        <span class="font-mono text-state-bad">exit {{ code }}</span>{% endif %}
       </p>
       {% if let Some(output) = hb.last_failure_output %}
       <pre class="max-h-40 overflow-auto rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1.5 font-mono text-xs whitespace-pre-wrap">{{ output }}</pre>

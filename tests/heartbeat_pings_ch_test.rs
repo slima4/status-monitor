@@ -1,6 +1,4 @@
-//! Storage contract for the heartbeat ping log: every signal is kept whether or
-//! not it changed the verdict, and the job's own output is a separate retention
-//! window from the row that carries it.
+//! Storage contract for the heartbeat ping log.
 
 mod common;
 
@@ -67,26 +65,21 @@ async fn a_run_stores_its_start_its_outcome_and_its_output() {
     .await;
 
     let rows = fetch(&client, org_id).await;
-    assert_eq!(
-        rows.len(),
-        2,
-        "both signals are history, not just the verdict"
-    );
+    assert_eq!(rows.len(), 2, "both signals kept, not just the verdict");
 
     let start = &rows[0];
     assert_eq!(start.signal, PingSignal::Start.as_enum8());
-    assert_eq!(start.duration_ms, None, "a start times nothing");
+    assert_eq!(start.duration_ms, None);
     assert_eq!(start.exit_code, None);
 
     let fail = &rows[1];
     assert_eq!(fail.signal, PingSignal::Fail.as_enum8());
     assert_eq!(fail.exit_code, Some(137));
     assert_eq!(fail.duration_ms, Some(94_000));
-    assert!(fail.body.contains("rsync"), "job output rides the ping");
+    assert!(fail.body.contains("rsync"));
 }
 
-/// A bare success carries no exit code and no duration, and those must read
-/// back as absent rather than as zero — 0 is a real exit status.
+/// Absent, not zero — 0 is a real exit status.
 #[tokio::test]
 #[ignore]
 async fn a_bare_success_stores_no_exit_code() {
@@ -107,9 +100,8 @@ async fn a_bare_success_stores_no_exit_code() {
     assert_eq!(rows[0].duration_ms, None);
 }
 
-/// The read matches the exact instant Postgres holds, not "the newest failure".
-/// A ping whose log write was lost must show no output rather than the previous
-/// run's, which would read as a diagnosis of the wrong failure.
+/// Matched to the exact instant Postgres holds, not "the newest failure" — a
+/// lost log write must read as absent, never as the previous run's output.
 #[tokio::test]
 #[ignore]
 async fn failure_output_is_matched_to_its_own_failure() {
@@ -141,7 +133,6 @@ async fn failure_output_is_matched_to_its_own_failure() {
         Some("disk full")
     );
 
-    // A later failure whose body never landed reads as absent, not as "disk full".
     let newer = chrono::Utc::now();
     assert_eq!(
         store
@@ -151,13 +142,69 @@ async fn failure_output_is_matched_to_its_own_failure() {
         None
     );
 
-    // Another tenant asking for the same target gets nothing.
     let stranger = uptimepage::domain::OrgId(Uuid::new_v4());
     assert_eq!(
         store
             .heartbeat_failure_output(stranger, target, older)
             .await
             .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn observed_cadence_contradicts_a_wrong_declaration() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    let org = uptimepage::domain::OrgId(Uuid::new_v4());
+    let target = Uuid::new_v4();
+    let sink =
+        ClickhouseHeartbeatPingSink::new(client.clone(), uptimepage::storage::OrgTtlDays::new());
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+
+    // Runs every ~80 minutes, declared as 10.
+    let base = chrono::Utc::now() - chrono::Duration::days(2);
+    for (i, offset_min) in [0i64, 83, 163, 245, 325, 408, 488].iter().enumerate() {
+        sink.write_ping(&HeartbeatPingRecord {
+            received_at: base + chrono::Duration::minutes(*offset_min),
+            ..ping(org.0, target, PingSignal::Success)
+        })
+        .await;
+        // Starts must not count as schedule ticks.
+        if i.is_multiple_of(2) {
+            sink.write_ping(&HeartbeatPingRecord {
+                received_at: base + chrono::Duration::minutes(offset_min - 1),
+                ..ping(org.0, target, PingSignal::Start)
+            })
+            .await;
+        }
+    }
+
+    let seen = store
+        .heartbeat_cadence(org, target, 14)
+        .await
+        .unwrap()
+        .expect("seven successes give six gaps");
+    assert_eq!(seen.samples, 6, "gaps, with no start among them");
+    // Gaps 83/80/82/80/83/80; quantileExact takes the upper of the middle pair.
+    assert_eq!(seen.median_gap.as_secs(), 82 * 60);
+
+    // Declared 10m with 5m grace: still nowhere near the real 82m cadence.
+    match seen.advice(std::time::Duration::from_secs(900)) {
+        Some(uptimepage::domain::CadenceAdvice::TooTight { suggested_period }) => {
+            assert_eq!(suggested_period.as_secs(), 90 * 60)
+        }
+        other => panic!("expected a too-tight verdict, got {other:?}"),
+    }
+
+    assert_eq!(seen.advice(std::time::Duration::from_secs(90 * 60)), None);
+
+    let stranger = uptimepage::domain::OrgId(Uuid::new_v4());
+    assert_eq!(
+        store.heartbeat_cadence(stranger, target, 14).await.unwrap(),
         None
     );
 }

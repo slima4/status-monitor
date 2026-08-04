@@ -52,6 +52,13 @@ impl CheckSpec {
         matches!(self, CheckSpec::Heartbeat(_))
     }
 
+    pub fn as_heartbeat(&self) -> Option<&HeartbeatCheck> {
+        match self {
+            CheckSpec::Heartbeat(h) => Some(h),
+            _ => None,
+        }
+    }
+
     /// The host this check concerns, IPv6 brackets stripped. `None` for
     /// heartbeat, which is inbound-only. Distinct from
     /// [`crate::worker::host_throttle::host_port_raw`], which keys a *network endpoint* and
@@ -202,9 +209,9 @@ pub struct PingCheck {
     pub timeout: Duration,
 }
 
-/// Inbound dead-man's-switch: the customer's system pings a token URL. Silence
-/// past `period + grace` opens an incident, and so do the job's own signals —
-/// a reported failure, or a run that outlives `max_runtime`.
+/// Inbound dead-man's-switch. Silence past `period + grace` opens an incident,
+/// and so do the job's own signals: a reported failure, or a run that outlives
+/// `max_runtime`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HeartbeatCheck {
     /// Expected ping cadence in milliseconds.
@@ -216,9 +223,8 @@ pub struct HeartbeatCheck {
     #[serde(with = "duration_ms")]
     #[schema(value_type = u64, example = 60000)]
     pub grace: Duration,
-    /// Cap on one run's `/start`→finish time, in milliseconds. `None` leaves a
-    /// run bounded only by `period + grace`, which is all a job that never
-    /// sends `/start` can be judged by anyway.
+    /// Cap on one run's `/start`→finish time, in milliseconds. `None` leaves
+    /// the run bounded only by `period + grace`.
     #[serde(
         default,
         with = "duration_ms_opt",
