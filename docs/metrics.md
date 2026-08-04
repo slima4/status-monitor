@@ -45,6 +45,8 @@ these names verbatim.
 | `uptimepage_targets_total` | gauge | targets in this process's scheduler registry (sampled). Non-zero only where in-process probing runs; a brain doing agent-only probing reports 0 by design — use `uptimepage_targets_enabled` for the configured-monitor count |
 | `uptimepage_targets_enabled{kind}` | gauge | configured enabled monitors counted from Postgres, by `kind`. Slow-cadence inventory gauge, scrape-cached so request load never reaches Postgres; correct on a brain regardless of where probing runs |
 | `uptimepage_users_active` | gauge | non-deleted user accounts counted from Postgres. Slow-cadence inventory gauge, scrape-cached |
+| `uptimepage_account_deletions_requested_total` | counter | account deletions scheduled. Reversible until the grace window closes, so this is the churn signal that still has something to act on; the matching audit rows are `org_audit_log` `action = 'user.deletion_requested'` |
+| `uptimepage_orgs_emptied_total` | counter | organisations that went from having monitors to having none. Catches the org that stops using the product without ever asking to be deleted, which no deletion counter sees |
 | `uptimepage_workers_in_flight` | gauge | current worker-pool semaphore depth (sampled). Emitted by every probing process, so on a brain doing agent-only probing the real value is on the agent's `role=probe` series, not the brain's near-zero one |
 | `uptimepage_result_queue_depth` | gauge | depth of the result channel buffer (sampled). Present on both the agent (egress to the control plane) and the brain (ingest to storage); separate them by `role` |
 | `uptimepage_circuit_breakers_open` | gauge | currently-open breakers (sampled). Probe-side — read the `role=probe` series |
