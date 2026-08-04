@@ -37,9 +37,12 @@ impl SlackNotifier {
         // responders' channel.
         let label = mrkdwn_escape(n.label());
         match n.reason {
-            NotificationReason::Opened | NotificationReason::Escalated => format!(
-                "*{label}* — {sev} incident OPEN{err}{regions}{link}",
+            NotificationReason::Opened
+            | NotificationReason::Escalated
+            | NotificationReason::Reopened => format!(
+                "*{label}* — {sev} incident {state}{err}{regions}{link}",
                 sev = n.severity.as_db_str(),
+                state = n.open_state(),
                 err = n
                     .error_sample
                     .as_deref()
@@ -47,9 +50,6 @@ impl SlackNotifier {
                     .unwrap_or_default(),
                 regions = region_line(n),
             ),
-            NotificationReason::Reopened => {
-                format!("*{label}* — incident REOPENED{link}")
-            }
             NotificationReason::Resolved => {
                 let dur = n
                     .duration_minutes()

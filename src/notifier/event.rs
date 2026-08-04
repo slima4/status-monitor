@@ -40,6 +40,13 @@ impl IncidentNotice {
             .map(|end| (end - self.started_at).num_minutes().max(0))
     }
 
+    pub fn open_state(&self) -> &'static str {
+        match self.reason {
+            NotificationReason::Reopened => "REOPENED",
+            _ => "OPEN",
+        }
+    }
+
     /// True only when more than one region is in play; single-region monitors
     /// skip the breakdown line.
     pub fn has_region_breakdown(&self) -> bool {
@@ -77,19 +84,19 @@ impl IncidentNotice {
             .map(|s| format!("\n{s}"))
             .unwrap_or_default();
         match self.reason {
-            NotificationReason::Opened | NotificationReason::Escalated => format!(
-                "{label} — {sev} incident OPEN{err}{regions}{link}",
+            NotificationReason::Opened
+            | NotificationReason::Escalated
+            | NotificationReason::Reopened => format!(
+                "{label} — {sev} incident {state}{err}{regions}{link}",
                 label = self.label(),
                 sev = self.severity.as_db_str(),
+                state = self.open_state(),
                 err = self
                     .error_sample
                     .as_deref()
                     .map(|e| format!(": {e}"))
                     .unwrap_or_default(),
             ),
-            NotificationReason::Reopened => {
-                format!("{label} — incident REOPENED{link}", label = self.label())
-            }
             NotificationReason::Resolved => {
                 let dur = self
                     .duration_minutes()
@@ -109,5 +116,43 @@ impl IncidentNotice {
                 label = self.label()
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::IncidentSeverity;
+
+    fn notice(reason: NotificationReason) -> IncidentNotice {
+        IncidentNotice {
+            incident_id: Uuid::from_u128(7),
+            reason,
+            monitor_name: Some("nightly-backup".into()),
+            title: None,
+            severity: IncidentSeverity::Major,
+            urgency: IncidentUrgency::High,
+            started_at: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
+            ended_at: None,
+            error_sample: Some("job reported failure (exit 137)".into()),
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
+            url: None,
+        }
+    }
+
+    #[test]
+    fn a_reopen_carries_the_same_evidence_as_the_first_page() {
+        let text = notice(NotificationReason::Reopened).plain_text();
+        assert!(text.contains("REOPENED"), "{text}");
+        assert!(text.contains("exit 137"), "{text}");
+        assert!(text.contains("major"), "{text}");
+    }
+
+    #[test]
+    fn an_open_still_reads_as_open() {
+        let text = notice(NotificationReason::Opened).plain_text();
+        assert!(text.contains("major incident OPEN"), "{text}");
+        assert!(!text.contains("REOPENED"), "{text}");
     }
 }
