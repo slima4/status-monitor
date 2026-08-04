@@ -196,8 +196,9 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
     // rollup carries the aggregated history 13 months.
     const CHECK_RESULTS_RAW_DAYS: u32 = 30;
     const CHECK_RESULTS_HISTORY_MONTHS: u32 = 13;
-    // A flow run's trace lives the raw window; the page it captured on failure
-    // is content from behind the customer's own login, so it goes sooner.
+    // Traces live the raw window. What they captured is content from behind the
+    // customer's own login, so it goes sooner. Heartbeat pings split the same
+    // way: the signal keeps, the job's own output takes the evidence window.
     const FLOW_EVIDENCE_DAYS: u32 = 7;
     let r = RetentionConfig::default();
     let s = SessionConfig::default();
@@ -215,6 +216,10 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
         format!(
             "| Browser flow failure evidence (page URL, title, visible text, browser console) | {FLOW_EVIDENCE_DAYS} days"
         ),
+        format!(
+            "| Heartbeat pings (when each signal arrived, its exit status, how long the run took) | {CHECK_RESULTS_RAW_DAYS} days"
+        ),
+        format!("| Output posted with a heartbeat ping | {FLOW_EVIDENCE_DAYS} days"),
         format!("| Login attempts | {} days", r.login_attempts_days),
         format!("| Quota events | {} days", r.quota_events_days),
         format!("| Sessions | {} days maximum", s.absolute_timeout_days),
@@ -259,6 +264,19 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
             "evidence_days   UInt16 DEFAULT {FLOW_EVIDENCE_DAYS}"
         )) && m3.contains("TTL timestamp + toIntervalDay(evidence_days)"),
         "flow evidence must expire on its own per-column TTL = FLOW_EVIDENCE_DAYS"
+    );
+    let m4 = include_str!("../migrations/clickhouse/004_heartbeat_pings.sql");
+    assert!(
+        m4.contains(&format!(
+            "ttl_days      UInt16 DEFAULT {CHECK_RESULTS_RAW_DAYS}"
+        )) && m4.contains("TTL received_at + toIntervalDay(ttl_days)"),
+        "heartbeat_pings row retention must be the per-row ttl_days DEFAULT = CHECK_RESULTS_RAW_DAYS"
+    );
+    assert!(
+        m4.contains(&format!(
+            "evidence_days UInt16 DEFAULT {FLOW_EVIDENCE_DAYS}"
+        )) && m4.contains("TTL received_at + toIntervalDay(evidence_days)"),
+        "job output must expire on its own per-column TTL = FLOW_EVIDENCE_DAYS"
     );
     let pg = include_str!("../migrations/postgres/034_flow_plan_limits.up.sql");
     assert!(

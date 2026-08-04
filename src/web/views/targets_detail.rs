@@ -1686,12 +1686,26 @@ mod tests {
         p.heartbeat = Some(crate::api::handlers::targets::HeartbeatInfo {
             ping_url: Some("https://app.example.com/ping/tok123".into()),
             last_ping_at: None,
+            last_start_at: None,
+            last_fail_at: Some(chrono::Utc::now()),
+            last_exit_code: Some(137),
+            last_failure_output: Some("rsync: connection unexpectedly closed".into()),
         });
         let html = p.render().unwrap();
         assert!(html.contains("https://app.example.com/ping/tok123"));
         assert!(html.contains(r##"data-copy="#hb-ping-url""##));
-        assert!(html.contains("last ping:"));
+        assert!(html.contains("last success:"));
         assert!(html.contains("never"));
+        assert!(html.contains("https://app.example.com/ping/tok123/start"));
+        assert!(
+            html.contains("(exit 137)"),
+            "a failure names its exit status"
+        );
+        assert!(
+            html.contains("rsync: connection unexpectedly closed"),
+            "the job's own account of the failure is the point of keeping it"
+        );
+        assert!(!html.contains("last start:"), "no start recorded, no row");
         // No probe surfaces for a passive kind.
         assert!(!html.contains("data-detail-test-now"));
         assert!(!html.contains("latency (p50/p95/p99)"));

@@ -64,6 +64,12 @@ pub fn routes(state: AppState) -> Router {
             "/ping/{token}",
             get(views::heartbeat::ping).post(views::heartbeat::ping),
         )
+        // `/start`, `/fail`, and `curl $URL/$?` — the job's own account of a run,
+        // beside the bare URL that only says "still alive".
+        .route(
+            "/ping/{token}/{signal}",
+            get(views::heartbeat::ping_signal).post(views::heartbeat::ping_signal),
+        )
         // Public email-channel verification: possession of the mailed token
         // is the proof; same always-mounted reasoning as the share links.
         .route("/verify-channel", get(views::verify_channel::verify))

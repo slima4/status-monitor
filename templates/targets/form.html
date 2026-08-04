@@ -304,10 +304,21 @@
                  value="{{ form.heartbeat.grace_s }}" class="w-full field pr-8">
           <span class="field-outline__unit" aria-hidden="true">s</span>
         </label>
+        <label class="field-outline w-40">
+          <span class="field-outline__label">Max run time</span>
+          <input name="heartbeat_max_runtime_s" type="number" min="60" max="2592000"
+                 placeholder="off"
+                 value="{% if form.heartbeat.max_runtime_s > 0 %}{{ form.heartbeat.max_runtime_s }}{% endif %}"
+                 class="w-full field pr-8">
+          <span class="field-outline__unit" aria-hidden="true">s</span>
+        </label>
       </div>
       <span class="mt-1 block text-xs text-muted">
-        Grace absorbs normal jitter (a slow backup, a queued cron). The ping
-        URL appears on the monitor page after you save.
+        Grace absorbs normal jitter (a slow backup, a queued cron). Max run time
+        applies only if the job calls <code>/start</code> first: it opens an
+        incident for a run that began and never finished, without waiting out
+        the whole period. The ping URL and its signals appear on the monitor
+        page after you save.
       </span>
       </div>
     </fieldset>

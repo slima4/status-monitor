@@ -247,12 +247,25 @@ The result carries `domain`, `record_type`, the `answers` list,
 ### Heartbeat (inbound dead-man's-switch)
 
 ```jsonc
-{ "type": "heartbeat", "period": 300000, "grace": 60000 }
+{ "type": "heartbeat", "period": 300000, "grace": 60000, "max_runtime": 900000 }
 ```
 
-Reverses the direction: instead of the platform probing your system, your system pings the platform. Creating a heartbeat monitor mints a capability URL, returned by `GET /api/v1/targets/{id}/heartbeat` (member-level `targets:write`, since the ping URL is itself a write capability) as `{ "ping_url": "...", "last_ping_at": "..." }`; call it (GET or POST, no auth, e.g. `curl -fsS $URL` at the end of a cron job) on every run. The scheduled evaluation compares the age of the last ping against `period + grace` (both in milliseconds): inside that window the monitor is `up`, past it the monitor goes `down` through the normal incident pipeline. A fresh or newly re-enabled monitor gets a full `period + grace` before it can go down.
+Reverses the direction: instead of the platform probing your system, your system pings the platform. Creating a heartbeat monitor mints a capability URL, returned by `GET /api/v1/targets/{id}/heartbeat` (member-level `targets:write`, since the ping URL is itself a write capability) as `{ "ping_url": "...", "last_ping_at": "...", "last_start_at": "...", "last_fail_at": "...", "last_exit_code": 137, "last_failure_output": "..." }`; call it (GET or POST, no auth, e.g. `curl -fsS $URL` at the end of a cron job) on every run. The scheduled evaluation compares the age of the last success against `period + grace` (both in milliseconds): inside that window the monitor is `up`, past it the monitor goes `down` through the normal incident pipeline. A fresh or newly re-enabled monitor gets a full `period + grace` before it can go down.
 
-Constraints: `period` runs from 60 s to 30 d, `grace` from 0 to 30 d, and the monitor's `interval` (evaluation cadence) has a 60 s kind floor. Heartbeats never run on regional probes and reject `test`/`check-now` (`HEARTBEAT_NOT_PROBEABLE`) and region assignment, since there is nothing to probe. Unknown ping tokens 404 uniformly; per-token ping ingest is rate-limited (429 with `Retry-After`) at 1/s sustained with a burst of 10.
+**Signals.** A path segment after the token says what the ping means, so a job can report more than "still alive":
+
+| Call | Meaning |
+|---|---|
+| `$URL` or `$URL/success` | the run finished cleanly; this is what clears a failure and advances the window |
+| `$URL/start` | the run has begun. Does not advance the window: it opens a run, it does not report one |
+| `$URL/fail` | the job knows it failed. Goes `down` immediately instead of waiting out `period + grace` |
+| `$URL/$?` | the shell's exit status, 0–255. `0` is a success, anything else a failure carrying that code |
+
+An unrecognised segment is a `404`, never a success, so a typo cannot keep a broken job green. Pairing `/start` with a finish gives that run a duration; `max_runtime` (optional, 60 s to 30 d) then bounds it, so a job that started and never finished opens an incident without waiting out the whole period. Without `/start` there is no run to bound and `max_runtime` does nothing.
+
+A POST body is kept as that run's output, truncated to 4 KiB and dropped on a shorter clock than the ping itself (see [data retention](hosted/data-retention.md)). Oversized bodies are truncated, never refused — a `413` on a success ping would page you for a job that ran fine. The ping counts as soon as it resolves, before the body is read, so a body the server stops reading (past 256 KiB, or 10 s of trickle) costs you the output, never the ping.
+
+Constraints: `period` runs from 60 s to 30 d, `grace` from 0 to 30 d, `max_runtime` from 60 s to 30 d, and the monitor's `interval` (evaluation cadence) has a 60 s kind floor. Heartbeats never run on regional probes and reject `test`/`check-now` (`HEARTBEAT_NOT_PROBEABLE`) and region assignment, since there is nothing to probe. Unknown ping tokens 404 uniformly; per-token ping ingest is rate-limited (429 with `Retry-After`) at 1/s sustained with a burst of 10, which is shared across all of a token's signals.
 
 Provisioning: a single create mints the ping URL immediately; bulk-created heartbeat monitors get theirs within one scheduler refresh (~30 s). Pick `grace` with your deployment in mind: a ping sent while the control plane itself is unreachable is lost, so on single-node self-hosts keep `grace` comfortably above your restart window (the hosted service deploys blue/green, so ping ingest stays up).
 

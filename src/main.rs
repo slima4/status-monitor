@@ -29,8 +29,8 @@ use uptimepage::{
     },
     scheduler::{Scheduler, TargetRegistry},
     storage::{
-        self, ClickhouseFlowRunSink, ClickhouseResultSink, ClickhouseResultsStore,
-        IncidentNarrationStore, MaintenanceStore, NotificationChannelStore,
+        self, ClickhouseFlowRunSink, ClickhouseHeartbeatPingSink, ClickhouseResultSink,
+        ClickhouseResultsStore, IncidentNarrationStore, MaintenanceStore, NotificationChannelStore,
         PgIncidentNarrationStore, PgMaintenanceStore, PgNotificationChannelStore,
         PostgresTargetStore, ResultSink, ResultsStore, TargetStore, admin::AdminRepo,
     },
@@ -233,6 +233,9 @@ async fn main() -> Result<()> {
             )),
         ));
     let flow_run_sink_for_state = flow_run_sink.clone();
+    let heartbeat_ping_sink: Arc<dyn uptimepage::storage::traits::HeartbeatPingSink> = Arc::new(
+        ClickhouseHeartbeatPingSink::new(clickhouse_client.clone(), org_ttl.clone()),
+    );
     let ch_client_for_public = clickhouse_client.clone();
     let ch_client_for_purge = clickhouse_client.clone();
     let ch_client_for_sampler = clickhouse_client.clone();
@@ -675,6 +678,7 @@ async fn main() -> Result<()> {
     );
     let state = state
         .with_flow_run_sink(flow_run_sink_for_state)
+        .with_heartbeat_ping_sink(heartbeat_ping_sink)
         .with_telegram_send_budget(telegram_send_budget)
         .with_incident_signals(incident_signal_tx)
         .with_subscription_unsubscribe_secret(unsubscribe_secret)

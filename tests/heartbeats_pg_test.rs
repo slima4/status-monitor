@@ -11,7 +11,8 @@ mod common;
 use std::time::Duration;
 
 use uptimepage::domain::{
-    CheckSpec, ExpectedStatus, HeartbeatCheck, NewTarget, OrgId, TargetUpdate, UserId, WriteSource,
+    CheckSpec, ExpectedStatus, HeartbeatCheck, NewTarget, OrgId, PingSignal, TargetUpdate, UserId,
+    WriteSource,
 };
 use uptimepage::storage::admin::AdminRepo;
 use uptimepage::storage::{
@@ -44,6 +45,7 @@ fn heartbeat_target(name: &str, enabled: bool) -> NewTarget {
         check: CheckSpec::Heartbeat(HeartbeatCheck {
             period: Duration::from_secs(300),
             grace: Duration::from_secs(60),
+            max_runtime: None,
         }),
         interval: Duration::from_secs(60),
         enabled,
@@ -97,7 +99,11 @@ async fn ensure_mints_once_and_ping_round_trips_live_pg() {
     let first = store.ensure(org_a, target).await.unwrap().expect("row");
     let token = first.token.clone().expect("plaintext without cipher");
     assert!(first.last_ping_at.is_none());
-    assert_eq!(first.anchor(), first.armed_at, "no ping yet → armed_at");
+    assert_eq!(
+        first.ping_state().success_at,
+        first.armed_at,
+        "no ping yet → armed_at"
+    );
 
     // Repeated ensure keeps the same token; a foreign org can't mint or read.
     let again = store.ensure(org_a, target).await.unwrap().expect("row");
@@ -106,16 +112,27 @@ async fn ensure_mints_once_and_ping_round_trips_live_pg() {
     assert!(store.get(org_b, target).await.unwrap().is_none());
 
     // One-statement ping: resolves, records, and reads back.
-    let (pinged, at) = store
-        .record_ping_by_token(&token)
+    let accepted = store
+        .record_signal_by_token(&token, PingSignal::Success, None)
         .await
         .unwrap()
         .expect("token records");
-    assert_eq!(pinged, target);
+    let at = accepted.at;
+    assert_eq!(accepted.target_id, target);
     let read = store.get(org_a, target).await.unwrap().expect("row");
     assert_eq!(read.last_ping_at, Some(at));
-    assert_eq!(read.anchor(), at, "ping newer than arm point wins");
-    assert!(store.record_ping_by_token("nope").await.unwrap().is_none());
+    assert_eq!(
+        read.ping_state().success_at,
+        at,
+        "ping newer than arm point wins"
+    );
+    assert!(
+        store
+            .record_signal_by_token("nope", PingSignal::Success, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
@@ -204,7 +221,7 @@ async fn dead_tokens_stop_recording_and_sync_heals_rows_live_pg() {
     assert!(targets.delete(org_a, doomed, None).await.unwrap());
     assert!(
         store
-            .record_ping_by_token(&tok_doomed)
+            .record_signal_by_token(&tok_doomed, PingSignal::Success, None)
             .await
             .unwrap()
             .is_none()
@@ -238,7 +255,7 @@ async fn dead_tokens_stop_recording_and_sync_heals_rows_live_pg() {
     assert!(store.remove(org_a, switched).await.unwrap());
     assert!(
         store
-            .record_ping_by_token(&tok_switched)
+            .record_signal_by_token(&tok_switched, PingSignal::Success, None)
             .await
             .unwrap()
             .is_none()
@@ -270,7 +287,7 @@ async fn dead_tokens_stop_recording_and_sync_heals_rows_live_pg() {
     soft_delete_org(&pool, org_b, user_b).await.unwrap();
     assert!(
         store
-            .record_ping_by_token(&tok_orphan)
+            .record_signal_by_token(&tok_orphan, PingSignal::Success, None)
             .await
             .unwrap()
             .is_none()
@@ -318,7 +335,11 @@ async fn restore_org_rearms_heartbeats_live_pg() {
     // The re-arm is not a fabricated ping: real ping history stays put.
     let ping = hb.last_ping_at.expect("backdated ping");
     assert!(ping < chrono::Utc::now() - chrono::Duration::minutes(30));
-    assert_eq!(hb.anchor(), hb.armed_at, "fresh arm point wins the anchor");
+    assert_eq!(
+        hb.ping_state().success_at,
+        hb.armed_at,
+        "fresh arm point wins the anchor"
+    );
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
@@ -366,17 +387,77 @@ async fn ensure_after_ping_preserves_state_live_pg() {
         .unwrap()
         .token
         .unwrap();
-    let (_, at) = store
-        .record_ping_by_token(&token)
+    let at = store
+        .record_signal_by_token(&token, PingSignal::Success, None)
         .await
         .unwrap()
-        .expect("ping records");
+        .expect("ping records")
+        .at;
 
     // A re-save hits the existence check, so it neither re-mints the token nor
     // clobbers the recorded ping.
     let again = store.ensure(org_a, target).await.unwrap().expect("row");
     assert_eq!(again.token.as_deref(), Some(token.as_str()));
     assert_eq!(again.last_ping_at, Some(at));
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+/// A run is timed against the row as it stood *before* the update, which only
+/// the CTE snapshot sees. Pinned against real Postgres: it lives in the SQL.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn signals_close_the_run_they_opened_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-sig").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let target = make_heartbeat_target(&pool, org_a, "nightly", true).await;
+    let token = store
+        .ensure(org_a, target)
+        .await
+        .unwrap()
+        .unwrap()
+        .token
+        .unwrap();
+
+    let started = store
+        .record_signal_by_token(&token, PingSignal::Start, None)
+        .await
+        .unwrap()
+        .expect("start records");
+    assert_eq!(started.org_id, org_a);
+    assert!(started.run_ms.is_none(), "a start closes nothing");
+    assert!(started.state.run_open_since().is_some());
+
+    let failed = store
+        .record_signal_by_token(&token, PingSignal::Fail, Some(137))
+        .await
+        .unwrap()
+        .expect("fail records");
+    assert!(failed.run_ms.is_some(), "the fail timed the open run");
+    assert_eq!(failed.state.failing().and_then(|f| f.exit_code), Some(137));
+    assert!(failed.state.run_open_since().is_none());
+
+    let recovered = store
+        .record_signal_by_token(&token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("success records");
+    assert!(recovered.run_ms.is_none(), "nothing was open to time");
+    assert!(recovered.state.failing().is_none(), "success clears it");
+
+    // A start does not advance the silence anchor: it opens a run, it does not
+    // report one.
+    let row = store.get(org_a, target).await.unwrap().expect("row");
+    assert_eq!(row.last_ping_at, Some(recovered.at));
+    assert!(row.last_start_at.unwrap() < recovered.at);
+    assert_eq!(
+        row.last_exit_code,
+        Some(137),
+        "the exit code outlives the fail"
+    );
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }

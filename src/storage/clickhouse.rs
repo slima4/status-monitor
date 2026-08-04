@@ -17,14 +17,16 @@ use crate::api::types::{
 };
 use crate::config::ClickhouseConfig;
 use crate::domain::agent_wire::{ConsoleLine, FlowEvidence, FlowRunRecord, StepOutcome, StepTrace};
-use crate::domain::{CheckResult, CheckStatus, Incident, OrgId, coalesce_incidents};
+use crate::domain::{
+    CheckResult, CheckStatus, HeartbeatPingRecord, Incident, OrgId, coalesce_incidents,
+};
 use crate::error::Result;
 use crate::observability::metrics::names;
 use crate::quotas::service::RetentionDays;
 use crate::storage::org_ttl::OrgTtlDays;
 use crate::storage::traits::{
-    ClampedRange, FlowRunSink, FlowRunView, ResultSink, ResultsStore, TimeRange, UptimeStats,
-    rollup_bucket_secs,
+    ClampedRange, FlowRunSink, FlowRunView, HeartbeatPingSink, ResultSink, ResultsStore, TimeRange,
+    UptimeStats, rollup_bucket_secs,
 };
 
 const TABLE: &str = "check_results";
@@ -123,6 +125,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "003_flow_runs.sql",
         include_str!("../../migrations/clickhouse/003_flow_runs.sql"),
+    ),
+    // 004 `heartbeat_pings`: the job's own account of its runs, which
+    // `check_results` cannot hold. Job output gets the shorter `evidence_days`
+    // window, same split as `flow_runs`. Org erasure must clear it too (see
+    // [`CH_TENANT_TABLES`]).
+    (
+        "004_heartbeat_pings.sql",
+        include_str!("../../migrations/clickhouse/004_heartbeat_pings.sql"),
     ),
 ];
 
@@ -708,6 +718,81 @@ impl<'a> FlowRunRow<'a> {
     }
 }
 
+const HEARTBEAT_PING_TABLE: &str = "heartbeat_pings";
+
+/// One row per accepted heartbeat signal. Unbatched: a job pings on its own
+/// schedule, and the period floor is 60s, so these arrive too rarely for a
+/// batcher to earn its keep.
+pub struct ClickhouseHeartbeatPingSink {
+    client: Client,
+    org_ttl: OrgTtlDays,
+}
+
+impl ClickhouseHeartbeatPingSink {
+    pub fn new(client: Client, org_ttl: OrgTtlDays) -> Self {
+        Self { client, org_ttl }
+    }
+}
+
+#[async_trait]
+impl HeartbeatPingSink for ClickhouseHeartbeatPingSink {
+    async fn write_ping(&self, ping: &HeartbeatPingRecord) {
+        let row = HeartbeatPingRow::from_record(ping, self.org_ttl.days_for(ping.org_id));
+
+        let backoff = insert_backoff();
+        let op = || async {
+            let mut insert = self
+                .client
+                .insert::<HeartbeatPingRow>(HEARTBEAT_PING_TABLE)
+                .await
+                .map_err(backoff::Error::transient)?;
+            insert
+                .write(&row)
+                .await
+                .map_err(backoff::Error::transient)?;
+            insert.end().await.map_err(backoff::Error::transient)
+        };
+        if let Err(err) = backoff::future::retry(backoff, op).await {
+            // The ping already moved the state the verdict reads, so this costs
+            // history only.
+            tracing::error!(?err, "heartbeat ping insert failed after retries");
+            counter!(names::STORAGE_DROPPED, "reason" => "heartbeat_ping_write_failed")
+                .increment(1);
+        }
+    }
+}
+
+#[derive(Debug, Row, Serialize)]
+struct HeartbeatPingRow<'a> {
+    #[serde(with = "clickhouse::serde::uuid")]
+    org_id: Uuid,
+    #[serde(with = "clickhouse::serde::uuid")]
+    target_id: Uuid,
+    received_at: u32,
+    signal: i8,
+    exit_code: Option<u8>,
+    duration_ms: Option<u32>,
+    body: &'a str,
+    evidence_days: u16,
+    ttl_days: u16,
+}
+
+impl<'a> HeartbeatPingRow<'a> {
+    fn from_record(r: &'a HeartbeatPingRecord, ttl: RetentionDays) -> Self {
+        Self {
+            org_id: r.org_id,
+            target_id: r.target_id,
+            received_at: to_unix_secs(r.received_at),
+            signal: r.signal.as_enum8(),
+            exit_code: r.exit_code,
+            duration_ms: r.duration_ms,
+            body: &r.body,
+            evidence_days: ttl.evidence,
+            ttl_days: ttl.row,
+        }
+    }
+}
+
 /// Org-scoped read side of the ClickHouse results table. Holds no ambient
 /// org; every query binds the `org` the caller resolved from the request, so
 /// a `target_id` guessed from another tenant returns zero rows. `org_id` is
@@ -1071,6 +1156,32 @@ impl ResultsStore for ClickhouseResultsStore {
             }
         }
         Ok(trends)
+    }
+
+    async fn heartbeat_failure_output(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        at: DateTime<Utc>,
+    ) -> Result<Option<String>> {
+        // `received_at` is second-granularity, so the microseconds Postgres
+        // keeps have to go before the instants can be compared.
+        let body: Vec<String> = self
+            .client
+            .query(&format!(
+                "SELECT body FROM {HEARTBEAT_PING_TABLE} \
+                 WHERE org_id = ? AND target_id = ? AND signal = 'fail' \
+                   AND received_at = fromUnixTimestamp(?) LIMIT 1"
+            ))
+            .bind(org.0)
+            .bind(target_id)
+            .bind(to_unix_secs(at))
+            .fetch_all::<String>()
+            .await
+            .context("clickhouse heartbeat failure output")?;
+        // An expired `body` column reads empty, same as a ping that carried
+        // none; neither is worth a panel.
+        Ok(body.into_iter().next().filter(|b| !b.is_empty()))
     }
 
     async fn ping(&self) -> Result<()> {

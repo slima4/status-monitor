@@ -44,6 +44,12 @@ impl OrgTtlDays {
             .collect()
     }
 
+    /// Windows for one org, for writers that insert a row at a time.
+    pub fn days_for(&self, org_id: Uuid) -> RetentionDays {
+        let snap = self.snapshot.read().expect("org ttl snapshot poisoned");
+        snap.get(&org_id).copied().unwrap_or(DEFAULT)
+    }
+
     /// Replace the snapshot from the shared retention reader, so physical TTL
     /// and the read-side window resolve the plan through the same path.
     pub async fn refresh(&self, pool: &PgPool) -> Result<usize> {

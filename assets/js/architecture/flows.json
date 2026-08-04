@@ -804,8 +804,8 @@
         {
           "f": "stores",
           "t": "pg",
-          "h": "record anchor",
-          "d": "Last-ping timestamp per heartbeat monitor."
+          "h": "record signal",
+          "d": "Last success, start, and failure per heartbeat monitor; the ping log itself goes to ClickHouse."
         },
         {
           "f": "pg",

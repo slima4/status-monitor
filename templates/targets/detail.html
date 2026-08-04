@@ -43,8 +43,17 @@
     </div>
     <p class="text-xs text-muted">
       Call it from the thing being watched, for example <code>curl -fsS</code>
-      this URL as the last step of the job. GET or POST both count as a ping.
+      this URL as the last step of the job. GET or POST both count as a ping,
+      and a POST body is kept as that run's output.
     </p>
+    <dl class="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr]">
+      <dt class="font-mono text-muted">{{ url }}/start</dt>
+      <dd class="text-muted">before the work, so a run that never finishes is visible</dd>
+      <dt class="font-mono text-muted">{{ url }}/fail</dt>
+      <dd class="text-muted">the job knows it failed; opens the incident now</dd>
+      <dt class="font-mono text-muted">{{ url }}/$?</dt>
+      <dd class="text-muted">exit status: 0 succeeds, anything else fails</dd>
+    </dl>
     {% else %}
     <p class="text-xs text-muted">
       Ping URL not available yet. It is provisioned within moments of
@@ -52,9 +61,24 @@
       rotation, recreate the monitor to mint a new token.
     </p>
     {% endif %}
-    <p class="font-mono text-xs text-muted">last ping:
+    <p class="font-mono text-xs text-muted">last success:
       {% if let Some(ts) = hb.last_ping_at %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}never{% endif %}
     </p>
+    {% if let Some(ts) = hb.last_start_at %}
+    <p class="font-mono text-xs text-muted">last start:
+      <time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>
+    </p>
+    {% endif %}
+    {% if let Some(ts) = hb.last_fail_at %}
+    <div class="space-y-1 border-l-2 border-[color:var(--theme-state-bad-line)] pl-3">
+      <p class="font-mono text-xs text-muted">last failure:
+        <time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% if let Some(code) = hb.last_exit_code %} (exit {{ code }}){% endif %}
+      </p>
+      {% if let Some(output) = hb.last_failure_output %}
+      <pre class="max-h-40 overflow-auto rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1.5 font-mono text-xs whitespace-pre-wrap">{{ output }}</pre>
+      {% endif %}
+    </div>
+    {% endif %}
   </section>
   <script defer src="{{ "js/public/copy.js"|asset }}"></script>
   {% endif %}

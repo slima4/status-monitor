@@ -236,6 +236,9 @@ pub struct AppState {
     /// Where an agent's flow-run telemetry lands. `None` on a control plane
     /// without ClickHouse (test fixtures), where runs are simply not recorded.
     pub flow_run_sink: Option<Arc<dyn crate::storage::traits::FlowRunSink>>,
+    /// `None` without ClickHouse, where pings still move the verdict but leave
+    /// no run log.
+    pub heartbeat_ping_sink: Option<Arc<dyn crate::storage::traits::HeartbeatPingSink>>,
     pub http_clients: Arc<HttpClients>,
     pub worker_pool: Arc<WorkerPool>,
     pub dashboard_cache: DashboardCache,
@@ -546,6 +549,7 @@ impl AppState {
             results_store,
             result_sink,
             flow_run_sink: None,
+            heartbeat_ping_sink: None,
             http_clients,
             worker_pool,
             dashboard_cache: build_dashboard_cache(),
@@ -609,6 +613,14 @@ impl AppState {
         sink: Arc<dyn crate::storage::traits::FlowRunSink>,
     ) -> Self {
         self.flow_run_sink = Some(sink);
+        self
+    }
+
+    pub fn with_heartbeat_ping_sink(
+        mut self,
+        sink: Arc<dyn crate::storage::traits::HeartbeatPingSink>,
+    ) -> Self {
+        self.heartbeat_ping_sink = Some(sink);
         self
     }
 

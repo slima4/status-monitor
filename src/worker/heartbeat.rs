@@ -1,12 +1,9 @@
 //! Heartbeat evaluation: a scheduled check that reads in-memory ping state
-//! instead of probing the network. `/ping/{token}` records into
-//! [`HeartbeatRuntime`]; the executor compares the anchor's age against the
-//! spec's `period + grace`.
+//! instead of probing the network.
 //!
-//! Postgres is the source of truth: the scheduler's refresh tick reconciles
-//! this cache from it (add, max-merge, prune) before dispatching a new target,
-//! so restarts, re-arms, org restores, and multi-replica ingest converge
-//! within one refresh interval.
+//! Postgres is the source of truth. The scheduler's refresh tick reconciles
+//! this cache from it before dispatching, so restarts, re-arms, org restores
+//! and multi-replica ingest converge within one refresh interval.
 
 use chrono::{DateTime, Utc};
 use dashmap::DashMap;
@@ -26,10 +23,59 @@ const PING_BURST: u32 = 10;
 
 type PingLimiter = RateLimiter<u128, DashMapStateStore<u128>, DefaultClock>;
 
-/// Shared main↔worker heartbeat state: the anchor cache the executor reads,
-/// plus the ingest rate limiter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Failure {
+    pub at: DateTime<Utc>,
+    pub exit_code: Option<u8>,
+}
+
+/// Latest-seen timestamps rather than state flags, so two nodes merge their
+/// views by taking the newer of each without a shared lock.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PingState {
+    /// Silence-rule anchor: the later of the last success and the re-arm point.
+    pub success_at: DateTime<Utc>,
+    pub start_at: Option<DateTime<Utc>>,
+    pub fail: Option<Failure>,
+}
+
+impl PingState {
+    pub fn from_success(success_at: DateTime<Utc>) -> Self {
+        Self {
+            success_at,
+            start_at: None,
+            fail: None,
+        }
+    }
+
+    /// A newer success clears it, and so does a re-arm: both move `success_at`.
+    pub fn failing(&self) -> Option<Failure> {
+        self.fail.filter(|f| f.at > self.success_at)
+    }
+
+    pub fn run_open_since(&self) -> Option<DateTime<Utc>> {
+        self.start_at
+            .filter(|s| *s > self.success_at && self.fail.is_none_or(|f| *s > f.at))
+    }
+
+    /// The snapshot may predate a ping this node already accepted.
+    fn merge_newer(&mut self, other: Self) {
+        if other.success_at > self.success_at {
+            self.success_at = other.success_at;
+        }
+        if other.start_at > self.start_at {
+            self.start_at = other.start_at;
+        }
+        if other.fail.map(|f| f.at) > self.fail.map(|f| f.at) {
+            self.fail = other.fail;
+        }
+    }
+}
+
+/// Shared main↔worker state: the cache the executor reads, plus the ingest
+/// rate limiter.
 pub struct HeartbeatRuntime {
-    anchors: DashMap<Uuid, DateTime<Utc>>,
+    states: DashMap<Uuid, PingState>,
     ping_limiter: PingLimiter,
 }
 
@@ -38,41 +84,37 @@ impl Default for HeartbeatRuntime {
         let quota = Quota::per_second(NonZeroU32::new(PING_PER_SEC).expect("nonzero"))
             .allow_burst(NonZeroU32::new(PING_BURST).expect("nonzero"));
         Self {
-            anchors: DashMap::new(),
+            states: DashMap::new(),
             ping_limiter: RateLimiter::dashmap(quota),
         }
     }
 }
 
 impl HeartbeatRuntime {
-    pub fn anchor(&self, id: Uuid) -> Option<DateTime<Utc>> {
-        self.anchors.get(&id).map(|e| *e)
+    pub fn state(&self, id: Uuid) -> Option<PingState> {
+        self.states.get(&id).map(|e| *e)
     }
 
-    pub fn set_anchor(&self, id: Uuid, at: DateTime<Utc>) {
-        self.anchors.insert(id, at);
+    /// Merged, not overwritten: a concurrent reconcile must not drop a field
+    /// this ping did not carry.
+    pub fn record(&self, id: Uuid, state: PingState) {
+        self.states
+            .entry(id)
+            .and_modify(|cur| cur.merge_newer(state))
+            .or_insert(state);
     }
 
-    /// Reconcile the cache against the Postgres snapshot: prune ids it no
-    /// longer has, max-merge per id so a ping accepted mid-read never
-    /// regresses, and sweep idle rate-limiter keys.
-    pub fn sync_anchors(&self, fresh: HashMap<Uuid, DateTime<Utc>>) {
-        self.anchors.retain(|id, _| fresh.contains_key(id));
-        for (id, at) in fresh {
-            self.anchors
-                .entry(id)
-                .and_modify(|cur| {
-                    if at > *cur {
-                        *cur = at;
-                    }
-                })
-                .or_insert(at);
+    /// Prune ids the snapshot no longer has, merge the rest so a ping accepted
+    /// mid-read never regresses, sweep idle rate-limiter keys.
+    pub fn sync_states(&self, fresh: HashMap<Uuid, PingState>) {
+        self.states.retain(|id, _| fresh.contains_key(id));
+        for (id, state) in fresh {
+            self.record(id, state);
         }
         self.ping_limiter.retain_recent();
     }
 
-    /// GCRA admission for one inbound ping, keyed on the presented token's
-    /// hash. A rejected ping reserves nothing.
+    /// Keyed on the presented token's hash. A rejected ping reserves nothing.
     pub fn allow_ping(&self, token_key: u128) -> bool {
         self.ping_limiter.check_key(&token_key).is_ok()
     }
@@ -85,8 +127,8 @@ pub fn execute_heartbeat_check(
     runtime: &HeartbeatRuntime,
 ) -> CheckResult {
     let now = Utc::now();
-    let Some(anchor) = runtime.anchor(target_id) else {
-        // Sub-refresh-interval race at worst (refresh syncs anchors before
+    let Some(state) = runtime.state(target_id) else {
+        // Sub-refresh-interval race at worst (refresh syncs state before
         // dispatch); Error resolves next tick rather than flapping a false Down.
         return CheckResult::error(
             target_id,
@@ -94,20 +136,16 @@ pub fn execute_heartbeat_check(
             "heartbeat state unavailable on this node",
         );
     };
-    let age = now.signed_duration_since(anchor);
-    // A future anchor (ingest/eval clock skew) is a fresh ping, never Down.
-    let allowed =
-        chrono::Duration::from_std(check.period + check.grace).unwrap_or(chrono::Duration::MAX);
-    let status = if age <= allowed {
-        CheckStatus::Up
-    } else {
-        CheckStatus::Down
-    };
+    let error = verdict(now, &state, check);
     CheckResult {
         target_id,
         org_id,
         timestamp: now,
-        status,
+        status: if error.is_none() {
+            CheckStatus::Up
+        } else {
+            CheckStatus::Down
+        },
         duration_ms: 0,
         dns_ms: None,
         connect_ms: None,
@@ -115,15 +153,43 @@ pub fn execute_heartbeat_check(
         ttfb_ms: None,
         response_code: None,
         response_size: None,
-        error: (status == CheckStatus::Down).then(|| {
-            format!(
-                "no ping for {}s, expected every {}s (+{}s grace)",
-                age.num_seconds().max(0),
-                check.period.as_secs(),
-                check.grace.as_secs()
-            )
-        }),
+        error,
     }
+}
+
+/// Cheapest evidence first: the job said it failed, the job announced a run it
+/// never finished, or nothing has been heard for too long.
+fn verdict(now: DateTime<Utc>, state: &PingState, check: &HeartbeatCheck) -> Option<String> {
+    if let Some(failure) = state.failing() {
+        return Some(match failure.exit_code {
+            Some(code) => format!("job reported failure (exit {code})"),
+            None => "job reported failure".to_string(),
+        });
+    }
+    if let (Some(started), Some(max)) = (state.run_open_since(), check.max_runtime) {
+        let running = now.signed_duration_since(started);
+        if running > to_chrono(max) {
+            return Some(format!(
+                "job started {}s ago and has not finished, past the {}s max runtime",
+                running.num_seconds().max(0),
+                max.as_secs()
+            ));
+        }
+    }
+    // A future anchor (ingest/eval clock skew) is a fresh ping, never Down.
+    let age = now.signed_duration_since(state.success_at);
+    (age > to_chrono(check.period + check.grace)).then(|| {
+        format!(
+            "no ping for {}s, expected every {}s (+{}s grace)",
+            age.num_seconds().max(0),
+            check.period.as_secs(),
+            check.grace.as_secs()
+        )
+    })
+}
+
+fn to_chrono(d: std::time::Duration) -> chrono::Duration {
+    chrono::Duration::from_std(d).unwrap_or(chrono::Duration::MAX)
 }
 
 #[cfg(test)]
@@ -135,14 +201,24 @@ mod tests {
         HeartbeatCheck {
             period: Duration::from_secs(period_s),
             grace: Duration::from_secs(grace_s),
+            max_runtime: None,
         }
+    }
+
+    fn ago(secs: i64) -> DateTime<Utc> {
+        Utc::now() - chrono::Duration::seconds(secs)
+    }
+
+    /// The pre-signals shape: one success anchor and nothing else.
+    fn armed(rt: &HeartbeatRuntime, id: Uuid, at: DateTime<Utc>) {
+        rt.record(id, PingState::from_success(at));
     }
 
     #[test]
     fn fresh_ping_is_up() {
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now());
+        armed(&rt, id, Utc::now());
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(60, 30), &rt);
         assert_eq!(r.status, CheckStatus::Up);
         assert!(r.error.is_none());
@@ -152,7 +228,7 @@ mod tests {
     fn stale_past_period_plus_grace_is_down() {
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now() - chrono::Duration::seconds(120));
+        armed(&rt, id, ago(120));
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(60, 30), &rt);
         assert_eq!(r.status, CheckStatus::Down);
         let err = r.error.expect("down carries a reason");
@@ -163,8 +239,93 @@ mod tests {
     fn within_grace_is_still_up() {
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now() - chrono::Duration::seconds(80));
+        armed(&rt, id, ago(80));
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(60, 30), &rt);
+        assert_eq!(r.status, CheckStatus::Up);
+    }
+
+    #[test]
+    fn reported_failure_is_down_before_the_window_expires() {
+        let rt = HeartbeatRuntime::default();
+        let id = Uuid::new_v4();
+        rt.record(
+            id,
+            PingState {
+                success_at: ago(30),
+                start_at: Some(ago(20)),
+                fail: Some(Failure {
+                    at: ago(5),
+                    exit_code: Some(137),
+                }),
+            },
+        );
+        let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(600, 300), &rt);
+        assert_eq!(
+            r.status,
+            CheckStatus::Down,
+            "silence rule says up, job says no"
+        );
+        assert!(r.error.unwrap().contains("exit 137"));
+    }
+
+    #[test]
+    fn a_later_success_clears_the_failure() {
+        let rt = HeartbeatRuntime::default();
+        let id = Uuid::new_v4();
+        rt.record(
+            id,
+            PingState {
+                success_at: ago(5),
+                start_at: None,
+                fail: Some(Failure {
+                    at: ago(60),
+                    exit_code: Some(1),
+                }),
+            },
+        );
+        let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(600, 0), &rt);
+        assert_eq!(r.status, CheckStatus::Up);
+    }
+
+    #[test]
+    fn an_open_run_past_max_runtime_is_down() {
+        let rt = HeartbeatRuntime::default();
+        let id = Uuid::new_v4();
+        rt.record(
+            id,
+            PingState {
+                success_at: ago(400),
+                start_at: Some(ago(300)),
+                fail: None,
+            },
+        );
+        let mut spec = check(3600, 600);
+        spec.max_runtime = Some(Duration::from_secs(120));
+        let r = execute_heartbeat_check(id, Uuid::new_v4(), &spec, &rt);
+        assert_eq!(r.status, CheckStatus::Down);
+        assert!(r.error.unwrap().contains("max runtime"));
+
+        // No max runtime configured leaves the run bounded only by the window.
+        let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(3600, 600), &rt);
+        assert_eq!(r.status, CheckStatus::Up);
+    }
+
+    #[test]
+    fn a_finished_run_is_not_an_open_one() {
+        // start then success: max runtime must not judge the closed run.
+        let rt = HeartbeatRuntime::default();
+        let id = Uuid::new_v4();
+        rt.record(
+            id,
+            PingState {
+                success_at: ago(10),
+                start_at: Some(ago(300)),
+                fail: None,
+            },
+        );
+        let mut spec = check(3600, 600);
+        spec.max_runtime = Some(Duration::from_secs(120));
+        let r = execute_heartbeat_check(id, Uuid::new_v4(), &spec, &rt);
         assert_eq!(r.status, CheckStatus::Up);
     }
 
@@ -180,7 +341,7 @@ mod tests {
         // Clock skew between the ingest write and evaluation must not flap.
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now() + chrono::Duration::seconds(5));
+        armed(&rt, id, Utc::now() + chrono::Duration::seconds(5));
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(60, 0), &rt);
         assert_eq!(r.status, CheckStatus::Up);
     }
@@ -198,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn sync_anchors_prunes_max_merges_and_inserts() {
+    fn sync_states_prunes_merges_and_inserts() {
         let rt = HeartbeatRuntime::default();
         let kept = Uuid::new_v4();
         let gone = Uuid::new_v4();
@@ -206,27 +367,63 @@ mod tests {
         let newer = Utc::now();
         let older = newer - chrono::Duration::hours(1);
 
-        rt.set_anchor(kept, newer);
-        rt.set_anchor(gone, newer);
-        rt.sync_anchors(HashMap::from([(kept, older), (added, older)]));
+        armed(&rt, kept, newer);
+        armed(&rt, gone, newer);
+        rt.sync_states(HashMap::from([
+            (kept, PingState::from_success(older)),
+            (added, PingState::from_success(older)),
+        ]));
 
-        assert_eq!(rt.anchor(kept), Some(newer), "max-merge, never regress");
-        assert_eq!(rt.anchor(added), Some(older), "snapshot-only id inserted");
-        assert!(rt.anchor(gone).is_none(), "absent-from-snapshot id pruned");
+        let kept_state = rt.state(kept).expect("kept");
+        assert_eq!(kept_state.success_at, newer, "merge newer, never regress");
+        assert_eq!(
+            rt.state(added).unwrap().success_at,
+            older,
+            "snapshot-only id inserted"
+        );
+        assert!(rt.state(gone).is_none(), "absent-from-snapshot id pruned");
 
         // A newer snapshot value (a re-arm on enable) advances the cache.
-        rt.sync_anchors(HashMap::from([(
-            kept,
-            newer + chrono::Duration::seconds(5),
+        let bumped = newer + chrono::Duration::seconds(5);
+        rt.sync_states(HashMap::from([(kept, PingState::from_success(bumped))]));
+        assert_eq!(rt.state(kept).unwrap().success_at, bumped);
+    }
+
+    #[test]
+    fn a_snapshot_that_predates_a_ping_keeps_every_newer_field() {
+        // The reconcile reads Postgres while a ping lands on this node; neither
+        // side may erase a field the other advanced.
+        let rt = HeartbeatRuntime::default();
+        let id = Uuid::new_v4();
+        let live = PingState {
+            success_at: ago(300),
+            start_at: Some(ago(10)),
+            fail: Some(Failure {
+                at: ago(1),
+                exit_code: Some(2),
+            }),
+        };
+        rt.record(id, live);
+        rt.sync_states(HashMap::from([(
+            id,
+            PingState {
+                success_at: ago(600),
+                start_at: Some(ago(700)),
+                fail: None,
+            },
         )]));
-        assert_eq!(rt.anchor(kept), Some(newer + chrono::Duration::seconds(5)));
+        assert_eq!(
+            rt.state(id),
+            Some(live),
+            "the stale snapshot erased nothing"
+        );
     }
 
     #[test]
     fn zero_grace_within_period_is_up() {
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now() - chrono::Duration::seconds(30));
+        armed(&rt, id, ago(30));
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(60, 0), &rt);
         assert_eq!(r.status, CheckStatus::Up);
     }
@@ -235,7 +432,7 @@ mod tests {
     fn zero_grace_past_period_is_down() {
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now() - chrono::Duration::seconds(90));
+        armed(&rt, id, ago(90));
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(60, 0), &rt);
         assert_eq!(r.status, CheckStatus::Down);
     }
@@ -245,7 +442,7 @@ mod tests {
         // One second short of the period+grace window still counts as up.
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now() - chrono::Duration::seconds(89));
+        armed(&rt, id, ago(89));
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(60, 30), &rt);
         assert_eq!(r.status, CheckStatus::Up);
     }
@@ -255,7 +452,7 @@ mod tests {
         // 30-day period + grace must convert without saturating to a false Down.
         let rt = HeartbeatRuntime::default();
         let id = Uuid::new_v4();
-        rt.set_anchor(id, Utc::now() - chrono::Duration::days(1));
+        armed(&rt, id, ago(86_400));
         let month = 30 * 24 * 3600;
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(month, month), &rt);
         assert_eq!(r.status, CheckStatus::Up);

@@ -9,7 +9,8 @@ use crate::api::types::{
 };
 use crate::domain::agent_wire::FlowRunRecord;
 use crate::domain::{
-    CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, UserId, WriteSource,
+    CheckResult, CheckStatus, HeartbeatPingRecord, NewTarget, OrgId, Target, TargetUpdate, UserId,
+    WriteSource,
 };
 use crate::error::Result;
 
@@ -44,6 +45,14 @@ pub trait FlowRunSink: Send + Sync {
     async fn write_runs_tagged(&self, runs: &[FlowRunRecord], _region: &str) {
         self.write_runs(runs).await;
     }
+}
+
+/// Where an accepted heartbeat signal's history goes. Infallible by signature
+/// for the same reason as [`FlowRunSink`]: the ping already moved the state the
+/// verdict is read from, so a failed write costs history, never correctness.
+#[async_trait]
+pub trait HeartbeatPingSink: Send + Sync {
+    async fn write_ping(&self, ping: &HeartbeatPingRecord);
 }
 
 /// One stored flow run. `evidence` is `None` both once its shorter window has
@@ -362,6 +371,18 @@ pub trait ResultsStore: Send + Sync {
         _limit: usize,
     ) -> Result<Vec<FlowRunView>> {
         Ok(Vec::new())
+    }
+    /// What the job printed on the failure recorded at `at`. Matched on the
+    /// exact instant Postgres holds rather than "the newest failure", so a ping
+    /// whose log write was lost shows no output instead of the previous run's.
+    /// Defaults to `None` so a store without the table simply has no output.
+    async fn heartbeat_failure_output(
+        &self,
+        _org: OrgId,
+        _target_id: Uuid,
+        _at: DateTime<Utc>,
+    ) -> Result<Option<String>> {
+        Ok(None)
     }
     /// One series per declared step, bucketed over the range: the mean
     /// duration among the runs that *passed* it, plus how many failed. A

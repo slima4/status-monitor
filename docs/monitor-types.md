@@ -56,6 +56,24 @@ This is how you monitor things that have no endpoint to poll: nightly backups, c
 
 You set a **period** (how often you expect the ping) and a **grace** (how late it may be before it counts as failed). A job that runs hourly with a ten-minute grace flips to failing ten minutes after the missed run, and the alert follows once the monitor's confirmation count is met (default 2 consecutive failing evaluations). A fresh or re-enabled monitor gets a full period plus grace before it can go down, so creating one at an awkward moment does not page you immediately.
 
+Set the period to how often the job *actually* runs, not how often you would like it to. A period shorter than the real cadence means every run is late by the time the next one arrives, and the monitor flaps all night for a job that is fine.
+
+### Telling us more than "alive"
+
+The bare URL only says the job got to the end. A path segment after it says what the ping means:
+
+```bash
+curl -fsS $URL/start     # before the work
+./nightly-backup.sh
+curl -fsS $URL/$?        # 0 succeeds, anything else fails with that exit code
+```
+
+`$URL/fail` does the same as a nonzero exit when you have no status to pass. Either way the monitor goes down immediately rather than waiting out the period, which is the difference between finding out at 03:05 and finding out at 04:15.
+
+Pairing `/start` with a finish also times the run. Setting **max run time** then catches the case a plain heartbeat cannot see: a job that started, hung, and will never ping again. Without it you wait out the whole period before anything is said, which for a daily job is a day.
+
+A POST body is kept as that run's output, so `curl -fsS --data-binary @backup.log $URL/$?` puts the tail of the log next to the failure. The monitor page then shows the exit code and that output on the last failure, which is usually the difference between reading the cause and going to find the machine that ran it. Whatever the job prints is what we store, so do not print secrets to it.
+
 Pick grace with your deployment in mind. A ping sent while the control plane is unreachable is lost, so on a single-node self-host keep grace comfortably above your restart window.
 
 Heartbeats never run on regional probes, and test and check-now do not apply to them: there is nothing on our side to probe.

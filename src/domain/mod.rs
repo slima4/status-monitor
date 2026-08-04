@@ -3,6 +3,7 @@ pub mod alert;
 pub mod check;
 pub mod check_error;
 pub mod escalation_policy;
+pub mod heartbeat;
 pub mod incident;
 pub mod maintenance;
 pub mod membership;
@@ -37,6 +38,7 @@ pub use escalation_policy::{
     EscalationTarget, EscalationTargetType, NewEscalationPolicy, NewEscalationStep,
     NewEscalationTarget, next_step,
 };
+pub use heartbeat::{HeartbeatPingRecord, Ping, PingSignal};
 pub use incident::{
     ActionItem, ActorType, Incident, IncidentEvent, IncidentEventKind, IncidentMetrics,
     IncidentNarrationUpdate, IncidentNotification, IncidentOrigin, IncidentPostmortem,

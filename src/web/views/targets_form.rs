@@ -87,6 +87,8 @@ impl Default for PingFields {
 pub struct HeartbeatFields {
     pub period_s: u64,
     pub grace_s: u64,
+    /// Cap on a `/start`ed run's length; 0 renders the field empty, meaning off.
+    pub max_runtime_s: u64,
 }
 
 impl Default for HeartbeatFields {
@@ -94,6 +96,7 @@ impl Default for HeartbeatFields {
         Self {
             period_s: 300,
             grace_s: 60,
+            max_runtime_s: 0,
         }
     }
 }
@@ -981,6 +984,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
             heartbeat = HeartbeatFields {
                 period_s: c.period.as_secs(),
                 grace_s: c.grace.as_secs(),
+                max_runtime_s: c.max_runtime.map_or(0, |d| d.as_secs()),
             };
             "heartbeat"
         }
@@ -1649,6 +1653,7 @@ mod tests {
             check: CheckSpec::Heartbeat(HeartbeatCheck {
                 period: Duration::from_secs(300),
                 grace: Duration::from_secs(45),
+                max_runtime: Some(Duration::from_secs(600)),
             }),
             interval: Duration::from_secs(60),
             enabled: true,

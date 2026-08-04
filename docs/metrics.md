@@ -16,7 +16,7 @@ these names verbatim.
 | `uptimepage_check_redirects_total{outcome}` | counter | HTTP redirect hops (`followed` / `limit_exceeded` / `invalid_location` / `blocked_scheme`) |
 | `uptimepage_circuit_breaker_state_changes_total{from,to}` | counter | breaker state transitions |
 | `uptimepage_storage_writes_total{store,result}` | counter | batcher flush outcomes |
-| `uptimepage_storage_dropped_results_total{reason}` | counter | rows dropped before reaching the sink. `queue_full` / `pool_saturated` / `target_in_flight` are check results; `flow_run_write_failed` and `flow_run_buffer_full` are flow-run telemetry, which is dropped rather than retried forever because the verdict it describes reaches storage by its own path |
+| `uptimepage_storage_dropped_results_total{reason}` | counter | rows dropped before reaching the sink. `queue_full` / `pool_saturated` / `target_in_flight` are check results; `flow_run_write_failed` and `flow_run_buffer_full` are flow-run telemetry, and `heartbeat_ping_write_failed` is the heartbeat ping log — all three are dropped rather than retried forever because the verdict they describe reaches storage by its own path |
 | `uptimepage_notifications_total{channel,kind}` | counter | alert notifications dispatched |
 | `uptimepage_notifications_failures_total{channel}` | counter | notification dispatches that returned an error |
 | `uptimepage_alerts_dropped_total{reason}` | counter | incident paging signals dropped before reaching the escalation engine, by `NotificationReason` (`opened`/`escalated`/`resolved`/`reopened`/`no_data`/`data_resumed`). A lifecycle change never blocks on paging throughput, so a saturated signal channel drops here; the incident row stays in Postgres for the reconcile sweep |

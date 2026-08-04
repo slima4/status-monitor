@@ -114,17 +114,17 @@ impl EnabledTargetSource for HeartbeatTargetSource {
 }
 
 /// One refresh tick's heartbeat work, shared by both sources: heal + list the
-/// rows, then reconcile the anchors before the registry dispatches, so a
-/// freshly added target is guaranteed a resident anchor by ordering.
+/// rows, then reconcile the ping state before the registry dispatches, so a
+/// freshly added target is guaranteed resident state by ordering.
 async fn enabled_heartbeats_synced(
     repo: &AdminRepo,
     runtime: &crate::worker::heartbeat::HeartbeatRuntime,
 ) -> Result<Vec<(OrgId, Target)>> {
-    let (targets, anchors) = tokio::try_join!(
+    let (targets, states) = tokio::try_join!(
         repo.list_enabled_heartbeat_targets(),
         repo.sync_heartbeat_rows(),
     )?;
-    runtime.sync_anchors(anchors.into_iter().collect());
+    runtime.sync_states(states.into_iter().collect());
     Ok(targets)
 }
 
@@ -339,9 +339,12 @@ impl AdminRepo {
 
     /// Per-refresh reconciliation of heartbeat state. Heals rows lost to a
     /// partial create or org restore (mints a fresh token), then returns every
-    /// live monitor's anchor, including disabled targets so a later enable
-    /// finds its anchor. Anchor rule: [`crate::storage::heartbeats::anchor_of`].
-    pub async fn sync_heartbeat_rows(&self) -> Result<Vec<(Uuid, chrono::DateTime<chrono::Utc>)>> {
+    /// live monitor's ping state, including disabled targets so a later enable
+    /// finds its state. Projection rule:
+    /// [`crate::storage::heartbeats::ping_state_of`].
+    pub async fn sync_heartbeat_rows(
+        &self,
+    ) -> Result<Vec<(Uuid, crate::worker::heartbeat::PingState)>> {
         let missing: Vec<(Uuid,)> = sqlx::query_as(
             "SELECT t.id FROM targets t \
              JOIN organizations o ON o.id = t.org_id AND o.deleted_at IS NULL \
@@ -382,21 +385,37 @@ impl AdminRepo {
             tx.commit().await.context("admin: commit heartbeat heal")?;
             tracing::warn!(%target_id, "healed missing heartbeat_monitors row");
         }
-        let rows: Vec<(
+        type StateRow = (
             Uuid,
             chrono::DateTime<chrono::Utc>,
             Option<chrono::DateTime<chrono::Utc>>,
-        )> = sqlx::query_as(
-            "SELECT hm.target_id, hm.armed_at, hm.last_ping_at \
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<chrono::DateTime<chrono::Utc>>,
+            Option<i16>,
+        );
+        let rows: Vec<StateRow> = sqlx::query_as(
+            "SELECT hm.target_id, hm.armed_at, hm.last_ping_at, hm.last_start_at, \
+                        hm.last_fail_at, hm.last_exit_code \
                  FROM heartbeat_monitors hm \
                  JOIN organizations o ON o.id = hm.org_id AND o.deleted_at IS NULL",
         )
         .fetch_all(&self.pool)
         .await
-        .context("admin: list heartbeat anchors")?;
+        .context("admin: list heartbeat state")?;
         Ok(rows
             .into_iter()
-            .map(|(id, armed, ping)| (id, crate::storage::heartbeats::anchor_of(armed, ping)))
+            .map(|(id, armed, ping, start, fail, code)| {
+                (
+                    id,
+                    crate::storage::heartbeats::ping_state_of(
+                        armed,
+                        ping,
+                        start,
+                        fail,
+                        code.map(|c| c as u8),
+                    ),
+                )
+            })
             .collect())
     }
 

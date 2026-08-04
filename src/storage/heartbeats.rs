@@ -10,49 +10,96 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::OrgId;
+use crate::domain::{OrgId, PingSignal};
 use crate::error::{AppError, Result};
 use crate::security::Cipher;
 use crate::storage::capability_token;
+use crate::worker::heartbeat::{Failure, PingState};
 
-/// One heartbeat monitor's ping surface. `token` is `None` when the KEK
-/// rotated out and the encrypted copy can't be opened.
 #[derive(Debug, Clone)]
 pub struct HeartbeatMonitor {
+    /// `None` when the KEK rotated out and the encrypted copy can't be opened.
     pub token: Option<String>,
+    /// Last *success*. A `/start` must not hold a monitor up while the job it
+    /// announced hangs, so it lives in `last_start_at` instead.
     pub last_ping_at: Option<DateTime<Utc>>,
     /// Re-arm point: set at creation and on every disabled→enabled flip.
     pub armed_at: DateTime<Utc>,
+    pub last_start_at: Option<DateTime<Utc>>,
+    pub last_fail_at: Option<DateTime<Utc>>,
+    pub last_exit_code: Option<u8>,
 }
 
 impl HeartbeatMonitor {
-    pub fn anchor(&self) -> DateTime<Utc> {
-        anchor_of(self.armed_at, self.last_ping_at)
+    pub fn ping_state(&self) -> PingState {
+        ping_state_of(
+            self.armed_at,
+            self.last_ping_at,
+            self.last_start_at,
+            self.last_fail_at,
+            self.last_exit_code,
+        )
     }
 }
 
-/// The anchor rule (one owner, also used by `AdminRepo`): later of the last
-/// real ping and the re-arm point.
-pub(crate) fn anchor_of(
+/// Anchors on the later of the last success and the re-arm point, so a
+/// pause/resume can't inherit stale silence or a stale failure.
+pub(crate) fn ping_state_of(
     armed_at: DateTime<Utc>,
     last_ping_at: Option<DateTime<Utc>>,
-) -> DateTime<Utc> {
-    last_ping_at.map_or(armed_at, |p| p.max(armed_at))
+    last_start_at: Option<DateTime<Utc>>,
+    last_fail_at: Option<DateTime<Utc>>,
+    last_exit_code: Option<u8>,
+) -> PingState {
+    PingState {
+        success_at: last_ping_at.map_or(armed_at, |p| p.max(armed_at)),
+        start_at: last_start_at,
+        fail: last_fail_at.map(|at| Failure {
+            at,
+            exit_code: last_exit_code,
+        }),
+    }
+}
+
+/// Measured against the state as it stood *before* the signal landed.
+/// Saturates: a run open past 49 days is a stuck job, not a negative duration.
+fn run_ms_of(prev: &PingState, signal: PingSignal, at: DateTime<Utc>) -> Option<u32> {
+    signal
+        .is_finish()
+        .then(|| prev.run_open_since())
+        .flatten()
+        .map(|started| {
+            at.signed_duration_since(started)
+                .num_milliseconds()
+                .clamp(0, i64::from(u32::MAX)) as u32
+        })
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PingAccepted {
+    pub org_id: OrgId,
+    pub target_id: Uuid,
+    pub at: DateTime<Utc>,
+    pub state: PingState,
+    /// `None` on a start, and on a finish whose start never arrived.
+    pub run_ms: Option<u32>,
 }
 
 #[async_trait]
 pub trait HeartbeatStore: Send + Sync {
-    /// Create the row (minting a token) if absent, else return the existing
-    /// row. `None` when the target is not in `org`.
+    /// Mints a token if the row is absent. `None` when the target is not in `org`.
     async fn ensure(&self, org: OrgId, target_id: Uuid) -> Result<Option<HeartbeatMonitor>>;
-    /// Plain read, never mints, so a read-scoped credential can't create a
-    /// write capability.
+    /// Never mints, so a read-scoped credential can't create a write capability.
     async fn get(&self, org: OrgId, target_id: Uuid) -> Result<Option<HeartbeatMonitor>>;
-    /// Drop the row (kind switched away). Target deletes cascade via the FK.
+    /// Target deletes cascade via the FK; this is for a kind switched away.
     async fn remove(&self, org: OrgId, target_id: Uuid) -> Result<bool>;
-    /// Record a ping presented as a raw token, in one statement. `None` for
-    /// unknown tokens and soft-deleted orgs, so both 404 the same way.
-    async fn record_ping_by_token(&self, raw_token: &str) -> Result<Option<(Uuid, DateTime<Utc>)>>;
+    /// `None` for unknown tokens and soft-deleted orgs, so both 404 the same way.
+    async fn record_signal_by_token(
+        &self,
+        raw_token: &str,
+        signal: PingSignal,
+        exit_code: Option<u8>,
+    ) -> Result<Option<PingAccepted>>;
 }
 
 pub struct PgHeartbeatStore {
@@ -71,6 +118,9 @@ struct HeartbeatRow {
     token_enc: String,
     last_ping_at: Option<DateTime<Utc>>,
     armed_at: DateTime<Utc>,
+    last_start_at: Option<DateTime<Utc>>,
+    last_fail_at: Option<DateTime<Utc>>,
+    last_exit_code: Option<i16>,
 }
 
 impl HeartbeatRow {
@@ -79,11 +129,15 @@ impl HeartbeatRow {
             token: capability_token::open(&self.token_enc, cipher),
             last_ping_at: self.last_ping_at,
             armed_at: self.armed_at,
+            last_start_at: self.last_start_at,
+            last_fail_at: self.last_fail_at,
+            last_exit_code: self.last_exit_code.map(|c| c as u8),
         }
     }
 }
 
-const HB_COLUMNS: &str = "token_enc, last_ping_at, armed_at";
+const HB_COLUMNS: &str =
+    "token_enc, last_ping_at, armed_at, last_start_at, last_fail_at, last_exit_code";
 
 #[async_trait]
 impl HeartbeatStore for PgHeartbeatStore {
@@ -133,18 +187,91 @@ impl HeartbeatStore for PgHeartbeatStore {
         Ok(res.rows_affected() > 0)
     }
 
-    async fn record_ping_by_token(&self, raw_token: &str) -> Result<Option<(Uuid, DateTime<Utc>)>> {
-        let row: Option<(Uuid, DateTime<Utc>)> = sqlx::query_as(
-            "UPDATE heartbeat_monitors hm SET last_ping_at = now() \
-             FROM organizations o \
-             WHERE hm.token_hash = $1 AND o.id = hm.org_id AND o.deleted_at IS NULL \
-             RETURNING hm.target_id, hm.last_ping_at",
+    async fn record_signal_by_token(
+        &self,
+        raw_token: &str,
+        signal: PingSignal,
+        exit_code: Option<u8>,
+    ) -> Result<Option<PingAccepted>> {
+        // The CTE is the only view of the start this signal closes; RETURNING
+        // shows the new row. FOR UPDATE pins the CTE against inlining and makes
+        // a statement that waited on a concurrent ping re-read what it
+        // committed, instead of timing the run against a start already closed.
+        let row: Option<AcceptedRow> = sqlx::query_as(
+            "WITH prev AS ( \
+                 SELECT hm.target_id, hm.last_ping_at, hm.last_start_at, hm.last_fail_at, hm.armed_at \
+                 FROM heartbeat_monitors hm \
+                 JOIN organizations o ON o.id = hm.org_id AND o.deleted_at IS NULL \
+                 WHERE hm.token_hash = $1 \
+                 FOR UPDATE OF hm \
+             ) \
+             UPDATE heartbeat_monitors hm SET \
+                 last_ping_at   = CASE WHEN $2 = 'success' THEN now() ELSE hm.last_ping_at END, \
+                 last_start_at  = CASE WHEN $2 = 'start'   THEN now() ELSE hm.last_start_at END, \
+                 last_fail_at   = CASE WHEN $2 = 'fail'    THEN now() ELSE hm.last_fail_at END, \
+                 last_exit_code = CASE WHEN $2 = 'fail'    THEN $3   ELSE hm.last_exit_code END \
+             FROM prev \
+             WHERE hm.target_id = prev.target_id \
+             RETURNING hm.org_id, hm.target_id, hm.armed_at, hm.last_ping_at, hm.last_start_at, \
+                       hm.last_fail_at, hm.last_exit_code, \
+                       prev.last_ping_at AS prev_ping_at, prev.last_start_at AS prev_start_at, \
+                       prev.last_fail_at AS prev_fail_at, prev.armed_at AS prev_armed_at",
         )
         .bind(capability_token::hash(raw_token))
+        .bind(signal.as_str())
+        .bind(exit_code.map(i16::from))
         .fetch_optional(&self.pool)
         .await
         .map_err(db_err)?;
-        Ok(row)
+        Ok(row.map(|r| r.into_accepted(signal)))
+    }
+}
+
+#[derive(sqlx::FromRow)]
+struct AcceptedRow {
+    org_id: Uuid,
+    target_id: Uuid,
+    armed_at: DateTime<Utc>,
+    last_ping_at: Option<DateTime<Utc>>,
+    last_start_at: Option<DateTime<Utc>>,
+    last_fail_at: Option<DateTime<Utc>>,
+    last_exit_code: Option<i16>,
+    prev_ping_at: Option<DateTime<Utc>>,
+    prev_start_at: Option<DateTime<Utc>>,
+    prev_fail_at: Option<DateTime<Utc>>,
+    prev_armed_at: DateTime<Utc>,
+}
+
+impl AcceptedRow {
+    fn into_accepted(self, signal: PingSignal) -> PingAccepted {
+        let state = ping_state_of(
+            self.armed_at,
+            self.last_ping_at,
+            self.last_start_at,
+            self.last_fail_at,
+            self.last_exit_code.map(|c| c as u8),
+        );
+        // Whichever column the statement's `now()` wrote holds the accept time.
+        let at = match signal {
+            PingSignal::Start => self.last_start_at,
+            PingSignal::Success => self.last_ping_at,
+            PingSignal::Fail => self.last_fail_at,
+        }
+        .unwrap_or(state.success_at);
+        let prev = ping_state_of(
+            self.prev_armed_at,
+            self.prev_ping_at,
+            self.prev_start_at,
+            self.prev_fail_at,
+            None,
+        );
+        PingAccepted {
+            org_id: OrgId(self.org_id),
+            target_id: self.target_id,
+            at,
+            state,
+            run_ms: run_ms_of(&prev, signal, at),
+        }
     }
 }
 
@@ -161,9 +288,8 @@ struct MemHeartbeat {
     token_hash: String,
 }
 
-/// In-memory [`HeartbeatStore`] for no-DB harnesses. Has no target/org tables,
-/// so `ensure` can't verify org membership and `record_ping_by_token` can't
-/// drop soft-deleted orgs; DB-backed tests cover those guards.
+/// No target/org tables here, so the org-membership and soft-delete guards are
+/// absent; DB-backed tests cover those.
 #[derive(Default)]
 pub struct InMemoryHeartbeatStore {
     inner: std::sync::Mutex<Vec<MemHeartbeat>>,
@@ -187,6 +313,9 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             token: Some(minted.raw),
             last_ping_at: None,
             armed_at: Utc::now(),
+            last_start_at: None,
+            last_fail_at: None,
+            last_exit_code: None,
         };
         st.push(MemHeartbeat {
             org,
@@ -214,7 +343,12 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
         Ok(st.len() < before)
     }
 
-    async fn record_ping_by_token(&self, raw_token: &str) -> Result<Option<(Uuid, DateTime<Utc>)>> {
+    async fn record_signal_by_token(
+        &self,
+        raw_token: &str,
+        signal: PingSignal,
+        exit_code: Option<u8>,
+    ) -> Result<Option<PingAccepted>> {
         let hash = capability_token::hash(raw_token);
         let now = Utc::now();
         Ok(self
@@ -224,8 +358,22 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             .iter_mut()
             .find(|m| m.token_hash == hash)
             .map(|m| {
-                m.monitor.last_ping_at = Some(now);
-                (m.target_id, now)
+                let prev = m.monitor.ping_state();
+                match signal {
+                    PingSignal::Start => m.monitor.last_start_at = Some(now),
+                    PingSignal::Success => m.monitor.last_ping_at = Some(now),
+                    PingSignal::Fail => {
+                        m.monitor.last_fail_at = Some(now);
+                        m.monitor.last_exit_code = exit_code;
+                    }
+                }
+                PingAccepted {
+                    org_id: m.org,
+                    target_id: m.target_id,
+                    at: now,
+                    state: m.monitor.ping_state(),
+                    run_ms: run_ms_of(&prev, signal, now),
+                }
             }))
     }
 }
@@ -244,18 +392,62 @@ mod tests {
         assert_eq!(a.token, b.token, "repeated ensure must keep the token");
         assert!(a.last_ping_at.is_none());
 
-        let (pinged_target, at) = store
-            .record_ping_by_token(a.token.as_deref().unwrap())
+        let ok = store
+            .record_signal_by_token(a.token.as_deref().unwrap(), PingSignal::Success, None)
             .await
             .unwrap()
             .expect("token resolves");
-        assert_eq!(pinged_target, target);
+        assert_eq!(ok.target_id, target);
         let read = store.get(org, target).await.unwrap().unwrap();
-        assert_eq!(read.last_ping_at, Some(at));
+        assert_eq!(read.last_ping_at, Some(ok.at));
         assert!(
-            store.record_ping_by_token("nope").await.unwrap().is_none(),
+            store
+                .record_signal_by_token("nope", PingSignal::Success, None)
+                .await
+                .unwrap()
+                .is_none(),
             "unknown tokens record nothing"
         );
+    }
+
+    #[tokio::test]
+    async fn a_finish_measures_the_run_its_start_opened() {
+        let store = InMemoryHeartbeatStore::new();
+        let org = OrgId(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        let token = store
+            .ensure(org, target)
+            .await
+            .unwrap()
+            .unwrap()
+            .token
+            .unwrap();
+
+        let started = store
+            .record_signal_by_token(&token, PingSignal::Start, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(started.run_ms.is_none(), "a start closes nothing");
+        assert!(started.state.run_open_since().is_some());
+
+        let failed = store
+            .record_signal_by_token(&token, PingSignal::Fail, Some(2))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(failed.run_ms.is_some(), "the fail closed the open run");
+        assert_eq!(failed.state.failing().and_then(|f| f.exit_code), Some(2));
+        assert!(failed.state.run_open_since().is_none());
+
+        // Nothing is open now, so the next finish measures no run.
+        let done = store
+            .record_signal_by_token(&token, PingSignal::Success, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(done.run_ms.is_none(), "an unpaired finish times nothing");
+        assert!(done.state.failing().is_none(), "success clears the failure");
     }
 
     #[tokio::test]
@@ -267,7 +459,7 @@ mod tests {
         assert!(store.remove(org, target).await.unwrap());
         assert!(
             store
-                .record_ping_by_token(m.token.as_deref().unwrap())
+                .record_signal_by_token(m.token.as_deref().unwrap(), PingSignal::Success, None)
                 .await
                 .unwrap()
                 .is_none()
@@ -275,12 +467,27 @@ mod tests {
     }
 
     #[test]
-    fn anchor_is_the_later_of_arm_and_ping() {
+    fn the_anchor_is_the_later_of_arm_and_success() {
         let armed = Utc::now();
         let earlier = armed - chrono::Duration::hours(1);
         let later = armed + chrono::Duration::hours(1);
-        assert_eq!(anchor_of(armed, None), armed);
-        assert_eq!(anchor_of(armed, Some(earlier)), armed);
-        assert_eq!(anchor_of(armed, Some(later)), later);
+        let at = |ping| ping_state_of(armed, ping, None, None, None).success_at;
+        assert_eq!(at(None), armed);
+        assert_eq!(at(Some(earlier)), armed);
+        assert_eq!(at(Some(later)), later);
+    }
+
+    #[test]
+    fn a_re_arm_outranks_a_failure_recorded_before_it() {
+        // Resume must not inherit the failure the pause froze.
+        let armed = Utc::now();
+        let state = ping_state_of(
+            armed,
+            None,
+            None,
+            Some(armed - chrono::Duration::hours(1)),
+            Some(1),
+        );
+        assert!(state.failing().is_none());
     }
 }

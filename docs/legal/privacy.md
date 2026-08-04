@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** 2026-07-25
+**Last updated:** 2026-08-04
 
 This Privacy Policy explains how the uptimepage service ("we", "us")
 collects and processes personal data. It is intended to satisfy our
@@ -54,12 +54,19 @@ We do **not** use third-party analytics services that export your data (no Googl
 | Email, display name, OAuth identity | Provide authentication | Contract |
 | Targets, check results | Provide monitoring service | Contract |
 | Browser flow runs and failure evidence | Show why a monitored journey broke | Contract |
+| Heartbeat pings and the output your job sends with them | Show when a scheduled job ran and why it failed | Contract |
 | Sessions, API tokens | Authenticate API requests | Contract |
 | Hashed IP, login attempts | Detect security threats | Legitimate interest |
 | Audit log | Compliance and accountability | Legitimate interest |
 | Aggregate analytics (marketing and sign-in pages) | Understand site usage and improve content and sign-in | Legitimate interest |
 
 **Browser flow monitors:** when a flow monitor you configured fails, we keep what the page showed at that moment — the URL the browser ended on, the page title, its visible text, and anything the page logged to the browser console. Because the flow signs in, that text can come from a page behind your own login. It is stored to explain the failure and for nothing else, it is never put into an alert or notification, and any value the flow typed from a secret variable is removed before it is stored. It is deleted on a shorter clock than the run itself.
+
+**Heartbeat monitors:** if your job POSTs a body to its ping URL, we keep the
+first few kilobytes of it as that run's output, so a failure can be read without
+going back to the machine that ran it. Whatever the job prints is what we store,
+so do not print secrets to it. It is never put into an alert or notification,
+and it is deleted on a shorter clock than the ping itself.
 
 We do not engage in automated decision-making with significant effects on
 you (no profiling, no scoring).
@@ -75,6 +82,8 @@ you (no profiling, no scoring).
 | Check result history (aggregated, hourly) | 13 months |
 | Browser flow runs (which steps ran, and how long each took) | 30 days |
 | Browser flow failure evidence (page URL, title, visible text, browser console) | 7 days |
+| Heartbeat pings (when each signal arrived, its exit status, how long the run took) | 30 days |
+| Output posted with a heartbeat ping | 7 days |
 | Login attempts | 180 days |
 | Audit log | 2 years |
 | Quota events | 90 days |

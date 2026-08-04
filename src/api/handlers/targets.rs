@@ -516,13 +516,21 @@ pub async fn set_target_regions(
 }
 
 /// Ping surface of a heartbeat monitor: the inbound URL the customer's system
-/// calls, and the last accepted ping.
+/// calls, and what its signals last reported.
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct HeartbeatInfo {
     /// Full ping URL. `null` when the stored token can't be decrypted (KEK
     /// rotated out).
     pub ping_url: Option<String>,
+    /// Last success. A `/start` does not count: it opens a run, it does not
+    /// report one.
     pub last_ping_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_start_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_fail_at: Option<chrono::DateTime<chrono::Utc>>,
+    pub last_exit_code: Option<u8>,
+    /// What the job printed on that failure, if it posted anything and the
+    /// output is still inside its window.
+    pub last_failure_output: Option<String>,
 }
 
 /// Read-only projection of a heartbeat's ping surface, shared by the API
@@ -534,6 +542,15 @@ pub(crate) async fn heartbeat_info(
     target_id: Uuid,
 ) -> Result<HeartbeatInfo> {
     let hb = state.heartbeat_store.get(org, target_id).await?;
+    let last_failure_output = match hb.as_ref().and_then(|h| h.last_fail_at) {
+        Some(at) => {
+            state
+                .results_store
+                .heartbeat_failure_output(org, target_id, at)
+                .await?
+        }
+        None => None,
+    };
     Ok(HeartbeatInfo {
         ping_url: hb.as_ref().and_then(|h| h.token.as_deref()).map(|t| {
             format!(
@@ -541,13 +558,17 @@ pub(crate) async fn heartbeat_info(
                 state.cfg.auth.public_base_url.trim_end_matches('/')
             )
         }),
-        last_ping_at: hb.and_then(|h| h.last_ping_at),
+        last_ping_at: hb.as_ref().and_then(|h| h.last_ping_at),
+        last_start_at: hb.as_ref().and_then(|h| h.last_start_at),
+        last_fail_at: hb.as_ref().and_then(|h| h.last_fail_at),
+        last_exit_code: hb.and_then(|h| h.last_exit_code),
+        last_failure_output,
     })
 }
 
 #[utoipa::path(
     get, path = "/api/v1/targets/{id}/heartbeat", tag = "targets",
-    summary = "Get a heartbeat monitor's ping URL and last ping",
+    summary = "Get a heartbeat monitor's ping URL and last reported run",
     params(("id" = Uuid, Path)),
     responses(
         (status = 200, body = HeartbeatInfo),
@@ -1913,6 +1934,17 @@ fn validate_check(check: &crate::domain::CheckSpec, guard: &SsrfGuard) -> Result
                     codes::INVALID_HEARTBEAT_PARAMS,
                     "heartbeat grace must be at most 30 days",
                     "check.grace",
+                ));
+            }
+            // Same floor as the period: the evaluation that judges it runs no
+            // finer than once a minute.
+            if let Some(max) = h.max_runtime
+                && !(60_000..=MAX_MS).contains(&max.as_millis())
+            {
+                return Err(AppError::bad_request_field(
+                    codes::INVALID_HEARTBEAT_PARAMS,
+                    "heartbeat max runtime must be between 1 minute and 30 days",
+                    "check.max_runtime",
                 ));
             }
         }

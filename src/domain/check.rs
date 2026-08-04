@@ -202,9 +202,9 @@ pub struct PingCheck {
     pub timeout: Duration,
 }
 
-/// Inbound dead-man's-switch: the customer's system pings a token URL; the
-/// scheduled evaluation opens an incident once the last ping is older than
-/// `period + grace`.
+/// Inbound dead-man's-switch: the customer's system pings a token URL. Silence
+/// past `period + grace` opens an incident, and so do the job's own signals —
+/// a reported failure, or a run that outlives `max_runtime`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct HeartbeatCheck {
     /// Expected ping cadence in milliseconds.
@@ -216,6 +216,16 @@ pub struct HeartbeatCheck {
     #[serde(with = "duration_ms")]
     #[schema(value_type = u64, example = 60000)]
     pub grace: Duration,
+    /// Cap on one run's `/start`→finish time, in milliseconds. `None` leaves a
+    /// run bounded only by `period + grace`, which is all a job that never
+    /// sends `/start` can be judged by anyway.
+    #[serde(
+        default,
+        with = "duration_ms_opt",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schema(value_type = Option<u64>, example = 900000)]
+    pub max_runtime: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -416,6 +426,23 @@ mod duration_ms {
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
         let ms = u64::deserialize(d)?;
         Ok(Duration::from_millis(ms))
+    }
+}
+
+mod duration_ms_opt {
+    use std::time::Duration;
+
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(d: &Option<Duration>, s: S) -> Result<S::Ok, S::Error> {
+        match d {
+            Some(d) => s.serialize_u64(d.as_millis() as u64),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
+        Ok(Option::<u64>::deserialize(d)?.map(Duration::from_millis))
     }
 }
 

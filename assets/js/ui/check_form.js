@@ -525,11 +525,17 @@
             if (grace < 0 || grace > 2592000) {
                 return { error: "Grace must be between 0 and 30 days.", field: "check.grace" };
             }
+            // Blank means no cap, so an unparseable value is off rather than an error.
+            const maxRuntime = parseInt(data.get("heartbeat_max_runtime_s"), 10) || 0;
+            if (maxRuntime && (maxRuntime < 60 || maxRuntime > 2592000)) {
+                return { error: "Max run time must be between 60 seconds and 30 days.", field: "check.max_runtime" };
+            }
             return {
                 check: {
                     type: "heartbeat",
                     period: period * 1000,
                     grace: grace * 1000,
+                    max_runtime: maxRuntime ? maxRuntime * 1000 : null,
                 },
             };
         }

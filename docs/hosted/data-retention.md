@@ -33,6 +33,10 @@ Uptime over a window that has no data at all is reported as unknown rather than 
 | Quota and rate-limit events | 90 days |
 | Audit log | 2 years |
 | Server access and error logs | 30 days |
+| Heartbeat pings (when each signal arrived, exit status, run duration) | 30 days |
+| Output your job posts with a heartbeat ping | 7 days |
+| Browser flow runs (which steps ran, how long each took) | 30 days |
+| Browser flow failure evidence (page URL, title, visible text, console) | 7 days |
 
 Incidents and their timelines live with your organization and are kept until you delete the organization, so a retrospective stays readable long after the raw checks behind it have expired.
 

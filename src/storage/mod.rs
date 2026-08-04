@@ -40,7 +40,8 @@ pub use channel_link_codes::{
     LinkCodeStatus, LinkPurpose, MintOutcome, PgChannelLinkCodeStore,
 };
 pub use clickhouse::{
-    ClickhouseFlowRunSink, ClickhouseResultSink, ClickhouseResultsStore, build_client, migrate,
+    ClickhouseFlowRunSink, ClickhouseHeartbeatPingSink, ClickhouseResultSink,
+    ClickhouseResultsStore, build_client, migrate,
 };
 pub use contacts::{ContactStore, InMemoryContactStore, PgContactStore};
 pub use domain_expiry_state::{
@@ -51,7 +52,9 @@ pub use escalation_policies::{
     EscalationPolicyStore, InMemoryEscalationPolicyStore, PgEscalationPolicyStore,
 };
 pub use flow_runs::ScrubbedFlowRunSink;
-pub use heartbeats::{HeartbeatMonitor, HeartbeatStore, InMemoryHeartbeatStore, PgHeartbeatStore};
+pub use heartbeats::{
+    HeartbeatMonitor, HeartbeatStore, InMemoryHeartbeatStore, PgHeartbeatStore, PingAccepted,
+};
 pub use incident_ops::{
     Actor, DueIncident, EmergencyAck, InMemoryIncidentOpsStore, IncidentOpsFilter,
     IncidentOpsStore, IncidentSort, LifecycleOutcome, PendingNotification, PgIncidentOpsStore,
