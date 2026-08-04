@@ -49,6 +49,10 @@ UPDATE plans SET max_targets = GREATEST(max_targets, 60)
  WHERE id = (SELECT plan_id FROM organizations WHERE id = '${ORG}');
 SQL
 
+# Read the previous run's ids before the delete takes them away, or its
+# ClickHouse rows outlive every target that could explain them.
+PRIOR=$(pg -tAc "SELECT id FROM targets WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-heartbeat']")
+
 echo "==> Postgres: (re)create the seeded heartbeat monitors"
 pg <<SQL
 DELETE FROM targets WHERE org_id = '${ORG}' AND tags @> ARRAY['seed-heartbeat'];
@@ -138,8 +142,8 @@ SQL
 FAIL_AT=$(pg -tAc "SELECT extract(epoch FROM last_fail_at)::bigint FROM heartbeat_monitors WHERE target_id='${FAILED}'")
 START_AT=$(pg -tAc "SELECT extract(epoch FROM last_start_at)::bigint FROM heartbeat_monitors WHERE target_id='${RUNNING}'")
 
-echo "==> ClickHouse: wipe prior rows for these monitors"
-for t in "$HEALTHY" "$TIGHT" "$LOOSE" "$FAILED" "$RUNNING" "$THIN"; do
+echo "==> ClickHouse: wipe rows for these monitors and for any prior run"
+for t in $PRIOR "$HEALTHY" "$TIGHT" "$LOOSE" "$FAILED" "$RUNNING" "$THIN"; do
   ch -q "ALTER TABLE monitor.heartbeat_pings DELETE WHERE target_id = toUUID('${t}') SETTINGS mutations_sync=1"
   ch -q "ALTER TABLE monitor.check_results DELETE WHERE target_id = toUUID('${t}') SETTINGS mutations_sync=1"
 done
