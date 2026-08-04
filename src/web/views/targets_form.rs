@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::domain::{
-    CheckSpec, ExpectedStatus, HttpMethod, OrgId, RegionIncidentPolicy, Target, TargetAlerts,
+    CadenceAdvice, CheckSpec, ExpectedStatus, HttpMethod, OrgId, RegionIncidentPolicy, Target,
+    TargetAlerts,
 };
 use crate::error::AppError;
 use crate::web::error::WebResult;
@@ -89,6 +90,13 @@ pub struct HeartbeatFields {
     pub grace_s: u64,
     /// Cap on a `/start`ed run's length; 0 renders the field empty, meaning off.
     pub max_runtime_s: u64,
+    pub cadence: Option<CadenceHint>,
+}
+
+pub struct CadenceHint {
+    pub observed_s: u64,
+    pub suggested_s: u64,
+    pub too_tight: bool,
 }
 
 impl Default for HeartbeatFields {
@@ -97,6 +105,7 @@ impl Default for HeartbeatFields {
             period_s: 300,
             grace_s: 60,
             max_runtime_s: 0,
+            cadence: None,
         }
     }
 }
@@ -894,6 +903,26 @@ pub async fn new_form(
     })
 }
 
+/// Same judgement as the monitor page, so the two cannot disagree.
+async fn cadence_hint(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+    fields: &HeartbeatFields,
+) -> Option<CadenceHint> {
+    let observed = crate::api::handlers::targets::observed_cadence(state, org, target_id).await?;
+    let down_after = std::time::Duration::from_secs(fields.period_s + fields.grace_s);
+    let (suggested, too_tight) = match observed.advice(down_after)? {
+        CadenceAdvice::TooTight { suggested_period } => (suggested_period, true),
+        CadenceAdvice::TooLoose { suggested_period } => (suggested_period, false),
+    };
+    Some(CadenceHint {
+        observed_s: observed.median_gap.as_secs(),
+        suggested_s: suggested.as_secs(),
+        too_tight,
+    })
+}
+
 pub async fn edit_form(
     _auth: AuthedBrowser,
     CurrentOrg(org): CurrentOrg,
@@ -916,6 +945,9 @@ pub async fn edit_form(
     form.group_options = group_options;
     form.tag_options = tag_options;
     ensure_tags_listed(&mut form);
+    if form.check_type == "heartbeat" {
+        form.heartbeat.cadence = cadence_hint(&state, org, id, &form.heartbeat).await;
+    }
     form.show_escalation = state.cfg.escalation.enabled;
     if form.show_escalation {
         (form.escalation_choices, form.escalation_hint) =
@@ -985,6 +1017,7 @@ fn form_from_target(t: Target, kind: FormKind) -> Result<FormModel, AppError> {
                 period_s: c.period.as_secs(),
                 grace_s: c.grace.as_secs(),
                 max_runtime_s: c.max_runtime.map_or(0, |d| d.as_secs()),
+                ..Default::default()
             };
             "heartbeat"
         }
@@ -1482,6 +1515,41 @@ mod tests {
         // Pinned, so the client leaves it alone.
         assert!(html.contains(r#"data-interval-touched="1""#));
         assert!(html.contains(r#"data-interval="3600""#));
+    }
+
+    #[test]
+    fn a_heartbeat_period_the_pings_contradict_offers_the_real_one() {
+        let mut form = empty_create_form();
+        form.check_type = "heartbeat";
+        form.heartbeat.period_s = 600;
+        form.heartbeat.cadence = Some(CadenceHint {
+            observed_s: 4980,
+            suggested_s: 5400,
+            too_tight: true,
+        });
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("runs less often than you told us"));
+        assert!(html.contains("83m"), "what the job really does");
+        assert!(html.contains(r#"data-apply-period="5400""#));
+    }
+
+    #[test]
+    fn a_heartbeat_period_that_fits_says_nothing() {
+        let mut form = empty_create_form();
+        form.check_type = "heartbeat";
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(!html.contains("data-apply-period"));
+        assert!(!html.contains("data-cadence-hint"));
     }
 
     #[test]

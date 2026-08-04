@@ -545,6 +545,23 @@ pub struct CadenceAdviceView {
 /// schedule changed last week stops counting.
 const CADENCE_WINDOW_DAYS: u16 = 14;
 
+/// Commentary on state Postgres already holds, so a ClickHouse outage costs
+/// the commentary rather than the caller.
+pub(crate) async fn observed_cadence(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+) -> Option<crate::domain::ObservedCadence> {
+    state
+        .results_store
+        .heartbeat_cadence(org, target_id, CADENCE_WINDOW_DAYS)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "heartbeat cadence unavailable");
+            None
+        })
+}
+
 impl From<CadenceAdvice> for CadenceAdviceView {
     fn from(a: CadenceAdvice) -> Self {
         let (kind, period) = match a {
@@ -567,16 +584,7 @@ pub(crate) async fn heartbeat_info(
     check: &HeartbeatCheck,
 ) -> Result<HeartbeatInfo> {
     let hb = state.heartbeat_store.get(org, target_id).await?;
-    // Both reads are commentary on state Postgres already holds, so a
-    // ClickHouse outage costs the commentary rather than the whole page.
-    let observed = state
-        .results_store
-        .heartbeat_cadence(org, target_id, CADENCE_WINDOW_DAYS)
-        .await
-        .unwrap_or_else(|err| {
-            tracing::warn!(error = %err, "heartbeat cadence unavailable");
-            None
-        });
+    let observed = observed_cadence(state, org, target_id).await;
     let last_failure_output = match hb.as_ref().and_then(|h| h.last_fail_at) {
         Some(at) => state
             .results_store

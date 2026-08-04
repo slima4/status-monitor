@@ -175,6 +175,18 @@
     form.addEventListener("click", (evt) => {
         const testBtn = evt.target.closest("[data-test-now]");
         if (testBtn) handleTestNow(testBtn);
+        const applyPeriod = evt.target.closest("[data-apply-period]");
+        if (applyPeriod) {
+            const field = form.querySelector("[name='heartbeat_period_s']");
+            if (field) {
+                field.value = applyPeriod.dataset.applyPeriod;
+                // `input` clears a stuck aria-invalid, `change` marks dirty.
+                field.dispatchEvent(new Event("input", { bubbles: true }));
+                field.dispatchEvent(new Event("change", { bubbles: true }));
+                field.focus();
+            }
+            applyPeriod.closest("[data-cadence-hint]")?.remove();
+        }
     });
 
     form.addEventListener("keydown", (evt) => {

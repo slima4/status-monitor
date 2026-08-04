@@ -313,6 +313,23 @@
           <span class="field-outline__unit" aria-hidden="true">s</span>
         </label>
       </div>
+      {% if let Some(cadence) = form.heartbeat.cadence %}
+      <div data-cadence-hint class="space-y-1 border-l-2 border-[color:var(--theme-state-warn-line)] pl-3">
+        <p class="text-xs">
+          {% if cadence.too_tight %}
+          <span class="hl">This job runs less often than you told us.</span>
+          Over the last two weeks it pinged about every {{ cadence.observed_s|exact_dur }}, so
+          ordinary runs arrive late and page you.
+          {% else %}
+          <span class="hl">This monitor is looser than it needs to be.</span>
+          The job pings about every {{ cadence.observed_s|exact_dur }}, so a job that dies
+          goes unnoticed far longer than it has to.
+          {% endif %}
+        </p>
+        <button type="button" data-apply-period="{{ cadence.suggested_s }}"
+                class="sticker-btn px-2 py-1 font-mono text-xs">use {{ cadence.suggested_s|exact_dur }}</button>
+      </div>
+      {% endif %}
       <span class="mt-1 block text-xs text-muted">
         Grace absorbs normal jitter (a slow backup, a queued cron). Max run time
         applies only if the job calls <code>/start</code> first: it opens an
