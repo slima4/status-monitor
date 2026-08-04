@@ -1,0 +1,19 @@
+{# Preset rail over a duration field. The input holds the value; a preset
+   fills it, and an off-preset value leaves the rail unselected. #}
+{% macro picker(name, label, value, placeholder, presets) %}
+<div class="space-y-1.5" data-duration-picker>
+  <span class="block text-xs text-muted">{{ label }}</span>
+  <div class="sm-rail sm-rail--fill" role="radiogroup" aria-label="{{ label }} presets">
+    {% for p in presets %}
+    <label class="sm-rail__seg">
+      <input type="radio" name="{{ name }}_preset" value="{{ p.value }}" data-duration-preset{% if p.selected %} checked{% endif %} class="sr-only">
+      {{ p.label }}
+    </label>
+    {% endfor %}
+  </div>
+  <input name="{{ name }}" type="text" value="{{ value }}" placeholder="{{ placeholder }}"
+         inputmode="numeric" autocomplete="off" spellcheck="false"
+         aria-label="{{ label }}" data-duration-input
+         class="w-full field">
+</div>
+{% endmacro %}

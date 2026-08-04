@@ -102,12 +102,68 @@ pub struct CadenceHint {
 impl Default for HeartbeatFields {
     fn default() -> Self {
         Self {
-            period_s: 300,
-            grace_s: 60,
+            period_s: 86_400,
+            grace_s: 3_600,
             max_runtime_s: 0,
             cadence: None,
         }
     }
+}
+
+impl HeartbeatFields {
+    pub fn period_presets(&self) -> Vec<DurationChoice> {
+        duration_presets(&[300, 900, 3_600, 21_600, 86_400], self.period_s)
+    }
+
+    pub fn grace_presets(&self) -> Vec<DurationChoice> {
+        duration_presets(&[0, 60, 300, 900, 3_600], self.grace_s)
+    }
+
+    pub fn max_runtime_presets(&self) -> Vec<DurationChoice> {
+        duration_presets(&[0, 300, 900, 3_600, 21_600], self.max_runtime_s)
+    }
+
+    pub fn period_value(&self) -> String {
+        super::exact_duration(self.period_s)
+    }
+
+    pub fn grace_value(&self) -> String {
+        super::exact_duration(self.grace_s)
+    }
+
+    /// Empty is the off state, which the `off` preset also selects.
+    pub fn max_runtime_value(&self) -> String {
+        if self.max_runtime_s == 0 {
+            String::new()
+        } else {
+            super::exact_duration(self.max_runtime_s)
+        }
+    }
+}
+
+pub struct DurationChoice {
+    pub value: String,
+    pub label: String,
+    pub selected: bool,
+}
+
+fn duration_presets(presets: &[u64], current: u64) -> Vec<DurationChoice> {
+    presets
+        .iter()
+        .map(|&secs| DurationChoice {
+            value: if secs == 0 {
+                String::new()
+            } else {
+                super::exact_duration(secs)
+            },
+            label: if secs == 0 {
+                "off".to_string()
+            } else {
+                super::exact_duration(secs)
+            },
+            selected: secs == current,
+        })
+        .collect()
 }
 
 pub struct DnsFields {
@@ -1518,6 +1574,40 @@ mod tests {
     }
 
     #[test]
+    fn a_preset_duration_selects_its_segment_and_an_odd_one_selects_none() {
+        let mut form = empty_create_form();
+        form.check_type = "heartbeat";
+        form.heartbeat.period_s = 3_600;
+        form.heartbeat.grace_s = 45;
+        form.heartbeat.max_runtime_s = 0;
+
+        let on: Vec<bool> = form
+            .heartbeat
+            .period_presets()
+            .iter()
+            .map(|p| p.selected)
+            .collect();
+        assert_eq!(on.iter().filter(|s| **s).count(), 1, "1h is a preset");
+        assert!(
+            form.heartbeat.grace_presets().iter().all(|p| !p.selected),
+            "45s is not"
+        );
+        assert!(
+            form.heartbeat.max_runtime_presets()[0].selected,
+            "off is a real selection, not an empty box"
+        );
+        assert_eq!(form.heartbeat.max_runtime_value(), "");
+
+        let html = FormPage {
+            active_tab: "targets",
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"value="1h" data-duration-preset checked"#));
+    }
+
+    #[test]
     fn a_heartbeat_period_the_pings_contradict_offers_the_real_one() {
         let mut form = empty_create_form();
         form.check_type = "heartbeat";
@@ -1535,7 +1625,7 @@ mod tests {
         .unwrap();
         assert!(html.contains("runs less often than you told us"));
         assert!(html.contains("83m"), "what the job really does");
-        assert!(html.contains(r#"data-apply-period="5400""#));
+        assert!(html.contains(r#"data-apply-period="90m""#));
     }
 
     #[test]
@@ -1749,7 +1839,10 @@ mod tests {
         .unwrap();
         // The schedule rail and test-now are hidden for the passive kind.
         assert!(html.contains("data-schedule-section hidden"));
-        assert!(html.contains(r#"name="heartbeat_period_s" type="number" min="60""#));
+        assert!(html.contains(r#"name="heartbeat_period_s" type="text" value="5m""#));
+        assert!(html.contains(r#"name="heartbeat_grace_s" type="text" value="45s""#));
+        // 45s is off-preset, so no grace segment is selected.
+        assert!(!html.contains(r#"value="45s" data-duration-preset checked"#));
         // Editing an existing heartbeat still shows its picker card.
         assert!(html.contains(r#"name="check_type" value="heartbeat""#));
     }

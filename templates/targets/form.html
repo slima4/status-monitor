@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "_register.html" as reg %}
+{% import "targets/partials/_duration_picker.html" as dur %}
 {% block title %}{% if form.mode == "create" %}New monitor{% else %}Edit monitor{% endif %} · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
@@ -291,27 +292,10 @@
         (plus grace) opens an incident</span>: a dead-man's-switch for things
         we can't reach.
       </p>
-      <div class="flex flex-wrap gap-3">
-        <label class="field-outline w-48">
-          <span class="field-outline__label">Expect a ping every</span>
-          <input name="heartbeat_period_s" type="number" min="60" max="2592000"
-                 value="{{ form.heartbeat.period_s }}" class="w-full field pr-8">
-          <span class="field-outline__unit" aria-hidden="true">s</span>
-        </label>
-        <label class="field-outline w-40">
-          <span class="field-outline__label">Grace</span>
-          <input name="heartbeat_grace_s" type="number" min="0" max="2592000"
-                 value="{{ form.heartbeat.grace_s }}" class="w-full field pr-8">
-          <span class="field-outline__unit" aria-hidden="true">s</span>
-        </label>
-        <label class="field-outline w-40">
-          <span class="field-outline__label">Max run time</span>
-          <input name="heartbeat_max_runtime_s" type="number" min="60" max="2592000"
-                 placeholder="off"
-                 value="{% if form.heartbeat.max_runtime_s > 0 %}{{ form.heartbeat.max_runtime_s }}{% endif %}"
-                 class="w-full field pr-8">
-          <span class="field-outline__unit" aria-hidden="true">s</span>
-        </label>
+      <div class="grid gap-4 sm:grid-cols-3">
+        {% call dur::picker("heartbeat_period_s", "Expect a ping every", form.heartbeat.period_value(), "", form.heartbeat.period_presets()) %}{% endcall %}
+        {% call dur::picker("heartbeat_grace_s", "Grace", form.heartbeat.grace_value(), "", form.heartbeat.grace_presets()) %}{% endcall %}
+        {% call dur::picker("heartbeat_max_runtime_s", "Max run time", form.heartbeat.max_runtime_value(), "off", form.heartbeat.max_runtime_presets()) %}{% endcall %}
       </div>
       {% if let Some(cadence) = form.heartbeat.cadence %}
       <div data-cadence-hint class="space-y-1 border-l-2 border-[color:var(--theme-state-warn-line)] pl-3">
@@ -326,7 +310,7 @@
           goes unnoticed far longer than it has to.
           {% endif %}
         </p>
-        <button type="button" data-apply-period="{{ cadence.suggested_s }}"
+        <button type="button" data-apply-period="{{ cadence.suggested_s|exact_dur }}"
                 class="sticker-btn px-2 py-1 font-mono text-xs">use {{ cadence.suggested_s|exact_dur }}</button>
       </div>
       {% endif %}

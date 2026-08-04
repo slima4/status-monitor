@@ -122,6 +122,10 @@ pub fn interval_hints_for_kind(kind: &str) -> IntervalHints {
             min: 300,
             default: 900,
         },
+        "heartbeat" => IntervalHints {
+            min: 60,
+            default: 300,
+        },
         other => IntervalHints {
             min: min_interval_secs_for_kind(other),
             default: 60,

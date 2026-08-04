@@ -11,6 +11,21 @@
     const form = document.getElementById("check-form");
     if (!form) return;
 
+    // Reads back what web::views::exact_duration renders, so the two must
+    // agree on the grammar. `""` is 0, so an empty optional field is off.
+    const DURATION_UNITS = { s: 1, m: 60, h: 3600, d: 86400 };
+
+    function parseDuration(raw) {
+        const t = String(raw ?? "").trim().toLowerCase();
+        if (t === "") return 0;
+        const m = t.match(/^(\d+)\s*([smhd])?$/);
+        if (!m) return null;
+        return parseInt(m[1], 10) * (DURATION_UNITS[m[2]] || 1);
+    }
+
+    const DURATION_HELP = (label, lo, hi) =>
+        `${label} must be between ${lo} and ${hi}. Use a number of seconds, or a unit: 90s, 15m, 2h, 30d.`;
+
     // Per-kind interval floors, mirrored from the API via data-kind-floors —
     // the slow/fast rail split and defaults all derive from them.
     let KIND_MIN_INTERVAL = {};
@@ -72,6 +87,23 @@
         const last = active.querySelector(`input[name='interval_s'][value='${active.dataset.last}']`);
         const def = [last, wanted, firstValid].find((o) => o && !o.disabled);
         if (def) def.checked = true;
+    }
+
+    // A heartbeat's cadence rail is hidden, so the form owns the value. A new
+    // monitor derives one; an existing one keeps what it has, lowered only if
+    // it is coarser than the window it judges, which the API refuses.
+    function heartbeatInterval(data, minInterval) {
+        const period = parseDuration(data.get("heartbeat_period_s"));
+        const grace = parseDuration(data.get("heartbeat_grace_s"));
+        if (period === null || grace === null || period === 0) {
+            return parseInt(form.dataset.interval, 10) || minInterval;
+        }
+        const window = period + grace;
+        const stored = parseInt(form.dataset.interval, 10);
+        const base = form.dataset.mode === "create" || !Number.isInteger(stored)
+            ? Math.min(300, Math.max(60, Math.ceil(window / 10)))
+            : stored;
+        return Math.max(minInterval, Math.min(base, window));
     }
 
     // Heartbeat is passive: no test-now, no cadence to pick (fixed floor), no
@@ -179,14 +211,40 @@
         if (applyPeriod) {
             const field = form.querySelector("[name='heartbeat_period_s']");
             if (field) {
-                field.value = applyPeriod.dataset.applyPeriod;
-                // `input` clears a stuck aria-invalid, `change` marks dirty.
-                field.dispatchEvent(new Event("input", { bubbles: true }));
-                field.dispatchEvent(new Event("change", { bubbles: true }));
+                setDuration(field, applyPeriod.dataset.applyPeriod);
                 field.focus();
             }
             applyPeriod.closest("[data-cadence-hint]")?.remove();
         }
+    });
+
+    // `input` clears a stuck aria-invalid, `change` marks the form dirty.
+    function setDuration(field, value) {
+        field.value = value;
+        field.dispatchEvent(new Event("input", { bubbles: true }));
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    function syncPresetRail(picker) {
+        const input = picker.querySelector("[data-duration-input]");
+        if (!input) return;
+        const typed = parseDuration(input.value);
+        picker.querySelectorAll("[data-duration-preset]").forEach((radio) => {
+            const preset = parseDuration(radio.value);
+            radio.checked = typed !== null && preset === typed;
+        });
+    }
+
+    form.addEventListener("change", (evt) => {
+        const preset = evt.target.closest("[data-duration-preset]");
+        if (!preset) return;
+        const input = preset.closest("[data-duration-picker]")?.querySelector("[data-duration-input]");
+        if (input) setDuration(input, preset.value);
+    });
+
+    form.addEventListener("input", (evt) => {
+        const input = evt.target.closest("[data-duration-input]");
+        if (input) syncPresetRail(input.closest("[data-duration-picker]"));
     });
 
     form.addEventListener("keydown", (evt) => {
@@ -529,18 +587,20 @@
             };
         }
         if (checkType === "heartbeat") {
-            const period = parseInt(data.get("heartbeat_period_s"), 10);
-            if (!Number.isInteger(period) || period < 60 || period > 2592000) {
-                return { error: "Heartbeat period must be between 60 seconds and 30 days.", field: "check.period" };
+            const period = parseDuration(data.get("heartbeat_period_s"));
+            if (period === null || period < 60 || period > 2592000) {
+                return { error: DURATION_HELP("Expect a ping every", "60s", "30d"), field: "check.period" };
             }
-            const grace = parseInt(data.get("heartbeat_grace_s"), 10) || 0;
-            if (grace < 0 || grace > 2592000) {
-                return { error: "Grace must be between 0 and 30 days.", field: "check.grace" };
+            const grace = parseDuration(data.get("heartbeat_grace_s"));
+            if (grace === null || grace > 2592000) {
+                return { error: DURATION_HELP("Grace", "0", "30d"), field: "check.grace" };
             }
-            // Blank means no cap, so an unparseable value is off rather than an error.
-            const maxRuntime = parseInt(data.get("heartbeat_max_runtime_s"), 10) || 0;
+            const maxRuntime = parseDuration(data.get("heartbeat_max_runtime_s"));
+            if (maxRuntime === null) {
+                return { error: DURATION_HELP("Max run time", "60s", "30d"), field: "check.max_runtime" };
+            }
             if (maxRuntime && (maxRuntime < 60 || maxRuntime > 2592000)) {
-                return { error: "Max run time must be between 60 seconds and 30 days.", field: "check.max_runtime" };
+                return { error: DURATION_HELP("Max run time", "60s", "30d"), field: "check.max_runtime" };
             }
             return {
                 check: {
@@ -666,11 +726,8 @@
         const planMin = Number(form.dataset.minInterval) || 60;
         const kind = data.get("check_type") || "http";
         const minInterval = Math.max(planMin, kindFloor(kind));
-        // Heartbeat hides the cadence rail: keep the stored interval rather
-        // than rewriting an API-set value; the floor still applies.
-        const stored = parseInt(form.dataset.interval, 10);
         const interval = kind === "heartbeat"
-            ? Math.max(minInterval, Number.isInteger(stored) ? stored : minInterval)
+            ? heartbeatInterval(data, minInterval)
             : parseInt(data.get("interval_s"), 10);
         if (!Number.isInteger(interval) || interval < minInterval) {
             return { error: `Check interval must be at least ${floorLabel(minInterval)}.` };

@@ -1480,12 +1480,6 @@ fn check_abuse(state: &AppState, org: OrgId, check: &crate::domain::CheckSpec) -
     Err(hit.into_app_error())
 }
 
-/// Largest per-kind floor (domain_expiry). Any requested interval at or above
-/// this is guaranteed to clear every kind floor and lets the PATCH path skip
-/// the existing-target read. Set too low, the skip waves through an interval
-/// the kind would reject, so a test holds it to the real maximum.
-const MAX_KIND_FLOOR_SECS: i64 = 43_200;
-
 /// The PATCH counterpart of the floor check in [`validate_new_target`]. A kind
 /// change is validated against the stored interval, since switching to a slower
 /// kind while omitting `interval` would otherwise keep a cadence that kind
@@ -1501,10 +1495,10 @@ async fn validate_patch_interval(
     if requested.is_none() && update.check.is_none() {
         return Ok(());
     }
-    // The row is only worth reading for the half the request leaves out, and an
-    // interval above every kind floor answers the kind half on its own.
-    let needs_row = requested.is_none()
-        || (update.check.is_none() && requested.is_some_and(|r| r < MAX_KIND_FLOOR_SECS));
+    // The row is only worth reading for the half the request leaves out. A high
+    // interval answers the kind floor on its own, but never the heartbeat
+    // pairing, which needs the spec to know the window it is judged against.
+    let needs_row = requested.is_none() || update.check.is_none();
     let fetched = match (needs_row, prefetched) {
         (true, None) => state.target_store.get(org, id).await?,
         _ => None,
@@ -1535,6 +1529,14 @@ async fn validate_patch_interval(
             "free",
         ));
     }
+    // Either half can arrive alone, so the pairing is judged on the merge of
+    // the request and the stored row.
+    if let Some(check) = update.check.as_ref().or(stored.map(|t| &t.check)) {
+        validate_heartbeat_cadence(
+            check,
+            std::time::Duration::from_secs(requested.max(0) as u64),
+        )?;
+    }
     Ok(())
 }
 
@@ -1553,10 +1555,30 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
         ));
     }
     validate_check(&new.check, guard)?;
+    validate_heartbeat_cadence(&new.check, new.interval)?;
     validate_alerts(&new.alerts)?;
     validate_alert_confirmations(Some(new.alert_confirmations))?;
     validate_renotify_interval(Some(new.renotify_interval_secs))?;
     validate_group_name(new.group_name.as_deref())
+}
+
+fn validate_heartbeat_cadence(check: &CheckSpec, interval: std::time::Duration) -> Result<()> {
+    let Some(hb) = check.as_heartbeat() else {
+        return Ok(());
+    };
+    let window = hb.period.as_secs().saturating_add(hb.grace.as_secs());
+    if interval.as_secs() > window {
+        return Err(AppError::bad_request_field(
+            codes::INVALID_HEARTBEAT_PARAMS,
+            format!(
+                "check interval ({}s) is longer than the heartbeat window it judges ({}s) — lower the interval or raise the period",
+                interval.as_secs(),
+                window
+            ),
+            "interval",
+        ));
+    }
+    Ok(())
 }
 
 /// The outage reminder cadence is either off (0) or no tighter than a minute —
@@ -2220,14 +2242,40 @@ fn check_ip(ip: IpAddr, guard: &SsrfGuard) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn heartbeat_spec(period_s: u64, grace_s: u64) -> CheckSpec {
+        CheckSpec::Heartbeat(crate::domain::HeartbeatCheck {
+            period: std::time::Duration::from_secs(period_s),
+            grace: std::time::Duration::from_secs(grace_s),
+            max_runtime: None,
+        })
+    }
+
     #[test]
-    fn the_floor_skip_covers_every_kind() {
-        for kind in CheckSpec::ALL_KINDS {
-            assert!(
-                MAX_KIND_FLOOR_SECS >= crate::domain::min_interval_secs_for_kind(kind) as i64,
-                "{kind} floors above the skip, so PATCH would accept a rejected interval"
-            );
-        }
+    fn an_interval_coarser_than_the_heartbeat_window_is_refused() {
+        let spec = heartbeat_spec(60, 60);
+        let err = validate_heartbeat_cadence(&spec, std::time::Duration::from_secs(300))
+            .expect_err("300s cannot judge a 120s window");
+        assert!(format!("{err:?}").contains("longer than the heartbeat window"));
+
+        // Equal is fine: the tick lands exactly when the window closes.
+        validate_heartbeat_cadence(&spec, std::time::Duration::from_secs(120)).unwrap();
+        // The default pairing, and every kind that is not a heartbeat.
+        validate_heartbeat_cadence(
+            &heartbeat_spec(86_400, 3_600),
+            std::time::Duration::from_secs(300),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn the_form_default_pairs_with_the_default_interval() {
+        let hb = crate::web::views::targets_form::HeartbeatFields::default();
+        let interval = crate::domain::interval_hints_for_kind("heartbeat").default;
+        validate_heartbeat_cadence(
+            &heartbeat_spec(hb.period_s, hb.grace_s),
+            std::time::Duration::from_secs(interval),
+        )
+        .unwrap();
     }
 
     #[test]
