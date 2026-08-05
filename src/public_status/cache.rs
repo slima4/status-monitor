@@ -448,7 +448,11 @@ mod tests {
     // every org's snapshot in memory forever.
     #[tokio::test]
     async fn last_good_idle_evicts_after_ttl() {
-        let cache = PageCache::build(64, Duration::from_secs(60), Duration::from_millis(50));
+        // The idle window has to outlast any scheduler delay between the seed
+        // and the read below: moka counts idle from insert, so a shorter one
+        // lets a loaded runner evict the entry before it is ever observed.
+        let idle = Duration::from_secs(1);
+        let cache = PageCache::build(64, Duration::from_secs(60), idle);
         let o = org();
         cache
             .get_or_compute(o, || async { Ok::<_, std::io::Error>(make_page("ok")) })
@@ -460,7 +464,7 @@ mod tests {
             "snapshot present right after seed"
         );
 
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        tokio::time::sleep(idle + Duration::from_millis(200)).await;
         // moka evicts on its own coarse clock, processed lazily by the
         // run_pending_tasks() inside last_good_len(). Poll past the window
         // instead of reading once, so a loaded runner can't lose the race.
