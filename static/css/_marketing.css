@@ -1583,13 +1583,16 @@ html:has(.marketing-shell) {
     border-radius: 2px;
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.1);
 }
-/* Image caption: the fully-italic line directly under an image. */
-.mk-article p:has(> img) + p:has(> em:only-child) {
-    margin-top: -0.75rem;
+/* Caption: the fully-italic line directly under an image or a figure. */
+.mk-article p:has(> img) + p:has(> em:only-child),
+.mk-article .mk-fig + p:has(> em:only-child) {
     text-align: center;
     font-size: 0.8125rem;
     color: var(--mk-quiet);
 }
+.mk-article p:has(> img) + p:has(> em:only-child) { margin-top: -0.75rem; }
+/* Keyed on the mounted class, so an unmounted figure cannot pull its caption up. */
+.mk-article .mk-fig + p:has(> em:only-child) { margin: -1.6rem 0 2.25rem; }
 .mk-article code {
     font-family: var(--mk-font-mono);
     font-size: 0.875em;
@@ -3362,6 +3365,53 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     text-wrap: pretty;
 }
 
+/* ── stagger: one bar per second of the interval, the shape of the fleet ── */
+.mk-stagger .mk-stagger__why {
+    margin: 0;
+    padding: 0.85rem var(--mk-pad) 0;
+    color: var(--mk-ink-soft);
+    font-size: 0.8rem;
+    line-height: 1.55;
+    text-wrap: pretty;
+}
+
+.mk-stagger__plot { padding: 1.15rem var(--mk-pad) 0; }
+
+.mk-stagger__bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+    height: 8.5rem;
+    padding: 0.4rem 0.5rem;
+    border: 1px solid var(--mk-rule-soft);
+    border-radius: 2px;
+    background: var(--mk-bg);
+}
+
+/* Floored so an empty second still draws a baseline: a gap in the row would
+   read as missing data rather than as nothing scheduled. */
+.mk-stagger__bar {
+    flex: 1;
+    min-width: 0;
+    height: calc(3% + 97% * var(--fill, 0));
+    border-radius: 1px 1px 0 0;
+    background: var(--mk-ok);
+    /* Under the round cadence, so a bar settles before the next round moves it. */
+    transition: height 300ms cubic-bezier(.2,0,0,1), background-color 200ms ease;
+}
+.mk-stagger__bar[data-state="idle"] { background: var(--mk-rule); }
+/* A crowded second is not a failure, so it takes the mark colour, not --mk-down. */
+.mk-stagger__bar[data-state="hot"] { background: var(--mk-mark); }
+
+.mk-stagger__axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.4rem;
+    color: var(--mk-faint);
+    font-size: 0.66rem;
+    font-variant-numeric: tabular-nums;
+}
+
 /* ── measured week: every check, over the far shorter band the page may show ── */
 .mk-week__readout {
     display: flex;
@@ -3465,9 +3515,88 @@ ol.mk-week__log, ol.mk-week__log > li { list-style: none; }
     white-space: nowrap;
 }
 
+/* ── supersede: the heap drawn on the clock it is ordered by ── */
+.mk-sup__readout {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.4rem 1.25rem;
+    padding: 0.85rem var(--mk-pad) 0;
+}
+.mk-sup__big { color: var(--mk-ink); font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.mk-sup__live { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+.mk-sup__chip {
+    padding: 0.15rem 0.45rem;
+    border: 1px solid var(--mk-rule-soft);
+    border-radius: 2px;
+    color: var(--mk-ink-soft);
+    font-size: 0.68rem;
+    font-variant-numeric: tabular-nums;
+}
+.mk-sup__chip[data-state="gone"] { color: var(--mk-faint); border-style: dashed; text-decoration: line-through; }
+
+.mk-sup__track { padding: 1.15rem var(--mk-pad) 0; }
+/* The positioning context for both the blocks and the playhead. Putting the
+   head on the padded track instead would resolve it against a wider box, so it
+   would cross an entry at a different moment than it touches it. */
+.mk-sup__grid { position: relative; }
+
+.mk-sup__ticks {
+    position: relative;
+    height: 0.9rem;
+    color: var(--mk-faint);
+    font-size: 0.64rem;
+    font-variant-numeric: tabular-nums;
+}
+.mk-sup__ticks span { position: absolute; transform: translateX(-50%); }
+/* Centring the first label would hang half of it off the rail. */
+.mk-sup__ticks span[data-at="0"] { transform: none; }
+
+.mk-sup .mk-sup__rail-label { margin: 0.55rem 0 0; color: var(--mk-quiet); font-size: 0.64rem; }
+
+.mk-sup__rail {
+    position: relative;
+    /* Two stacked rows plus the gap: entries can fall due close together. */
+    height: 3.1rem;
+    margin-top: 0.3rem;
+    border-left: 1px solid var(--mk-rule);
+    background: repeating-linear-gradient(to right, var(--mk-rule-soft) 0 1px, transparent 1px 14.2857%);
+}
+.mk-sup__rail--out { background-image: none; border-top: 1px dashed var(--mk-rule-soft); }
+
+.mk-sup__blk {
+    position: absolute;
+    padding: 0.16rem 0.34rem;
+    border: 1px solid var(--mk-rule-hover);
+    border-radius: 2px;
+    background: var(--mk-bg);
+    color: var(--mk-ink);
+    font-size: 0.64rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    transform: translateX(-2px);
+}
+.mk-sup__blk[data-row="0"] { top: 0.15rem; }
+.mk-sup__blk[data-row="1"] { top: 1.65rem; }
+.mk-sup__blk[data-state="doomed"] { border-style: dashed; opacity: 0.45; }
+.mk-sup__blk[data-state="fire"] { border-color: var(--mk-ok); background: var(--mk-ok-soft); color: var(--mk-ok); }
+.mk-sup__blk[data-state="drop"] { border-color: var(--mk-mark); border-style: dashed; color: var(--mk-mark); }
+
+.mk-sup__head {
+    position: absolute;
+    top: 2.4rem;
+    bottom: 0.35rem;
+    width: 2px;
+    background: var(--mk-ink);
+    opacity: 0.75;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .mk-flow__step, .mk-ev__step, .mk-rec__row, .mk-ev__panel, .mk-ev__pair,
-    .mk-flow__bar, .mk-flow__want, .mk-flow__badge, .mk-rec__fly { transition: none; }
+    .mk-flow__bar, .mk-flow__want, .mk-flow__badge, .mk-rec__fly,
+    .mk-stagger__bar, .mk-week-lane__plot rect, .mk-fig__go { transition: none; }
+    .mk-fig__go:active { transform: none; }
     .mk-flow__step[data-state="run"], .mk-flow__step[data-state="down"],
     .mk-ev__step[data-state="run"], .mk-ev__step[data-state="down"] { transform: none; }
     .mk-flow__bar[data-state="load"] .mk-flow__sweep { animation: none; }

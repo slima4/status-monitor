@@ -224,6 +224,8 @@ const EMBEDS: &[(&str, &str)] = &[
     ("mk-embed-silence", "js/marketing/silence.js"),
     ("mk-embed-flow-break", "js/marketing/flow_break.js"),
     ("mk-embed-ci-vs-prod", "js/marketing/ci_vs_prod.js"),
+    ("mk-embed-stagger", "js/marketing/stagger.js"),
+    ("mk-embed-supersede", "js/marketing/supersede.js"),
     ("mk-embed-measured-week", "js/marketing/measured_week.js"),
 ];
 

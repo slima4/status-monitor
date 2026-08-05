@@ -1,7 +1,7 @@
 +++
 title = "Building an uptime monitor in Rust: one binary, two databases"
 date = "2026-06-30"
-updated = "2026-07-14"
+updated = "2026-08-05"
 slug = "building-an-uptime-monitor-in-rust"
 excerpt = "The Rust build behind Uptimepage: a custom hyper client doing ~130K checks a second on one core, a single-heap scheduler, and ClickHouse rollups."
 tags = ["rust", "clickhouse", "monitoring", "devops"]
@@ -38,9 +38,11 @@ These numbers come from a laptop and a load-test binary, so I treat them as regr
 
 ## One heap, not a timer per target
 
-The naive scheduler spawns a timer task per monitor. That falls apart at fleet size: thousands of tasks, thousands of wakeups, memory that grows with the number of targets.
+The naive scheduler spawns a timer task per monitor. The tasks themselves are cheap. What falls apart at fleet size is everything around them: a thousand independent clocks, a handle map with a lock on it, and one copy of the config per task to keep in step.
 
-Instead there is a single driver task that owns one `BinaryHeap<Reverse<Due>>`, a min-heap keyed by the next due `Instant` for the whole fleet. Memory stays flat in fleet size. Each target gets a deterministic jitter offset hashed from its UUID so a thousand monitors on a 60-second interval do not all fire on the same tick. Generation and sequence counters mean a re-scheduled target supersedes its stale heap entry instead of double-firing. The registry refresh that pulls config from Postgres runs on its own task with exponential backoff, so a Postgres hiccup never stalls dispatch: the scheduler keeps running on what it last knew.
+Instead there is a single driver task that owns one `BinaryHeap<Reverse<Due>>`, a min-heap keyed by the next due `Instant` for the whole fleet. Nothing in it needs a lock, because nothing in it leaves the task. Each target gets a deterministic jitter offset hashed from its UUID so a thousand monitors on a 60-second interval do not all fire on the same tick. Generation and sequence counters mean a re-scheduled target supersedes its stale heap entry instead of double-firing. The registry refresh that pulls config from Postgres runs on its own task with exponential backoff, so a Postgres hiccup never stalls dispatch: the scheduler keeps running on what it last knew.
+
+The whole scheduler, with the code and the tests that back each of those claims, is [its own post](/blog/rust-scheduler-one-heap).
 
 ## Failure isolation inside one process
 
