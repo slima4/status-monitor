@@ -52,6 +52,15 @@ export function choices(label, options, selected){
     </div>`;
 }
 
+/** Avalanche mixer: one bit of input changes every output bit. Stands in for a
+    real hash where a figure needs a stable, evenly spread number from an id. */
+export function mix(n){
+  let x = (n + 0x9e3779b9) >>> 0;
+  x = Math.imul(x ^ (x >>> 16), 0x21f0aaad) >>> 0;
+  x = Math.imul(x ^ (x >>> 15), 0x735a2d97) >>> 0;
+  return (x ^ (x >>> 15)) >>> 0;
+}
+
 /** Timers the figure can drop all at once when the viewer scrubs or pauses. */
 export function timers(){
   const pending = [];

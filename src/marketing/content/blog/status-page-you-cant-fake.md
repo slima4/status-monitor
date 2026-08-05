@@ -38,6 +38,10 @@ One version of this trap is easy to build by accident, so it is worth explaining
 
 The bar should come from the measured data. It needs only one rule to stay calm: wait for confirmation before you count downtime. You do not want one failed check from one place to turn a whole day red, because networks are noisy and one bad checker is not an outage. So you wait for agreement: more than one region failing at the same time, for more than one check in a row. That one rule is enough to keep a short blip from becoming a red day.
 
+Here is a week under that rule. The three lanes are every check, the band underneath is only what the rule let through:
+
+<div class="mk-embed-measured-week"></div>
+
 One thing matters here: the same rule feeds both your alerts and your uptime bar. If the rule that wakes your on-call person is the same rule that colors the timeline, the two can never tell different stories. The moment you add a second rule just for the bar, it will drift from the first, and the page will disagree with itself. On-call gets paged, but the public history says everything was fine.
 
 Publishing stays where it belongs, on the notes. The team decides whether to write an incident, what to say, and when to post the all-clear. They do not decide whether last Tuesday was down. [The checks](/blog/building-an-uptime-monitor-in-rust) already decided that.
