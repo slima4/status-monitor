@@ -462,6 +462,69 @@ html:has(.marketing-shell) {
 .mk-cta:active { transform: scale(0.96); }
 .mk-cta--primary:active { transform: translateY(-1px) scale(0.96); }
 
+/* ── Start line — type a URL, land on a prefilled monitor ─────────── */
+/* One input tall, so the page's shared rhythm around it reads as a hole.
+   Tailwind v4 wraps space-y in :where(), so a plain class overrides it.
+   The hero side is scoped to the pairing — other pages keep the rhythm. */
+.mk-hero:has(+ .mk-start-band) { margin-block-end: 2.5rem; }
+.mk-start-band { margin-block-end: 2.5rem; }
+.mk-start {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-inline: auto;
+    max-width: 42rem;
+}
+/* Both controls clear the 40px touch target; 2.5rem is what .mk-cta--block
+   already uses for the same reason. */
+.mk-start__field,
+.mk-start .mk-cta { min-height: 2.5rem; }
+.mk-start__field {
+    flex: 1 1 15rem;
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.5625rem 0.75rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-bg-2);
+    transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+/* The input drops its own outline, so the ring has to live on the wrapper —
+   same shape as .tool-cron-input, the other text input in this register. */
+.mk-start__field:focus-within {
+    border-color: var(--mk-ok);
+    box-shadow: 0 0 0 2px var(--mk-ok-soft);
+}
+.mk-start__prompt {
+    font-family: var(--mk-font-mono);
+    font-size: 0.875rem;
+    line-height: 1;
+    color: var(--mk-ok);
+    user-select: none;
+}
+.mk-start__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--mk-ink);
+    font-family: var(--mk-font-mono);
+    font-size: 0.875rem;
+    line-height: 1;
+}
+.mk-start__input::placeholder { color: var(--mk-quiet); }
+
+/* iOS Safari zooms the whole page when an input under 16px takes focus, which
+   throws the hero off screen mid-tap. Desktop keeps the 14px mono measure. */
+@media (max-width: 640px) {
+    .mk-start__prompt,
+    .mk-start__input { font-size: 1rem; }
+}
+
 /* ── Live pill — bracket-wrapped status indicator ─────────────────── */
 .mk-livepill {
     display: inline-flex;
@@ -1322,70 +1385,6 @@ html:has(.marketing-shell) {
 .mk-integration:hover { color: var(--mk-ink); }
 .mk-integration svg { width: 1rem; height: 1rem; fill: currentColor; }
 
-/* ── Customer quote ──────────────────────────────────────────────── */
-.mk-quote {
-    margin-inline: auto;
-    max-width: 42rem;
-    padding: 1.75rem 1.5rem;
-    text-align: left;
-    background: var(--mk-surface);
-    border: 1px solid var(--mk-rule);
-    border-left: 2px solid var(--mk-ok);
-    border-radius: 2px;
-    box-shadow: var(--mk-shadow-card);
-}
-.mk-quote__body {
-    margin: 0 0 1.25rem;
-    font-size: 1.0625rem;
-    line-height: 1.6;
-    color: var(--mk-ink);
-    text-wrap: pretty;
-}
-.mk-quote__foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 0.75rem 1rem;
-}
-.mk-quote__cite {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-    text-decoration: none;
-    transition: opacity 160ms ease;
-}
-.mk-quote__cite:hover { opacity: 0.82; }
-.mk-quote__status {
-    font-family: var(--mk-font-mono);
-    font-size: 0.75rem;
-    color: var(--mk-ok);
-    white-space: nowrap;
-    text-decoration: none;
-    transition: opacity 160ms ease;
-}
-.mk-quote__status:hover { opacity: 0.82; }
-.mk-quote__logo {
-    flex: none;
-    width: 2.5rem;
-    height: 2.5rem;
-    border-radius: 9px;
-    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.08);
-}
-.mk-quote__name {
-    display: block;
-    font-family: var(--mk-font-mono);
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--mk-ink);
-}
-.mk-quote__org {
-    display: block;
-    font-family: var(--mk-font-mono);
-    font-size: 0.75rem;
-    color: var(--mk-quiet);
-}
-
 /* ── Blog primitives ─────────────────────────────────────────────── */
 .mk-blog-row {
     display: block;
@@ -1929,9 +1928,9 @@ html:has(.marketing-shell) {
 
 .mk-hero__map .mk-map__svg {
     transform-origin: top center;
-    scale: 0.8;
+    scale: 0.64;
     /* The SVG is 150/360 as tall as it is wide; reclaim the scaled height. */
-    margin-bottom: -8.333%;
+    margin-bottom: -15%;
 }
 
 .mk-hero__map .mk-map__legend {

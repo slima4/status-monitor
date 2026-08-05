@@ -28,6 +28,7 @@ pub mod md;
 mod negotiate;
 pub mod pages;
 pub mod seo;
+pub mod start;
 pub mod tools;
 
 use std::sync::Arc;
@@ -55,6 +56,7 @@ pub fn router(cfg: MarketingCfg) -> Router {
         .route("/", get(pages::landing))
         .route("/pricing", get(pages::pricing))
         .route(pages::ARCHITECTURE_PATH, get(pages::architecture))
+        .route(start::START_PATH, get(start::start))
         .route("/robots.txt", get(seo::robots_txt))
         .route("/sitemap.xml", get(seo::sitemap_xml))
         .route("/llms.txt", get(seo::llms_txt))

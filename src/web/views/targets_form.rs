@@ -699,6 +699,10 @@ pub struct NewParams {
     pub kind: Option<String>,
     #[serde(default)]
     pub host: Option<String>,
+    /// Carried from the marketing hero, where people type the site they want
+    /// watched before they have an account.
+    #[serde(default)]
+    pub url: Option<String>,
 }
 
 /// Unrecognised kinds are ignored, not rejected: people hand-edit this URL.
@@ -709,6 +713,41 @@ fn apply_kind_param(form: &mut FormModel, kind: &str) -> bool {
     form.check_type = kind;
     form.interval_s = crate::domain::interval_hints_for_kind(kind).default;
     true
+}
+
+/// A bare host is accepted and promoted to `https://`, so `acme.com` from the
+/// marketing hero lands as a usable field. Anything that will not parse is
+/// dropped rather than shown back broken. Only `http`: flow picks its kind
+/// before the plan is known and can still be downgraded below, which would
+/// strand a URL written to the flow field.
+fn prefill_url(form: &mut FormModel, raw: &str) {
+    if form.check_type != "http" {
+        return;
+    }
+    let Some(url) = parse_monitor_url(raw) else {
+        return;
+    };
+    form.name = url.host_str().unwrap_or_default().to_owned();
+    form.http.url = url.into();
+}
+
+/// `https://` is assumed when no scheme is typed, and only the two web schemes
+/// are honoured so a `javascript:` or `file:` value never reaches the field.
+fn parse_monitor_url(raw: &str) -> Option<url::Url> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.len() > 2048 {
+        return None;
+    }
+    let candidate = if raw.contains("://") {
+        raw.to_owned()
+    } else {
+        format!("https://{raw}")
+    };
+    let url = url::Url::parse(&candidate).ok()?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none_or(str::is_empty) {
+        return None;
+    }
+    Some(url)
 }
 
 /// Kinds with no single host to fill (http, flow, heartbeat) leave the form
@@ -904,9 +943,13 @@ pub async fn new_form(
             form.owner_user_id = user_id.0.to_string();
             if let Some(kind) = params.kind.as_deref()
                 && apply_kind_param(&mut form, kind)
-                && let Some(host) = params.host.as_deref()
             {
-                prefill_host(&mut form, host);
+                if let Some(host) = params.host.as_deref() {
+                    prefill_host(&mut form, host);
+                }
+                if let Some(url) = params.url.as_deref() {
+                    prefill_url(&mut form, url);
+                }
             }
             (form, TargetAlerts::default())
         }
@@ -1250,6 +1293,31 @@ mod tests {
         let mut form = empty_create_form();
         assert!(!apply_kind_param(&mut form, "nonsense"));
         assert_eq!(form.check_type, "http");
+    }
+
+    #[test]
+    fn a_url_param_prefills_the_field_and_names_the_monitor() {
+        let mut form = empty_create_form();
+        prefill_url(&mut form, "acme.com/health");
+        assert_eq!(form.http.url, "https://acme.com/health");
+        assert_eq!(form.name, "acme.com");
+
+        // Every other kind is left alone, flow included — the plan can still
+        // downgrade it to http and a flow-field URL would be lost.
+        for kind in ["flow", "ping"] {
+            let mut form = empty_create_form();
+            assert!(apply_kind_param(&mut form, kind));
+            prefill_url(&mut form, "acme.com");
+            assert!(
+                form.flow.start_url.is_empty() && form.ping.host.is_empty(),
+                "{kind}"
+            );
+        }
+        for raw in ["", "javascript:alert(1)", "https://"] {
+            let mut form = empty_create_form();
+            prefill_url(&mut form, raw);
+            assert!(form.http.url.is_empty(), "{raw}");
+        }
     }
 
     #[test]
