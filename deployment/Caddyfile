@@ -523,7 +523,9 @@ www.{$UPTIMEPAGE_DOMAIN} {
 		# img-src also allows our own status badge served from the status host.
 		# form-action names the app host because Chrome applies it to the whole
 		# redirect chain, and /start hands the hero's URL to the app's login.
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://uptimepage.{$UPTIMEPAGE_DOMAIN}; style-src 'self'; script-src 'self' https://analytics.{$UPTIMEPAGE_DOMAIN}; connect-src 'self' https://analytics.{$UPTIMEPAGE_DOMAIN}; base-uri 'self'; form-action 'self' https://app.{$UPTIMEPAGE_DOMAIN}; frame-ancestors 'none'"
+		# connect-src names the two DoH resolvers the DNS tool reads from the
+		# visitor's own browser, which is why that tool needs no egress here.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https://uptimepage.{$UPTIMEPAGE_DOMAIN}; style-src 'self'; script-src 'self' https://analytics.{$UPTIMEPAGE_DOMAIN}; connect-src 'self' https://analytics.{$UPTIMEPAGE_DOMAIN} https://cloudflare-dns.com https://dns.google; base-uri 'self'; form-action 'self' https://app.{$UPTIMEPAGE_DOMAIN}; frame-ancestors 'none'"
 		-Server
 	}
 

@@ -920,6 +920,114 @@ async fn incident_update(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMa
     serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
 }
 
+// ── DNS lookup ────────────────────────────────────────────────────────
+
+pub const DNS_LOOKUP_PATH: &str = "/tools/dns-lookup";
+const DNS_LOOKUP_CREATED: &str = "2026-08-05";
+pub const DNS_LOOKUP_LASTMOD: &str = "2026-08-05";
+pub const DNS_LOOKUP_TITLE: &str = "DNS Lookup: Compare Two Resolvers Side by Side";
+pub const DNS_LOOKUP_DESCRIPTION: &str = "Check A, MX, NS, TXT and CAA records against Cloudflare and Google at once and see where they disagree. Free, no sign-up, runs in your browser.";
+
+/// Offered record types. The number is the DNS RR type the resolvers take, kept
+/// beside the label so the template and the script cannot drift.
+const DNS_RECORD_TYPES: &[(&str, u16, &str)] = &[
+    ("A", 1, "IPv4 address the name points at"),
+    ("AAAA", 28, "IPv6 address the name points at"),
+    ("CNAME", 5, "Alias pointing this name at another"),
+    ("MX", 15, "Mail servers, in priority order"),
+    ("NS", 2, "Nameservers the zone is delegated to"),
+    ("TXT", 16, "Free-form text: SPF, DMARC, domain verification"),
+    ("SOA", 6, "Zone's start of authority and serial"),
+    ("CAA", 257, "Which authorities may issue certificates"),
+];
+
+const DNS_LOOKUP_FAQS: &[(&str, &str)] = &[
+    (
+        "Why do two resolvers return different answers?",
+        "Usually you are seeing a change mid-flight: a record was edited and one resolver still holds the old answer until its TTL runs out. It can also mean a filtering or captive resolver is rewriting the answer, which is what makes a site look down from one network and fine from every other.",
+    ),
+    (
+        "What is a TTL?",
+        "Time to live, in seconds: how long a resolver may cache the answer before asking again. A record with a TTL of 3600 can keep serving the old value for an hour after you change it, so lower the TTL before a planned migration, not after.",
+    ),
+    (
+        "My site loads but mail stopped. What should I check?",
+        "Look at MX first, then TXT for the SPF record. A domain that expired and got parked keeps answering on port 80, so an uptime check stays green while MX records quietly disappear and mail dies. That failure is invisible to anything that only watches the homepage.",
+    ),
+    (
+        "Does this send my domain anywhere?",
+        "The lookup runs in your browser and goes straight to the public resolvers at Cloudflare and Google. It does not pass through our servers, and nothing is stored.",
+    ),
+    (
+        "Can I be told when these records change?",
+        "Yes. A DNS check watches a name and record type on a schedule and alerts when the answer changes or disappears. The button beside each result opens a monitor prefilled with what you just looked up.",
+    ),
+];
+
+#[derive(Template, WebTemplate)]
+#[template(path = "marketing/tool_dns_lookup.html")]
+struct DnsLookupPage {
+    app_url: String,
+    canonical_url: String,
+    og: OpenGraph,
+    breadcrumb_json_ld: JsonLd,
+    web_application_json_ld: JsonLd,
+    webpage_json_ld: JsonLd,
+    faq_json_ld: JsonLd,
+    faqs: &'static [(&'static str, &'static str)],
+    record_types: &'static [(&'static str, u16, &'static str)],
+    version: &'static str,
+}
+
+static DNS_LOOKUP_CACHED: OnceLock<CachedRender> = OnceLock::new();
+
+fn render_dns_lookup(cfg: &MarketingCfg) -> CachedRender {
+    let canonical_url = format!("{}{}", cfg.canonical_origin, DNS_LOOKUP_PATH);
+    let mut og = OpenGraph::default_for(
+        &format!("{DNS_LOOKUP_TITLE} | {BRAND}"),
+        &canonical_url,
+        &cfg.canonical_origin,
+    );
+    og.description = DNS_LOOKUP_DESCRIPTION.to_string();
+    let page = DnsLookupPage {
+        app_url: cfg.app_url.clone(),
+        breadcrumb_json_ld: json_ld_breadcrumb(
+            &cfg.canonical_origin,
+            DNS_LOOKUP_TITLE,
+            DNS_LOOKUP_PATH,
+        ),
+        web_application_json_ld: json_ld_web_application(
+            &cfg.canonical_origin,
+            DNS_LOOKUP_TITLE,
+            DNS_LOOKUP_PATH,
+            DNS_LOOKUP_DESCRIPTION,
+        ),
+        webpage_json_ld: json_ld_webpage(
+            &cfg.canonical_origin,
+            DNS_LOOKUP_PATH,
+            DNS_LOOKUP_TITLE,
+            DNS_LOOKUP_CREATED,
+            DNS_LOOKUP_LASTMOD,
+            true,
+        ),
+        faq_json_ld: json_ld_faqpage(DNS_LOOKUP_FAQS),
+        faqs: DNS_LOOKUP_FAQS,
+        record_types: DNS_RECORD_TYPES,
+        canonical_url,
+        og,
+        version: env!("CARGO_PKG_VERSION"),
+    };
+    let body = page
+        .render()
+        .unwrap_or_else(|e| format!("<!-- dns-lookup render failed: {e} -->"));
+    cached_render(body)
+}
+
+async fn dns_lookup(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Response {
+    let cached = DNS_LOOKUP_CACHED.get_or_init(|| render_dns_lookup(&cfg));
+    serve_cached(&headers, cached, &TOOL_CACHE_CONTROL)
+}
+
 /// Path + copy for each tool, so the sitemap and llms index iterate one list.
 pub struct ToolMeta {
     pub path: &'static str,
@@ -952,6 +1060,12 @@ pub const TOOLS: &[ToolMeta] = &[
         title: INCIDENT_UPDATE_TITLE,
         description: INCIDENT_UPDATE_DESCRIPTION,
         lastmod: INCIDENT_UPDATE_LASTMOD,
+    },
+    ToolMeta {
+        path: DNS_LOOKUP_PATH,
+        title: DNS_LOOKUP_TITLE,
+        description: DNS_LOOKUP_DESCRIPTION,
+        lastmod: DNS_LOOKUP_LASTMOD,
     },
 ];
 
@@ -1032,6 +1146,7 @@ pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<Market
         .route(CRON_PATH, axum::routing::get(cron))
         .route(ERROR_BUDGET_PATH, axum::routing::get(error_budget))
         .route(INCIDENT_UPDATE_PATH, axum::routing::get(incident_update))
+        .route(DNS_LOOKUP_PATH, axum::routing::get(dns_lookup))
 }
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
@@ -1040,6 +1155,7 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     CRON_CACHED.get_or_init(|| render_cron(cfg));
     ERROR_BUDGET_CACHED.get_or_init(|| render_error_budget(cfg));
     INCIDENT_UPDATE_CACHED.get_or_init(|| render_incident_update(cfg));
+    DNS_LOOKUP_CACHED.get_or_init(|| render_dns_lookup(cfg));
 }
 
 #[cfg(test)]

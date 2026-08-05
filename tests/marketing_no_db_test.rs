@@ -445,6 +445,36 @@ async fn llms_txt_renders() {
 }
 
 #[tokio::test]
+async fn dns_lookup_tool_renders_without_db() {
+    let (status, body, _headers) = get("/tools/dns-lookup").await;
+    assert_eq!(status, StatusCode::OK);
+    // No server-side lookup exists, so the value the page must carry with JS
+    // off is the reference: every offered record type and what it answers.
+    for ty in ["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "CAA"] {
+        assert!(
+            body.contains(&format!(">{ty}<")),
+            "missing record type {ty}"
+        );
+    }
+    assert!(
+        body.contains("js/marketing/dns_lookup"),
+        "must load the lookup script"
+    );
+    assert!(
+        body.contains("WebApplication") && body.contains("isAccessibleForFree"),
+        "must carry the free WebApplication schema"
+    );
+    assert!(
+        body.contains("FAQPage"),
+        "must carry the FAQ schema the visible copy mirrors"
+    );
+    assert!(
+        !body.contains("cloudflare-dns.com"),
+        "resolver endpoints belong in the script, not the cached HTML"
+    );
+}
+
+#[tokio::test]
 async fn uptime_sla_tool_renders_without_db() {
     let (status, body, headers) = get("/tools/uptime-sla-calculator").await;
     assert_eq!(status, StatusCode::OK);

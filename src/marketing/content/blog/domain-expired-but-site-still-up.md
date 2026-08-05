@@ -56,7 +56,7 @@ Now your customers cannot get in. They panic. They email to ask whether you are 
 
 > **Why the mail dies with it**
 >
-> The registration carries your MX records, so when it lapses, mail to every address on the domain starts bouncing. The website looks up and the inbox goes silent, and the two failures do not obviously connect. That is why the angry email never reaches you.
+> The registration carries your MX records, so when it lapses, mail to every address on the domain starts bouncing. The website looks up and the inbox goes silent, and the two failures do not obviously connect. That is why the angry email never reaches you. You can see it for yourself in a few seconds: read the [MX records with the DNS lookup tool](/tools/dns-lookup), and an expired domain comes back with none.
 
 ![An illustration of a server disconnected from its monitor, the link between them broken.](/static/marketing/blog-domain-expiry-server-down.webp)
 
