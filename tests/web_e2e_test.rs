@@ -506,6 +506,64 @@ async fn settings_account_redirects_to_login_when_unauthenticated() {
     assert!(loc.starts_with("/login"), "redirect target was {loc}");
 }
 
+/// A signed-in browser that named a destination skips the sign-in form, so the
+/// marketing URL box does not bounce a returning visitor through OAuth. Bare
+/// `/login` keeps rendering: that is how a second account is reached.
+#[tokio::test]
+async fn login_honours_a_destination_for_an_already_signed_in_browser() {
+    let signed_in = build_test_app_with_web_and_owner(|_| {});
+    let resp = signed_in
+        .clone()
+        .oneshot(
+            Request::get("/login?redirect_after=%2Ftargets%2Fnew%3Fkind%3Dhttp%26url%3Dacme.com")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(resp.status().is_redirection(), "got {}", resp.status());
+    assert_eq!(
+        resp.headers()
+            .get(header::LOCATION)
+            .and_then(|v| v.to_str().ok()),
+        Some("/targets/new?kind=http&url=acme.com")
+    );
+
+    // An invitation owns its own accept flow, bare /login is how a second
+    // account is reached, and every off-site shape stays refused — including
+    // the control bytes a browser strips before resolving the URL.
+    for query in [
+        "",
+        "?redirect_after=%2F&invitation=tok",
+        "?redirect_after=https%3A%2F%2Fevil.test",
+        "?redirect_after=%2F%2Fevil.test",
+        "?redirect_after=%2F%5Cevil.test",
+        "?redirect_after=%2F%09%2Fevil.test",
+        "?redirect_after=%2F%0A%2Fevil.test",
+    ] {
+        let resp = signed_in
+            .clone()
+            .oneshot(
+                Request::get(format!("/login{query}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{query}");
+    }
+
+    let anon = build_test_app_with_web(|_| {})
+        .oneshot(
+            Request::get("/login?redirect_after=%2Ftargets%2Fnew")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(anon.status(), StatusCode::OK);
+}
+
 /// Operator HTML pages must redirect an anonymous browser to `/login`.
 /// The `AuthedBrowser` gate is the single auth model — there is no
 /// no-auth pass-through anywhere in the binary.

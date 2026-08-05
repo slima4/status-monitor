@@ -7,10 +7,12 @@
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Query, State};
+use axum::response::{IntoResponse, Redirect, Response};
 use serde::Deserialize;
 
 use crate::app::AppState;
 use crate::auth::url::safe_redirect_target;
+use crate::web::auth::Session;
 use crate::web::filters;
 
 /// Sentinel matched against `nav` in base.html so the header doesn't render
@@ -66,7 +68,18 @@ pub async fn login(
     State(state): State<AppState>,
     Query(q): Query<LoginQuery>,
     cookies: tower_cookies::Cookies,
-) -> LoginPage {
+    session: Session,
+) -> Response {
+    // Someone signed in who named a destination is not here to sign in. Bare
+    // `/login` still renders, so a second account is still reachable, and an
+    // invitation keeps its own accept flow.
+    if session.user_id().is_some()
+        && q.invitation.is_none()
+        && let Some(target) = q.redirect_after.as_deref().and_then(safe_redirect_target)
+    {
+        return Redirect::to(target).into_response();
+    }
+
     let mut params: Vec<(&str, String)> = Vec::new();
     if let Some(r) = q.redirect_after.as_deref().and_then(safe_redirect_target) {
         params.push(("redirect_after", r.to_string()));
@@ -96,6 +109,7 @@ pub async fn login(
         ready: login_ready(&state).await,
         analytics: crate::analytics::website_id(&state.cfg.auth.public_base_url),
     }
+    .into_response()
 }
 
 /// Process-global cached readiness for the (public, unauthenticated) login
