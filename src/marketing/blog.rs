@@ -235,7 +235,8 @@ const EMBEDS: &[(&str, &str)] = &[
 /// dropped before the bytes leave this function.
 pub fn render(markdown: &str) -> String {
     let mut html = String::new();
-    pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(parser(markdown)));
+    let events = super::highlight::code_blocks(parser(markdown));
+    pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(events.into_iter()));
     // Declared before the builder so it outlives the borrow taken below.
     let mounts: Vec<&str> = EMBEDS.iter().map(|(mount, _)| *mount).collect();
     let mut safe = ammonia::Builder::default();
@@ -243,11 +244,10 @@ pub fn render(markdown: &str) -> String {
         .add_tags(["details", "summary"])
         .add_allowed_classes("div", &["mk-table-scroll", "mk-faq__body"])
         .add_allowed_classes("details", &["mk-faq"])
-        .add_tag_attributes("div", &["tabindex"])
-        // Keep pulldown's `language-*` class so a language-tagged block reads as
-        // code (scroll) and a plain fence reads as prose (wrap). A class cannot
-        // execute, so this widens nothing dangerous.
-        .add_tag_attributes("code", &["class"]);
+        .add_tag_attributes("div", &["tabindex"]);
+    // Token spans and the `language-*` class the wrap rules key off. A class
+    // cannot execute, so this widens nothing dangerous.
+    super::highlight::allow_markup(&mut safe);
     safe.add_allowed_classes("div", &mounts);
     safe.clean(&html).to_string()
 }

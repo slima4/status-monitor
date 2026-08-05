@@ -1604,15 +1604,15 @@ html:has(.marketing-shell) {
 }
 .mk-article pre {
     font-family: var(--mk-font-mono);
-    background: oklch(0.16 0.012 240);
-    color: oklch(0.92 0.008 240);
+    color: #d8dee9;
+    background: #2e3440;
     padding: 1rem 1.125rem;
     border-radius: 2px;
     overflow-x: auto;
     margin: 1.25rem 0;
-    font-size: 0.8125rem;
-    line-height: 1.55;
-    border: 1px solid oklch(0.26 0.012 240);
+    font-size: 0.875rem;
+    line-height: 1.6;
+    border: 1px solid #3b4252;
 }
 .mk-article pre code {
     background: transparent;
@@ -1622,8 +1622,446 @@ html:has(.marketing-shell) {
 }
 /* A plain fence (no language) is prose: prompts, commands, output. It wraps so
    nothing hides behind a scrollbar. A language-tagged block keeps its shape and
-   scrolls. The fence language is the wrap switch. */
+   scrolls. The fence language is the wrap switch, on blog posts — docs opt out
+   of the switch further down and wrap everything. */
 .mk-article pre code:not([class]) {
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+}
+/* Nord, generated from the two-face theme set against the `hl-` class prefix.
+   Token background tints are dropped: a tint behind a word reads as a search
+   hit, not a colour scheme. Comments are lightened off Nord's own `#616e88`,
+   which lands at 2.4:1 here. */
+.mk-article pre .hl-comment, .mk-article pre .hl-punctuation.hl-definition.hl-comment {
+    color: #939fb8;
+}
+.mk-article pre .hl-constant.hl-numeric {
+    color: #b48ead;
+}
+.mk-article pre .hl-constant.hl-language {
+    color: #81a1c1;
+}
+.mk-article pre .hl-constant.hl-character.hl-escape {
+    color: #ebcb8b;
+}
+.mk-article pre .hl-constant.hl-other.hl-placeholder {
+    color: #ebcb8b;
+}
+.mk-article pre .hl-constant.hl-other {
+    color: #d8dee9;
+}
+.mk-article pre .hl-entity.hl-name.hl-class {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-entity.hl-name.hl-struct {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-entity.hl-name.hl-enum {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-entity.hl-name.hl-union {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-entity.hl-name.hl-trait {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-entity.hl-name.hl-interface {
+    color: #8fbcbb;
+    font-weight: bold;
+}
+.mk-article pre .hl-entity.hl-name.hl-type {
+    color: #81a1c1;
+}
+.mk-article pre .hl-entity.hl-other.hl-inherited-class {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-entity.hl-name.hl-function {
+    color: #88c0d0;
+}
+.mk-article pre .hl-entity.hl-name.hl-function.hl-constructor {
+    color: #88c0d0;
+}
+.mk-article pre .hl-entity.hl-name.hl-function.hl-destructor {
+    color: #88c0d0;
+}
+.mk-article pre .hl-entity.hl-name.hl-namespace {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-entity.hl-name.hl-constant {
+    color: #81a1c1;
+}
+.mk-article pre .hl-entity.hl-name.hl-label {
+    color: #5e81ac;
+}
+.mk-article pre .hl-entity.hl-name.hl-section {
+    color: #88c0d0;
+}
+.mk-article pre .hl-entity.hl-name.hl-tag {
+    color: #81a1c1;
+}
+.mk-article pre .hl-entity.hl-other.hl-attribute-name {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-invalid.hl-illegal {
+    color: #d8dee9;
+}
+.mk-article pre .hl-invalid.hl-deprecated {
+    color: #d8dee9;
+}
+.mk-article pre .hl-keyword.hl-control {
+    color: #81a1c1;
+}
+.mk-article pre .hl-keyword.hl-control.hl-conditional {
+    color: #81a1c1;
+}
+.mk-article pre .hl-keyword.hl-control.hl-import {
+    color: #81a1c1;
+}
+.mk-article pre .hl-punctuation.hl-definition.hl-keyword {
+    color: #81a1c1;
+}
+.mk-article pre .hl-keyword.hl-other {
+    color: #81a1c1;
+}
+.mk-article pre .hl-keyword.hl-operator, .mk-article pre .hl-keyword.hl-operator.hl-assignment, .mk-article pre .hl-keyword.hl-operator.hl-arithmetic, .mk-article pre .hl-keyword.hl-operator.hl-bitwise, .mk-article pre .hl-keyword.hl-operator.hl-logical, .mk-article pre .hl-keyword.hl-operator.hl-word {
+    color: #81a1c1;
+}
+.mk-article pre .hl-markup.hl-heading {
+    color: #88c0d0;
+}
+.mk-article pre .hl-markup.hl-list.hl-unnumbered, .mk-article pre .hl-markup.hl-list.hl-numbered {
+    color: #d8dee9;
+}
+.mk-article pre .hl-markup.hl-bold {
+    font-weight: bold;
+}
+.mk-article pre .hl-markup.hl-italic {
+    font-style: italic;
+}
+.mk-article pre .hl-markup.hl-inserted {
+    color: #a3be8c;
+}
+.mk-article pre .hl-markup.hl-deleted {
+    color: #bf616a;
+}
+.mk-article pre .hl-markup.hl-changed {
+    color: #ebcb8b;
+}
+.mk-article pre .hl-markup.hl-quote {
+    color: #616e88;
+}
+.mk-article pre .hl-markup.hl-raw.hl-inline, .mk-article pre .hl-markup.hl-raw.hl-block {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-punctuation.hl-separator, .mk-article pre .hl-punctuation.hl-terminator {
+    color: #eceff4;
+}
+.mk-article pre .hl-punctuation.hl-separator.hl-continuation, .mk-article pre .hl-punctuation.hl-accessor {
+    color: #81a1c1;
+}
+.mk-article pre .hl-punctuation.hl-definition.hl-tag {
+    color: #81a1c1;
+}
+.mk-article pre .hl-storage.hl-type, .mk-article pre .hl-storage.hl-modifier {
+    color: #81a1c1;
+}
+.mk-article pre .hl-string.hl-quoted.hl-single, .mk-article pre .hl-string.hl-quoted.hl-double, .mk-article pre .hl-string.hl-quoted.hl-triple, .mk-article pre .hl-string.hl-quoted.hl-other, .mk-article pre .hl-string.hl-unquoted {
+    color: #a3be8c;
+}
+.mk-article pre .hl-punctuation.hl-definition.hl-string.hl-begin, .mk-article pre .hl-punctuation.hl-definition.hl-string.hl-end {
+    color: #a3be8c;
+}
+.mk-article pre .hl-string.hl-regexp {
+    color: #ebcb8b;
+}
+.mk-article pre .hl-support.hl-constant {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-support.hl-function {
+    color: #88c0d0;
+}
+.mk-article pre .hl-support.hl-module {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-support.hl-type {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-support.hl-class {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-text.hl-html.hl-basic, .mk-article pre .hl-text.hl-xml {
+    color: #eceff4;
+}
+.mk-article pre .hl-variable.hl-other, .mk-article pre .hl-variable.hl-other.hl-readwrite {
+    color: #d8dee9;
+}
+.mk-article pre .hl-punctuation.hl-definition.hl-variable {
+    color: #81a1c1;
+}
+.mk-article pre .hl-variable.hl-other.hl-constant {
+    color: #81a1c1;
+}
+.mk-article pre .hl-variable.hl-language {
+    color: #81a1c1;
+}
+.mk-article pre .hl-variable.hl-parameter {
+    color: #d8dee9;
+}
+.mk-article pre .hl-variable.hl-other.hl-member {
+    color: #d8dee9;
+}
+.mk-article pre .hl-variable.hl-function {
+    color: #88c0d0;
+}
+.mk-article pre .hl-constant.hl-numeric.hl-line-number.hl-find-in-files {
+    color: #d8dee9;
+}
+.mk-article pre .hl-constant.hl-numeric.hl-line-number.hl-match.hl-find-in-files {
+    color: #88c0d0;
+}
+.mk-article pre .hl-entity.hl-name.hl-filename.hl-find-in-files {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-text.hl-find-in-files {
+    color: #d8dee9;
+}
+.mk-article pre .hl-source.hl-c .hl-keyword.hl-control.hl-import.hl-include.hl-c, .mk-article pre .hl-source.hl-c .hl-meta.hl-preprocessor.hl-c .hl-keyword.hl-control.hl-import.hl-c, .mk-article pre .hl-source.hl-c\2b \2b  .hl-keyword.hl-control.hl-import.hl-include.hl-c\2b \2b, .mk-article pre .hl-source.hl-c\2b \2b  .hl-meta.hl-preprocessor.hl-c\2b \2b  .hl-keyword.hl-control.hl-import.hl-c\2b \2b {
+    color: #5e81ac;
+}
+.mk-article pre .hl-source.hl-c .hl-keyword.hl-operator.hl-word.hl-c, .mk-article pre .hl-source.hl-c\2b \2b  .hl-keyword.hl-operator.hl-word.hl-c\2b \2b {
+    color: #88c0d0;
+    font-style: italic;
+}
+.mk-article pre .hl-source.hl-css .hl-support.hl-type.hl-property-name.hl-css, .mk-article pre .hl-source.hl-sass .hl-support.hl-type.hl-property-name.hl-sass, .mk-article pre .hl-source.hl-css .hl-support.hl-type.hl-vendor-prefix.hl-css {
+    color: #d8dee9;
+}
+.mk-article pre .hl-source.hl-css .hl-constant.hl-other.hl-color.hl-rgb-value.hl-css, .mk-article pre .hl-source.hl-sass .hl-constant.hl-other.hl-rgb-value.hl-sass {
+    color: #b48ead;
+}
+.mk-article pre .hl-source.hl-css .hl-support.hl-constant.hl-color.hl-w3c-special-color-keyword.hl-css, .mk-article pre .hl-source.hl-css .hl-support.hl-constant.hl-property-value.hl-css, .mk-article pre .hl-source.hl-sass .hl-support.hl-constant.hl-property-value.hl-sass {
+    color: #81a1c1;
+}
+.mk-article pre .hl-source.hl-css .hl-entity.hl-other.hl-pseudo-class.hl-css {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-css .hl-keyword.hl-control.hl-at-rule.hl-media.hl-css, .mk-article pre .hl-source.hl-css .hl-punctuation.hl-definition.hl-keyword.hl-css, .mk-article pre .hl-source.hl-sass .hl-keyword.hl-control.hl-at-rule.hl-sass {
+    color: #d08770;
+}
+.mk-article pre .hl-source.hl-css .hl-support.hl-constant.hl-color.hl-w3c-standard-color-name.hl-css {
+    color: #81a1c1;
+    font-style: italic;
+}
+.mk-article pre .hl-source.hl-css .hl-entity.hl-other.hl-attribute-name.hl-id.hl-css, .mk-article pre .hl-source.hl-sass .hl-entity.hl-other.hl-attribute-name.hl-id.hl-sass {
+    font-weight: bold;
+}
+.mk-article pre .hl-source.hl-diff .hl-meta.hl-diff.hl-range.hl-context {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-diff .hl-meta.hl-diff.hl-header.hl-from-file {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-diff .hl-punctuation.hl-definition.hl-from-file {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-diff .hl-punctuation.hl-definition.hl-separator {
+    color: #81a1c1;
+}
+.mk-article pre .hl-source.hl-go .hl-support.hl-function.hl-builtin.hl-go {
+    font-style: italic;
+}
+.mk-article pre .hl-text.hl-html.hl-basic .hl-constant.hl-character.hl-entity.hl-html {
+    color: #ebcb8b;
+}
+.mk-article pre .hl-variable.hl-annotation.hl-java, .mk-article pre .hl-punctuation.hl-definition.hl-annotation.hl-java {
+    color: #d08770;
+}
+.mk-article pre .hl-punctuation.hl-accessor.hl-dot.hl-java {
+    color: #eceff4;
+}
+.mk-article pre .hl-support.hl-other.hl-package.hl-java {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-java .hl-comment.hl-block.hl-documentation.hl-javadoc .hl-punctuation.hl-definition.hl-entity.hl-html {
+    color: #81a1c1;
+}
+.mk-article pre .hl-source.hl-java .hl-entity.hl-name.hl-constant {
+    color: #d8dee9;
+}
+.mk-article pre .hl-source.hl-java .hl-keyword.hl-other.hl-documentation, .mk-article pre .hl-source.hl-java .hl-comment.hl-block.hl-documentation.hl-javadoc .hl-punctuation.hl-definition.hl-keyword.hl-javadoc {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-java .hl-variable.hl-parameter.hl-type.hl-java {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-java .hl-entity.hl-other.hl-inherited-class.hl-java {
+    color: #8fbcbb;
+    font-weight: bold;
+}
+.mk-article pre .hl-source.hl-java .hl-keyword.hl-declaration.hl-implements.hl-java {
+    color: #81a1c1;
+}
+.mk-article pre .hl-source.hl-json .hl-meta.hl-structure.hl-dictionary.hl-json .hl-meta.hl-structure.hl-dictionary.hl-key.hl-json .hl-string.hl-quoted.hl-double.hl-json, .mk-article pre .hl-source.hl-json.hl-sublime .hl-meta.hl-structure.hl-dictionary.hl-json .hl-meta.hl-structure.hl-dictionary.hl-key.hl-json .hl-string.hl-quoted.hl-double.hl-json {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-json .hl-meta.hl-structure.hl-dictionary.hl-json .hl-punctuation.hl-definition.hl-string.hl-begin.hl-json, .mk-article pre .hl-source.hl-json .hl-meta.hl-structure.hl-dictionary.hl-json .hl-punctuation.hl-definition.hl-string.hl-end.hl-json, .mk-article pre .hl-source.hl-json.hl-sublime .hl-meta.hl-structure.hl-dictionary.hl-json .hl-punctuation.hl-definition.hl-string.hl-begin.hl-json, .mk-article pre .hl-source.hl-json.hl-sublime .hl-meta.hl-structure.hl-dictionary.hl-json .hl-punctuation.hl-definition.hl-string.hl-end.hl-json {
+    color: #eceff4;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-raw.hl-code-fence.hl-begin.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-raw.hl-code-fence.hl-end.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-markup.hl-raw.hl-code-fence.hl-markdown .hl-constant.hl-other.hl-language-name.hl-markdown {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-list_item.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-markup.hl-list.hl-numbered.hl-bullet.hl-markdown {
+    color: #81a1c1;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-markup.hl-quote.hl-markdown .hl-punctuation.hl-definition.hl-blockquote.hl-markdown {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-meta.hl-link.hl-inline.hl-description.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-meta.hl-image.hl-inline.hl-description.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-meta.hl-link.hl-reference.hl-description.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-constant.hl-other.hl-reference.hl-link.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-entity.hl-name.hl-reference.hl-link.hl-markdown {
+    color: #88c0d0;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-link.hl-begin.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-link.hl-end.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-image.hl-begin.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-image.hl-end.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-constant.hl-begin.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-constant.hl-end.hl-markdown {
+    color: #81a1c1;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-separator.hl-table-cell.hl-markdown, .mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-section.hl-table-header.hl-markdown {
+    color: #81a1c1;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-meta.hl-table.hl-header.hl-markdown {
+    color: #88c0d0;
+}
+.mk-article pre .hl-text.hl-html.hl-markdown .hl-punctuation.hl-definition.hl-thematic-break.hl-markdown {
+    color: #81a1c1;
+    font-weight: bold;
+}
+.mk-article pre .hl-embedding.hl-php .hl-text.hl-html.hl-basic .hl-punctuation.hl-section.hl-embedded.hl-begin.hl-php, .mk-article pre .hl-embedding.hl-php .hl-text.hl-html.hl-basic .hl-punctuation.hl-section.hl-embedded.hl-end.hl-php {
+    color: #5e81ac;
+}
+.mk-article pre .hl-embedding.hl-php .hl-text.hl-html.hl-basic .hl-comment.hl-block.hl-documentation.hl-phpdoc.hl-php .hl-keyword.hl-other.hl-phpdoc.hl-php {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-embedding.hl-php .hl-text.hl-html.hl-basic .hl-support.hl-other.hl-namespace.hl-php {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-python .hl-meta.hl-annotation.hl-python .hl-meta.hl-qualified-name.hl-python .hl-support.hl-function.hl-builtin.hl-python, .mk-article pre .hl-source.hl-python .hl-punctuation.hl-definition.hl-annotation.hl-python {
+    color: #d08770;
+}
+.mk-article pre .hl-support.hl-function.hl-builtin.hl-python {
+    font-style: italic;
+}
+.mk-article pre .hl-source.hl-python .hl-support.hl-type.hl-exception.hl-python {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-python .hl-support.hl-type.hl-python {
+    color: #81a1c1;
+}
+.mk-article pre .hl-source.hl-sass .hl-variable.hl-parameter.hl-sass {
+    color: #d8dee9;
+    font-weight: bold;
+}
+.mk-article pre .hl-source.hl-ruby .hl-support.hl-function.hl-builtin.hl-ruby {
+    font-style: italic;
+}
+.mk-article pre .hl-source.hl-shell .hl-support.hl-function.hl-builtin.hl-shell {
+    font-style: italic;
+}
+.mk-article pre .hl-text.hl-xml .hl-entity.hl-name.hl-tag.hl-namespace {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-text.hl-xml .hl-meta.hl-tag.hl-sgml.hl-doctype.hl-xml, .mk-article pre .hl-text.hl-xml .hl-meta.hl-tag.hl-preprocessor .hl-entity.hl-name.hl-tag, .mk-article pre .hl-text.hl-xml .hl-meta.hl-tag.hl-preprocessor.hl-xml .hl-punctuation.hl-definition.hl-tag.hl-begin.hl-xml, .mk-article pre .hl-text.hl-xml .hl-meta.hl-tag.hl-preprocessor.hl-xml .hl-punctuation.hl-definition.hl-tag.hl-end.hl-xml, .mk-article pre .hl-text.hl-xml .hl-meta.hl-tag.hl-sgml.hl-doctype.hl-xml .hl-punctuation.hl-definition.hl-tag.hl-begin.hl-xml, .mk-article pre .hl-text.hl-xml .hl-meta.hl-tag.hl-sgml.hl-doctype.hl-xml .hl-punctuation.hl-definition.hl-tag.hl-end.hl-xml {
+    color: #5e81ac;
+}
+.mk-article pre .hl-text.hl-xml .hl-string.hl-unquoted.hl-cdata.hl-xml .hl-punctuation.hl-definition.hl-string.hl-begin.hl-xml, .mk-article pre .hl-text.hl-xml .hl-string.hl-unquoted.hl-cdata.hl-xml .hl-punctuation.hl-definition.hl-string.hl-end.hl-xml {
+    color: #d08770;
+    font-style: italic;
+}
+.mk-article pre .hl-source.hl-yaml .hl-entity.hl-name.hl-tag {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-sublimelinter.hl-mark.hl-warning {
+    color: #ebcb8b;
+}
+.mk-article pre .hl-sublimelinter.hl-mark.hl-error {
+    color: #bf616a;
+}
+.mk-article pre .hl-markup.hl-ignored.hl-git_gutter {
+    color: #616e88;
+}
+.mk-article pre .hl-markup.hl-untracked.hl-git_gutter {
+    color: #88c0d0;
+}
+.mk-article pre .hl-markup.hl-inserted.hl-git_gutter {
+    color: #a3be8c;
+}
+.mk-article pre .hl-markup.hl-changed.hl-git_gutter {
+    color: #ebcb8b;
+}
+.mk-article pre .hl-markup.hl-deleted.hl-git_gutter {
+    color: #bf616a;
+}
+.mk-article pre .hl-source.hl-js .hl-tag.hl-decorator.hl-js .hl-entity.hl-name.hl-tag.hl-js, .mk-article pre .hl-source.hl-js .hl-tag.hl-decorator.hl-js .hl-punctuation.hl-definition.hl-tag.hl-js {
+    color: #d08770;
+}
+.mk-article pre .hl-source.hl-js .hl-string.hl-quoted.hl-js, .mk-article pre .hl-source.hl-js .hl-string.hl-quoted.hl-jsx, .mk-article pre .hl-source.hl-js .hl-meta.hl-class.hl-js .hl-meta.hl-class.hl-property.hl-js .hl-string.hl-interpolated.hl-js, .mk-article pre .hl-source.hl-js .hl-string.hl-interpolated.hl-js, .mk-article pre .hl-source.hl-js .hl-string.hl-template.hl-js {
+    color: #a3be8c;
+}
+.mk-article pre .hl-source.hl-js .hl-variable.hl-other.hl-constant.hl-js {
+    color: #d8dee9;
+    font-weight: bold;
+}
+.mk-article pre .hl-source.hl-js .hl-constant.hl-other.hl-object.hl-key.hl-js .hl-string.hl-unquoted.hl-label.hl-js, .mk-article pre .hl-source.hl-js .hl-variable.hl-other.hl-readwrite.hl-js {
+    color: #d8dee9;
+}
+.mk-article pre .hl-source.hl-js .hl-meta.hl-class.hl-js .hl-meta.hl-class.hl-property.hl-js .hl-variable.hl-other.hl-property.hl-js {
+    color: #88c0d0;
+}
+.mk-article pre .hl-source.hl-js .hl-variable.hl-other.hl-property.hl-static.hl-js {
+    font-style: italic;
+}
+.mk-article pre .hl-source.hl-js .hl-variable.hl-other.hl-class.hl-js {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-js .hl-string.hl-interpolated.hl-js .hl-keyword.hl-other.hl-substitution.hl-begin.hl-js, .mk-article pre .hl-source.hl-js .hl-string.hl-interpolated.hl-js .hl-keyword.hl-other.hl-substitution.hl-end.hl-js, .mk-article pre .hl-source.hl-js .hl-punctuation.hl-definition.hl-template-expression.hl-begin.hl-js, .mk-article pre .hl-source.hl-js .hl-punctuation.hl-definition.hl-template-expression.hl-end.hl-js {
+    color: #5e81ac;
+}
+.mk-article pre .hl-source.hl-js .hl-keyword.hl-operator.hl-spread.hl-js {
+    color: #81a1c1;
+}
+.mk-article pre .hl-source.hl-js .hl-meta.hl-export.hl-js .hl-variable.hl-other.hl-readwrite.hl-js {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-ts .hl-meta.hl-class.hl-ts .hl-entity.hl-other.hl-inherited-class.hl-ts {
+    color: #8fbcbb;
+    font-weight: bold;
+}
+.mk-article pre .hl-source.hl-ts .hl-entity.hl-name.hl-type.hl-class.hl-ts, .mk-article pre .hl-source.hl-ts .hl-entity.hl-name.hl-type.hl-enum.hl-ts {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-ts .hl-entity.hl-name.hl-type.hl-ts {
+    color: #8fbcbb;
+}
+.mk-article pre .hl-source.hl-ts .hl-support.hl-type.hl-primitive.hl-ts {
+    color: #81a1c1;
+}
+.mk-article pre .hl-source.hl-ts .hl-meta.hl-class.hl-ts .hl-meta.hl-method.hl-declaration.hl-ts .hl-meta.hl-parameters.hl-ts .hl-meta.hl-decorator.hl-ts .hl-variable.hl-other.hl-readwrite.hl-ts, .mk-article pre .hl-source.hl-ts .hl-meta.hl-class.hl-ts .hl-meta.hl-method.hl-declaration.hl-ts .hl-meta.hl-parameters.hl-ts .hl-meta.hl-decorator.hl-ts .hl-punctuation.hl-decorator.hl-ts {
+    color: #d08770;
+}
+.mk-article pre .hl-source.hl-ts .hl-punctuation.hl-definition.hl-template-expression.hl-begin.hl-ts, .mk-article pre .hl-source.hl-ts .hl-punctuation.hl-definition.hl-template-expression.hl-end.hl-ts {
+    color: #5e81ac;
+}
+.mk-article pre .hl-source.hl-ts .hl-string.hl-template.hl-ts {
+    color: #a3be8c;
+}
+.mk-article pre .hl-source.hl-ts .hl-support.hl-function.hl-math.hl-ts {
+    font-style: italic;
+}
+.mk-article pre .hl-source.hl-ts .hl-variable.hl-other.hl-constant.hl-property.hl-ts, .mk-article pre .hl-source.hl-ts .hl-variable.hl-other.hl-enummember.hl-ts, .mk-article pre .hl-source.hl-ts .hl-variable.hl-other.hl-constant.hl-ts {
+    color: #d8dee9;
+    font-weight: bold;
+}
+.mk-article pre .hl-source.hl-ts .hl-comment.hl-block.hl-documentation.hl-ts .hl-storage.hl-type.hl-class.hl-jsdoc {
+    color: #8fbcbb;
+}
+/* Docs code is commands and config, and it wrapped before it had a language
+   class to lose the wrap by. Keeping it wrapped is the smaller surprise. */
+.mk-doc-body pre code {
     white-space: pre-wrap;
     overflow-wrap: break-word;
 }

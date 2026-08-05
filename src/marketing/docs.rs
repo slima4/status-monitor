@@ -10,8 +10,8 @@
 //!
 //! The renderer sanitises. Docs take third-party pull requests exactly
 //! like the blog, so the trusted legal renderer must not be reused here;
-//! the allowlist is only widened for the heading ids this module's own
-//! transforms emit.
+//! the allowlist is only widened for what this module's own transforms
+//! emit: heading ids, and the highlighter's token classes.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -453,9 +453,9 @@ pub fn index_lastmod() -> Option<&'static str> {
     DOCS.iter().map(|d| d.lastmod).max()
 }
 
-/// Sanitising render. The allowlist adds exactly what this module's own
-/// transforms emit: ids on h2–h4. The visible sidebar keeps the h2/h3
-/// subset; an h4 id exists only as a deep-link target.
+/// Sanitising render. The allowlist adds ids on h2–h4, plus whatever the
+/// highlighter needs. The visible sidebar keeps the h2/h3 subset; an h4 id
+/// exists only as a deep-link target.
 fn render(markdown: &str, dir: &str) -> (String, Vec<TocEntry>) {
     let mut opts = pulldown_cmark::Options::empty();
     opts.insert(pulldown_cmark::Options::ENABLE_TABLES);
@@ -463,18 +463,18 @@ fn render(markdown: &str, dir: &str) -> (String, Vec<TocEntry>) {
     let parser = pulldown_cmark::Parser::new_ext(markdown, opts);
     let (events, toc) =
         super::md::anchor_headings(super::md::rewrite_doc_links(parser, dir).collect());
+    let events = super::highlight::code_blocks(events.into_iter());
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, super::md::wrap_tables(events.into_iter()));
-    let clean = ammonia::Builder::default()
-        .link_rel(Some("noopener noreferrer"))
+    let mut safe = ammonia::Builder::default();
+    safe.link_rel(Some("noopener noreferrer"))
         .add_allowed_classes("div", &["mk-table-scroll"])
         .add_tag_attributes("div", &["tabindex"])
         .add_tag_attributes("h2", &["id"])
         .add_tag_attributes("h3", &["id"])
-        .add_tag_attributes("h4", &["id"])
-        .clean(&html)
-        .to_string();
-    (clean, toc)
+        .add_tag_attributes("h4", &["id"]);
+    super::highlight::allow_markup(&mut safe);
+    (safe.clean(&html).to_string(), toc)
 }
 
 /// A sidebar link. Resolved once so the nav is identical on every page

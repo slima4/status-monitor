@@ -22,6 +22,7 @@ pub mod discovery;
 pub mod dispatch;
 pub mod docs;
 pub mod gallery;
+mod highlight;
 pub mod landings;
 pub mod legal;
 pub mod md;
