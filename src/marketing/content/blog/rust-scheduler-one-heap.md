@@ -2,7 +2,7 @@
 title = "Scheduling in Rust: one heap, not a timer per task"
 date = "2026-08-05"
 slug = "rust-scheduler-one-heap"
-excerpt = "Every check my uptime monitor runs is scheduled from a single BinaryHeap on one task. No timer per monitor, no locks, no drift. Five things that fell out of building it."
+excerpt = "Every check my uptime monitor runs is scheduled from one BinaryHeap on one task. No timers, no locks, no drift. Five things that fell out of building it."
 tags = ["rust", "tokio", "scheduling", "performance"]
 draft = false
 +++
