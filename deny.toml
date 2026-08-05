@@ -39,6 +39,12 @@ ignore = [
     # Dev-dep-only (test cert helpers); harmless. Revisit when test deps
     # migrate.
     "RUSTSEC-2025-0134",
+    # `bincode` — upstream ceased development permanently; no vulnerability,
+    # the crate is feature-complete. Transitive via syntect's `dump-load`,
+    # which two-face hard-requires and which pins bincode 1.x, so no upgrade
+    # path exists. Only decodes our own embedded syntax dumps, never user
+    # input. Revisit when syntect drops the bincode dump format.
+    "RUSTSEC-2025-0141",
 ]
 
 # ── Licenses: explicit allow-list. Anything outside the list fails CI. ──────
