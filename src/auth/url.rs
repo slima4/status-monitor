@@ -40,6 +40,13 @@ pub fn form_body(pairs: &[(&str, &str)]) -> String {
 /// surfaces agree on the policy.
 pub fn safe_redirect_target(raw: &str) -> Option<&str> {
     let s = raw.trim();
+    // Browsers strip ASCII tab and newline from anywhere in a URL, so a value
+    // the leading-character checks below accept, `/\t/evil.test`, still
+    // navigates to `//evil.test`. Refuse every control byte instead of trying
+    // to pattern-match around them.
+    if s.bytes().any(|b| b.is_ascii_control()) {
+        return None;
+    }
     if !s.starts_with('/') {
         return None;
     }
@@ -89,5 +96,17 @@ mod tests {
         assert!(safe_redirect_target("/\\evil.test").is_none());
         assert!(safe_redirect_target("https://evil.test").is_none());
         assert!(safe_redirect_target("javascript:alert(1)").is_none());
+    }
+
+    /// A browser deletes these bytes before resolving the URL, so each of these
+    /// reaches `//evil.test` while looking same-origin to a leading-byte check.
+    #[test]
+    fn safe_redirect_target_rejects_control_bytes_browsers_strip() {
+        for raw in ["/\t/evil.test", "/\n/evil.test", "/\r/evil.test"] {
+            assert!(safe_redirect_target(raw).is_none(), "{raw:?}");
+        }
+        assert!(safe_redirect_target("/foo\u{0}bar").is_none());
+        // Surrounding whitespace is still trimmed, not a reason to refuse.
+        assert_eq!(safe_redirect_target("  /foo  "), Some("/foo"));
     }
 }
