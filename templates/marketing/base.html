@@ -50,7 +50,10 @@
                     </svg>
                     <span class="gh-label">github</span>
                 </a>
-                <a href="{{ app_url }}/login" class="mk-cta mk-cta--primary" data-umami-event="signup-start" data-umami-event-position="header">
+                {# Marketing never sees the session cookie, so the label cannot
+                   know. Naming a destination lets the app skip the form for
+                   anyone already signed in. #}
+                <a href="{{ app_url }}/login?redirect_after=%2F" class="mk-cta mk-cta--primary" data-umami-event="signup-start" data-umami-event-position="header">
                     sign in
                     <svg class="mk-cta__arrow h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 12h15"/>
@@ -101,7 +104,7 @@
                 <a href="/docs" class="mk-footer-link">docs</a>
                 <a href="/architecture" class="mk-footer-link">architecture</a>
                 <a href="/blog" class="mk-footer-link">notes</a>
-                <a href="{{ app_url }}/login" class="mk-footer-link" data-umami-event="signup-start" data-umami-event-position="footer">sign in</a>
+                <a href="{{ app_url }}/login?redirect_after=%2F" class="mk-footer-link" data-umami-event="signup-start" data-umami-event-position="footer">sign in</a>
             </div>
 
             <div class="lg:col-span-2">
