@@ -463,9 +463,8 @@ html:has(.marketing-shell) {
 .mk-cta--primary:active { transform: translateY(-1px) scale(0.96); }
 
 /* ── Start line — type a URL, land on a prefilled monitor ─────────── */
-/* One input tall, so the page's shared rhythm around it reads as a hole.
-   Tailwind v4 wraps space-y in :where(), so a plain class overrides it.
-   The hero side is scoped to the pairing — other pages keep the rhythm. */
+/* One input tall, so the page's shared rhythm reads as a hole around it.
+   Tailwind v4 wraps space-y in :where(), so a plain class overrides it. */
 .mk-hero:has(+ .mk-start-band) { margin-block-end: 2.5rem; }
 .mk-start-band { margin-block-end: 2.5rem; }
 .mk-start {
@@ -477,8 +476,7 @@ html:has(.marketing-shell) {
     margin-inline: auto;
     max-width: 42rem;
 }
-/* Both controls clear the 40px touch target; 2.5rem is what .mk-cta--block
-   already uses for the same reason. */
+/* Clears the 40px touch target, matching .mk-cta--block. */
 .mk-start__field,
 .mk-start .mk-cta { min-height: 2.5rem; }
 .mk-start__field {
@@ -492,8 +490,7 @@ html:has(.marketing-shell) {
     background: var(--mk-bg-2);
     transition: border-color 140ms ease, box-shadow 140ms ease;
 }
-/* The input drops its own outline, so the ring has to live on the wrapper —
-   same shape as .tool-cron-input, the other text input in this register. */
+/* The input drops its own outline, so the ring lives on the wrapper. */
 .mk-start__field:focus-within {
     border-color: var(--mk-ok);
     box-shadow: 0 0 0 2px var(--mk-ok-soft);
@@ -518,8 +515,7 @@ html:has(.marketing-shell) {
 }
 .mk-start__input::placeholder { color: var(--mk-quiet); }
 
-/* iOS Safari zooms the whole page when an input under 16px takes focus, which
-   throws the hero off screen mid-tap. Desktop keeps the 14px mono measure. */
+/* iOS Safari zooms the page when an input under 16px takes focus. */
 @media (max-width: 640px) {
     .mk-start__prompt,
     .mk-start__input { font-size: 1rem; }

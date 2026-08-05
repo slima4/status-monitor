@@ -13,8 +13,7 @@ use super::config::MarketingCfg;
 
 pub const START_PATH: &str = "/start";
 
-/// Long enough for a real deep link, short enough that nobody can stuff a
-/// payload into the `Location` header.
+/// Bounded because this ends up inside a `Location` header.
 const MAX_URL_LEN: usize = 512;
 
 #[derive(Debug, Default, Deserialize)]
@@ -27,8 +26,8 @@ pub async fn start(State(cfg): State<Arc<MarketingCfg>>, Query(q): Query<StartQu
     Redirect::to(&login_url(&cfg.app_url, q.url.as_deref())).into_response()
 }
 
-/// An unusable value falls through to a plain sign-in rather than an error
-/// page: the visitor's intent was to start, and the app can ask again.
+/// An unusable value falls through to plain sign-in: they came here to start,
+/// and the app can ask again.
 fn login_url(app_url: &str, typed: Option<&str>) -> String {
     let app = app_url.trim_end_matches('/');
     match typed.and_then(monitor_url) {
@@ -40,14 +39,10 @@ fn login_url(app_url: &str, typed: Option<&str>) -> String {
     }
 }
 
-/// `https://` is assumed when no scheme is typed, and only the two web schemes
-/// survive, so nothing else can be smuggled into the create form.
-///
-/// Deliberately not shared with `targets_form::parse_monitor_url`: this module
-/// may not import app code, and the two have different jobs. This one screens
-/// anonymous input headed for a `Location` header, so it is the stricter of the
-/// pair — shorter cap, and a dotless host is rejected because that is the shape
-/// a pasted search phrase takes.
+/// Only the two web schemes survive, so nothing else can be smuggled into the
+/// create form. Not shared with `targets_form::parse_monitor_url`: this module
+/// may not import app code, and this copy is stricter because it screens
+/// anonymous input.
 fn monitor_url(raw: &str) -> Option<String> {
     let raw = raw.trim();
     if raw.is_empty() || raw.len() > MAX_URL_LEN {
@@ -63,16 +58,14 @@ fn monitor_url(raw: &str) -> Option<String> {
         return None;
     }
     let host = url.host_str()?;
-    // A hostname with no dot is a LAN name or a typo; neither is monitorable
-    // from the public probes, and it is the shape a pasted search term takes.
+    // A dotless host is a LAN name, a typo, or a pasted search phrase.
     if !host.contains('.') {
         return None;
     }
     Some(url.into())
 }
 
-/// Not `auth::url::url_encode`: this module's contract forbids importing app
-/// code, so it goes to the same underlying serialiser directly.
+/// Not `auth::url::url_encode`: this module may not import app code.
 fn encode(s: &str) -> String {
     url::form_urlencoded::byte_serialize(s.as_bytes()).collect()
 }

@@ -49,8 +49,7 @@
         </div>
     </section>
 
-    {# Posts to /start, which normalises the URL and hands it to the app's
-       login. No JS: the redirect is server-side. #}
+    {# /start normalises the URL and hands it to login. No JS: it is a 302. #}
     <section aria-label="Start monitoring" class="mk-start-band">
         <form class="mk-start" method="get" action="/start">
             <label class="sr-only" for="mk-start-url">The site or API you want watched</label>

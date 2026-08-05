@@ -699,8 +699,7 @@ pub struct NewParams {
     pub kind: Option<String>,
     #[serde(default)]
     pub host: Option<String>,
-    /// Carried from the marketing hero, where people type the site they want
-    /// watched before they have an account.
+    /// Carried from the marketing hero, typed before they have an account.
     #[serde(default)]
     pub url: Option<String>,
 }
@@ -715,11 +714,8 @@ fn apply_kind_param(form: &mut FormModel, kind: &str) -> bool {
     true
 }
 
-/// A bare host is accepted and promoted to `https://`, so `acme.com` from the
-/// marketing hero lands as a usable field. Anything that will not parse is
-/// dropped rather than shown back broken. Only `http`: flow picks its kind
-/// before the plan is known and can still be downgraded below, which would
-/// strand a URL written to the flow field.
+/// Unparseable input is dropped rather than shown back broken. `http` only:
+/// flow can still be downgraded below, stranding a URL in the flow field.
 fn prefill_url(form: &mut FormModel, raw: &str) {
     if form.check_type != "http" {
         return;
@@ -731,8 +727,8 @@ fn prefill_url(form: &mut FormModel, raw: &str) {
     form.http.url = url.into();
 }
 
-/// `https://` is assumed when no scheme is typed, and only the two web schemes
-/// are honoured so a `javascript:` or `file:` value never reaches the field.
+/// A bare host is promoted to `https://`; only the two web schemes are honoured
+/// so a `javascript:` or `file:` value never reaches the field.
 fn parse_monitor_url(raw: &str) -> Option<url::Url> {
     let raw = raw.trim();
     if raw.is_empty() || raw.len() > 2048 {
