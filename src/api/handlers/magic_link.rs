@@ -431,6 +431,7 @@ pub async fn verify_confirm(
         &state,
         LoginMethod::MagicLink,
         bootstrapped,
+        row.redirect_after.as_deref(),
         client_ip,
         &headers,
     );

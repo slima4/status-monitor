@@ -42,6 +42,7 @@ pub fn track_login(
     state: &AppState,
     method: LoginMethod,
     new_user: bool,
+    redirect_after: Option<&str>,
     ip: IpAddr,
     headers: &HeaderMap,
 ) {
@@ -69,7 +70,7 @@ pub fn track_login(
             url: EVENT_URL,
             name: event_name(new_user),
             ip: ip.to_string(),
-            data: BTreeMap::from([("method", method)]),
+            data: BTreeMap::from([("method", method), ("intent", intent(redirect_after))]),
         },
     };
 
@@ -98,6 +99,18 @@ fn event_name(new_user: bool) -> &'static str {
     } else {
         "login-complete"
     }
+}
+
+/// Only the marketing URL box routes to a prefilled create form, so its
+/// redirect target is the whole signal. Parsed, not substring-matched:
+/// `curl=` contains `url=`.
+fn intent(redirect_after: Option<&str>) -> &'static str {
+    let carries_url = redirect_after
+        .and_then(|r| r.strip_prefix("/targets/new?"))
+        .is_some_and(|q| {
+            url::form_urlencoded::parse(q.as_bytes()).any(|(k, v)| k == "url" && !v.is_empty())
+        });
+    if carries_url { "monitor-url" } else { "none" }
 }
 
 /// Mirrors the values the login page's browser events send, so both ends of the
@@ -168,6 +181,28 @@ mod tests {
         assert_eq!(json["payload"]["ip"], "203.0.113.7");
         assert_eq!(json["payload"]["hostname"], HOSTNAME);
         assert_eq!(json["payload"]["data"]["method"], "github");
+    }
+
+    #[test]
+    fn only_a_create_form_carrying_a_url_counts_as_monitor_intent() {
+        assert_eq!(
+            intent(Some("/targets/new?kind=http&url=https%3A%2F%2Fa.io%2F")),
+            "monitor-url"
+        );
+        assert_eq!(intent(Some("/targets/new?url=a.io")), "monitor-url");
+
+        for other in [
+            "/targets/new",
+            "/targets/new?kind=http",
+            "/targets/new?url=",
+            // Substring matching would read this as a URL.
+            "/targets/new?curl=1",
+            "/settings/account?url=a.io",
+            "/",
+        ] {
+            assert_eq!(intent(Some(other)), "none", "{other}");
+        }
+        assert_eq!(intent(None), "none");
     }
 
     #[test]
