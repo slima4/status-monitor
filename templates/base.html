@@ -20,6 +20,8 @@
     </script>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {# Every page behind this base is login-walled; none belongs in an index. #}
+    <meta name="robots" content="noindex, nofollow">
     <title>{% block title %}Uptimepage{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="{{ "img/favicon.svg"|asset }}">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ "img/favicon.png"|asset }}">
