@@ -277,16 +277,20 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/open-source-status-page",
         created: "2026-06-20",
-        lastmod: "2026-07-19",
-        title: "Open-Source Status Page, Monitoring Built In",
+        lastmod: "2026-08-06",
+        title: "Open-Source Status Page, Self-Hosted",
         eyebrow: "open source",
-        h1: "An open-source status page",
-        meta_description: "An open-source status page with built-in uptime and website monitoring. Branded pages, subscribers, incidents, maintenance. AGPL, free, self-host or hosted.",
-        lede: "Uptimepage is an AGPL status page with website and uptime monitoring built in. Publish a branded page on your own subdomain, let customers subscribe, and run it yourself or on the free hosted tier.",
+        h1: "An open-source status page you can self-host",
+        meta_description: "An open-source status page with uptime monitoring built in, self-hosted with docker compose or free on the hosted tier. Branded pages, subscribers, incidents.",
+        lede: "Uptimepage is an AGPL status page with website and uptime monitoring built in. Publish a branded page on your own subdomain, let customers subscribe, and run the whole thing yourself with docker compose or start free on the hosted tier.",
         features: &[
             Feature {
                 label: "License",
                 value: "AGPL, self-host",
+            },
+            Feature {
+                label: "Deploy",
+                value: "docker compose up",
             },
             Feature {
                 label: "Status page",
@@ -297,16 +301,12 @@ pub const LANDINGS: &[Landing] = &[
                 value: "built in",
             },
             Feature {
-                label: "Subscribers",
-                value: "email + webhook",
-            },
-            Feature {
                 label: "Stack",
                 value: "one binary + Postgres + ClickHouse",
             },
             Feature {
-                label: "Price to start",
-                value: "free, no card",
+                label: "Uptime bar",
+                value: "measured, not published",
             },
         ],
         sections: &[
@@ -315,12 +315,20 @@ pub const LANDINGS: &[Landing] = &[
                 body: "Branded public pages on your own domain, a 90-day history strip, incident timelines, scheduled maintenance and subscribers who get every update. All of it is included from the free tier up, because a status page that cannot notify anyone is just a screenshot.",
             },
             Section {
+                heading: "Up with one command",
+                body: "One self-contained binary, Postgres for config and ClickHouse for the check history. docker compose up brings the whole stack up and applies migrations on boot. There is no queue to run, no Kubernetes, and no second service to keep in sync.",
+            },
+            Section {
+                heading: "Your data stays on your infrastructure",
+                body: "Every check result, incident, subscriber and status page lives in your own environment, in the region you choose, behind your own network. The public page serves straight from your instance, so nothing about your uptime leaves your control.",
+            },
+            Section {
                 heading: "Monitoring is built in",
                 body: "Incidents open automatically from real HTTP, TCP, DNS, TLS and ping checks and flow straight onto the page. There is no separate monitoring tool to buy, wire up and keep in sync, and no gap where the checks say down but the page says nothing.",
             },
             Section {
                 heading: "Open source you can audit",
-                body: "The uptime bar is measured from checks with a confirmation rule; nobody can set a red day green by hand. That is a promise you do not have to take on faith: the source is AGPL, so the code that computes your uptime number is public, and anyone can read exactly how a red day becomes a red day.",
+                body: "The uptime bar is measured from checks with a confirmation rule; nobody can set a red day green by hand. Three tests will tell you whether any status page does the same. Add a monitor to a page after it has already had an outage: does the history show it? Unpublish an incident: does the day stay red? Fail one region for one second: does the bar stay calm? Uptimepage passes all three, and because the source is AGPL you can read the code that computes your number rather than take it on faith.",
             },
             Section {
                 heading: "The whole product, one license",
@@ -331,11 +339,20 @@ pub const LANDINGS: &[Landing] = &[
                 body: "Email subscribers confirm before they receive anything, bounces are handled instead of retried forever, and webhook deliveries are signed so the receiver can verify each update really came from your page. Boring plumbing, until the day someone tries to abuse a subscription form and it is the only thing that matters.",
             },
         ],
-        code: None,
+        code: Some(CodeSample {
+            caption: "Bring the stack up",
+            body: r#"git clone https://github.com/uptimepage/uptimepage
+cd uptimepage
+docker compose up -d"#,
+        }),
         resources: &[
             ResourceLink {
                 label: "Deployment docs",
                 href: "/docs/deployment",
+            },
+            ResourceLink {
+                label: "Open-source uptime monitor",
+                href: "/open-source-uptime-monitoring",
             },
             ResourceLink {
                 label: "Status page for SaaS",
@@ -360,6 +377,10 @@ pub const LANDINGS: &[Landing] = &[
             ResourceLink {
                 label: "Email bombing through status pages",
                 href: "/blog/email-bombing-uptime-pages",
+            },
+            ResourceLink {
+                label: "vs Upptime, Cachet, Statping",
+                href: "/vs/self-hosted-status-pages",
             },
         ],
         cta: "Start free",
@@ -412,8 +433,8 @@ docker compose up -d"#,
                 href: "/docs/deployment",
             },
             ResourceLink {
-                label: "Self-hosted status page",
-                href: "/self-hosted-status-page",
+                label: "Open-source status page",
+                href: "/open-source-status-page",
             },
             ResourceLink {
                 label: "For developers",
@@ -430,105 +451,6 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Best open-source monitors, ranked",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
-            },
-        ],
-        cta: "Start free",
-    },
-    Landing {
-        path: "/self-hosted-status-page",
-        created: "2026-06-20",
-        lastmod: "2026-07-19",
-        title: "Self-Hosted Status Page, Monitoring Built In",
-        eyebrow: "run it yourself",
-        h1: "A self-hosted status page and uptime monitor",
-        meta_description: "Self-hosted uptime monitoring and status pages in one AGPL binary. docker compose up with Postgres and ClickHouse. Your data on your own infrastructure.",
-        lede: "Run the whole thing yourself: uptime monitoring, incidents and a public status page in one self-contained binary. docker compose up and you are live, with every check and subscriber on your own infrastructure and an uptime bar measured from real checks, not from what someone chose to publish.",
-        features: &[
-            Feature {
-                label: "License",
-                value: "AGPL, self-host",
-            },
-            Feature {
-                label: "Deploy",
-                value: "docker compose up",
-            },
-            Feature {
-                label: "Stack",
-                value: "one binary + Postgres + ClickHouse",
-            },
-            Feature {
-                label: "Probes",
-                value: "regional agents you run",
-            },
-            Feature {
-                label: "As code",
-                value: "Terraform + REST + MCP",
-            },
-            Feature {
-                label: "Uptime bar",
-                value: "measured, not published",
-            },
-        ],
-        sections: &[
-            Section {
-                heading: "Up with one command",
-                body: "One self-contained binary, Postgres for config and ClickHouse for the check history. docker compose up brings the whole stack up and applies migrations on boot. There is no queue to run, no Kubernetes, and no second service to keep in sync.",
-            },
-            Section {
-                heading: "Your data stays on your infrastructure",
-                body: "Every check result, incident, subscriber and status page lives in your own environment, in the region you choose, behind your own network. The public page serves straight from your instance, so nothing about your uptime leaves your control.",
-            },
-            Section {
-                heading: "An uptime bar you cannot fake",
-                body: "The 90-day history comes from real checks, measured across regions with a confirmation rule, not from which incidents someone chose to publish. A short blip in one region does not burn a day, and a real outage always shows, even one you never wrote an incident for.",
-            },
-            Section {
-                heading: "Three tests any status page should pass",
-                body: "Add a monitor to a page after it has already had an outage: does the history show the outage? Unpublish an incident: does the day stay red? Fail one region for one second: does the bar stay calm? Uptimepage passes all three, and because the source is open you can check that, not just believe it. Run the same tests against whatever you use today.",
-            },
-            Section {
-                heading: "Incidents and postmortems on your terms",
-                body: "A failing monitor opens an incident automatically and posts it to the status page. You add the human notes and the postmortem when you are ready. Email and webhook subscribers get the updates, and scheduled maintenance windows keep planned work from paging anyone.",
-            },
-            Section {
-                heading: "Probes you run, in the regions you need",
-                body: "Run regional probe agents wherever your users are and fold their results into each monitor per region. HTTP, TCP, DNS, TLS and ping checks, each with its own expectations and its own alert channels.",
-            },
-            Section {
-                heading: "One config for hosted and self-hosted",
-                body: "The same Terraform provider, REST API and MCP server drive a self-hosted instance and the hosted tier alike. Move between them without rewriting anything, and there is no vendor lock-in to leave behind.",
-            },
-        ],
-        code: Some(CodeSample {
-            caption: "Bring the stack up",
-            body: r#"git clone https://github.com/uptimepage/uptimepage
-cd uptimepage
-docker compose up -d"#,
-        }),
-        resources: &[
-            ResourceLink {
-                label: "Deployment docs",
-                href: "/docs/deployment",
-            },
-            ResourceLink {
-                label: "An uptime bar you cannot fake",
-                href: "/blog/status-page-you-cant-fake",
-            },
-            ResourceLink {
-                label: "How the monitor is built",
-                href: "/blog/building-an-uptime-monitor-in-rust",
-            },
-            ResourceLink {
-                label: "vs Uptime Kuma",
-                href: "/vs/uptime-kuma",
-            },
-            ResourceLink {
-                label: "Monitoring as code",
-                href: "/terraform-uptime-monitoring",
-            },
-            ResourceLink {
-                label: "vs Upptime, Cachet, Statping",
-                href: "/vs/self-hosted-status-pages",
             },
         ],
         cta: "Start free",
@@ -699,6 +621,10 @@ docker compose up -d"#,
 }"#,
         }),
         resources: &[
+            ResourceLink {
+                label: "Open-source uptime monitoring",
+                href: "/open-source-uptime-monitoring",
+            },
             ResourceLink {
                 label: "REST API docs",
                 href: "/docs/api",
@@ -1167,6 +1093,10 @@ docker compose up -d"#,
                 href: "/docs/deployment",
             },
             ResourceLink {
+                label: "Open-source uptime monitor",
+                href: "/open-source-uptime-monitoring",
+            },
+            ResourceLink {
                 label: "Monitoring as code",
                 href: "/terraform-uptime-monitoring",
             },
@@ -1192,12 +1122,12 @@ docker compose up -d"#,
     Landing {
         path: "/vs/pingdom",
         created: "2026-06-25",
-        lastmod: "2026-07-19",
-        title: "Uptimepage vs Pingdom: Status Pages Built In",
+        lastmod: "2026-08-06",
+        title: "Pingdom Alternative with Status Pages Built In",
         eyebrow: "switching monitors",
-        h1: "Uptimepage vs Pingdom: status pages built in",
-        meta_description: "Uptimepage pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Open source, free to start.",
-        lede: "If you are comparing monitor prices, here is what Uptimepage gives you by default: the checks and a public status page are the same product, the source is open, and you can start free with no card.",
+        h1: "A Pingdom alternative with status pages built in",
+        meta_description: "A Pingdom alternative that pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Open source, free to start.",
+        lede: "If you are looking for a Pingdom alternative, here is what Uptimepage gives you by default: the checks and a public status page are the same product, the source is open, and you can start free with no card.",
         features: &[
             Feature {
                 label: "Check interval",
@@ -1253,8 +1183,8 @@ docker compose up -d"#,
                 href: "/vs/uptimerobot",
             },
             ResourceLink {
-                label: "Self-hosted status page",
-                href: "/self-hosted-status-page",
+                label: "Open-source status page",
+                href: "/open-source-status-page",
             },
             ResourceLink {
                 label: "vs Better Stack",
@@ -1323,12 +1253,12 @@ docker compose up -d"#,
                 href: "/docs/deployment",
             },
             ResourceLink {
-                label: "Open-source status page",
-                href: "/open-source-status-page",
+                label: "Open-source uptime monitoring",
+                href: "/open-source-uptime-monitoring",
             },
             ResourceLink {
-                label: "Self-hosted status page",
-                href: "/self-hosted-status-page",
+                label: "Open-source status page",
+                href: "/open-source-status-page",
             },
             ResourceLink {
                 label: "vs Uptime Kuma",
@@ -1400,6 +1330,10 @@ docker compose up -d"#,
         ],
         code: None,
         resources: &[
+            ResourceLink {
+                label: "Open-source uptime monitoring",
+                href: "/open-source-uptime-monitoring",
+            },
             ResourceLink {
                 label: "Deployment docs",
                 href: "/docs/deployment",
@@ -2352,6 +2286,10 @@ resource "uptimepage_target" "api" {
                 href: TERRAFORM_URL,
             },
             ResourceLink {
+                label: "Open-source uptime monitor",
+                href: "/open-source-uptime-monitoring",
+            },
+            ResourceLink {
                 label: "Terraform status page",
                 href: "/terraform-status-page",
             },
@@ -2820,8 +2758,16 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
                 "Yes. Visitors opt in with confirmed email or webhook and hear about every incident and maintenance change, with signed payloads they can verify.",
             ),
             (
-                "Can I self-host it?",
-                "Yes. The AGPL source ships a compose file: one command brings up the binary with Postgres and ClickHouse, migrations applied on boot.",
+                "How do I self-host it?",
+                "Clone the repo and run `docker compose up`. That starts the single binary with Postgres and ClickHouse, runs migrations on boot, and serves the dashboard and public status page.",
+            ),
+            (
+                "Where does my data live?",
+                "On your own infrastructure. Self-hosting keeps every check result, incident and subscriber in your environment, and the public page serves straight from it.",
+            ),
+            (
+                "Can I trust the uptime numbers?",
+                "Yes. The uptime bar is measured from your own checks with a confirmation rule, not set by hand and not built from published incidents. A real outage shows even if you never wrote an incident for it.",
             ),
         ],
         "/open-source-uptime-monitoring" => &[
@@ -2844,28 +2790,6 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Is it free?",
                 "Self-hosting under AGPL is free. The hosted tier is also $0 a month if you prefer not to run it yourself.",
-            ),
-        ],
-        "/self-hosted-status-page" => &[
-            (
-                "How do I deploy it?",
-                "Clone the repo and run `docker compose up`. That starts the single binary with Postgres and ClickHouse, runs migrations on boot, and serves the dashboard and public status page.",
-            ),
-            (
-                "Where does my data live?",
-                "On your own infrastructure. Self-hosting keeps every check result, incident and subscriber in your environment, and the public page serves straight from it.",
-            ),
-            (
-                "Can I monitor from more than one region?",
-                "Yes. Run regional probe agents on your own servers and Uptimepage folds their results into each monitor per region.",
-            ),
-            (
-                "Can I trust the uptime numbers?",
-                "Yes. The uptime bar is measured from your own checks with a confirmation rule, not set by hand and not built from published incidents. A real outage shows even if you never wrote an incident for it.",
-            ),
-            (
-                "Is it free?",
-                "Yes. The source is AGPL and free to self-host, and the hosted tier is $0 a month if you prefer not to run it.",
             ),
         ],
         "/white-label-uptime-monitoring" => &[
@@ -5421,16 +5345,18 @@ pub fn mount(router: Router<Arc<MarketingCfg>>) -> Router<Arc<MarketingCfg>> {
 
 /// Paths that earn traffic but should not be pages: retired URLs and the
 /// spellings visitors guess. One source, so a test can prove every target is
-/// still a real landing.
+/// still a real landing or a published post.
 const ALIASES: &[(&str, &str)] = &[
     // Old name for Better Stack; searchers still use it.
     ("/vs/better-uptime", "/vs/better-stack"),
     // /automation split the same Terraform intent as the page below and the same
     // MCP intent as /mcp-server, so it competed with both.
     ("/automation", "/terraform-uptime-monitoring"),
-    // Both spellings show up as 404s in analytics; the intent is /vs/pingdom.
-    ("/pingdom-alternatives", "/vs/pingdom"),
-    ("/vs/pingdom-alternatives", "/vs/pingdom"),
+    // The roundup outranks the head-to-head page on these, so send them there.
+    ("/pingdom-alternatives", "/blog/pingdom-alternatives"),
+    ("/vs/pingdom-alternatives", "/blog/pingdom-alternatives"),
+    // Same pitch as the open-source page, which draws far more search demand.
+    ("/self-hosted-status-page", "/open-source-status-page"),
 ];
 
 #[cfg(test)]
@@ -5451,10 +5377,14 @@ mod tests {
     #[test]
     fn alias_targets_are_real_pages() {
         for (from, to) in ALIASES {
-            assert!(
-                LANDINGS.iter().any(|l| l.path == *to),
-                "{to} is a redirect target but not a landing"
-            );
+            let landing = LANDINGS.iter().any(|l| l.path == *to);
+            // A draft target renders in debug but 404s in release.
+            let post = to.strip_prefix("/blog/").is_some_and(|slug| {
+                crate::marketing::blog::all()
+                    .iter()
+                    .any(|p| p.slug == slug && !p.draft)
+            });
+            assert!(landing || post, "{to} is a redirect target but not a page");
             assert!(
                 !LANDINGS.iter().any(|l| l.path == *from),
                 "{from} is both a landing and an alias"
