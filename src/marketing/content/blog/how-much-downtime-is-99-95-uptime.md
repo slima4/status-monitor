@@ -43,7 +43,7 @@ First the math. The allowed failure is 0.05%, so multiply the period by 0.0005.
 
 ## The space between the target and the promise
 
-If your internal target and your contract number are the same, they fail on the same day. The first month you miss your engineering goal is also the first month you owe service credits, write an apology and put an account at risk. There is no space between the technical problem and the business problem.
+If your internal target and your contract number are the same, they fail on the same day. The first month you miss your engineering goal is also the first month you owe [service credits](/blog/uptime-sla), write an apology and put an account at risk. There is no space between the technical problem and the business problem.
 
 Setting the internal target at 99.95% behind a [99.9% contract](/blog/how-much-downtime-is-99-9-uptime) gives you about 21 minutes of that space every month. When you pass 21 minutes 36 seconds, your own alarm goes off and the team treats the month as bad, while the customer is still inside the promise you sold them. That is the difference between hearing about the problem from your monitoring and hearing about it from your customer.
 

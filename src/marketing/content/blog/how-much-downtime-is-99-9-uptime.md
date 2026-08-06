@@ -75,7 +75,7 @@ The reason is arithmetic. If your internal target and your contract number are t
 
 ## Reading a 99.9% SLA that you are buying
 
-The percentage is only part of the promise. Two other things decide what it is worth.
+The percentage is only part of [what an uptime SLA promises](/blog/uptime-sla). Two other things decide what it is worth.
 
 Start with what counts as down. Some contracts measure only a total outage of the whole service, so a service where half the requests fail, or where every request takes 30 seconds, can still count as up all month. The definition sets the value of the number above it.
 

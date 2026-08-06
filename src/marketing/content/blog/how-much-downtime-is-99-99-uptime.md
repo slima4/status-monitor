@@ -69,7 +69,7 @@ This is why systems at this level are built so that most dependencies are not re
 
 ## Reading a 99.99% SLA that you are buying
 
-The percentage is the least useful part of the document.
+The percentage is the least useful part of [an uptime SLA](/blog/uptime-sla).
 
 The measurement period does more work than the number. A monthly period and a yearly period are different promises at the same percentage. Holding 4 minutes 19 seconds in every single month is much harder than spreading 52 minutes 34 seconds anywhere across a year.
 

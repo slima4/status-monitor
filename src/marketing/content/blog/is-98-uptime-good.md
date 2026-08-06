@@ -91,7 +91,7 @@ This is why a single uptime percentage is a summary, not the full story. You als
 
 ## Uptime is measured, an SLA is promised
 
-The two get mixed up constantly. Uptime is a measurement: the fraction of time your service actually answered. An SLA is a promise in a contract, with a defined penalty when it is broken.
+The two get mixed up constantly. Uptime is a measurement: the fraction of time your service actually answered. An SLA is [a promise in a contract](/blog/uptime-sla), with a defined penalty when it is broken.
 
 The penalty is almost always a service credit. If a provider misses its 99.9% SLA, you get a percentage of that month's bill back. Your customers get nothing, because the credit refunds your invoice, not their time. So an SLA tells you how confident the provider is, and it caps your refund. It does not keep your service up.
 

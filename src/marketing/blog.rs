@@ -598,6 +598,7 @@ mod tests {
     #[test]
     fn only_in_market_posts_carry_a_cta() {
         const IN_MARKET: &[&str] = &[
+            "uptime-sla",
             "is-98-uptime-good",
             "how-much-downtime-is-99-9-uptime",
             "how-much-downtime-is-99-95-uptime",
@@ -624,6 +625,22 @@ mod tests {
                 ),
             }
         }
+    }
+
+    /// A parse failure only logs, so a broken post disappears from the site
+    /// while every other test still passes. Counting is the cheap tripwire;
+    /// the dropped file's name is in the error log.
+    #[test]
+    fn every_markdown_file_parses_into_a_post() {
+        let files = BLOG_DIR
+            .files()
+            .filter(|f| f.path().extension().and_then(|e| e.to_str()) == Some("md"))
+            .count();
+        assert_eq!(
+            files,
+            load_posts().len(),
+            "a markdown file did not parse into a post"
+        );
     }
 
     #[test]
