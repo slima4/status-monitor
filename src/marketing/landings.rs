@@ -367,16 +367,8 @@ docker compose up -d"#,
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
             ResourceLink {
-                label: "vs self-hosted monitors",
-                href: "/vs/self-hosted-monitoring",
-            },
-            ResourceLink {
                 label: "An uptime bar you cannot fake",
                 href: "/blog/status-page-you-cant-fake",
-            },
-            ResourceLink {
-                label: "Email bombing through status pages",
-                href: "/blog/email-bombing-uptime-pages",
             },
             ResourceLink {
                 label: "vs Upptime, Cachet, Statping",
