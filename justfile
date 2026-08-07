@@ -201,6 +201,13 @@ seed-latency-demo:
 seed-heartbeats:
     bash scripts/seed-heartbeats.sh
 
+# Seed a monitor that fails ~1 check in 5 from every region, always in single
+# checks, plus a clean twin to compare it against. No incident ever opens, so
+# this is the state where uptime falls and the incidents tab stays empty.
+# Stop the dev-region agents first. Idempotent: tagged rows wiped (PG + CH).
+seed-flapping:
+    bash scripts/seed-flapping.sh
+
 # Seed a photogenic operator tenant (40 monitors, 90d up history, resolved
 # incidents) for shooting the marketing screenshot gallery. Stop the dev-region
 # agents first; see the script header for the shoot-time stale-window override.
