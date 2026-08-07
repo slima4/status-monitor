@@ -706,6 +706,11 @@
                 <a href="mailto:support@uptimepage.dev?subject=More%20monitoring%20regions"
                    class="underline decoration-dotted hover:text-body">Send a message</a>
               </span>
+              <span class="mt-1 block text-xs text-muted">
+                Every region probes from datacentre addresses, so <span class="hl">a host that blocks those times out here while the same URL loads fine for you</span>.
+                <a href="{{ "/hosted/regions"|docs_url }}" target="_blank" rel="noopener"
+                   class="underline decoration-dotted hover:text-body">What we cannot reach</a>
+              </span>
             </div>
           </div>
           {% endif %}

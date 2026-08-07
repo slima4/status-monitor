@@ -41,10 +41,11 @@ mod static_refs {
     /// Product documentation. Absolute and upstream on purpose: docs are
     /// served by the marketing router on the apex host, which an app-only
     /// deployment does not run, so a relative `/docs` would land on the
-    /// app's Swagger UI or 404. Invoked as `{{ ""|docs_url }}`.
+    /// app's Swagger UI or 404. The input is appended, so `{{ ""|docs_url }}`
+    /// is the index and `{{ "/hosted/regions"|docs_url }}` is one page.
     #[askama::filter_fn]
-    pub fn docs_url(_: &str, _: &dyn askama::Values) -> askama::Result<&'static str> {
-        Ok("https://uptimepage.dev/docs")
+    pub fn docs_url(path: &str, _: &dyn askama::Values) -> askama::Result<String> {
+        Ok(format!("https://uptimepage.dev/docs{path}"))
     }
 
     /// Crate version baked at compile time. Public build string, safe to

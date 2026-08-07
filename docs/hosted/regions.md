@@ -33,6 +33,22 @@ Region agreement and the consecutive-failure threshold are two separate gates, a
 
 Regions push their results to the control plane, and the policy counts the regions that are actually reporting. A region that stops reporting, for example because it lost connectivity, drops out of the vote entirely: it is not counted as down, and the policy applies to the regions still delivering results. Missing data alone never opens an incident and never closes one.
 
+## What our probes cannot reach
+
+Some endpoints refuse traffic from datacentre address ranges, which is where every one of our regions lives. When that happens the monitor fails with `connect timeout`, or sometimes `network unreachable`, from every region at once, while the same URL loads fine when you open it yourself. Nothing is down. The host is declining to talk to us.
+
+The clearest case is mainland China. Endpoints served from inside China are routinely unreachable or lossy from foreign networks, so a monitor pointed at one will show a failure rate in the tens of percent, scattered through the day, with no pattern you can act on. We have no probe inside mainland China and no plan to add one, because operating there requires a licence we do not hold. If you need that coverage, we are the wrong tool for it and we would rather say so here than let you find out over a day of bad data.
+
+The same thing shows up in smaller ways elsewhere: geo-fenced APIs, aggressive bot protection in front of a login page, and firewalls that drop anything not coming from a residential range.
+
+How to tell this apart from real downtime:
+
+- Run **check now** and compare regions. A block from our side usually fails in every region at once, where a real outage often starts in one region and spreads.
+- Look at connect time on the checks that did succeed. If they connect in a couple of hundred milliseconds and the failures are hard timeouts, the path is being dropped rather than being slow.
+- Open the URL yourself, from a connection that is not a datacentre. If it answers there and times out from every region you assigned, the difference is who is asking, not whether the service is up.
+
+If a monitor is in this state, the useful moves are to assign it to fewer regions, to point it at an endpoint that will answer us, or to switch to a heartbeat monitor and have the system itself ping us, which works from anywhere and needs no reachability at all.
+
 ## Practical notes
 
 Checks from different regions leave from different addresses, so an allowlist on your side needs every region you assign. If you allowlist by IP, write to <hello@uptimepage.dev> before you rely on it, because the egress addresses are not guaranteed stable on every region yet.
