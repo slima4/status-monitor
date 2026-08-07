@@ -26,8 +26,8 @@ use crate::observability::metrics::names;
 use crate::quotas::service::RetentionDays;
 use crate::storage::org_ttl::OrgTtlDays;
 use crate::storage::traits::{
-    ClampedRange, FlowRunSink, FlowRunView, HeartbeatPingSink, ResultSink, ResultsStore, TimeRange,
-    UptimeStats, rollup_bucket_secs,
+    ClampedRange, FlowRunSink, FlowRunView, HeartbeatPingSink, RegionFlaps, ResultSink,
+    ResultsStore, TimeRange, UptimeStats, rollup_bucket_secs,
 };
 
 const TABLE: &str = "check_results";
@@ -1844,6 +1844,52 @@ impl ResultsStore for ClickhouseResultsStore {
                 p95_ms: ms(r.quantiles.get(1).copied().unwrap_or(0.0)),
                 p99_ms: ms(r.quantiles.get(2).copied().unwrap_or(0.0)),
                 last_status: CheckStatus::from_enum8(r.last_status).as_str().to_string(),
+            })
+            .collect())
+    }
+
+    async fn flap_counts(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+    ) -> Result<Vec<RegionFlaps>> {
+        #[derive(Row, Deserialize)]
+        struct F {
+            region: String,
+            failures: u64,
+            transitions: u64,
+        }
+        let rows: Vec<F> = self
+            .client
+            .query(&format!(
+                "SELECT region, countIf(status != {up}) AS failures, \
+                   countIf(seq > 1 AND status != prev) AS transitions \
+                 FROM ( \
+                   SELECT region, status, \
+                     any(status) OVER (PARTITION BY region ORDER BY timestamp \
+                       ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING) AS prev, \
+                     row_number() OVER (PARTITION BY region ORDER BY timestamp) AS seq \
+                   FROM {TABLE} \
+                   WHERE org_id = ? AND target_id = ? \
+                     AND timestamp >= fromUnixTimestamp(?) \
+                     AND timestamp < fromUnixTimestamp(?) \
+                 ) GROUP BY region ORDER BY region",
+                up = CheckStatus::Up.as_enum8(),
+            ))
+            .bind(org.0)
+            .bind(target_id)
+            .bind(range.from.timestamp())
+            .bind(range.to.timestamp())
+            .fetch_all::<F>()
+            .await
+            .context("clickhouse flap_counts")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RegionFlaps {
+                region: r.region,
+                failures: r.failures,
+                transitions: r.transitions,
             })
             .collect())
     }

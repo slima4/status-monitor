@@ -13,8 +13,8 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    ClampedRange, RegionOption, ResultSink, ResultsStore, TargetFilter, TargetStore, TimeRange,
-    UptimeStats, rollup_bucket_secs,
+    ClampedRange, RegionFlaps, RegionOption, ResultSink, ResultsStore, TargetFilter, TargetStore,
+    TimeRange, UptimeStats, rollup_bucket_secs,
 };
 
 #[derive(Default)]
@@ -439,6 +439,39 @@ impl ResultsStore for InMemorySink {
         _range: TimeRange,
     ) -> Result<Vec<RegionRollup>> {
         Ok(Vec::new())
+    }
+
+    async fn flap_counts(
+        &self,
+        _org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+    ) -> Result<Vec<RegionFlaps>> {
+        // No region dimension in memory; count the whole series as one region.
+        let guard = self.results.lock();
+        let mut series: Vec<&CheckResult> = guard
+            .iter()
+            .filter(|r| {
+                r.target_id == target_id && r.timestamp >= range.from && r.timestamp < range.to
+            })
+            .collect();
+        if series.is_empty() {
+            return Ok(Vec::new());
+        }
+        series.sort_by_key(|r| r.timestamp);
+        let failures = series
+            .iter()
+            .filter(|r| r.status != CheckStatus::Up)
+            .count() as u64;
+        let transitions = series
+            .windows(2)
+            .filter(|w| w[0].status != w[1].status)
+            .count() as u64;
+        Ok(vec![RegionFlaps {
+            region: "default".to_string(),
+            failures,
+            transitions,
+        }])
     }
 
     async fn latency_buckets_by_region(

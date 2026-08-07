@@ -168,6 +168,8 @@ pub struct ShareIncidentsPage {
     pub from_human: String,
     pub to_human: String,
     pub selected_region: Option<String>,
+    /// Always `None`: a share link is a status view, not a diagnosis.
+    pub unconfirmed: Option<crate::web::views::targets_detail::UnconfirmedFailures>,
 }
 
 pub async fn detail(
@@ -355,6 +357,7 @@ pub async fn incidents(
         from_human: labels.from_human,
         to_human: labels.to_human,
         selected_region: None,
+        unconfirmed: None,
     })
 }
 

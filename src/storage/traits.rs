@@ -348,6 +348,16 @@ impl UptimeStats {
     }
 }
 
+/// How unsettled one region was over a window. Failures that never confirm an
+/// incident leave no other trace, so this is the only thing that separates a
+/// flapping probe path from a quiet one.
+#[derive(Debug, Clone, Default)]
+pub struct RegionFlaps {
+    pub region: String,
+    pub failures: u64,
+    pub transitions: u64,
+}
+
 /// Operator-facing results repository. Org-scoped on every method for the
 /// same reason as [`TargetStore`]: the `org` is resolved from the request and
 /// the implementation never returns another tenant's check history. A bare
@@ -535,6 +545,15 @@ pub trait ResultsStore: Send + Sync {
         target_id: Uuid,
         range: TimeRange,
     ) -> Result<Vec<RegionRollup>>;
+    /// Per-region failure and state-change counts for one target over `range`.
+    /// Implementations MUST read raw results: the minute rollup keeps one status
+    /// per minute, which erases the transitions this counts.
+    async fn flap_counts(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+    ) -> Result<Vec<RegionFlaps>>;
     /// Per-region latency buckets for one target — the overlay view, each
     /// region a separate line. Same rollup source + bucketing as
     /// [`latency_buckets`](Self::latency_buckets), split by region.

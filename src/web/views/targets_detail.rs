@@ -167,6 +167,95 @@ pub struct DetailCheckRows {
     pub show_region: bool,
 }
 
+/// Failures that never became an incident. Without them named, an empty
+/// incidents tab reads as "nothing happened" beside an uptime card that agrees.
+pub struct UnconfirmedFailures {
+    pub failures: u64,
+    pub transitions: u64,
+    /// Regions that saw at least one failure, worst first.
+    pub regions: Vec<String>,
+    pub confirmations: u32,
+    /// Regions that must agree, over the regions that reported — the same
+    /// denominator the incident writer applies.
+    pub quorum: usize,
+    pub region_count: usize,
+}
+
+impl UnconfirmedFailures {
+    /// `None` when there is nothing to explain.
+    fn new(
+        flaps: &[crate::storage::traits::RegionFlaps],
+        catalog: &[crate::storage::RegionOption],
+        confirmations: u32,
+        policy: crate::domain::RegionIncidentPolicy,
+    ) -> Option<Self> {
+        let failures: u64 = flaps.iter().map(|f| f.failures).sum();
+        if failures == 0 {
+            return None;
+        }
+        let mut failing: Vec<&crate::storage::traits::RegionFlaps> =
+            flaps.iter().filter(|f| f.failures > 0).collect();
+        failing.sort_by_key(|f| std::cmp::Reverse(f.failures));
+        let region_count = flaps.len().max(1);
+        Some(Self {
+            failures,
+            transitions: flaps.iter().map(|f| f.transitions).sum(),
+            regions: failing
+                .into_iter()
+                .map(|f| {
+                    catalog
+                        .iter()
+                        .find(|c| c.id == f.region)
+                        .map(crate::web::views::region_display::region_label)
+                        .unwrap_or_else(|| f.region.clone())
+                })
+                .collect(),
+            confirmations,
+            quorum: policy.required(region_count),
+            region_count,
+        })
+    }
+}
+
+/// Best-effort: a failed read costs the flap column, never the page.
+async fn flaps_by_region(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+) -> std::collections::HashMap<String, u64> {
+    load_flaps(state, org, target_id)
+        .await
+        .into_iter()
+        .map(|f| (f.region, f.transitions))
+        .collect()
+}
+
+/// Flaps always cover this window, whatever range or region the page is showing:
+/// the label is fixed, so the number behind it has to be. Also caps the raw read
+/// a 30d page would otherwise widen — measured on the busiest production
+/// monitor, 24h costs 17 ms against 233 ms for 30d.
+const FLAP_WINDOW_HOURS: i64 = 24;
+
+async fn load_flaps(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+) -> Vec<crate::storage::traits::RegionFlaps> {
+    let to = Utc::now();
+    let window = TimeRange {
+        from: to - chrono::Duration::hours(FLAP_WINDOW_HOURS),
+        to,
+    };
+    let Ok(clamped) = state.quotas.clamp_raw(org, window).await else {
+        return Vec::new();
+    };
+    state
+        .results_store
+        .flap_counts(org, target_id, clamped)
+        .await
+        .unwrap_or_default()
+}
+
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/incidents.html")]
 pub struct IncidentsPage {
@@ -201,6 +290,8 @@ pub struct IncidentsPage {
     /// Always `None` here — the incidents tab is not region-filtered yet; the
     /// field exists so the shared range-pills partial type-checks.
     pub selected_region: Option<String>,
+    /// `None` when the window was clean, or when incidents already explain it.
+    pub unconfirmed: Option<UnconfirmedFailures>,
 }
 
 #[derive(Template, WebTemplate)]
@@ -394,6 +485,9 @@ pub struct RegionBreakdownRow {
     pub last_status: String,
     /// Marks the row matching the active region filter.
     pub selected: bool,
+    /// Status changes over the last 24h. Bursts too short to open an incident
+    /// show up here and nowhere else.
+    pub flaps: u64,
 }
 
 impl RegionBreakdownRow {
@@ -404,6 +498,7 @@ impl RegionBreakdownRow {
         live_regions: Option<&std::collections::HashSet<String>>,
         base_path: &str,
         range: &str,
+        flaps: u64,
     ) -> Self {
         let uptime_label = super::dashboard::pct_label(r.samples, r.up);
         let selected = selected_region == Some(r.region.as_str());
@@ -436,6 +531,7 @@ impl RegionBreakdownRow {
             region_label,
             filter_href,
             region: r.region,
+            flaps,
         }
     }
 }
@@ -1029,12 +1125,14 @@ pub async fn index(
             .await
             .ok()
             .map(|v| v.into_iter().collect());
+        let flaps = flaps_by_region(&state, org, target.id).await;
         state
             .results_store
             .region_breakdown(org, target.id, TimeRange { from, to })
             .await?
             .into_iter()
             .map(|r| {
+                let region_flaps = flaps.get(&r.region).copied().unwrap_or(0);
                 RegionBreakdownRow::from_rollup(
                     r,
                     selected_region.as_deref(),
@@ -1042,6 +1140,7 @@ pub async fn index(
                     live.as_ref(),
                     &base_path,
                     range_key,
+                    region_flaps,
                 )
             })
             .collect()
@@ -1476,6 +1575,21 @@ pub async fn incidents(
     let time_range = TimeRange { from, to };
     let labels = WindowLabels::new(from, to);
     let data = load_incidents_data(&state, org, target.id, time_range).await?;
+    // Compared against the flap window, not the page range: an incident 29 days
+    // ago explains nothing about failures from this morning.
+    let flap_cutoff = Utc::now() - chrono::Duration::hours(FLAP_WINDOW_HOURS);
+    let unconfirmed =
+        if !explained_by_incident(&data.rows, flap_cutoff) && !target.check.is_passive() {
+            let catalog = state.regions_detailed().await.unwrap_or_default();
+            UnconfirmedFailures::new(
+                &load_flaps(&state, org, target.id).await,
+                &catalog,
+                target.alert_confirmations,
+                target.region_policy,
+            )
+        } else {
+            None
+        };
     let (kind, address) = describe_check(&target.check);
     let share_count = state
         .monitor_share_store
@@ -1508,7 +1622,16 @@ pub async fn incidents(
         from_human: labels.from_human,
         to_human: labels.to_human,
         selected_region: None,
+        unconfirmed,
     })
+}
+
+/// Whether a listed incident accounts for the flap window. Incidents older than
+/// it explain nothing about failures inside it, which is the case the block
+/// exists for.
+fn explained_by_incident(rows: &[IncidentRow], cutoff: DateTime<Utc>) -> bool {
+    rows.iter()
+        .any(|i| i.ended_at.is_none() || i.started_at >= cutoff)
 }
 
 pub(crate) fn resolve_incident_window(
@@ -1552,6 +1675,7 @@ mod tests {
                 live,
                 "/targets/x",
                 "24h",
+                0,
             )
         };
 
@@ -1580,6 +1704,7 @@ mod tests {
                 None,
                 "/targets/x",
                 "24h",
+                0,
             )
         };
 
@@ -2223,6 +2348,7 @@ mod tests {
             p99_label: "300 ms".into(),
             last_status: "up".into(),
             selected: false,
+            flaps: 0,
         }
     }
 
@@ -2260,6 +2386,105 @@ mod tests {
         let anchor = &html[pos..pos + html[pos..].find("</a>").expect("anchor terminator")];
         assert!(anchor.contains("href=\"/targets/x?range=24h"));
         assert!(anchor.contains("region=eu-helsinki"));
+    }
+
+    #[test]
+    fn by_region_table_reports_state_changes_per_region() {
+        let mut p = multi_region_page();
+        let mut quiet = breakdown_row("EU North");
+        let mut noisy = breakdown_row("US East");
+        noisy.flaps = 271;
+        quiet.flaps = 0;
+        p.region_breakdown = vec![quiet, noisy];
+        let html = p.render().unwrap();
+        assert!(html.contains(">flaps 24h<"));
+        assert!(html.contains(">271<"));
+        assert!(html.contains("tabular-nums text-quiet\">0<"));
+    }
+
+    fn flaps(region: &str, failures: u64, transitions: u64) -> crate::storage::traits::RegionFlaps {
+        crate::storage::traits::RegionFlaps {
+            region: region.into(),
+            failures,
+            transitions,
+        }
+    }
+
+    #[test]
+    fn a_clean_window_has_nothing_to_explain() {
+        assert!(
+            UnconfirmedFailures::new(
+                &[flaps("eu-helsinki", 0, 0)],
+                &[],
+                2,
+                crate::domain::RegionIncidentPolicy::Majority,
+            )
+            .is_none()
+        );
+        assert!(
+            UnconfirmedFailures::new(&[], &[], 2, crate::domain::RegionIncidentPolicy::Majority)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn unconfirmed_failures_rank_regions_and_spell_out_the_quorum() {
+        let u = UnconfirmedFailures::new(
+            &[
+                flaps("eu-helsinki", 240, 273),
+                flaps("apac-sg", 0, 0),
+                flaps("us-east", 205, 235),
+            ],
+            &[],
+            2,
+            crate::domain::RegionIncidentPolicy::Majority,
+        )
+        .expect("failures present");
+        assert_eq!(u.failures, 445);
+        assert_eq!(u.transitions, 508);
+        assert_eq!(u.regions, vec!["eu-helsinki", "us-east"]);
+        assert_eq!(u.region_count, 3);
+        assert_eq!(u.quorum, 2);
+    }
+
+    #[test]
+    fn incidents_page_explains_failures_that_never_opened_one() {
+        let mut p = sample_incidents_page(vec![], 0);
+        p.unconfirmed = UnconfirmedFailures::new(
+            &[flaps("eu-helsinki", 240, 273), flaps("us-east", 205, 235)],
+            &[],
+            2,
+            crate::domain::RegionIncidentPolicy::Majority,
+        );
+        let html = p.render().unwrap();
+        assert!(html.contains("no incidents in the last 30d"));
+        assert!(html.contains("445 checks failed in the last 24 hours"));
+        assert!(html.contains("508 state changes"));
+        assert!(html.contains("eu-helsinki, us-east"));
+        assert!(html.contains("2 of the 2 regions reporting"));
+        assert!(html.contains("/docs/hosted/regions"));
+    }
+
+    #[test]
+    fn an_old_incident_does_not_explain_failures_inside_the_flap_window() {
+        let cutoff = Utc::now() - chrono::Duration::hours(FLAP_WINDOW_HOURS);
+        let mut stale = resolved_row();
+        stale.started_at = Utc::now() - chrono::Duration::days(29);
+        stale.ended_at = Some(Utc::now() - chrono::Duration::days(29));
+        assert!(!explained_by_incident(&[stale], cutoff));
+        assert!(explained_by_incident(&[ongoing_row()], cutoff));
+
+        let mut recent = resolved_row();
+        recent.started_at = Utc::now() - chrono::Duration::hours(2);
+        recent.ended_at = Some(Utc::now() - chrono::Duration::hours(1));
+        assert!(explained_by_incident(&[recent], cutoff));
+    }
+
+    #[test]
+    fn a_clean_incidents_page_says_nothing_extra() {
+        let html = sample_incidents_page(vec![], 0).render().unwrap();
+        assert!(html.contains("no incidents in the last 30d"));
+        assert!(!html.contains("state change"));
     }
 
     #[test]
@@ -2526,6 +2751,7 @@ mod tests {
             from_human: "2026-04-13 12:00 UTC".into(),
             to_human: "2026-05-13 12:00 UTC".into(),
             selected_region: None,
+            unconfirmed: None,
         }
     }
 

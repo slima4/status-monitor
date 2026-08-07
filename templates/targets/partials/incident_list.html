@@ -1,5 +1,6 @@
 {# Incidents table for the Incidents sub-tab. Inputs: name, range, incidents,
-   incidents_has_more, and `results_base` — the URL prefix incidents_tab.js
+   incidents_has_more, `unconfirmed` (failures with no incident to explain them,
+   `None` on the share view), and `results_base` — the URL prefix incidents_tab.js
    appends `/results` to for the per-incident timeline. The operator page
    passes `/api/v1/targets/{id}`; the public share view passes `/m/{token}`,
    so no operator target id leaks onto a shared page. #}
@@ -8,6 +9,29 @@
   <span aria-hidden="true" class="text-lg text-state-ok">✓</span>
   <span>no incidents in the last {{ range }}</span>
 </div>
+{% match unconfirmed %}
+{% when Some with (u) %}
+<div class="sticker-card mt-4 space-y-2 p-6 text-sm text-muted">
+  <p class="text-body">
+    Still, <span class="hl">{{ u.failures }} check{% if u.failures != 1 %}s{% endif %} failed in the last 24 hours</span> without opening one.
+  </p>
+  <p>
+    A region has to fail {{ u.confirmations }} time{% if u.confirmations != 1 %}s{% endif %} in a row before it counts as down, and
+    {{ u.quorum }} of the {{ u.region_count }} region{% if u.region_count != 1 %}s{% endif %} reporting then have to agree. These failures never lined up that way,
+    so no incident opened and nothing paged. The checks failed all the same, and the uptime figure counts confirmed incidents, not failed checks.
+  </p>
+  <p>
+    Failing region{% if u.regions.len() != 1 %}s{% endif %}: {% for r in u.regions %}{% if !loop.first %}, {% endif %}{{ r }}{% endfor %}.
+    {% if u.transitions > 0 %}{{ u.transitions }} state change{% if u.transitions != 1 %}s{% endif %} in that time.{% endif %}
+  </p>
+  <p class="text-xs">
+    Scattered failures from every region, on a host that answers fine when you open it yourself, usually mean it is refusing our probes rather than being down.
+    <a href="{{ "/hosted/regions"|docs_url }}" target="_blank" rel="noopener"
+       class="underline decoration-dotted hover:text-body">What our probes cannot reach</a>
+  </p>
+</div>
+{% when None %}
+{% endmatch %}
 {% else %}
 <section class="sticker-card overflow-hidden">
   <table class="min-w-full text-sm">

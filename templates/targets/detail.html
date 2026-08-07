@@ -174,6 +174,7 @@
         <tr>
           <th scope="col" class="px-5 py-2">region</th>
           <th scope="col" class="px-5 py-2 text-right">uptime</th>
+          <th scope="col" class="px-5 py-2 text-right" title="Status changes in this region over the last 24 hours">flaps 24h</th>
           <th scope="col" class="px-5 py-2 text-right">p50</th>
           <th scope="col" class="px-5 py-2 text-right">p95</th>
           <th scope="col" class="px-5 py-2 text-right">p99</th>
@@ -187,6 +188,7 @@
             <a class="region-row__link" href="{{ row.filter_href }}"{% if row.selected %} aria-current="page"{% endif %}>{{ row.region_label }}</a>
           </td>
           <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.uptime_label }}</td>
+          <td class="px-5 py-2 text-right font-mono tabular-nums{% if row.flaps == 0 %} text-quiet{% endif %}">{{ row.flaps }}</td>
           <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.p50_label }}</td>
           <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.p95_label }}</td>
           <td class="px-5 py-2 text-right font-mono tabular-nums">{{ row.p99_label }}</td>
