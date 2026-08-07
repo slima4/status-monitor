@@ -587,8 +587,11 @@ async fn due_for_reconcile_finds_only_unpaged_triggered_pg() {
         .await
         .unwrap();
 
-    let cutoff = chrono::Utc::now() - chrono::Duration::seconds(60);
-    let due = store.due_for_reconcile(cutoff, 100).await.unwrap();
+    let window = (
+        chrono::Utc::now() - chrono::Duration::hours(6),
+        chrono::Utc::now() - chrono::Duration::seconds(60),
+    );
+    let due = store.due_for_reconcile(window, 100).await.unwrap();
     assert!(
         due.iter().any(|d| d.id == never_paged),
         "an old, never-paged, unarmed triggered incident is reconcilable"
@@ -611,7 +614,7 @@ async fn due_for_reconcile_finds_only_unpaged_triggered_pg() {
         })
         .await
         .unwrap();
-    let due = store.due_for_reconcile(cutoff, 100).await.unwrap();
+    let due = store.due_for_reconcile(window, 100).await.unwrap();
     assert!(
         !due.iter().any(|d| d.id == never_paged),
         "a paged incident is no longer reconcilable"
@@ -624,7 +627,7 @@ async fn due_for_reconcile_finds_only_unpaged_triggered_pg() {
         .execute(&pool)
         .await
         .unwrap();
-    let due = store.due_for_reconcile(cutoff, 100).await.unwrap();
+    let due = store.due_for_reconcile(window, 100).await.unwrap();
     assert!(!due.iter().any(|d| d.id == acked));
 }
 

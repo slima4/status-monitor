@@ -356,6 +356,9 @@ pub struct EscalationConfig {
     pub retry_backoff_base_secs: u64,
     /// Ceiling on a single retry's backoff delay.
     pub retry_backoff_cap_secs: u64,
+    /// Floor on the reconcile scan: without it an incident nobody can be paged
+    /// about is re-attempted every tick, forever.
+    pub reconcile_window_secs: u64,
 }
 
 impl Default for EscalationConfig {
@@ -367,6 +370,7 @@ impl Default for EscalationConfig {
             max_attempts: 5,
             retry_backoff_base_secs: 30,
             retry_backoff_cap_secs: 3600,
+            reconcile_window_secs: 3600,
         }
     }
 }
@@ -1303,6 +1307,14 @@ impl AppConfig {
                 "checker.rdap_max_inflight must be >= 1"
             )));
         }
+        if self.escalation.reconcile_window_secs <= self.escalation.tick_interval_secs {
+            return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                "escalation.reconcile_window_secs ({}) must exceed tick_interval_secs ({}) \
+                 or the reconcile scan never matches",
+                self.escalation.reconcile_window_secs,
+                self.escalation.tick_interval_secs
+            )));
+        }
         if self.escalation.enabled {
             ge1_u64(
                 self.escalation.tick_interval_secs,
@@ -1638,6 +1650,16 @@ mod tests {
     fn scheduler_enabled_defaults_true_and_parses_false() {
         assert!(scheduler_from("target_refresh_interval_secs = 30").enabled);
         assert!(!scheduler_from("enabled = false\ntarget_refresh_interval_secs = 30").enabled);
+    }
+
+    #[test]
+    fn reconcile_window_must_outlast_a_tick_or_the_scan_never_matches() {
+        let mut cfg = AppConfig::load().expect("load");
+        cfg.escalation.tick_interval_secs = 15;
+        cfg.escalation.reconcile_window_secs = 15;
+        assert!(cfg.validate_quotas_and_limits().is_err());
+        cfg.escalation.reconcile_window_secs = 16;
+        assert!(cfg.validate_quotas_and_limits().is_ok());
     }
 
     fn agent_cfg(url: &str) -> AppConfig {

@@ -314,12 +314,18 @@ impl Worker {
     /// incident, older than the grace window, that was never paged and never
     /// armed. Re-running `page(Opened)` is idempotent — `open_episode` no-ops if
     /// the episode is already active. The DB is the source of truth, not the
-    /// in-memory channel.
+    /// in-memory channel. Bounded on both sides: a monitor with no channel
+    /// bound records nothing, so it would otherwise match this scan forever.
     async fn reconcile(&self) {
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
+        let now = Utc::now();
         let grace = chrono::Duration::seconds(self.cfg.tick_interval_secs.max(1) as i64);
-        let cutoff = Utc::now() - grace;
-        let due = match self.ops.due_for_reconcile(cutoff, limit).await {
+        let window = chrono::Duration::seconds(self.cfg.reconcile_window_secs.max(1) as i64);
+        let due = match self
+            .ops
+            .due_for_reconcile((now - window, now - grace), limit)
+            .await
+        {
             Ok(d) => d,
             Err(err) => {
                 tracing::warn!(error = %err, "escalation reconcile scan failed");
@@ -2044,6 +2050,52 @@ mod tests {
         // Now that it has been paged, reconcile no longer picks it up.
         eng.reconcile().await;
         assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn reconcile_leaves_an_incident_older_than_its_window_alone() {
+        let channels = Arc::new(InMemoryNotificationChannelStore::new());
+        let target = target_with_channel(Uuid::now_v7());
+        let tid = target.id;
+        let ops = Arc::new(InMemoryIncidentOpsStore::new());
+        let now = Utc::now();
+        let id = Uuid::now_v7();
+        let old = now - chrono::Duration::days(21);
+        ops.seed(OpsIncident {
+            id,
+            target_id: Some(tid),
+            title: None,
+            state: IncidentState::Triggered,
+            severity: IncidentSeverity::Major,
+            urgency: IncidentUrgency::High,
+            origin: IncidentOrigin::Monitor,
+            visibility: IncidentVisibility::Internal,
+            started_at: old,
+            ended_at: None,
+            acknowledged_at: None,
+            acknowledged_by: None,
+            assigned_to: None,
+            resolved_by: None,
+            escalation_policy_id: None,
+            escalation_level: 0,
+            escalation_round: 0,
+            next_escalation_at: None,
+            check_count: 2,
+            error_sample: None,
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
+            created_at: old,
+            updated_at: old,
+        });
+        let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+        let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+
+        let eng = engine(ops.clone(), policies, targets, channels);
+        eng.reconcile().await;
+        assert!(
+            ops.notifications_for(org(), id).await.unwrap().is_empty(),
+            "an incident past the reconcile window is not re-attempted"
+        );
     }
 
     #[test]

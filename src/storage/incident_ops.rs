@@ -339,13 +339,13 @@ pub trait IncidentOpsStore: Send + Sync {
         lease_secs: i64,
     ) -> Result<Vec<DueIncident>>;
     /// Cross-org `triggered` incidents that were opened but never paged and
-    /// never armed — no paging-log row, no bound policy, no timer — and are
-    /// older than `cutoff`. These are incidents whose open signal was lost
+    /// never armed — no paging-log row, no bound policy, no timer — started
+    /// inside `window`, given as `(floor, cutoff)`. These are incidents whose open signal was lost
     /// (e.g. the signal channel saturated); the engine reconciles them by
     /// re-running the open-episode paging. Oldest first.
     async fn due_for_reconcile(
         &self,
-        cutoff: DateTime<Utc>,
+        window: (DateTime<Utc>, DateTime<Utc>),
         limit: usize,
     ) -> Result<Vec<DueIncident>>;
     /// Cross-org open, unacknowledged incidents whose monitor wants an outage
@@ -1576,9 +1576,10 @@ impl IncidentOpsStore for PgIncidentOpsStore {
 
     async fn due_for_reconcile(
         &self,
-        cutoff: DateTime<Utc>,
+        window: (DateTime<Utc>, DateTime<Utc>),
         limit: usize,
     ) -> Result<Vec<DueIncident>> {
+        let (since, cutoff) = window;
         let cap = (limit as i64).clamp(1, 1000);
         #[derive(sqlx::FromRow)]
         struct Row {
@@ -1592,14 +1593,15 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         let rows: Vec<Row> = sqlx::query_as(
             "SELECT id, org_id, target_id, escalation_policy_id, escalation_level, escalation_round \
              FROM incidents i \
-             WHERE state = 'triggered' AND started_at <= $1 \
+             WHERE state = 'triggered' AND started_at <= $1 AND started_at >= $2 \
                  AND escalation_policy_id IS NULL AND next_escalation_at IS NULL \
                  AND NOT EXISTS ( \
                      SELECT 1 FROM incident_notifications n WHERE n.incident_id = i.id \
                  ) \
-             ORDER BY started_at ASC LIMIT $2",
+             ORDER BY started_at ASC LIMIT $3",
         )
         .bind(cutoff)
+        .bind(since)
         .bind(cap)
         .fetch_all(&self.pool)
         .await
@@ -2385,15 +2387,17 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
 
     async fn due_for_reconcile(
         &self,
-        cutoff: DateTime<Utc>,
+        window: (DateTime<Utc>, DateTime<Utc>),
         limit: usize,
     ) -> Result<Vec<DueIncident>> {
+        let (since, cutoff) = window;
         let g = self.inner.lock();
         Ok(g.incidents
             .iter()
             .filter(|i| {
                 i.state == IncidentState::Triggered
                     && i.started_at <= cutoff
+                    && i.started_at >= since
                     && i.escalation_policy_id.is_none()
                     && i.next_escalation_at.is_none()
                     && !g.notifications.iter().any(|(_, n)| n.incident_id == i.id)
