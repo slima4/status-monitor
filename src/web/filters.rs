@@ -79,6 +79,20 @@ mod static_refs {
     pub fn escalation_ui(_: &str, _: &dyn askama::Values) -> askama::Result<bool> {
         Ok(*ESCALATION_UI.get().unwrap_or(&false))
     }
+
+    static SUPPORT_UI: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+    /// Set once at startup from `[email].support_address`. Nav, page and
+    /// endpoint ride the same flag, so a self-host install shows no dead entry.
+    pub fn set_support_ui(enabled: bool) {
+        let _ = SUPPORT_UI.set(enabled);
+    }
+
+    /// `{% if ""|support_ui %}` → whether the in-app help form is on.
+    #[askama::filter_fn]
+    pub fn support_ui(_: &str, _: &dyn askama::Values) -> askama::Result<bool> {
+        Ok(*SUPPORT_UI.get().unwrap_or(&false))
+    }
 }
 
 /// Format raw values (timestamps, durations) by writing straight into the

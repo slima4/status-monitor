@@ -7,6 +7,7 @@ pub mod delegate_connect;
 pub mod discord_connect;
 pub mod escalation;
 pub mod heartbeat;
+pub mod help;
 pub mod incidents;
 pub mod invitations;
 pub mod legal;

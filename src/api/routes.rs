@@ -400,7 +400,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             post(handlers::invitations::resend),
         )
         .route("/invitations/accept", post(handlers::invitations::accept))
-        .route("/invitations/decline", post(handlers::invitations::decline))
+        .route("/invitations/decline", post(handlers::invitations::decline));
+
+    // Added inside the chain below so it still inherits auth + rate limiting.
+    if state.cfg.email.support_enabled() {
+        v1 = v1.route("/support", post(handlers::support::create));
+    }
+
+    let mut v1 = v1
         // Added before the auth layer so it ends up *inner*: auth runs
         // first and populates `AuthContext`, then the rate-limit middleware
         // keys on the resolved org/user (never the TCP peer).

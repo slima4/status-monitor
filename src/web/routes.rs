@@ -18,6 +18,7 @@ use crate::web::{assets, error, views};
 pub fn routes(state: AppState) -> Router {
     let cfg = &state.cfg;
     crate::web::filters::set_escalation_ui(cfg.escalation.enabled);
+    crate::web::filters::set_support_ui(cfg.email.support_enabled());
     let mut r = Router::new()
         .route("/", get(views::dashboard::root))
         .route("/targets", get(views::targets_list::index))
@@ -206,6 +207,11 @@ pub fn routes(state: AppState) -> Router {
                 "/web/partials/settings/on-call",
                 get(views::on_call::list_partial),
             );
+    }
+
+    // Only where an operator staffs an inbox, so no page goes nowhere.
+    if cfg.email.support_enabled() {
+        r = r.route("/help", get(views::help::page));
     }
 
     // Central Telegram bot receiver. Mounted only when an operator bot token

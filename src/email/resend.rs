@@ -7,6 +7,7 @@ use secrecy::{ExposeSecret, SecretString};
 use serde::Deserialize;
 use serde_json::json;
 
+use super::templates::single_line;
 use super::trait_def::{EmailError, EmailResult, EmailSender, MessageId, TransactionalEmail};
 use crate::http_outbound::OutboundHttpClient;
 
@@ -55,13 +56,24 @@ impl EmailSender for ResendEmailSender {
             "text": rendered.text_body,
             "html": rendered.html_body,
         });
+        if let Some(addr) = email.template.reply_to() {
+            body["reply_to"] = json!(single_line(addr));
+        }
+        let mut headers = serde_json::Map::new();
         // RFC 8058 one-click unsubscribe for public-subscriber mail: a stable
         // header link plus the One-Click marker so Gmail/Outlook render it.
         if let Some(url) = email.template.list_unsubscribe_url() {
-            body["headers"] = json!({
-                "List-Unsubscribe": format!("<{url}>"),
-                "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-            });
+            headers.insert("List-Unsubscribe".into(), json!(format!("<{url}>")));
+            headers.insert(
+                "List-Unsubscribe-Post".into(),
+                json!("List-Unsubscribe=One-Click"),
+            );
+        }
+        for (name, value) in email.template.custom_headers() {
+            headers.insert(name.into(), json!(single_line(&value)));
+        }
+        if !headers.is_empty() {
+            body["headers"] = serde_json::Value::Object(headers);
         }
         let payload = serde_json::to_vec(&body)
             .map_err(|e| EmailError::Transport(format!("serialize: {e}")))?;

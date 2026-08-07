@@ -76,8 +76,9 @@ name: deploy
 #                               webhook endpoint; presence mounts the
 #                               /hooks/resend bounce receiver (sensitive)
 # Non-secret repo variables: RUST_LOG (log/trace verbosity),
-# TELEGRAM_BOT_USERNAME (the bot's public @handle, no leading @) —
-# redeploy applies them with no rebuild.
+# TELEGRAM_BOT_USERNAME (the bot's public @handle, no leading @),
+# EMAIL_SUPPORT_ADDRESS (inbox behind the in-app /help form; unset = no
+# form) — redeploy applies them with no rebuild.
 
 on:
   workflow_dispatch:
@@ -218,6 +219,7 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_WEBHOOK_SECRET: ${{ secrets.RESEND_WEBHOOK_SECRET }}
           EMAIL_FROM_ADDRESS: ${{ vars.EMAIL_FROM_ADDRESS }}
+          EMAIL_SUPPORT_ADDRESS: ${{ vars.EMAIL_SUPPORT_ADDRESS }}
           # Dashboard/agent split. Token is a secret (agent credential); the
           # three knobs are plain config (Actions variables). Set all three vars
           # + the token to switch prod to brain-only + a co-located agent (see
@@ -278,6 +280,7 @@ jobs:
                RESEND_API_KEY='${RESEND_API_KEY}' \
                RESEND_WEBHOOK_SECRET='${RESEND_WEBHOOK_SECRET}' \
                EMAIL_FROM_ADDRESS='${EMAIL_FROM_ADDRESS}' \
+               EMAIL_SUPPORT_ADDRESS='${EMAIL_SUPPORT_ADDRESS}' \
                HOME_AGENT_TOKEN='${HOME_AGENT_TOKEN}' \
                UPTIMEPAGE_SCHEDULER_ENABLED='${UPTIMEPAGE_SCHEDULER_ENABLED}' \
                UPTIMEPAGE_SCHEDULER_REGION='${UPTIMEPAGE_SCHEDULER_REGION}' \
@@ -898,6 +901,36 @@ jobs:
               n=$(grep -cxF "$pair" .env || true)
               [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
             done
+          fi
+
+          # --- managed help-form inbox (optional) ---------------------------
+          # Non-secret address, sourced from the repo *variable*
+          # EMAIL_SUPPORT_ADDRESS. Same write contract as the blocks above.
+          # Separate from the resend block because it gates a surface rather
+          # than delivery: setting it mounts /help and POST /api/v1/support,
+          # and mail still needs the provider above to actually leave the box.
+          # Skipped when unset, so the compose `${…:-}` fallback keeps the
+          # form absent; to switch it off later, clear the key in .env.
+          if [ -n "${EMAIL_SUPPORT_ADDRESS:-}" ]; then
+            cp .env ".env.bak.$(date +%s).support"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN { m["UPTIMEPAGE_EMAIL_SUPPORT_ADDRESS"] = ENVIRON["EMAIL_SUPPORT_ADDRESS"] }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next
+            mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+1: appended only if the key was absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 1))" ]; then
+              echo "::error::.env line count out of range after support upsert (${before} -> ${after})"
+              exit 1
+            fi
+            n=$(grep -cxF "UPTIMEPAGE_EMAIL_SUPPORT_ADDRESS=$(printenv EMAIL_SUPPORT_ADDRESS)" .env || true)
+            [ "$n" = 1 ] || { echo "::error::EMAIL_SUPPORT_ADDRESS not written exactly once to .env (count=${n})"; exit 1; }
           fi
 
           # --- managed RUST_LOG (optional) ----------------------------------

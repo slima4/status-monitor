@@ -22,6 +22,10 @@
 <div class="monitors-popover__sep"></div>
 <a href="{{ ""|docs_url }}" role="menuitem" target="_blank" rel="noopener"
    class="monitors-popover__item"><svg class="mp-icon" aria-hidden="true"><use href="#i-book" /></svg>docs</a>
+{% if ""|support_ui %}
+<a href="/help" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "help" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-help" /></svg>get help</a>
+{% endif %}
 <div class="monitors-popover__sep"></div>
 <button type="button" role="menuitem"
         hx-post="/auth/logout"

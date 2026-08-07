@@ -20,6 +20,11 @@
         { group: "action", label: "+ new monitor", href: "/targets/new", meta: "" },
     ];
 
+    // Only where the server mounted /help; a row to a 404 is worse than none.
+    if (document.body.hasAttribute("data-support-ui")) {
+        STATIC.push({ group: "go", label: "get help", href: "/help", meta: "", icon: "i-help" });
+    }
+
     function mount() {
         if (dialog) return;
         dialog = document.createElement("dialog");

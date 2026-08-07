@@ -49,6 +49,11 @@ on a plan without it the badge always renders, whatever the page setting says.
 | `test_now_per_minute` | 60 | 90 | 120 | `POST /api/v1/targets/test` + the notification-channel test endpoints |
 | `check_now_per_minute` | 60 | 90 | 120 | `POST /api/v1/targets/{id}/check-now` |
 
+One category sits outside the plan: `support` (`POST /api/v1/support`, the
+in-app help form) is capped at a fixed 2 per minute on every tier. It spends the
+operator's mail budget rather than a tenant resource, so paying more does not
+buy a larger share of it.
+
 ## How quotas are enforced
 
 A resource quota is checked **atomically at the write**, not by a
@@ -102,12 +107,13 @@ RDAP, which rate-limits by source address.
 Two app-side tiers, both keyed on the **authenticated subject** (never the
 TCP peer): `(org, category)` and `(user, category)`. Both are checked; the
 org tier fires first because it protects shared resources. The per-minute
-budget comes from the org's plan. The request category is derived from the
-path and method:
+budget comes from the org's plan, except for `support`, which is fixed. The
+request category is derived from the path and method:
 
 - path contains `/bulk` → `bulk_ops`
 - path ends `/test` → `test_now`
 - path ends `/check-now` → `check_now`
+- path ends `/support` → `support`
 - any path under `/mcp` → `api_reads`, whatever the method (the JSON-RPC body hides the tool name from the middleware; probe-spawning and write tools re-check the stricter category inside the tool)
 - otherwise `GET`/`HEAD`/`OPTIONS` → `api_reads`, else → `api_writes`
 

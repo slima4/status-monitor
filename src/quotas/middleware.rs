@@ -35,6 +35,9 @@ fn categorize(parts: &Parts) -> RateLimitCategory {
     if path.ends_with("/check-now") {
         return RateLimitCategory::CheckNow;
     }
+    if path.ends_with("/support") {
+        return RateLimitCategory::Support;
+    }
     match parts.method {
         Method::GET | Method::HEAD | Method::OPTIONS => RateLimitCategory::ApiReads,
         _ => RateLimitCategory::ApiWrites,
@@ -118,7 +121,7 @@ pub async fn rate_limit_middleware(
 /// Wraps a `Denied` into a 429 response and increments the rate-limit
 /// drop counter on the way out. Counter is labelled by the same `scope`
 /// string carried in the error body so a dashboard can join the two —
-/// label set is bounded (2 tiers × 5 categories = 10 series).
+/// label set is bounded (2 tiers × 6 categories = 12 series).
 fn denied_response(d: Denied) -> Response {
     counter!(names::RATELIMIT_DROPS, "scope" => d.scope.clone()).increment(1);
     crate::error::AppError::RateLimited {
@@ -173,6 +176,9 @@ mod tests {
             categorize(&parts("POST", "/api/v1/targets/abc/check-now")),
             CheckNow
         );
+        // The help relay gets its own bucket, not the shared api_writes one:
+        // its ceiling is fixed and far tighter than any plan's write budget.
+        assert_eq!(categorize(&parts("POST", "/api/v1/support")), Support);
         // Method classifies everything else.
         assert_eq!(categorize(&parts("GET", "/api/v1/targets")), ApiReads);
         assert_eq!(categorize(&parts("HEAD", "/api/v1/targets")), ApiReads);

@@ -168,6 +168,10 @@ pub mod codes {
     pub const DELEGATE_LINK_LIMIT: &str = "DELEGATE_LINK_LIMIT";
     pub const DELEGATE_LINK_NOT_FOUND: &str = "DELEGATE_LINK_NOT_FOUND";
     pub const DELEGATE_KIND_INVALID: &str = "DELEGATE_KIND_INVALID";
+    // In-app help form.
+    pub const SUPPORT_UNAVAILABLE: &str = "SUPPORT_UNAVAILABLE";
+    pub const SUPPORT_DELIVERY_FAILED: &str = "SUPPORT_DELIVERY_FAILED";
+    pub const INVALID_TOPIC: &str = "INVALID_TOPIC";
     // Org management.
     pub const ORG_NOT_FOUND: &str = "ORG_NOT_FOUND";
     pub const ORG_DELETED: &str = "ORG_DELETED";

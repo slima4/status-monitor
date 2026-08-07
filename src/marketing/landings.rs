@@ -2445,7 +2445,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "Getting in touch",
-                body: "Write to hello@uptimepage.dev and a person reads it. Bugs and feature requests are better as GitHub issues, where the discussion stays public and searchable. Legal details are in the impressum.",
+                body: "Write to hello@uptimepage.dev and a person reads it, or use the help form inside the app if you already have an account. Bugs belong in GitHub issues; questions and feature requests belong in GitHub discussions, where the answers stay public and searchable. Legal details are in the impressum.",
             },
         ],
         code: None,

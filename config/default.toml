@@ -210,6 +210,9 @@ public_per_ip_rate_limit_per_min = 60
 provider = "log"
 from_name = "Uptimepage"
 from_address = "no-reply@example.invalid"
+# Where the in-app help form delivers. Empty hides it; set only if you staff
+# an inbox.
+support_address = ""
 
 [email.resend]
 # From https://resend.com/api-keys. Required when provider = "resend".

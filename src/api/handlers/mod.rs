@@ -18,6 +18,7 @@ pub mod public;
 pub mod results;
 pub mod shares;
 pub mod status_page;
+pub mod support;
 pub mod tags;
 pub mod targets;
 pub mod usage;

@@ -554,7 +554,7 @@ The person who owns the Slack workspace / Telegram group / inbox often isn't the
 
 ## Rate limiting
 
-`/api/v1/*` is rate-limited per authenticated subject — by `(org, category)` and by `(user, category)`, whichever trips first — with the per-minute budgets taken from the org's plan. Categories: `api_writes` (POST/PATCH/DELETE), `api_reads` (GET/HEAD/OPTIONS), `bulk_ops` (`/bulk*`), `test_now` (`/test`), `check_now` (`/check-now`). Exceeding a budget returns `429 Too Many Requests` with a `Retry-After` header (seconds until the next token) and `code: RATE_LIMITED`. `/healthz` and `/readyz` are never throttled. Unauthenticated and per-IP limiting is the reverse proxy's job (see [Deployment](deployment.md)). Full model: [Quotas & rate limits](quotas.md).
+`/api/v1/*` is rate-limited per authenticated subject — by `(org, category)` and by `(user, category)`, whichever trips first — with the per-minute budgets taken from the org's plan. Categories: `api_writes` (POST/PATCH/DELETE), `api_reads` (GET/HEAD/OPTIONS), `bulk_ops` (`/bulk*`), `test_now` (`/test`), `check_now` (`/check-now`), and `support` (`/support`), the one category with a fixed ceiling on every plan. Exceeding a budget returns `429 Too Many Requests` with a `Retry-After` header (seconds until the next token) and `code: RATE_LIMITED`. `/healthz` and `/readyz` are never throttled. Unauthenticated and per-IP limiting is the reverse proxy's job (see [Deployment](deployment.md)). Full model: [Quotas & rate limits](quotas.md).
 
 ## CORS
 

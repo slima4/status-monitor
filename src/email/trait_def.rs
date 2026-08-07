@@ -101,6 +101,20 @@ pub enum EmailTemplate {
         incident_url: String,
         unsubscribe_url: String,
     },
+    /// An in-app help request relayed to the operator's support address.
+    /// Everything but `message` and `page_url` is server-derived, and
+    /// `from_email` becomes the Reply-To so an answer goes straight back.
+    SupportRequest {
+        request_id: String,
+        topic: String,
+        message: String,
+        from_email: String,
+        org_slug: String,
+        org_id: String,
+        plan: String,
+        page_url: Option<String>,
+        app_version: String,
+    },
     /// A maintenance-window announcement or completion for a confirmed
     /// subscriber. `phase` is `scheduled` or `completed`.
     SubscriberMaintenance {
@@ -197,6 +211,27 @@ impl EmailTemplate {
                 incident_url,
                 unsubscribe_url,
             ),
+            EmailTemplate::SupportRequest {
+                request_id,
+                topic,
+                message,
+                from_email,
+                org_slug,
+                org_id,
+                plan,
+                page_url,
+                app_version,
+            } => templates::support_request::render(&templates::support_request::SupportContext {
+                request_id,
+                topic,
+                message,
+                from_email,
+                org_slug,
+                org_id,
+                plan,
+                page_url: page_url.as_deref(),
+                app_version,
+            }),
             EmailTemplate::SubscriberMaintenance {
                 page_name,
                 title,
@@ -230,6 +265,33 @@ impl EmailTemplate {
             EmailTemplate::SubscriberConfirm { confirm_url, .. } => Some(confirm_url),
             EmailTemplate::SubscriberIncident { incident_url, .. } => Some(incident_url),
             EmailTemplate::SubscriberMaintenance { page_url, .. } => Some(page_url),
+            EmailTemplate::SupportRequest { .. } => None,
+        }
+    }
+
+    /// Sent by the platform, answered to the customer who wrote it.
+    pub fn reply_to(&self) -> Option<&str> {
+        match self {
+            EmailTemplate::SupportRequest { from_email, .. } => Some(from_email),
+            _ => None,
+        }
+    }
+
+    /// Lets a filter rule match without parsing a subject. Names are
+    /// unprefixed per RFC 6648, which deprecates `X-` for new headers.
+    pub fn custom_headers(&self) -> Vec<(&'static str, String)> {
+        match self {
+            EmailTemplate::SupportRequest {
+                request_id,
+                topic,
+                org_slug,
+                ..
+            } => vec![
+                ("Uptimepage-Request-Id", request_id.clone()),
+                ("Uptimepage-Topic", topic.clone()),
+                ("Uptimepage-Org", org_slug.clone()),
+            ],
+            _ => Vec::new(),
         }
     }
 
@@ -277,6 +339,67 @@ impl fmt::Display for MessageId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sample_support() -> EmailTemplate {
+        EmailTemplate::SupportRequest {
+            request_id: "0198f0e1-1111-7222-8333-a1b2c3d4e5f6".into(),
+            topic: "bug".into(),
+            message: "checks are flapping".into(),
+            from_email: "jane@acme.test".into(),
+            org_slug: "acme".into(),
+            org_id: "0198f0e1-0000-7000-8000-000000000000".into(),
+            plan: "founding".into(),
+            page_url: None,
+            app_version: "1.0.0".into(),
+        }
+    }
+
+    #[test]
+    fn support_request_answers_to_the_customer_not_the_platform() {
+        assert_eq!(sample_support().reply_to(), Some("jane@acme.test"));
+    }
+
+    #[test]
+    fn only_the_support_relay_sets_a_reply_to() {
+        let alert = EmailTemplate::IncidentAlert {
+            body: "x".into(),
+            org_name: None,
+            stop_url: None,
+        };
+        assert_eq!(alert.reply_to(), None);
+        assert_eq!(EmailTemplate::AccountRestored.reply_to(), None);
+    }
+
+    #[test]
+    fn support_request_carries_filterable_headers() {
+        let headers = sample_support().custom_headers();
+        assert_eq!(
+            headers,
+            vec![
+                (
+                    "Uptimepage-Request-Id",
+                    "0198f0e1-1111-7222-8333-a1b2c3d4e5f6".to_string()
+                ),
+                ("Uptimepage-Topic", "bug".to_string()),
+                ("Uptimepage-Org", "acme".to_string()),
+            ],
+            "unprefixed per RFC 6648, so a filter rule need not parse a subject"
+        );
+    }
+
+    #[test]
+    fn other_templates_add_no_application_headers() {
+        assert!(EmailTemplate::AccountRestored.custom_headers().is_empty());
+    }
+
+    #[test]
+    fn support_request_offers_no_unsubscribe_or_action_url() {
+        // It is operator mail, not subscriber mail: a List-Unsubscribe header
+        // here would let a mail gateway silently mute the help channel.
+        let support = sample_support();
+        assert_eq!(support.list_unsubscribe_url(), None);
+        assert_eq!(support.primary_url(), None);
+    }
 
     #[test]
     fn incident_alert_withholds_one_click_but_verification_offers_it() {

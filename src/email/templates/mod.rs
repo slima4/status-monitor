@@ -7,6 +7,7 @@ pub mod magic_link;
 pub mod subscriber_confirm;
 pub mod subscriber_incident;
 pub mod subscriber_maintenance;
+pub mod support_request;
 
 /// HTML-escape the five entities that matter in element text and double- or
 /// single-quoted attribute values. Single owner for every transactional
@@ -31,4 +32,32 @@ pub(crate) fn html_escape(input: &str) -> String {
 /// entities cover `href="…"`); a distinct name keeps call sites self-documenting.
 pub(crate) fn attr_escape(input: &str) -> String {
     html_escape(input)
+}
+
+/// Flattens a value destined for a mail header, subject included: a control
+/// character there would start a new header. Single owner for the same reason
+/// as [`html_escape`] — a template and its transport must not disagree.
+pub(crate) fn single_line(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::single_line;
+
+    #[test]
+    fn folding_sequences_collapse_into_one_line() {
+        assert_eq!(
+            single_line("bug\r\nBcc: evil@example.test"),
+            "bug Bcc: evil@example.test"
+        );
+        assert_eq!(single_line("a\tb\u{0}c"), "a b c");
+        assert_eq!(single_line("  padded  "), "padded");
+    }
 }

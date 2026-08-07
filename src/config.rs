@@ -465,6 +465,9 @@ pub struct TransactionalEmailConfig {
     pub provider: String,
     pub from_name: String,
     pub from_address: String,
+    /// Empty leaves the help form, its route and its nav entry absent, so a
+    /// self-host install never mails a vendor.
+    pub support_address: String,
     pub resend: ResendConfig,
 }
 
@@ -472,6 +475,10 @@ impl TransactionalEmailConfig {
     /// Whether mail leaves the process. `log` renders to tracing and drops it.
     pub fn delivers(&self) -> bool {
         self.provider != "log"
+    }
+
+    pub fn support_enabled(&self) -> bool {
+        !self.support_address.trim().is_empty()
     }
 }
 
@@ -481,6 +488,7 @@ impl Default for TransactionalEmailConfig {
             provider: "log".into(),
             from_name: "Uptimepage".into(),
             from_address: "no-reply@example.invalid".into(),
+            support_address: String::new(),
             resend: ResendConfig::default(),
         }
     }
@@ -1650,6 +1658,16 @@ mod tests {
     fn scheduler_enabled_defaults_true_and_parses_false() {
         assert!(scheduler_from("target_refresh_interval_secs = 30").enabled);
         assert!(!scheduler_from("enabled = false\ntarget_refresh_interval_secs = 30").enabled);
+    }
+
+    #[test]
+    fn help_form_stays_off_until_an_address_is_configured() {
+        let mut cfg = TransactionalEmailConfig::default();
+        assert!(!cfg.support_enabled(), "default ships with no address");
+        cfg.support_address = "   ".into();
+        assert!(!cfg.support_enabled(), "whitespace is not an address");
+        cfg.support_address = "hello@example.test".into();
+        assert!(cfg.support_enabled());
     }
 
     #[test]

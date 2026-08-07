@@ -563,6 +563,15 @@ pub fn with_session(
 /// In-memory stores, no Postgres pool (`db: None`); callers that require a
 /// pool must build their own state.
 pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
+    build_test_app_state_with_email(mutate, build_test_outbound_and_email().1)
+}
+
+/// [`build_test_app_state`] with a caller-supplied email sender, so a test can
+/// hold the concrete [`InMemoryEmailSender`] and assert on what was mailed.
+pub fn build_test_app_state_with_email(
+    mutate: impl FnOnce(&mut AppConfig),
+    email_sender: Arc<dyn EmailSender>,
+) -> AppState {
     let mut cfg = AppConfig::load().expect("config");
     mutate(&mut cfg);
     let target_store = Arc::new(InMemoryTargetStore::new());
@@ -599,8 +608,27 @@ pub fn build_test_app_state(mutate: impl FnOnce(&mut AppConfig)) -> AppState {
         Arc::new(InMemoryStatusPageStore::new()),
         incident_narration_store,
         build_test_outbound_and_email().0,
-        build_test_outbound_and_email().1,
+        email_sender,
         None,
+    )
+}
+
+/// Owner-session router paired with the in-memory sender its handlers write
+/// to, for tests that assert on the content of a mail an endpoint sent.
+pub fn build_test_app_with_owner_and_email(
+    mutate: impl FnOnce(&mut AppConfig),
+) -> (Router, Arc<uptimepage::email::InMemoryEmailSender>) {
+    let mem = Arc::new(uptimepage::email::InMemoryEmailSender::new());
+    let state = build_test_app_state_with_email(mutate, mem.clone());
+    let router = uptimepage::build_app_router(state, CancellationToken::new());
+    (
+        with_session(
+            router,
+            test_user_id(),
+            Some(test_org_id()),
+            Some("test-owner-session"),
+        ),
+        mem,
     )
 }
 

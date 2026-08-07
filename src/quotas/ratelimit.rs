@@ -30,7 +30,12 @@ pub enum RateLimitCategory {
     BulkOps,
     TestNow,
     CheckNow,
+    Support,
 }
+
+/// Spends the operator's mail budget, not a tenant resource, so paying more
+/// buys no larger share of it.
+const SUPPORT_PER_MINUTE: i32 = 2;
 
 impl RateLimitCategory {
     /// Per-minute quota for this category from the plan. Floored at 1 so a
@@ -43,6 +48,7 @@ impl RateLimitCategory {
             Self::BulkOps => plan.bulk_ops_per_minute,
             Self::TestNow => plan.test_now_per_minute,
             Self::CheckNow => plan.check_now_per_minute,
+            Self::Support => SUPPORT_PER_MINUTE,
         };
         let clamped = u32::try_from(raw).unwrap_or(u32::MAX).max(1);
         NonZeroU32::new(clamped).expect("clamped to >= 1")
@@ -55,6 +61,7 @@ impl RateLimitCategory {
             Self::BulkOps => "bulk_ops",
             Self::TestNow => "test_now",
             Self::CheckNow => "check_now",
+            Self::Support => "support",
         };
         format!("{tier}_{c}")
     }

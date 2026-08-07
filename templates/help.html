@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% import "_register.html" as reg %}
+{% block title %}Get help · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>get help</h1>
+    <p class="text-sm text-muted">
+      A person reads every message. We reply within one business day, to
+      <span class="font-mono">{{ reply_to }}</span>.
+    </p>
+  </header>
+
+  <form id="help-form" novalidate class="space-y-6">
+    <div id="form-errors" role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+
+    <fieldset class="space-y-3">
+      <legend class="panel-label">what is this about</legend>
+      <div class="check-type-cards">
+        {% call reg::chooser_card("data-topic-card", "topic", "question", true, "question", "how do I …") %}{% endcall %}
+        {% call reg::chooser_card("data-topic-card", "topic", "bug", false, "bug", "something is wrong") %}{% endcall %}
+        {% call reg::chooser_card("data-topic-card", "topic", "feature", false, "feature request", "what is missing") %}{% endcall %}
+        {% call reg::chooser_card("data-topic-card", "topic", "regions", false, "request a region", "check from somewhere we do not reach") %}{% endcall %}
+        {% call reg::chooser_card("data-topic-card", "topic", "billing", false, "billing", "plans and invoices") %}{% endcall %}
+      </div>
+    </fieldset>
+
+    <label class="field-outline">
+      <span class="field-outline__label">Message</span>
+      <textarea name="message" rows="8" required maxlength="4000"
+                placeholder="What were you doing, what did you expect, what happened instead?"
+                class="w-full field"></textarea>
+      <span class="mt-1 block text-xs text-muted">
+        Your org, plan, build and the page you came from are attached automatically.
+      </span>
+    </label>
+
+    <div class="flex flex-wrap items-center gap-3">
+      <button type="submit" data-help-submit
+              class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">send message</button>
+      <span data-help-sent class="hidden text-sm text-state-ok"># sent, reply comes to {{ reply_to }} · ref <span class="font-mono" data-help-ref></span></span>
+    </div>
+  </form>
+
+  <div class="sticker-card overflow-hidden">
+    <header class="card-band">
+      <h2 class="panel-label">faster answers</h2>
+    </header>
+    <ul class="space-y-2 px-5 py-4 text-sm">
+      <li><a href="{{ ""|docs_url }}" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body">docs</a> — setup, monitor types, notifications, API</li>
+      <li><a href="https://github.com/uptimepage/uptimepage/discussions/categories/q-a" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body">questions</a> — someone may have asked already, and answers stay searchable</li>
+      <li><a href="https://github.com/uptimepage/uptimepage/discussions/categories/ideas" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body">ideas</a> — feature requests others can upvote</li>
+      <li><a href="https://github.com/uptimepage/uptimepage/issues" target="_blank" rel="noopener" class="underline decoration-dotted hover:text-body">issues</a> — reproducible bugs</li>
+    </ul>
+  </div>
+</section>
+
+<script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+<script defer src="{{ "js/ui/help_form.js"|asset }}"></script>
+{% endblock %}
