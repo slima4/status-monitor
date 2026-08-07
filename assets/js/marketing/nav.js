@@ -5,6 +5,7 @@
 // per-page engagement beacons.
 import "./_link_event.js";
 import "./_engagement.js";
+import "./_badges.js";
 (() => {
     const desktop = matchMedia("(min-width: 768px)");
 

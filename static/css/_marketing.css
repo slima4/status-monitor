@@ -1447,6 +1447,38 @@ html:has(.marketing-shell) {
 .mk-social__link:hover { color: var(--mk-ok); border-color: var(--mk-ok); }
 .mk-social__link svg { width: 1.0625rem; height: 1.0625rem; fill: currentColor; }
 
+/* ── Featured-on badge rail ──────────────────────────────────────── */
+.mk-badges__viewport { min-width: 0; }
+.mk-badges__track { display: flex; }
+.mk-badges__set {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem 1.75rem;
+}
+.mk-badges__item { display: inline-flex; }
+.mk-badges__item img { height: 2.75rem; width: auto; }
+
+/* Marquee only once JS has measured a set; without it the row just wraps. */
+.mk-badges.is-live .mk-badges__viewport {
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 6%, black 94%, transparent);
+            mask-image: linear-gradient(90deg, transparent, black 6%, black 94%, transparent);
+}
+.mk-badges.is-live .mk-badges__track {
+    width: max-content;
+    animation: mk-badges-slide var(--mk-badges-dur, 40s) linear infinite;
+}
+/* Trailing pad rides with the set so one hop lands exactly on the next copy. */
+.mk-badges.is-live .mk-badges__set { flex-wrap: nowrap; padding-inline-end: 1.75rem; }
+.mk-badges.is-live:hover .mk-badges__track,
+.mk-badges.is-live:focus-within .mk-badges__track { animation-play-state: paused; }
+@keyframes mk-badges-slide {
+    from { transform: translate3d(0, 0, 0); }
+    to   { transform: translate3d(calc(-100% / var(--mk-badges-copies, 2)), 0, 0); }
+}
+
 /* ── Integrations strip ──────────────────────────────────────────── */
 .mk-integration {
     display: inline-flex;
