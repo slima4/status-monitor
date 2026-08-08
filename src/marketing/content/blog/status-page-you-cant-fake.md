@@ -1,6 +1,7 @@
 +++
 title = "The status page you can't fake: measured uptime, not published"
 date = "2026-07-15"
+updated = "2026-08-08"
 slug = "status-page-you-cant-fake"
 excerpt = "Why a status page's uptime bar must come from real checks, not the incidents you chose to publish, and a quick test for any page."
 tags = ["status-page", "monitoring", "trust", "uptime", "postmortem", "sre", "devops"]
@@ -58,7 +59,7 @@ A page you can trust shows the outage in the first test, keeps the red in the se
 
 ## Where we stand
 
-This is how Uptimepage works. The 90-day bar and each status light come from confirmed downtime, measured across regions with a confirmation rule, not from what someone chose to publish. Incidents are the notes you write by hand. Some status page tools also let a person set a component to green by hand. We do not. If you are comparing tools, we keep an honest [comparison with Statuspage](/vs/statuspage). We hold our own pages to the same rule and keep improving it. Most recently we made sure that a monitor added to a page after an outage still shows that outage on the bar, so the history stays complete no matter when the monitor was added.
+This is how Uptimepage works. The 90-day bar and each status light come from confirmed downtime, measured across regions with a confirmation rule, not from what someone chose to publish. Incidents are the notes you write by hand. Some status page tools also let a person set a component to green by hand. We do not. If you are comparing tools, we keep an honest [comparison with Statuspage](/vs/statuspage) and a wider review of the [Statuspage alternatives](/blog/statuspage-alternatives) worth knowing about. We hold our own pages to the same rule and keep improving it. Most recently we made sure that a monitor added to a page after an outage still shows that outage on the bar, so the history stays complete no matter when the monitor was added.
 
 You should not be able to fake your uptime. You should not be able to fake it by accident either. The bar is a measurement. Keep it that way.
 

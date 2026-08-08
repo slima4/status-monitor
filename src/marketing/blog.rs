@@ -599,6 +599,7 @@ mod tests {
     fn only_in_market_posts_carry_a_cta() {
         const IN_MARKET: &[&str] = &[
             "uptime-sla",
+            "statuspage-alternatives",
             "is-98-uptime-good",
             "how-much-downtime-is-99-9-uptime",
             "how-much-downtime-is-99-95-uptime",

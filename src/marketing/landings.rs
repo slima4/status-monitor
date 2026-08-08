@@ -121,7 +121,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/status-page-for-saas",
         created: "2026-06-16",
-        lastmod: "2026-08-03",
+        lastmod: "2026-08-08",
         title: "Status Page & Uptime Monitoring for SaaS",
         eyebrow: "for saas teams",
         h1: "A status page your SaaS customers actually trust",
@@ -194,6 +194,10 @@ pub const LANDINGS: &[Landing] = &[
                 href: "/vs/statuspage",
             },
             ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
+            },
+            ResourceLink {
                 label: "White-label status pages",
                 href: "/white-label-uptime-monitoring",
             },
@@ -203,7 +207,7 @@ pub const LANDINGS: &[Landing] = &[
     Landing {
         path: "/status-page-for-agencies",
         created: "2026-06-16",
-        lastmod: "2026-08-03",
+        lastmod: "2026-08-08",
         title: "Status Pages for Agencies & Client Sites",
         eyebrow: "for agencies",
         h1: "One account. A branded status page for every client.",
@@ -271,13 +275,17 @@ pub const LANDINGS: &[Landing] = &[
                 label: "White-label status pages",
                 href: "/white-label-uptime-monitoring",
             },
+            ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
+            },
         ],
         cta: "Start free",
     },
     Landing {
         path: "/open-source-status-page",
         created: "2026-06-20",
-        lastmod: "2026-08-06",
+        lastmod: "2026-08-08",
         title: "Open-Source Status Page, Self-Hosted",
         eyebrow: "open source",
         h1: "An open-source status page you can self-host",
@@ -444,13 +452,17 @@ docker compose up -d"#,
                 label: "Best open-source monitors, ranked",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
+            ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
+            },
         ],
         cta: "Start free",
     },
     Landing {
         path: "/white-label-uptime-monitoring",
         created: "2026-07-01",
-        lastmod: "2026-08-03",
+        lastmod: "2026-08-08",
         title: "White-Label Uptime Monitoring & Status Pages",
         eyebrow: "white label",
         h1: "White-label uptime monitoring and status pages",
@@ -529,6 +541,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Self-hosted monitors compared",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+            ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
             },
         ],
         cta: "Start free",
@@ -831,7 +847,7 @@ docker compose up -d"#,
     Landing {
         path: "/vs/statuspage",
         created: "2026-06-19",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-08",
         title: "Statuspage Alternative with Monitoring Built In",
         eyebrow: "switching status pages",
         h1: "A Statuspage alternative with monitoring built in",
@@ -879,6 +895,10 @@ docker compose up -d"#,
         ],
         code: None,
         resources: &[
+            ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
+            },
             ResourceLink {
                 label: "Status pages for SaaS",
                 href: "/status-page-for-saas",
@@ -1188,7 +1208,7 @@ docker compose up -d"#,
     Landing {
         path: "/vs/self-hosted-status-pages",
         created: "2026-07-01",
-        lastmod: "2026-07-02",
+        lastmod: "2026-08-08",
         title: "Uptimepage vs Upptime, Cachet & Statping",
         eyebrow: "comparing self-hosted",
         h1: "Uptimepage vs Upptime, Cachet and Statping",
@@ -1259,6 +1279,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Self-hosted monitoring tools",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+            ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
             },
         ],
         cta: "Start free",
@@ -1564,7 +1588,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-cachet",
         created: "2026-07-14",
-        lastmod: "2026-07-14",
+        lastmod: "2026-08-08",
         title: "Uptime Kuma vs Cachet",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Cachet: monitor or status page?",
@@ -1610,6 +1634,10 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Self-hosted uptime monitors",
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
+            },
+            ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
             },
         ],
         cta: "Start free",
@@ -5347,6 +5375,12 @@ const ALIASES: &[(&str, &str)] = &[
     // The roundup outranks the head-to-head page on these, so send them there.
     ("/pingdom-alternatives", "/blog/pingdom-alternatives"),
     ("/vs/pingdom-alternatives", "/blog/pingdom-alternatives"),
+    // Bare head term readers and inbound links guess at; the roundup owns it.
+    ("/statuspage-alternatives", "/blog/statuspage-alternatives"),
+    (
+        "/vs/statuspage-alternatives",
+        "/blog/statuspage-alternatives",
+    ),
     // Same pitch as the open-source page, which draws far more search demand.
     ("/self-hosted-status-page", "/open-source-status-page"),
 ];
