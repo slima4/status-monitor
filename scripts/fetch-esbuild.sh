@@ -26,6 +26,7 @@ case "$uname_s-$uname_m" in
     Darwin-x86_64)  pkg="darwin-x64" ;;
     Linux-aarch64)  pkg="linux-arm64" ;;
     Linux-x86_64)   pkg="linux-x64" ;;
+    MINGW*-x86_64|MSYS*-x86_64|CYGWIN*-x86_64) pkg="win32-x64"; TARGET="$BIN_DIR/esbuild.exe" ;;
     *) echo "unsupported platform: $uname_s-$uname_m" >&2; exit 1 ;;
 esac
 
@@ -34,7 +35,16 @@ echo "fetching $url"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 curl -fL --retry 3 -o "$tmp/esbuild.tgz" "$url"
-tar -xzf "$tmp/esbuild.tgz" -C "$tmp" package/bin/esbuild
-mv "$tmp/package/bin/esbuild" "$TARGET"
-chmod +x "$TARGET"
+if [[ "$pkg" == win32-x64 ]]; then
+    tar -xzf "$tmp/esbuild.tgz" -C "$tmp" package/esbuild.exe 2>/dev/null || tar -xzf "$tmp/esbuild.tgz" -C "$tmp" package/bin/esbuild.exe
+    if [[ -f "$tmp/package/esbuild.exe" ]]; then
+        mv "$tmp/package/esbuild.exe" "$TARGET"
+    elif [[ -f "$tmp/package/bin/esbuild.exe" ]]; then
+        mv "$tmp/package/bin/esbuild.exe" "$TARGET"
+    fi
+else
+    tar -xzf "$tmp/esbuild.tgz" -C "$tmp" package/bin/esbuild
+    mv "$tmp/package/bin/esbuild" "$TARGET"
+fi
+chmod +x "$TARGET" 2>/dev/null || true
 echo "installed $TARGET"

@@ -74,13 +74,32 @@ fn watch_git_head() {
 /// dev server with no rebuild. The single PROFILE check keeps the build output
 /// and the runtime resolver on the same side. (Both layouts share static/js, so
 /// a local `--release` build leaves it in release layout until the next debug.)
+fn run_sh_script(script: &str, args: &[&str]) -> std::process::ExitStatus {
+    if cfg!(windows) {
+        let sh_bin = if Path::new(r"C:\Program Files\Git\bin\sh.exe").exists() {
+            r"C:\Program Files\Git\bin\sh.exe"
+        } else if Path::new(r"C:\Program Files\Git\bin\bash.exe").exists() {
+            r"C:\Program Files\Git\bin\bash.exe"
+        } else {
+            "sh"
+        };
+        Command::new(sh_bin)
+            .arg(script)
+            .args(args)
+            .status()
+            .unwrap_or_else(|e| panic!("failed to invoke {script} via {sh_bin}: {e}"))
+    } else {
+        Command::new(script)
+            .args(args)
+            .status()
+            .unwrap_or_else(|e| panic!("failed to invoke {script}: {e}"))
+    }
+}
+
 fn build_js() {
     println!("cargo::rustc-check-cfg=cfg(assets_manifest)");
 
-    let status = Command::new("scripts/build-js.sh")
-        .arg("build")
-        .status()
-        .expect("failed to invoke scripts/build-js.sh");
+    let status = run_sh_script("scripts/build-js.sh", &["build"]);
     assert!(status.success(), "build-js.sh exited non-zero");
 
     if std::env::var("PROFILE").as_deref() == Ok("release") {
@@ -153,10 +172,8 @@ fn main() {
 
     build_js();
 
-    if !Path::new("bin/tailwindcss").exists() {
-        let fetch = Command::new("scripts/fetch-tailwind.sh")
-            .status()
-            .expect("failed to invoke scripts/fetch-tailwind.sh");
+    if !Path::new("bin/tailwindcss").exists() && !Path::new("bin/tailwindcss.exe").exists() {
+        let fetch = run_sh_script("scripts/fetch-tailwind.sh", &[]);
         assert!(fetch.success(), "fetch-tailwind.sh exited non-zero");
     }
 
@@ -164,7 +181,13 @@ fn main() {
     let lock = File::create("static/css/.tailwind.lock").expect("create tailwind lock");
     lock.lock().expect("acquire tailwind lock");
 
-    let status = Command::new("./bin/tailwindcss")
+    let tailwind_bin = if Path::new("bin/tailwindcss.exe").exists() {
+        "bin/tailwindcss.exe"
+    } else {
+        "./bin/tailwindcss"
+    };
+
+    let status = Command::new(tailwind_bin)
         .args([
             "--input",
             "static/css/input.css",
