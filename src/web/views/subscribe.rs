@@ -173,9 +173,28 @@ pub async fn subscribe(
                 unsubscribe_url,
             },
         };
-        if let Err(err) = state.email_sender.send(outgoing).await {
+        let outcome = if let Err(err) = state.email_sender.send(outgoing).await {
             tracing::warn!(error = %err, "subscriber confirm send failed");
-        }
+            "failed"
+        } else {
+            "sent"
+        };
+        metrics::counter!(
+            crate::observability::metrics::names::CONFIRM_EMAILS_TOTAL,
+            "path" => "subscribe",
+            "outcome" => outcome,
+        )
+        .increment(1);
+    } else {
+        // LimitReached — the subscriber already got their daily quota of
+        // confirm mails; no email was attempted. Record the cap breach so
+        // a spray-and-pray attack that hits the rate cap is still visible.
+        metrics::counter!(
+            crate::observability::metrics::names::CONFIRM_EMAILS_TOTAL,
+            "path" => "subscribe",
+            "outcome" => "rate_limited",
+        )
+        .increment(1);
     }
 
     Ok(SubscribeNotice::ok(

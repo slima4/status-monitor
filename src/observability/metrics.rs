@@ -264,6 +264,14 @@ fn register_descriptions() {
         "uptimepage_orgs_emptied_total",
         "Deletes that took an organisation from having monitors to having none. The shape a customer walking out leaves behind when they clear the account by hand instead of deleting it"
     );
+    describe_counter!(
+        "uptimepage_confirm_emails_total",
+        "Confirm/verify emails sent for double opt-in flows, labelled by path \
+         (subscribe = public status-page subscribe form; channel = authenticated \
+         alert-channel verification) and outcome (sent | rate_limited | failed). \
+         Abuse signal: a spike on outcome=sent above the per-address/per-page \
+         caps is a subscription-stuffing attack"
+    );
 }
 
 pub mod names {
@@ -326,4 +334,5 @@ pub mod names {
     pub const RATELIMIT_DROPS: &str = "uptimepage_ratelimit_drops_total";
     pub const FLOW_RUNS: &str = "uptimepage_flow_runs_total";
     pub const FLOW_STEP_DURATION_MS: &str = "uptimepage_flow_step_duration_ms";
+    pub const CONFIRM_EMAILS_TOTAL: &str = "uptimepage_confirm_emails_total";
 }
