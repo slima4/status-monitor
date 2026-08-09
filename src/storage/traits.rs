@@ -266,7 +266,7 @@ impl RegionOption {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct TimeRange {
     pub from: DateTime<Utc>,
     pub to: DateTime<Utc>,

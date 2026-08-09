@@ -17,6 +17,17 @@ pub fn decode_offset(cursor: &str) -> Option<usize> {
     std::str::from_utf8(&bytes).ok()?.parse().ok()
 }
 
+/// Carries the whole query, not just the offset, so a cursor sent on its own
+/// returns page two of the question that was asked and over the same window,
+/// rather than page two of the defaults.
+pub fn encode_query<T: serde::Serialize>(query: &T) -> Option<String> {
+    Some(URL_SAFE_NO_PAD.encode(serde_json::to_vec(query).ok()?))
+}
+
+pub fn decode_query<T: serde::de::DeserializeOwned>(cursor: &str) -> Option<T> {
+    serde_json::from_slice(&URL_SAFE_NO_PAD.decode(cursor).ok()?).ok()
+}
+
 /// Offset-paginate a sorted slice: map the `page_size` window at `offset`
 /// through `f` and emit a `next_cursor` only when more rows remain. An offset
 /// past the end yields an empty page and no cursor (never panics).

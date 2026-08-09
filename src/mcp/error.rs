@@ -24,6 +24,9 @@ pub mod codes {
     /// tool can run through it. Distinct from a human saying no.
     pub const ELICITATION_UNSUPPORTED: &str = "elicitation_unsupported";
     pub const UNAUTHENTICATED: &str = "unauthenticated";
+    /// No probe could run right now (no live agent in the region). The
+    /// arguments were fine, so an identical retry can succeed.
+    pub const PROBE_UNAVAILABLE: &str = "probe_unavailable";
     /// The org's per-category rate limit was exhausted; retry after a delay.
     pub const RATE_LIMITED: &str = "rate_limited";
     pub const INTERNAL: &str = "internal";

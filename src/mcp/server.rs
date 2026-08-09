@@ -31,6 +31,7 @@ use crate::domain::{
     WriteSource, confirmed_downtime_secs, humanize_check_error, uptime_pct_from_downtime,
 };
 use crate::quotas::ratelimit::{RateLimitCategory, RateLimitKey};
+use crate::storage::incident_ops::opening_update_message;
 use crate::storage::incidents::{IncidentBrief, IncidentBriefFilter};
 use crate::storage::{ClampedRange, TargetFilter, TimeRange};
 use crate::web::views::describe_check;
@@ -642,18 +643,26 @@ impl McpServer {
         let auth = McpAuth::from_ctx(&ctx)?;
         auth.require(Scope::IncidentsRead)?;
         let org = auth.org;
-        let open_only = parse_incident_state_filter(args.state.as_deref())?;
-        let range = incident_window(args.from.as_deref(), args.to.as_deref(), Utc::now())?;
-        let target_id = args
-            .monitor_id
-            .as_deref()
-            .map(|id| parse_uuid(id, "monitor id"))
-            .transpose()?;
-        let offset = match args.cursor.as_deref() {
-            Some(c) => cursor::decode_offset(c)
+        let page = match args.cursor.as_deref() {
+            Some(c) => cursor::decode_query::<IncidentPage>(c)
                 .ok_or_else(|| McpToolError::invalid_argument("invalid cursor"))?,
-            None => 0,
+            None => IncidentPage {
+                offset: 0,
+                open_only: parse_incident_state_filter(args.state.as_deref())?,
+                range: incident_window(args.from.as_deref(), args.to.as_deref(), Utc::now())?,
+                target_id: args
+                    .monitor_id
+                    .as_deref()
+                    .map(|id| parse_uuid(id, "monitor id"))
+                    .transpose()?,
+            },
         };
+        let IncidentPage {
+            offset,
+            open_only,
+            range,
+            target_id,
+        } = page;
 
         // Peek one row past the page so `next_cursor` needs no second query.
         let mut incidents = self
@@ -674,7 +683,15 @@ impl McpServer {
             .map_err(|e| McpToolError::internal(format!("list incidents: {e}")))?;
 
         let next_cursor = (incidents.len() > PAGE_SIZE)
-            .then(|| cursor::encode_offset(offset.saturating_add(PAGE_SIZE)));
+            .then(|| {
+                cursor::encode_query(&IncidentPage {
+                    offset: offset.saturating_add(PAGE_SIZE),
+                    open_only,
+                    range,
+                    target_id,
+                })
+            })
+            .flatten();
         incidents.truncate(PAGE_SIZE);
 
         Ok(Json(IncidentList {
@@ -828,7 +845,7 @@ impl McpServer {
     // recorded, not just the happy path.
 
     #[tool(
-        description = "Run a check on a monitor immediately and record the result. Requires user confirmation; a down result may fire the org's normal alerts. Not read-only.",
+        description = "Run a check on a monitor immediately and record the result. Requires user confirmation; a down result may fire the org's normal alerts. Heartbeat monitors cannot be probed (they wait for your systems to ping them). Not read-only.",
         annotations(read_only_hint = false, idempotent_hint = false)
     )]
     async fn run_check_now(
@@ -1092,12 +1109,11 @@ impl McpServer {
         .await?;
 
         // Same region-aware agent dispatch as REST check-now; the agent runs
-        // the probe and persists the result. 503 (no live agent) maps to a
-        // retryable tool error.
+        // the probe and persists the result.
         let result =
             crate::api::handlers::targets::check_now_via_dispatch(&self.state, auth.org, &target)
                 .await
-                .map_err(|e| McpToolError::new("probe_unavailable", e.to_string(), true))?;
+                .map_err(probe_dispatch_error)?;
 
         Ok(Json(CheckRunResult {
             id: target.id.to_string(),
@@ -1299,15 +1315,18 @@ impl McpServer {
             MAX_DESCRIPTION,
         )?;
         let label = self.incident_label(auth.org, id).await?;
+        // Publishing posts an opening update, and that update is what reaches
+        // subscribers, so the prompt has to show the words they will receive.
+        let opening = opening_update_message(title.as_deref(), description.as_deref());
         require_confirmation(
             ctx,
             format!(
-                "Publish {label} on your public status pages? Visitors will see it{}, \
-                 and subscribers may be notified.",
+                "Publish {label} on your public status pages?{}\n\nSubscribers receive:\n\n\"{}\"",
                 match &title {
-                    Some(t) => format!(" as \"{}\"", sanitize_prompt(t)),
+                    Some(t) => format!(" Headline: \"{}\".", sanitize_prompt(t)),
                     None => String::new(),
-                }
+                },
+                sanitize_prompt(&opening)
             ),
         )
         .await?;
@@ -1386,7 +1405,9 @@ impl McpServer {
         Ok(match (monitor, incident.title.as_deref()) {
             (Some(name), _) => format!("the incident on \"{}\"", sanitize_prompt(&name)),
             (None, Some(title)) => format!("the incident \"{}\"", sanitize_prompt(title)),
-            (None, None) => "this incident".to_string(),
+            // A declared incident can carry neither monitor nor title; the id is
+            // then the only handle, and it beats approving an unnamed thing.
+            (None, None) => format!("incident {}", incident.id),
         })
     }
 
@@ -1507,6 +1528,16 @@ fn check_timing(r: &CheckResult) -> CheckTiming {
         tls_ms: r.tls_ms,
         ttfb_ms: r.ttfb_ms,
     }
+}
+
+/// The query behind one `list_incidents` page, round-tripped through the
+/// cursor so later pages answer the same question over the same window.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct IncidentPage {
+    offset: usize,
+    open_only: bool,
+    range: TimeRange,
+    target_id: Option<Uuid>,
 }
 
 /// `open` (default) keeps only running incidents; `all` includes resolved ones.
@@ -1673,12 +1704,26 @@ fn parse_uuid(s: &str, what: &str) -> Result<Uuid, McpToolError> {
     Uuid::parse_str(s).map_err(|_| McpToolError::invalid_argument(format!("invalid {what}")))
 }
 
+/// A refusal the target itself earns (a heartbeat has nothing to probe, a plan
+/// won't run this flow) never becomes true by waiting, so marking it retryable
+/// would loop the model against the check-now limiter.
+fn probe_dispatch_error(e: crate::error::AppError) -> McpToolError {
+    use crate::error::AppError;
+    match e {
+        AppError::ServiceUnavailable { .. } => {
+            McpToolError::new(codes::PROBE_UNAVAILABLE, e.to_string(), true)
+        }
+        AppError::Internal { .. } | AppError::Other(_) => McpToolError::internal(e.to_string()),
+        other => McpToolError::invalid_argument(other.to_string()),
+    }
+}
+
 /// Map a write-tool error to an audit outcome: server faults are `error`;
 /// everything else (scope, confirmation, bad input, not-found) is a caller-side
 /// `denied`.
 fn outcome_for(e: &McpToolError) -> Outcome {
     match e.code {
-        codes::INTERNAL | "probe_failed" => Outcome::Error,
+        codes::INTERNAL | codes::PROBE_UNAVAILABLE => Outcome::Error,
         _ => Outcome::Denied,
     }
 }
@@ -1911,6 +1956,46 @@ mod tests {
         assert!(incident_summary(&brief).resolved_at.is_none());
         brief.ended_at = Some(Utc::now());
         assert!(incident_summary(&brief).resolved_at.is_some());
+    }
+
+    #[test]
+    fn an_incident_cursor_round_trips_its_whole_query() {
+        let page = IncidentPage {
+            offset: 50,
+            open_only: false,
+            range: TimeRange {
+                from: Utc::now() - Duration::try_days(90).unwrap(),
+                to: Utc::now(),
+            },
+            target_id: Some(Uuid::now_v7()),
+        };
+        let back: IncidentPage =
+            cursor::decode_query(&cursor::encode_query(&page).unwrap()).unwrap();
+        assert_eq!(back.offset, 50);
+        assert!(!back.open_only);
+        assert_eq!(back.target_id, page.target_id);
+        assert_eq!(back.range.from, page.range.from);
+        assert_eq!(back.range.to, page.range.to);
+        assert!(cursor::decode_query::<IncidentPage>("not-a-cursor").is_none());
+    }
+
+    #[test]
+    fn a_probe_refusal_is_not_retryable_but_a_missing_agent_is() {
+        let refused = probe_dispatch_error(crate::error::AppError::bad_request(
+            "heartbeat_not_probeable",
+            "nothing to probe",
+        ));
+        assert_eq!(refused.code, codes::INVALID_ARGUMENT);
+        assert!(!refused.retryable);
+        assert_eq!(outcome_for(&refused), Outcome::Denied);
+
+        let unavailable = probe_dispatch_error(crate::error::AppError::service_unavailable(
+            "no_agent",
+            "no live agent",
+        ));
+        assert_eq!(unavailable.code, codes::PROBE_UNAVAILABLE);
+        assert!(unavailable.retryable);
+        assert_eq!(outcome_for(&unavailable), Outcome::Error);
     }
 
     #[test]

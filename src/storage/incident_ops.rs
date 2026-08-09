@@ -179,6 +179,19 @@ pub struct DueIncident {
     pub escalation_round: i32,
 }
 
+/// Body of the update that publishing an incident posts for it. Subscribers are
+/// notified per update, so publishing without one would reach nobody; shared so
+/// a confirmation prompt can show the text before it goes out.
+pub fn opening_update_message(title: Option<&str>, description: Option<&str>) -> String {
+    let non_blank = |s: &&str| !s.trim().is_empty();
+    description
+        .filter(non_blank)
+        .or(title.filter(non_blank))
+        .map(str::trim)
+        .unwrap_or("We are investigating this incident.")
+        .to_string()
+}
+
 #[async_trait]
 pub trait IncidentOpsStore: Send + Sync {
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<OpsIncident>>;
@@ -1103,14 +1116,8 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("publish lock: {e}"))?;
-        // The opening update's body (subscribers are notified per update, so
-        // publishing without one would be silent): the operator's description,
-        // else the title, else a generic line.
-        let opening_message = public_description
-            .clone()
-            .filter(|s| !s.trim().is_empty())
-            .or_else(|| public_title.clone().filter(|s| !s.trim().is_empty()))
-            .unwrap_or_else(|| "We are investigating this incident.".to_string());
+        let opening_message =
+            opening_update_message(public_title.as_deref(), public_description.as_deref());
         // A provided narration field overwrites; an omitted one keeps the stored
         // copy (clearing is the narration patch endpoint's job, not publish's).
         let sql = format!(

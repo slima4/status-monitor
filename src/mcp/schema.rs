@@ -316,7 +316,9 @@ pub struct ListIncidentsArgs {
     pub to: Option<String>,
     /// Restrict to one monitor (id from `list_monitors`).
     pub monitor_id: Option<String>,
-    /// Opaque pagination cursor from a previous call's `next_cursor`.
+    /// Opaque pagination cursor from a previous call's `next_cursor`. It
+    /// carries the whole query, so send it on its own: any other filter passed
+    /// alongside it is ignored rather than silently changing the page.
     pub cursor: Option<String>,
 }
 
@@ -348,7 +350,9 @@ pub struct IncidentSummary {
 pub struct IncidentList {
     pub items: Vec<IncidentSummary>,
     /// RFC 3339 window actually read, after the defaults and the one-year cap.
-    /// Report spans from these, not from what was asked for.
+    /// It bounds the *resolved* incidents only: one that is still running is
+    /// listed however long ago it opened, so it can be older than `from`.
+    /// Describe spans from these, never from what was asked for.
     pub from: String,
     pub to: String,
     pub next_cursor: Option<String>,

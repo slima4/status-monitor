@@ -43,7 +43,7 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 
 | Tool | Scope | Effect |
 |---|---|---|
-| `run_check_now` | `targets:execute` | Probe a monitor immediately and record the result. A `down` result may fire the org's normal alerts. |
+| `run_check_now` | `targets:execute` | Probe a monitor immediately and record the result. A `down` result may fire the org's normal alerts. A heartbeat monitor has nothing to probe and is refused as `invalid_argument`, not as something to retry. |
 | `pause_monitor` | `targets:write` | Stop a monitor's checks until resumed. Idempotent. |
 | `resume_monitor` | `targets:write` | Restart a paused monitor's checks. Idempotent. |
 | `acknowledge_incident` | `incidents:write` | Take ownership of an incident and halt escalation. Internal only: it posts nothing to the public status page. Idempotent. |

@@ -12,7 +12,7 @@ use sqlx::PgPool;
 
 use super::auth::McpAuth;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Success,
     Error,
