@@ -19,6 +19,7 @@ use uuid::Uuid;
 use serde_json::json;
 
 use crate::api::handlers::validation::{MAX_DESCRIPTION, MAX_MESSAGE, MAX_TITLE};
+use crate::api::redaction::REDACTED;
 use crate::api::types::DashboardMetrics;
 use crate::app::AppState;
 use crate::auth::scope::Scope;
@@ -28,7 +29,8 @@ use crate::domain::public::IncidentStatusPhase;
 use crate::domain::result::CheckResult;
 use crate::domain::target::{Target, TargetUpdate};
 use crate::domain::{
-    WriteSource, confirmed_downtime_secs, humanize_check_error, uptime_pct_from_downtime,
+    CheckSpec, ExpectedStatus, FlowStep, WriteSource, confirmed_downtime_secs,
+    humanize_check_error, uptime_pct_from_downtime,
 };
 use crate::quotas::ratelimit::{RateLimitCategory, RateLimitKey};
 use crate::storage::incident_ops::opening_update_message;
@@ -43,16 +45,18 @@ use super::confirm::require_confirmation;
 use super::cursor;
 use super::error::{McpToolError, codes};
 use super::schema::{
-    CheckRunResult, CheckTiming, Failure, FlowRunEvidence, FlowRunItem, FlowRunList, FlowStepRun,
+    CheckConfig, CheckRunResult, CheckTiming, DnsCheckConfig, DomainExpiryCheckConfig, Failure,
+    FlowCheckConfig, FlowRunEvidence, FlowRunItem, FlowRunList, FlowStepConfig, FlowStepRun,
     FlowStepTrendItem, FlowStepTrendSummary, FlowWindowArgs, GetIncidentMetricsArgs,
-    GetMonitorArgs, GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, IncidentActionArgs,
-    IncidentActionResult, IncidentDetail, IncidentIdArg, IncidentList, IncidentMetricsResult,
-    IncidentSummary, IncidentUpdateItem, IncidentUpdatePosted, IncidentVisibilityResult,
-    IncidentWindow, LatencyPoint, ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs,
-    MetricCount, MonitorDetail, MonitorHistory, MonitorIdArg, MonitorList, MonitorListItem,
-    MonitorStateResult, NoisyMonitor, OrgHealth, OrgUsage, PostIncidentUpdateArgs,
-    PublishIncidentArgs, Quota, StatusPageComponent as McpComponent, StatusPageDetail,
-    StatusPageList, StatusPageSummary, WorstMonitor,
+    GetMonitorArgs, GetMonitorHistoryArgs, GetStatusPageArgs, HealthTotals, HeartbeatCheckConfig,
+    HttpCheckConfig, IncidentActionArgs, IncidentActionResult, IncidentDetail, IncidentIdArg,
+    IncidentList, IncidentMetricsResult, IncidentSummary, IncidentUpdateItem, IncidentUpdatePosted,
+    IncidentVisibilityResult, IncidentWindow, LatencyPoint, ListIncidentsArgs, ListMonitorsArgs,
+    ListStatusPagesArgs, MetricCount, MonitorDetail, MonitorHistory, MonitorIdArg, MonitorList,
+    MonitorListItem, MonitorStateResult, NoisyMonitor, OrgHealth, OrgUsage, PingCheckConfig,
+    PostIncidentUpdateArgs, PublishIncidentArgs, Quota, RegionHealth, RegionItem, RegionList,
+    StatusPageComponent as McpComponent, StatusPageDetail, StatusPageList, StatusPageSummary,
+    TagItem, TagList, TcpCheckConfig, TlsCertCheckConfig, WorstMonitor,
 };
 use crate::storage::{Actor, LifecycleOutcome};
 
@@ -88,6 +92,9 @@ const UPTIME_INCIDENT_CAP: usize = 2_000;
 /// the answer holds up to twice this. Each run carries its whole step trace, so
 /// a deeper page costs the model more context than it buys.
 const FLOW_RUN_CAP: usize = 25;
+/// Tags returned by `list_tags`. Far above a usable tag vocabulary, and the
+/// response flags the truncation rather than passing a partial list off as whole.
+const TAG_CAP: usize = 200;
 
 #[derive(Clone)]
 pub struct McpServer {
@@ -294,7 +301,7 @@ impl McpServer {
     /// Full config + current state + recent uptime for one monitor. Use after
     /// `list_monitors`/`get_org_health` to investigate a specific monitor.
     #[tool(
-        description = "One monitor's configuration, current state, last error, and 24h/30d uptime. Read-only.",
+        description = "One monitor's full configuration — everything the check asserts (expected status, body match, headers, timeout, redirect and TLS policy) plus the regions it probes from — with its current state, last error, and 24h/30d uptime. Read this before judging whether a response should have passed. Credentials are withheld. Read-only.",
         annotations(read_only_hint = true)
     )]
     async fn get_monitor(
@@ -320,7 +327,7 @@ impl McpServer {
             self.clamped_raw_window(org, Duration::try_hours(24).unwrap_or_default()),
             self.clamped_raw_window(org, Duration::try_days(30).unwrap_or_default()),
         )?;
-        let (latest, mut up24, mut up30, incidents) = tokio::try_join!(
+        let (latest, mut up24, mut up30, incidents, regions) = tokio::try_join!(
             self.state
                 .results_store
                 .list_results(org, id, r24, 1, 0, None),
@@ -334,6 +341,7 @@ impl McpServer {
                 0,
                 false
             ),
+            self.state.target_store.regions_for_target(org, id),
         )
         .map_err(|e| McpToolError::internal(format!("monitor history: {e}")))?;
 
@@ -361,6 +369,15 @@ impl McpServer {
             name: sanitize_data(&target.name),
             r#type: target.check.kind().to_string(),
             address: sanitize_data(&address),
+            check: check_config(&target.check),
+            // A passive check is seeded a region row like any other target and
+            // is never probed from it; reporting it would be a lie the model
+            // has no way to catch.
+            regions: if target.check.is_passive() {
+                Vec::new()
+            } else {
+                regions.unwrap_or_default()
+            },
             enabled: target.enabled,
             interval_secs: target.interval.as_secs(),
             group_name: target.group_name.as_deref().map(sanitize_data),
@@ -382,7 +399,7 @@ impl McpServer {
     /// Bounded history for one monitor over a window: uptime, a latency series,
     /// failing observations (with error text), and incident windows.
     #[tool(
-        description = "One monitor's history over a window (1h/24h/7d/30d): uptime, latency series, failures with error text, and incident windows. Read-only.",
+        description = "One monitor's history over a window (1h/24h/7d/30d): uptime, latency series, a per-region split of the same window, failures with error text, and incident windows. Pass `region` to narrow it to one probe region and tell a partial outage from a total one. Read-only.",
         annotations(read_only_hint = true)
     )]
     async fn get_monitor_history(
@@ -396,21 +413,37 @@ impl McpServer {
         let id = parse_uuid(&args.id, "monitor id")?;
         let (span, bucket_secs) = parse_window(&args.window)?;
 
-        // Existence + tenant check; the history reads come from the stores below.
-        self.state
-            .target_store
-            .get(org, id)
-            .await
-            .map_err(|e| McpToolError::internal(format!("get monitor: {e}")))?
-            .ok_or_else(|| McpToolError::not_found("monitor not found"))?;
+        let (target, assigned) = tokio::try_join!(
+            self.state.target_store.get(org, id),
+            self.state.target_store.regions_for_target(org, id),
+        )
+        .map_err(|e| McpToolError::internal(format!("get monitor: {e}")))?;
+        let target = target.ok_or_else(|| McpToolError::not_found("monitor not found"))?;
+        // Every target is seeded a region row, passive or not, so a heartbeat
+        // would otherwise claim to be probed from somewhere it never runs.
+        let assigned = if target.check.is_passive() {
+            Vec::new()
+        } else {
+            assigned.unwrap_or_default()
+        };
+        let region = requested_region(args.region.as_deref(), &assigned)?;
+        // One region cannot disagree with itself, and the headline numbers
+        // already describe it, so the split is worth a query only above that.
+        let split_by_region = assigned.len() > 1;
 
         let now = Utc::now();
         let range = self.clamped_raw_window(org, span).await?;
-        let (uptime, buckets, incidents) = tokio::try_join!(
-            self.state.results_store.uptime(org, id, range, None),
+        let (uptime, buckets, incidents, breakdown) = tokio::try_join!(
             self.state
                 .results_store
-                .latency_buckets(org, id, range, bucket_secs, None),
+                .uptime(org, id, range, region.as_deref()),
+            self.state.results_store.latency_buckets(
+                org,
+                id,
+                range,
+                bucket_secs,
+                region.as_deref()
+            ),
             self.state.incident_narration_store.list_for_target(
                 org,
                 id,
@@ -419,6 +452,16 @@ impl McpServer {
                 0,
                 false,
             ),
+            async {
+                if split_by_region {
+                    self.state
+                        .results_store
+                        .region_breakdown(org, id, range.inner())
+                        .await
+                } else {
+                    Ok(Vec::new())
+                }
+            },
         )
         .map_err(|e| McpToolError::internal(format!("monitor history: {e}")))?;
 
@@ -434,15 +477,24 @@ impl McpServer {
             })
             .collect();
 
-        // Uptime as confirmed downtime over the window, from the full incident set.
-        let uptime_pct = if uptime.total > 0 {
-            let down = confirmed_downtime_secs(&incidents, range.from, range.to, now);
-            Some(uptime_pct_from_downtime(
-                down,
-                (range.to - range.from).num_seconds(),
-            ))
-        } else {
-            None
+        let regions = breakdown
+            .into_iter()
+            .filter(|r| region.as_deref().is_none_or(|sel| sel == r.region))
+            .map(region_health)
+            .collect();
+
+        // Confirmed downtime measures the monitor, not a region, so a filtered
+        // answer reports that region's own check rate instead.
+        let uptime_pct = match (region.is_none(), uptime.total > 0) {
+            (true, true) => {
+                let down = confirmed_downtime_secs(&incidents, range.from, range.to, now);
+                Some(uptime_pct_from_downtime(
+                    down,
+                    (range.to - range.from).num_seconds(),
+                ))
+            }
+            (true, false) => None,
+            (false, _) => uptime.uptime_pct,
         };
 
         // The failures/windows lists stay bounded regardless of how flappy the
@@ -468,9 +520,76 @@ impl McpServer {
 
         Ok(Json(MonitorHistory {
             uptime: uptime_pct,
+            region,
             latency_series,
+            regions,
             failures,
             incidents: incident_windows,
+        }))
+    }
+
+    /// The probe-region catalog, so the model can name a region and pass a
+    /// valid one to `get_monitor_history`.
+    #[tool(
+        description = "The fleet's probe regions: id, display name, city, country, continent. Use it to name where a check runs from and to pass a valid `region` to get_monitor_history. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_regions(
+        &self,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<RegionList>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::TargetsRead)?;
+        let regions = self
+            .state
+            .regions_detailed()
+            .await
+            .map_err(|e| McpToolError::internal(format!("list regions: {e}")))?;
+        Ok(Json(RegionList {
+            items: regions
+                .into_iter()
+                .map(|r| RegionItem {
+                    id: r.id,
+                    name: sanitize_data(&r.name),
+                    city: sanitize_data(&r.city),
+                    country_code: r.country_code,
+                    continent: r.continent,
+                })
+                .collect(),
+        }))
+    }
+
+    /// The org's tag inventory — `list_monitors(tag=…)` filters by an exact tag,
+    /// and this is the only way to learn which ones exist.
+    #[tool(
+        description = "Every tag in use across the org's monitors, most-used first, with how many monitors carry each. Pass one back as the `tag` filter to list_monitors. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_tags(
+        &self,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<TagList>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::TargetsRead)?;
+        // One past the cap, so a truncated inventory says so instead of reading
+        // as the whole set.
+        let mut tags = self
+            .state
+            .target_store
+            .list_tags(auth.org, None, TAG_CAP + 1)
+            .await
+            .map_err(|e| McpToolError::internal(format!("list tags: {e}")))?;
+        let truncated = tags.len() > TAG_CAP;
+        tags.truncate(TAG_CAP);
+        Ok(Json(TagList {
+            items: tags
+                .into_iter()
+                .map(|t| TagItem {
+                    name: sanitize_data(&t.name),
+                    count: t.count,
+                })
+                .collect(),
+            truncated,
         }))
     }
 
@@ -1520,6 +1639,180 @@ fn index_by_target(rollup: Vec<DashboardMetrics>) -> HashMap<Uuid, DashboardMetr
     rollup.into_iter().map(|m| (m.target_id, m)).collect()
 }
 
+/// Resolve a requested region against what the monitor is actually assigned to.
+/// Naming the valid ids beats an empty answer, which reads as "healthy there".
+fn requested_region(
+    requested: Option<&str>,
+    assigned: &[String],
+) -> Result<Option<String>, McpToolError> {
+    let Some(region) = requested.map(str::trim).filter(|r| !r.is_empty()) else {
+        return Ok(None);
+    };
+    if !assigned.iter().any(|a| a == region) {
+        return Err(McpToolError::invalid_argument(if assigned.is_empty() {
+            "this monitor runs in no probe region, so it cannot be filtered by one".to_string()
+        } else {
+            format!(
+                "monitor does not run in region `{}`; it runs in {}",
+                sanitize_data(region),
+                assigned.join(", ")
+            )
+        }));
+    }
+    Ok(Some(region.to_string()))
+}
+
+fn region_health(r: crate::api::types::RegionRollup) -> RegionHealth {
+    RegionHealth {
+        region: r.region,
+        samples: r.samples,
+        up: r.up,
+        uptime_pct: (r.samples > 0).then(|| r.up as f64 / r.samples as f64 * 100.0),
+        p50_ms: r.p50_ms,
+        p95_ms: r.p95_ms,
+        p99_ms: r.p99_ms,
+        last_status: status_str(&r.last_status).to_string(),
+    }
+}
+
+/// Structured view of what a check asserts. Built field by field rather than
+/// serialising [`CheckSpec`], so a credential slot cannot reach the model by
+/// being added upstream: HTTP credentials collapse to a boolean, header values
+/// and the request body are masked, and a flow's fill values are dropped.
+///
+/// Header values and the body are masked rather than name-matched against a
+/// denylist, on the reasoning [`redact_check_for_public`] already records: they
+/// are where `Authorization` / `X-Api-Key` / `Cookie` live, and a value that
+/// reaches a chat transcript is a value that has left the building. What the
+/// model actually needs is which headers are sent, and it still gets that.
+///
+/// [`redact_check_for_public`]: crate::api::redaction
+fn check_config(check: &CheckSpec) -> CheckConfig {
+    let ms = |d: &std::time::Duration| d.as_millis() as u64;
+    match check {
+        CheckSpec::Http(h) => CheckConfig::Http(HttpCheckConfig {
+            url: sanitize_data(h.url.as_str()),
+            method: format!("{:?}", h.method).to_uppercase(),
+            timeout_ms: ms(&h.timeout),
+            follow_redirects: h.follow_redirects,
+            max_redirects: h.max_redirects,
+            expected_status: expected_status_str(&h.expected_status),
+            expected_body_contains: h.expected_body_contains.as_deref().map(sanitize_data),
+            headers: h
+                .headers
+                .keys()
+                .map(|k| (sanitize_data(k), REDACTED.to_string()))
+                .collect(),
+            body: h.body.as_ref().map(|_| REDACTED.to_string()),
+            verify_tls: h.verify_tls,
+            has_basic_auth: h.basic_auth.is_some(),
+            has_bearer_token: h.bearer_token.is_some(),
+        }),
+        CheckSpec::Tcp(t) => CheckConfig::Tcp(TcpCheckConfig {
+            host: sanitize_data(&t.host),
+            port: t.port,
+            timeout_ms: ms(&t.timeout),
+        }),
+        CheckSpec::Ping(p) => CheckConfig::Ping(PingCheckConfig {
+            host: sanitize_data(&p.host),
+            timeout_ms: ms(&p.timeout),
+        }),
+        CheckSpec::Heartbeat(h) => CheckConfig::Heartbeat(HeartbeatCheckConfig {
+            period_secs: h.period.as_secs(),
+            grace_secs: h.grace.as_secs(),
+            max_runtime_secs: h.max_runtime.map(|d| d.as_secs()),
+        }),
+        CheckSpec::Dns(d) => CheckConfig::Dns(DnsCheckConfig {
+            domain: sanitize_data(&d.domain),
+            record_type: d.record_type.as_str().to_string(),
+            resolver: d.resolver.as_deref().map(sanitize_data),
+            expected_contains: d.expected_contains.as_deref().map(sanitize_data),
+            timeout_ms: ms(&d.timeout),
+        }),
+        CheckSpec::TlsCert(c) => CheckConfig::TlsCert(TlsCertCheckConfig {
+            host: sanitize_data(&c.host),
+            port: c.port,
+            server_name: c.server_name.as_deref().map(sanitize_data),
+            warn_days: c.warn_days,
+            critical_days: c.critical_days,
+            timeout_ms: ms(&c.timeout),
+        }),
+        CheckSpec::DomainExpiry(d) => CheckConfig::DomainExpiry(DomainExpiryCheckConfig {
+            domain: sanitize_data(&d.domain),
+            warn_days: d.warn_days,
+            critical_days: d.critical_days,
+            timeout_ms: ms(&d.timeout),
+        }),
+        CheckSpec::Flow(f) => CheckConfig::Flow(FlowCheckConfig {
+            start_url: sanitize_data(f.start_url.as_str()),
+            steps: f
+                .steps
+                .iter()
+                .enumerate()
+                .map(|(i, s)| flow_step_config(u32::try_from(i + 1).unwrap_or(u32::MAX), s))
+                .collect(),
+            timeout_ms: ms(&f.timeout),
+            step_timeout_ms: ms(&f.step_timeout),
+            verify_tls: f.verify_tls,
+        }),
+    }
+}
+
+fn flow_step_config(step: u32, s: &FlowStep) -> FlowStepConfig {
+    let base = |op: &str| FlowStepConfig {
+        step,
+        op: op.to_string(),
+        selector: None,
+        url: None,
+        contains: None,
+        value_withheld: false,
+    };
+    match s {
+        FlowStep::Goto { url } => FlowStepConfig {
+            url: Some(sanitize_data(url.as_str())),
+            ..base("goto")
+        },
+        FlowStep::Click { selector } => FlowStepConfig {
+            selector: Some(sanitize_data(selector)),
+            ..base("click")
+        },
+        // The value it types is the flow's credential slot, so only its
+        // destination is reported.
+        FlowStep::Fill { selector, .. } => FlowStepConfig {
+            selector: Some(sanitize_data(selector)),
+            value_withheld: true,
+            ..base("fill")
+        },
+        FlowStep::WaitFor { selector } => FlowStepConfig {
+            selector: Some(sanitize_data(selector)),
+            ..base("wait_for")
+        },
+        FlowStep::AssertText { selector, contains } => FlowStepConfig {
+            selector: selector.as_deref().map(sanitize_data),
+            contains: Some(sanitize_data(contains)),
+            ..base("assert_text")
+        },
+        FlowStep::AssertUrl { contains } => FlowStepConfig {
+            contains: Some(sanitize_data(contains)),
+            ..base("assert_url")
+        },
+    }
+}
+
+/// The passing status codes as one phrase, so "why was this a failure?" is
+/// answerable without the model reconstructing a shape.
+fn expected_status_str(e: &ExpectedStatus) -> String {
+    match e {
+        ExpectedStatus::Exact(c) => c.to_string(),
+        ExpectedStatus::Range { min, max } => format!("{min}-{max}"),
+        ExpectedStatus::OneOf(codes) => codes
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
 /// Per-phase timing from a check result.
 fn check_timing(r: &CheckResult) -> CheckTiming {
     CheckTiming {
@@ -1628,13 +1921,19 @@ fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail
 /// when there are samples, else `no_data`.
 fn current_state(metrics: Option<&DashboardMetrics>) -> &'static str {
     match metrics {
-        Some(m) if m.samples > 0 => match m.last_status.as_str() {
-            "up" => "up",
-            "down" => "down",
-            "degraded" => "degraded",
-            "error" => "error",
-            _ => "no_data",
-        },
+        Some(m) if m.samples > 0 => status_str(&m.last_status),
+        _ => "no_data",
+    }
+}
+
+/// A stored status string as one of the states the tools document. An
+/// unexpected value degrades to `no_data` rather than leaking it.
+fn status_str(stored: &str) -> &'static str {
+    match stored {
+        "up" => "up",
+        "down" => "down",
+        "degraded" => "degraded",
+        "error" => "error",
         _ => "no_data",
     }
 }
@@ -2064,7 +2363,191 @@ mod tests {
         assert!(!write.is_empty());
         assert!(write.iter().any(|t| t.name == "publish_incident"));
         assert!(read.iter().any(|t| t.name == "list_incidents"));
+        assert!(read.iter().any(|t| t.name == "list_regions"));
+        assert!(read.iter().any(|t| t.name == "list_tags"));
         assert!(!read.iter().any(|t| t.name == "pause_monitor"));
+    }
+
+    fn http_check() -> CheckSpec {
+        use crate::domain::{HttpCheck, HttpMethod};
+        CheckSpec::Http(HttpCheck {
+            url: "https://api.example.com/health".parse().unwrap(),
+            method: HttpMethod::Head,
+            timeout: std::time::Duration::from_secs(5),
+            follow_redirects: false,
+            max_redirects: 0,
+            expected_status: ExpectedStatus::Exact(200),
+            expected_body_contains: Some("ok".into()),
+            headers: HashMap::from([("X-Api-Key".to_string(), "shh".to_string())]),
+            body: Some("ping".into()),
+            verify_tls: true,
+            basic_auth: Some(("u".into(), "p".into())),
+            bearer_token: Some("t0ken".into()),
+        })
+    }
+
+    #[test]
+    fn an_http_config_reports_what_the_check_asserts() {
+        let CheckConfig::Http(http) = check_config(&http_check()) else {
+            panic!("expected http");
+        };
+        assert_eq!(http.method, "HEAD");
+        assert_eq!(http.expected_status, "200");
+        assert_eq!(http.timeout_ms, 5_000);
+        assert!(!http.follow_redirects);
+        assert_eq!(http.expected_body_contains.as_deref(), Some("ok"));
+    }
+
+    #[test]
+    fn a_header_is_reported_by_name_with_its_value_masked() {
+        let config = check_config(&http_check());
+        let CheckConfig::Http(http) = &config else {
+            panic!("expected http");
+        };
+        // Which headers are sent is the diagnostic; the values are credentials.
+        assert_eq!(
+            http.headers.get("X-Api-Key").map(String::as_str),
+            Some(REDACTED)
+        );
+        assert_eq!(http.body.as_deref(), Some(REDACTED));
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("shh"), "header value leaked: {json}");
+        assert!(!json.contains("ping"), "request body leaked: {json}");
+        // A check that posts nothing says so, rather than reporting a mask.
+        let CheckSpec::Http(mut plain) = http_check() else {
+            unreachable!()
+        };
+        plain.body = None;
+        let CheckConfig::Http(plain) = check_config(&CheckSpec::Http(plain)) else {
+            unreachable!()
+        };
+        assert_eq!(plain.body, None);
+    }
+
+    #[test]
+    fn credentials_are_reported_as_set_never_as_values() {
+        let config = check_config(&http_check());
+        let CheckConfig::Http(http) = &config else {
+            panic!("expected http");
+        };
+        assert!(http.has_basic_auth);
+        assert!(http.has_bearer_token);
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("t0ken"), "bearer token leaked: {json}");
+        assert!(!json.contains("\"p\""), "basic auth leaked: {json}");
+    }
+
+    #[test]
+    fn expected_status_reads_as_one_phrase() {
+        assert_eq!(expected_status_str(&ExpectedStatus::Exact(204)), "204");
+        assert_eq!(
+            expected_status_str(&ExpectedStatus::Range { min: 200, max: 299 }),
+            "200-299"
+        );
+        assert_eq!(
+            expected_status_str(&ExpectedStatus::OneOf(vec![200, 201, 204])),
+            "200, 201, 204"
+        );
+    }
+
+    #[test]
+    fn a_flow_config_numbers_its_steps_and_withholds_fill_values() {
+        use crate::domain::FlowCheck;
+        let config = check_config(&CheckSpec::Flow(FlowCheck {
+            start_url: "https://app.example.com/login".parse().unwrap(),
+            steps: vec![
+                FlowStep::Fill {
+                    selector: "#password".into(),
+                    value: "hunter2".into(),
+                },
+                FlowStep::Click {
+                    selector: "#submit".into(),
+                },
+                FlowStep::AssertText {
+                    selector: None,
+                    contains: "Welcome".into(),
+                },
+            ],
+            timeout: std::time::Duration::from_secs(30),
+            step_timeout: std::time::Duration::from_secs(5),
+            verify_tls: true,
+        }));
+        let CheckConfig::Flow(flow) = &config else {
+            panic!("expected flow");
+        };
+        assert_eq!(
+            flow.steps.iter().map(|s| s.step).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(flow.steps[0].op, "fill");
+        assert!(flow.steps[0].value_withheld);
+        assert_eq!(flow.steps[0].selector.as_deref(), Some("#password"));
+        assert!(!flow.steps[1].value_withheld);
+        assert_eq!(flow.steps[2].contains.as_deref(), Some("Welcome"));
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(!json.contains("hunter2"), "fill value leaked: {json}");
+    }
+
+    #[test]
+    fn a_heartbeat_config_carries_its_cadence_and_no_token() {
+        use crate::domain::HeartbeatCheck;
+        let config = check_config(&CheckSpec::Heartbeat(HeartbeatCheck {
+            period: std::time::Duration::from_secs(300),
+            grace: std::time::Duration::from_secs(60),
+            max_runtime: None,
+        }));
+        let CheckConfig::Heartbeat(hb) = &config else {
+            panic!("expected heartbeat");
+        };
+        assert_eq!((hb.period_secs, hb.grace_secs), (300, 60));
+        assert_eq!(hb.max_runtime_secs, None);
+        // The ping URL and token are the credential; the kind name is enough.
+        assert!(!serde_json::to_string(&config).unwrap().contains("token"));
+    }
+
+    #[test]
+    fn a_region_filter_must_name_a_region_the_monitor_runs_in() {
+        let assigned = vec!["eu-helsinki".to_string(), "apac-sg".to_string()];
+        assert_eq!(requested_region(None, &assigned).unwrap(), None);
+        assert_eq!(requested_region(Some("  "), &assigned).unwrap(), None);
+        assert_eq!(
+            requested_region(Some("apac-sg"), &assigned)
+                .unwrap()
+                .as_deref(),
+            Some("apac-sg")
+        );
+        let err = requested_region(Some("us-east"), &assigned).unwrap_err();
+        assert_eq!(err.code, codes::INVALID_ARGUMENT);
+        // The refusal names the choices, so the model can retry without guessing.
+        assert!(err.message.contains("eu-helsinki"), "{}", err.message);
+        assert!(requested_region(Some("eu-helsinki"), &[]).is_err());
+    }
+
+    #[test]
+    fn region_health_rates_a_regions_own_checks() {
+        let health = region_health(crate::api::types::RegionRollup {
+            region: "apac-sg".into(),
+            samples: 200,
+            up: 190,
+            p50_ms: 120,
+            p95_ms: 300,
+            p99_ms: 900,
+            last_status: "down".into(),
+        });
+        assert_eq!(health.uptime_pct, Some(95.0));
+        assert_eq!(health.last_status, "down");
+        // An unexpected stored status degrades rather than leaking.
+        let health = region_health(crate::api::types::RegionRollup {
+            region: "us-east".into(),
+            samples: 0,
+            up: 0,
+            p50_ms: 0,
+            p95_ms: 0,
+            p99_ms: 0,
+            last_status: "weird".into(),
+        });
+        assert_eq!(health.uptime_pct, None);
+        assert_eq!(health.last_status, "no_data");
     }
 
     #[test]

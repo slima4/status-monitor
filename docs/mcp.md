@@ -6,7 +6,7 @@ It is another authorized front door to the same stores the web app and [`/api/v1
 
 - **Transport** — Streamable HTTP at `POST/GET /mcp`, served on its own host (`mcp.{DOMAIN}` in production).
 - **Auth** — an org-bound scoped API token (`sm_live_…`), minted either by hand (Settings → API tokens) or by the one-click OAuth 2.1 connector flow.
-- **Surface** — 12 read tools (always) + 8 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
+- **Surface** — 14 read tools (always) + 8 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
 
 The server only mounts when enabled (see [Enabling](#enabling)); a deployment that leaves it off never exposes `/mcp`.
 
@@ -22,8 +22,10 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 |---|---|---|
 | `get_org_health` | `targets:read` | Per-state monitor totals + the worst currently-failing monitors, each with its open `incident_id`. The one-shot "what is broken right now?" answer — start here. |
 | `list_monitors` | `targets:read` | Monitors with optional `state` / `type` / `tag` filters, cursor-paginated; each item carries current state + last-checked time. |
-| `get_monitor` | `targets:read` | One monitor's config, current state, last error, last HTTP status, and 24h / 30d uptime. |
-| `get_monitor_history` | `targets:read` | One monitor's history over a `window` (`1h` / `24h` / `7d` / `30d`): uptime, latency series, failures with error text, incident windows. |
+| `get_monitor` | `targets:read` | One monitor's **full** config — everything the check asserts (expected status, body match, which request headers are sent, timeout, redirect policy, TLS options, per-kind thresholds) plus the regions it probes from — with its current state, last error, last HTTP status, and 24h / 30d uptime. Credentials are never carried: HTTP basic-auth and bearer tokens report only `has_basic_auth` / `has_bearer_token`, header values and the request body come back as `***`, a heartbeat's ping token is withheld, and a flow step's fill value is reported as `value_withheld`. The address is reported as configured, so a credential an operator put in the URL itself is visible there, exactly as in `/api/v1`. |
+| `get_monitor_history` | `targets:read` | One monitor's history over a `window` (`1h` / `24h` / `7d` / `30d`): uptime, latency series, a per-region split of the same window, failures with error text, incident windows. `region` narrows uptime, latency, and the split to one probe region, which is how "down everywhere or only from Singapore?" gets answered. |
+| `list_regions` | `targets:read` | The fleet's probe regions: id, display name, city, country, continent. The id is what `get_monitor.regions` lists and what `get_monitor_history` takes as `region`. |
+| `list_tags` | `targets:read` | Every tag in use across the org's monitors, most-used first, with a monitor count each. `list_monitors` filters by an exact tag; this is how to learn which ones exist. Says so when the inventory is truncated. |
 | `get_flow_runs` | `targets:read` | A browser flow monitor's recent runs over a `window`: every declared step with its outcome and duration, the step a failure stopped on, and the page the browser saw. Answers *why* a login check failed. |
 | `get_flow_step_trend` | `targets:read` | Per step of a browser flow monitor, over a `window`: earliest and latest mean duration, the ratio between them, and how many runs passed or failed it. Answers *which step is getting slower* while the monitor still reports up. |
 | `list_incidents` | `incidents:read` | Incidents with their id, affected monitor, severity, open/resolved times, and latest update phase. Defaults to the currently-open ones; `state: "all"` adds resolved history inside a `from`/`to` window (default: the last 30 days, capped at a year), and `monitor_id` narrows to one monitor. The response repeats the window it actually read, so a clamped request is never reported as the span that was asked for. An incident still running is listed however long ago it opened. Cursor-paginated. |
@@ -34,6 +36,8 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 | `get_org_usage` | `targets:read` | Resource usage against plan limits (monitors, status pages, members, components) + key policy values. |
 
 A `window` is a request, not a promise: every history tool clamps it to what your plan retains at per-check detail, and one clamp covers the whole response so its fields never describe different spans. See [Quotas and limits](quotas.md).
+
+`get_monitor_history` measures uptime the way the rest of the product does: unfiltered, it counts *confirmed* incident time, so a flap that never breached the alert threshold does not dent it. Under a `region` filter there is no such thing as a confirmed regional incident, so `uptime` becomes that region's raw pass rate — the two numbers answer different questions and should not be compared. `failures` and `incidents` always describe the monitor as a whole, since an incident is raised for the monitor rather than per region; the `regions` split is what shows a partial outage. That split is empty for a monitor that runs in one region, because one region cannot disagree with itself.
 
 A status-page monitor is down → `get_org_health` gives the `incident_id` → `get_incident` shows the timeline → `acknowledge_incident` takes ownership → `publish_incident` puts it on the status page → `post_incident_update` tells your customers. Incidents (and the `incident_id` / ack workflow) exist only for monitors that are status-page components; a monitor not on any status page can be failing with `incident_id: null` — `since` still reports how long it's been down. `run_check_now` and `get_monitor` return `http_status` for HTTP monitors so you can tell "wrong status code" from "no response".
 
@@ -243,6 +247,9 @@ Once connected, drive it in natural language — the client picks the tool:
 - "What's broken in my org right now?" → `get_org_health`
 - "Show me every DNS monitor that's degraded." → `list_monitors(type=dns, state=degraded)`
 - "How has the checkout API done over the last 7 days?" → `get_monitor_history(window=7d)`
+- "Is it down everywhere or only from Singapore?" → `get_monitor_history(window=24h)`, then `region=apac-sg`
+- "Why does this check treat a 301 as a failure?" → `get_monitor` (reads `follow_redirects` + `expected_status`)
+- "Which tags am I using?" → `list_tags` → `list_monitors(tag=…)`
 - "Why did the login check fail last night?" → `get_flow_runs(window=24h)`
 - "Is any step of the sign-in getting slower?" → `get_flow_step_trend(window=30d)`
 - "What incidents are open, and what's been posted on them?" → `list_incidents` → `get_incident`

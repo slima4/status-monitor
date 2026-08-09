@@ -141,6 +141,16 @@ async fn seed_monitor_with_incident(pool: &PgPool, org: OrgId) -> (Uuid, Uuid) {
     (target_id, incident_id)
 }
 
+async fn seed_tagged_monitor(pool: &PgPool, org: OrgId, tag: &str) {
+    let mut target = secret_monitor();
+    target.name = format!("tagged-{tag}");
+    target.tags = vec![tag.to_string()];
+    PostgresTargetStore::from_pool(pool.clone(), None)
+        .create(org, target, WriteSource::Api, i64::MAX, i64::MAX)
+        .await
+        .expect("insert tagged target");
+}
+
 /// Router with `/mcp` mounted, two orgs, and a connector bound to the first.
 async fn connect(pool: &PgPool) -> (Connector, OrgId, OrgId) {
     let app = build_saas_router_with_pg_cfg(pool.clone(), |cfg| {
@@ -274,6 +284,20 @@ async fn listings_carry_only_the_tokens_own_org() {
         !worst.to_string().contains(&b_target.to_string()),
         "org health leaked a foreign monitor: {worst}"
     );
+
+    // The tag inventory aggregates across the whole org and takes no id to
+    // scope it, so it is a tenancy surface of its own.
+    seed_tagged_monitor(&pool, org_a, "mcp-tenancy-a").await;
+    seed_tagged_monitor(&pool, org_b, "mcp-tenancy-b").await;
+    let tags = mcp.call("list_tags", json!({})).await;
+    let names: Vec<&str> = tags["result"]["structuredContent"]["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert!(names.contains(&"mcp-tenancy-a"), "{names:?}");
+    assert!(!names.contains(&"mcp-tenancy-b"), "{names:?}");
 }
 
 /// The org lookup runs before the confirmation gate, so the two failures are

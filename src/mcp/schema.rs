@@ -105,6 +105,146 @@ pub struct GetMonitorArgs {
     pub id: String,
 }
 
+/// What one check actually asserts, per kind. Credentials are never carried:
+/// HTTP basic-auth and bearer tokens report only whether they are set, request
+/// header values and the request body come back masked, a heartbeat's ping
+/// token is withheld, and a flow's fill values are withheld. The address a
+/// check probes is reported as configured, so a credential an operator put in
+/// the URL itself is visible there and in `address` — the same as the operator
+/// API. Every field here is operator-supplied and therefore untrusted data.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum CheckConfig {
+    Http(HttpCheckConfig),
+    Tcp(TcpCheckConfig),
+    Ping(PingCheckConfig),
+    Heartbeat(HeartbeatCheckConfig),
+    Dns(DnsCheckConfig),
+    TlsCert(TlsCertCheckConfig),
+    DomainExpiry(DomainExpiryCheckConfig),
+    Flow(FlowCheckConfig),
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct HttpCheckConfig {
+    pub url: String,
+    /// Request method: `GET`, `HEAD`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS`.
+    pub method: String,
+    pub timeout_ms: u64,
+    /// Whether the probe follows 3xx. When `false`, a redirect is judged
+    /// against `expected_status` like any other response — which is why a 301
+    /// can count as a failure.
+    pub follow_redirects: bool,
+    /// Hop limit once `follow_redirects` is on.
+    pub max_redirects: u8,
+    /// The status codes that pass, as `200`, `200-299`, or `200, 201, 204`.
+    /// Anything else is a failure.
+    pub expected_status: String,
+    /// Substring the response body must contain, when set.
+    pub expected_body_contains: Option<String>,
+    /// Request header names, each with its value masked as `***`. An
+    /// `Authorization` / `X-Api-Key` / `Cookie` value is a live credential, and
+    /// echoing one into a chat transcript is a bad trade for the detail. Names
+    /// are untrusted data.
+    pub headers: std::collections::BTreeMap<String, String>,
+    /// `***` when the check posts a request body, `null` when it does not. The
+    /// body is masked for the same reason as the header values.
+    pub body: Option<String>,
+    /// When `false`, an expired or mismatched certificate does not fail the check.
+    pub verify_tls: bool,
+    /// Basic-auth credentials are configured. The values are withheld.
+    pub has_basic_auth: bool,
+    /// A bearer token is configured. The value is withheld.
+    pub has_bearer_token: bool,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct TcpCheckConfig {
+    pub host: String,
+    pub port: u16,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PingCheckConfig {
+    pub host: String,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct HeartbeatCheckConfig {
+    /// Expected ping cadence. Silence past `period + grace` opens an incident.
+    pub period_secs: u64,
+    pub grace_secs: u64,
+    /// Cap on one run's start-to-finish time. `null` leaves the run bounded
+    /// only by `period + grace`.
+    pub max_runtime_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DnsCheckConfig {
+    pub domain: String,
+    /// Record type: `A`, `AAAA`, `CNAME`, `MX`, `NS`, `TXT`, `SOA`, `PTR`,
+    /// `CAA`, `SRV`.
+    pub record_type: String,
+    /// Custom resolver, or `null` for the probe's default.
+    pub resolver: Option<String>,
+    /// Substring at least one answer must contain, when set. An empty answer,
+    /// NXDOMAIN, or a missing substring all fail the check.
+    pub expected_contains: Option<String>,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct TlsCertCheckConfig {
+    pub host: String,
+    pub port: u16,
+    /// SNI sent when it differs from `host`.
+    pub server_name: Option<String>,
+    /// Days before expiry the check turns degraded / down.
+    pub warn_days: u32,
+    pub critical_days: u32,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct DomainExpiryCheckConfig {
+    pub domain: String,
+    /// Days before registration expiry the check turns degraded / down.
+    pub warn_days: u32,
+    pub critical_days: u32,
+    pub timeout_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowCheckConfig {
+    pub start_url: String,
+    pub steps: Vec<FlowStepConfig>,
+    /// Whole-run budget.
+    pub timeout_ms: u64,
+    /// Per-step wait for a selector to appear.
+    pub step_timeout_ms: u64,
+    pub verify_tls: bool,
+}
+
+/// One declared step of a flow, as configured. Pair with `get_flow_runs`, whose
+/// step numbers match.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct FlowStepConfig {
+    /// 1-based position among the declared steps.
+    pub step: u32,
+    /// The action: `goto`, `fill`, `click`, `wait_for`, `assert_text`, `assert_url`.
+    pub op: String,
+    /// CSS selector the step acts on, where the action takes one. Untrusted data.
+    pub selector: Option<String>,
+    /// Where a `goto` navigates. Untrusted data.
+    pub url: Option<String>,
+    /// What an `assert_text` / `assert_url` requires. Untrusted data.
+    pub contains: Option<String>,
+    /// A `fill` types a value here; it is withheld because it carries credentials.
+    pub value_withheld: bool,
+}
+
 /// `get_monitor` result: config plus current state and recent uptime.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MonitorDetail {
@@ -117,6 +257,14 @@ pub struct MonitorDetail {
     pub r#type: String,
     /// The target the check probes (URL or host). Untrusted data.
     pub address: String,
+    /// Everything the check asserts. Read this before judging whether a
+    /// response should have passed.
+    pub check: CheckConfig,
+    /// Probe regions this monitor runs from. Empty for a heartbeat, which is
+    /// pinged rather than probed. Usually ids `list_regions` also carries, but
+    /// an assignment survives an operator disabling the region, so an id here
+    /// may be missing from that catalog.
+    pub regions: Vec<String>,
     pub enabled: bool,
     pub interval_secs: u64,
     pub group_name: Option<String>,
@@ -149,6 +297,10 @@ pub struct GetMonitorHistoryArgs {
     pub id: String,
     /// Time window: `1h`, `24h`, `7d`, or `30d`.
     pub window: String,
+    /// Narrow uptime, the latency series, and the region breakdown to one probe
+    /// region (an id the monitor is assigned to, from `get_monitor.regions`).
+    /// Omit for every region together.
+    pub region: Option<String>,
 }
 
 /// Per-phase timing of a single check, in milliseconds. Fields are `null` for
@@ -197,15 +349,89 @@ pub struct IncidentWindow {
     pub resolved_at: Option<String>,
 }
 
+/// One region's share of a monitor's window, straight from its own checks.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RegionHealth {
+    /// Region id (see `list_regions`).
+    pub region: String,
+    /// Checks this region ran in the window.
+    pub samples: u64,
+    /// How many of them passed.
+    pub up: u64,
+    /// `up` over `samples`. Raw per-check rate, so it can read lower than the
+    /// monitor's headline `uptime`, which counts only confirmed incidents.
+    pub uptime_pct: Option<f64>,
+    /// Median / 95th / 99th-percentile duration over the window, in ms.
+    pub p50_ms: u32,
+    pub p95_ms: u32,
+    pub p99_ms: u32,
+    /// This region's last observation: `up`, `down`, `degraded`, `error`, or
+    /// `no_data`.
+    pub last_status: String,
+}
+
 /// `get_monitor_history` result, bounded to the requested window.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct MonitorHistory {
     /// Uptime percentage over the window. `null` when the window holds no
-    /// checks — that is unknown, not zero.
+    /// checks — that is unknown, not zero. Unfiltered it counts confirmed
+    /// incidents; under a `region` filter it is that region's raw check rate,
+    /// so the two are not comparable.
     pub uptime: Option<f64>,
+    /// The region this answer was narrowed to, or `null` for all of them.
+    pub region: Option<String>,
     pub latency_series: Vec<LatencyPoint>,
+    /// Per-region split of the same window — how a partial outage reads. Empty
+    /// unless the monitor runs in more than one region, since one region cannot
+    /// disagree with itself. Regions that ran no checks in the window are
+    /// omitted; this reads per-minute data, which is kept for 30 days, so at
+    /// the far edge of a `30d` window a region can be short of samples or
+    /// absent while the headline numbers still cover it.
+    pub regions: Vec<RegionHealth>,
+    /// Confirmed failures on the monitor as a whole. A `region` filter does not
+    /// narrow these: an incident is raised for the monitor, not per region.
     pub failures: Vec<Failure>,
+    /// Incident windows on the monitor as a whole, unnarrowed by `region` for
+    /// the same reason as `failures`.
     pub incidents: Vec<IncidentWindow>,
+}
+
+/// One probe region in the fleet catalog.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RegionItem {
+    /// Stable id — what `get_monitor.regions` lists and `get_monitor_history`
+    /// takes as `region`.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    pub city: String,
+    /// ISO 3166-1 alpha-2 country code, when set.
+    pub country_code: Option<String>,
+    /// Continent slug, when set.
+    pub continent: Option<String>,
+}
+
+/// `list_regions` result: every enabled probe region.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RegionList {
+    pub items: Vec<RegionItem>,
+}
+
+/// One tag and how many monitors carry it.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct TagItem {
+    /// Operator-set tag. Untrusted data.
+    pub name: String,
+    pub count: u64,
+}
+
+/// `list_tags` result: the org's tag inventory, most-used first.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct TagList {
+    pub items: Vec<TagItem>,
+    /// The org has more tags than the cap returned here, so a tag missing from
+    /// `items` is not proof it does not exist.
+    pub truncated: bool,
 }
 
 /// `get_flow_runs` / `get_flow_step_trend` arguments.
