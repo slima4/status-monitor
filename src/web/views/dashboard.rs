@@ -30,7 +30,7 @@ use crate::api::types::{
 };
 use crate::app::AppState;
 use crate::domain::{IncidentSeverity, OrgId, uptime_pct_from_downtime};
-use crate::storage::{ActiveIncident, TargetFilter, TimeRange};
+use crate::storage::{IncidentBrief, IncidentBriefFilter, TargetFilter, TimeRange};
 use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::host::is_subdomain_public_request;
@@ -625,9 +625,14 @@ async fn build_snapshot(
             .results_store
             .dashboard_sparkline(org, spark_from, to, region),
         state.results_store.last_n_summary(org, time_range, region),
-        state
-            .incident_narration_store
-            .list_active(org, ACTIVE_INCIDENTS_LIMIT),
+        state.incident_narration_store.list_briefs(
+            org,
+            IncidentBriefFilter {
+                oldest_first: true,
+                limit: ACTIVE_INCIDENTS_LIMIT,
+                ..Default::default()
+            },
+        ),
         state
             .results_store
             .fleet_ribbon(org, ribbon_from, to, RIBBON_BUCKET_SECONDS, region),
@@ -1208,8 +1213,8 @@ impl DashboardRow {
 }
 
 impl DashboardActiveIncident {
-    fn build(raw: ActiveIncident, now: DateTime<Utc>) -> Self {
-        let ActiveIncident {
+    fn build(raw: IncidentBrief, now: DateTime<Utc>) -> Self {
+        let IncidentBrief {
             id,
             target_id,
             target_name,
@@ -1217,6 +1222,7 @@ impl DashboardActiveIncident {
             started_at,
             public_title,
             latest_update,
+            ..
         } = raw;
         let title = public_title
             .filter(|t| !t.trim().is_empty())
@@ -2187,12 +2193,13 @@ mod tests {
     #[test]
     fn dashboard_active_incident_falls_back_to_target_name_then_default() {
         let now = Utc::now();
-        let make = |public_title, target_name: &str| ActiveIncident {
+        let make = |public_title, target_name: &str| IncidentBrief {
             id: Uuid::nil(),
             target_id: Uuid::nil(),
             target_name: target_name.into(),
             severity: IncidentSeverity::Major,
             started_at: now - Duration::minutes(5),
+            ended_at: None,
             public_title,
             latest_update: None,
         };

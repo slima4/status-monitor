@@ -20,17 +20,44 @@ use std::collections::HashMap;
 use crate::error::Result;
 use crate::storage::TimeRange;
 
-/// One open incident joined with its target name + latest update.
-/// Powers the operator dashboard banner.
+/// One incident joined with its target name + latest update. Powers the
+/// operator dashboard banner (open only) and the MCP incident list (any window).
 #[derive(Debug, Clone)]
-pub struct ActiveIncident {
+pub struct IncidentBrief {
     pub id: Uuid,
     pub target_id: Uuid,
     pub target_name: String,
     pub severity: IncidentSeverity,
     pub started_at: DateTime<Utc>,
+    pub ended_at: Option<DateTime<Utc>>,
     pub public_title: Option<String>,
     pub latest_update: Option<PublicIncidentUpdate>,
+}
+
+/// Which slice of an org's incidents [`IncidentNarrationStore::list_briefs`]
+/// returns. `range: None` is unbounded — the open-incident callers don't need a
+/// window and shouldn't have to invent one.
+#[derive(Debug, Clone)]
+pub struct IncidentBriefFilter {
+    pub range: Option<TimeRange>,
+    pub target_id: Option<Uuid>,
+    pub open_only: bool,
+    pub oldest_first: bool,
+    pub limit: usize,
+    pub offset: usize,
+}
+
+impl Default for IncidentBriefFilter {
+    fn default() -> Self {
+        Self {
+            range: None,
+            target_id: None,
+            open_only: true,
+            oldest_first: false,
+            limit: 50,
+            offset: 0,
+        }
+    }
 }
 
 /// Operator-facing incident narration repository. Every method takes the
@@ -53,10 +80,14 @@ pub trait IncidentNarrationStore: Send + Sync {
         new: NewIncidentUpdate,
         author: Option<String>,
     ) -> Result<Option<PublicIncidentUpdate>>;
-    /// Currently-open incidents across every target in `org`, oldest-first
-    /// (so the banner shows "first opened …" without re-sorting). Capped at
-    /// `limit` for the dashboard banner.
-    async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>>;
+    /// Incidents across every target in `org` matching `filter`, with the
+    /// monitor name and latest update joined. Manual incidents (no monitor) are
+    /// absent: the join is what supplies the name.
+    async fn list_briefs(
+        &self,
+        org: OrgId,
+        filter: IncidentBriefFilter,
+    ) -> Result<Vec<IncidentBrief>>;
     /// Count of open incidents (`ended_at IS NULL`) for the nav health pill.
     async fn count_active(&self, org: OrgId) -> Result<u32>;
     /// Open incidents for one monitor. The tab badge counts these rather than
@@ -288,16 +319,36 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         }))
     }
 
-    async fn list_active(&self, org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>> {
+    async fn list_briefs(
+        &self,
+        org: OrgId,
+        filter: IncidentBriefFilter,
+    ) -> Result<Vec<IncidentBrief>> {
         // LATERAL picks the latest update per incident in one round-trip. The
         // ceiling bounds a runaway query; callers that paginate (MCP) pass a
-        // limit at least one page past what they'll surface so the page after
-        // the cap is still reachable.
-        let cap = limit.clamp(1, 1000) as i64;
-        let rows: Vec<ActiveIncidentRow> = sqlx::query_as(
+        // limit one page past what they'll surface so "is there more?" is
+        // answerable without a second count.
+        let cap = filter.limit.clamp(1, 1000) as i64;
+        // An offset past i64 is a page that cannot exist; Postgres rejects a
+        // negative one outright, so saturate into an empty page instead.
+        let skip = i64::try_from(filter.offset).unwrap_or(i64::MAX);
+        // Fixed strings chosen by a closed match — never caller text.
+        let order = if filter.oldest_first {
+            "i.started_at ASC, i.id ASC"
+        } else {
+            "i.started_at DESC, i.id DESC"
+        };
+        // Literal rather than a parameter so the open-incident partial index is
+        // usable; a parameterised `NOT $n OR …` can never match it.
+        let open_clause = if filter.open_only {
+            "AND i.ended_at IS NULL"
+        } else {
+            ""
+        };
+        let sql = format!(
             r#"SELECT i.id, i.target_id,
                       t.name AS target_name,
-                      i.severity, i.started_at, i.public_title,
+                      i.severity, i.started_at, i.ended_at, i.public_title,
                       u.posted_at AS update_posted_at,
                       u.phase     AS update_phase,
                       u.message   AS update_message
@@ -310,16 +361,26 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
                    ORDER BY iu.posted_at DESC
                    LIMIT 1
                ) u ON true
-               WHERE i.org_id = $1 AND i.ended_at IS NULL
-               ORDER BY i.started_at ASC
-               LIMIT $2"#,
-        )
-        .bind(org.0)
-        .bind(cap)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("list_active incidents: {e}"))?;
-        Ok(rows.into_iter().map(row_to_active).collect())
+               WHERE i.org_id = $1
+                 AND ($2::uuid IS NULL OR i.target_id = $2)
+                 {open_clause}
+                 AND ($3::timestamptz IS NULL OR i.started_at < $4)
+                 AND ($3::timestamptz IS NULL
+                      OR i.ended_at IS NULL OR i.ended_at >= $3)
+               ORDER BY {order}
+               LIMIT $5 OFFSET $6"#
+        );
+        let rows: Vec<IncidentBriefRow> = sqlx::query_as(&sql)
+            .bind(org.0)
+            .bind(filter.target_id)
+            .bind(filter.range.map(|r| r.from))
+            .bind(filter.range.map(|r| r.to))
+            .bind(cap)
+            .bind(skip)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("list_briefs incidents: {e}"))?;
+        Ok(rows.into_iter().map(row_to_brief).collect())
     }
 
     async fn count_active(&self, org: OrgId) -> Result<u32> {
@@ -414,19 +475,20 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
 }
 
 #[derive(sqlx::FromRow)]
-struct ActiveIncidentRow {
+struct IncidentBriefRow {
     id: Uuid,
     target_id: Uuid,
     target_name: String,
     severity: String,
     started_at: DateTime<Utc>,
+    ended_at: Option<DateTime<Utc>>,
     public_title: Option<String>,
     update_posted_at: Option<DateTime<Utc>>,
     update_phase: Option<String>,
     update_message: Option<String>,
 }
 
-fn row_to_active(r: ActiveIncidentRow) -> ActiveIncident {
+fn row_to_brief(r: IncidentBriefRow) -> IncidentBrief {
     let latest_update = match (r.update_posted_at, r.update_phase, r.update_message) {
         (Some(posted_at), Some(phase), Some(message)) => Some(PublicIncidentUpdate {
             posted_at,
@@ -435,12 +497,13 @@ fn row_to_active(r: ActiveIncidentRow) -> ActiveIncident {
         }),
         _ => None,
     };
-    ActiveIncident {
+    IncidentBrief {
         id: r.id,
         target_id: r.target_id,
         target_name: r.target_name,
         severity: IncidentSeverity::from_db_str(&r.severity),
         started_at: r.started_at,
+        ended_at: r.ended_at,
         public_title: r.public_title,
         latest_update,
     }
@@ -534,28 +597,45 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
         Ok(Some(entry))
     }
 
-    async fn list_active(&self, _org: OrgId, limit: usize) -> Result<Vec<ActiveIncident>> {
+    async fn list_briefs(
+        &self,
+        _org: OrgId,
+        filter: IncidentBriefFilter,
+    ) -> Result<Vec<IncidentBrief>> {
         // In-memory store doesn't track targets; tests that need a real
         // `target_name` use the Postgres-backed store via the harness.
-        let mut out: Vec<ActiveIncident> = self
+        let mut out: Vec<IncidentBrief> = self
             .inner
             .lock()
             .incidents
             .iter()
-            .filter(|i| i.ended_at.is_none())
-            .map(|i| ActiveIncident {
+            .filter(|i| !filter.open_only || i.ended_at.is_none())
+            .filter(|i| filter.target_id.is_none_or(|t| i.target_id == t))
+            .filter(|i| {
+                filter
+                    .range
+                    .is_none_or(|r| i.started_at < r.to && i.ended_at.is_none_or(|e| e >= r.from))
+            })
+            .map(|i| IncidentBrief {
                 id: i.id,
                 target_id: i.target_id,
                 target_name: String::new(),
                 severity: i.severity,
                 started_at: i.started_at,
+                ended_at: i.ended_at,
                 public_title: i.public_title.clone(),
                 latest_update: i.updates.last().cloned(),
             })
             .collect();
-        out.sort_by_key(|a| a.started_at);
-        out.truncate(limit);
-        Ok(out)
+        out.sort_by_key(|a| (a.started_at, a.id));
+        if !filter.oldest_first {
+            out.reverse();
+        }
+        Ok(out
+            .into_iter()
+            .skip(filter.offset)
+            .take(filter.limit)
+            .collect())
     }
 
     async fn count_active(&self, _org: OrgId) -> Result<u32> {
@@ -771,6 +851,110 @@ mod tests {
             .unwrap();
         assert_eq!(page2.len(), 1);
         assert_eq!(page2[0].started_at, all[1].started_at); // offset skipped the newest
+    }
+
+    #[tokio::test]
+    async fn list_briefs_filters_by_state_target_and_window() {
+        let store = InMemoryIncidentNarrationStore::new();
+        let target = Uuid::now_v7();
+        let other = Uuid::now_v7();
+        let now = Utc::now();
+        let mk = |tid: Uuid, started_min_ago: i64, ended_min_ago: Option<i64>| {
+            let mut inc = sample();
+            inc.id = Uuid::now_v7();
+            inc.target_id = tid;
+            inc.started_at = now - ChronoDuration::minutes(started_min_ago);
+            inc.ended_at = ended_min_ago.map(|m| now - ChronoDuration::minutes(m));
+            inc
+        };
+        store.seed(mk(target, 30, Some(20))); // resolved, inside the window
+        store.seed(mk(target, 10, None)); // still open
+        store.seed(mk(target, 60 * 24 * 40, Some(60 * 24 * 39))); // long resolved
+        store.seed(mk(other, 5, None)); // different monitor
+
+        let window = TimeRange {
+            from: now - ChronoDuration::days(30),
+            to: now,
+        };
+        let open = store
+            .list_briefs(org(), IncidentBriefFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(open.len(), 2);
+        assert!(open.iter().all(|i| i.ended_at.is_none()));
+
+        let all = store
+            .list_briefs(
+                org(),
+                IncidentBriefFilter {
+                    range: Some(window),
+                    target_id: Some(target),
+                    open_only: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        // The other monitor's row and the pre-window one are both excluded.
+        assert_eq!(all.len(), 2);
+        assert!(all[0].started_at >= all[1].started_at); // newest first
+
+        let oldest_first = store
+            .list_briefs(
+                org(),
+                IncidentBriefFilter {
+                    oldest_first: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(oldest_first[0].started_at <= oldest_first[1].started_at);
+
+        let page2 = store
+            .list_briefs(
+                org(),
+                IncidentBriefFilter {
+                    range: Some(window),
+                    target_id: Some(target),
+                    open_only: false,
+                    limit: 1,
+                    offset: 1,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2[0].started_at, all[1].started_at);
+    }
+
+    /// An incident that opened before the window and is still running stays
+    /// visible: "what's broken" must not depend on when it broke.
+    #[tokio::test]
+    async fn list_briefs_keeps_an_open_incident_older_than_the_window() {
+        let store = InMemoryIncidentNarrationStore::new();
+        let now = Utc::now();
+        let mut inc = sample();
+        inc.started_at = now - ChronoDuration::days(90);
+        inc.ended_at = None;
+        store.seed(inc);
+
+        let found = store
+            .list_briefs(
+                org(),
+                IncidentBriefFilter {
+                    range: Some(TimeRange {
+                        from: now - ChronoDuration::days(30),
+                        to: now,
+                    }),
+                    open_only: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(found.len(), 1);
     }
 
     #[tokio::test]

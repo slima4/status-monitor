@@ -142,7 +142,7 @@
       "id": "mcp",
       "col": "handler",
       "t": "mcp::server",
-      "s": "10 read + 6 write tools"
+      "s": "12 read + 8 write tools"
     },
     {
       "id": "oauth",

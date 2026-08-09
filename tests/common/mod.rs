@@ -28,7 +28,8 @@ use uptimepage::storage::{
     DomainExpiryStateStore, InMemoryDomainExpiryStateStore, InMemoryIncidentNarrationStore,
     InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink,
     InMemoryStatusPageStore, InMemoryTargetStore, IncidentNarrationStore, MaintenanceStore,
-    NotificationChannelStore, PgStatusPageStore, PostgresTargetStore, ResultSink, ResultsStore,
+    NotificationChannelStore, PgIncidentNarrationStore, PgStatusPageStore, PostgresTargetStore,
+    ResultSink, ResultsStore,
 };
 use uptimepage::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
 use uptimepage::worker::host_throttle::HostThrottle;
@@ -446,8 +447,10 @@ pub async fn build_saas_router_with_pg_cfg(
 }
 
 /// Shared tail of the PG-target-store router builders: real
-/// `PostgresTargetStore` + in-memory everything else, wired into the API +
-/// web router. Callers own the tenancy prelude that precedes this.
+/// `PostgresTargetStore` + `PgIncidentNarrationStore` + in-memory results,
+/// wired into the API + web router. The incident store has to be the Postgres
+/// one for tenancy tests to mean anything: the in-memory stand-in looks rows up
+/// by id alone. Callers own the tenancy prelude that precedes this.
 fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
     let target_store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
     let sink = Arc::new(InMemorySink::new());
@@ -466,7 +469,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
     let public_source = Arc::new(NoopPublicSource::default());
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
-        Arc::new(InMemoryIncidentNarrationStore::new());
+        Arc::new(PgIncidentNarrationStore::new(pool.clone()));
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
         Arc::new(InMemoryNotificationChannelStore::new());
     let status_page_store = Arc::new(PgStatusPageStore::new(pool.clone()));

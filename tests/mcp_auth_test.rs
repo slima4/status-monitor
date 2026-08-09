@@ -27,6 +27,114 @@ fn mcp_post_body(authorization: Option<&str>, body: &'static str) -> Request<Bod
     b.body(Body::from(body)).unwrap()
 }
 
+/// `initialize` body declaring (or not) the elicitation client capability.
+fn initialize_body(elicitation: bool) -> String {
+    let caps = if elicitation {
+        r#"{"elicitation":{}}"#
+    } else {
+        "{}"
+    };
+    format!(
+        r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"protocolVersion":"2025-06-18","capabilities":{caps},"clientInfo":{{"name":"probe","version":"0"}}}}}}"#
+    )
+}
+
+fn session_post(session: &str, body: &'static str) -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/mcp")
+        .header("content-type", "application/json")
+        .header("host", "localhost")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-session-id", session)
+        .body(Body::from(body))
+        .unwrap()
+}
+
+/// Handshake, then read the tool catalog that client is offered. Bodies come
+/// back as SSE frames, so the JSON is whatever follows the `data:` prefix.
+async fn tool_names_for_client(elicitation: bool) -> Vec<String> {
+    let app = build_test_app_with_web(|cfg| cfg.mcp.enabled = true);
+    let init = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("content-type", "application/json")
+                .header("host", "localhost")
+                .header("accept", "application/json, text/event-stream")
+                .body(Body::from(initialize_body(elicitation)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(init.status().is_success(), "initialize: {}", init.status());
+    let session = init
+        .headers()
+        .get("mcp-session-id")
+        .expect("transport must issue a session id")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    let resp = app
+        .oneshot(session_post(
+            &session,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+        ))
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "tools/list: {}", resp.status());
+    let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    // The stream opens with an empty keep-alive frame; the answer is the first
+    // `data:` line carrying anything.
+    let json = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("data:"))
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_else(|| panic!("no data frame in {text:?}"));
+    let parsed: serde_json::Value = serde_json::from_str(json).expect("tools/list json");
+    parsed["result"]["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn tool_catalog_hides_writes_from_a_client_that_cannot_confirm() {
+    let names = tool_names_for_client(false).await;
+    assert!(
+        names.contains(&"list_monitors".to_string()),
+        "read tools stay: {names:?}"
+    );
+    for write in [
+        "pause_monitor",
+        "run_check_now",
+        "publish_incident",
+        "post_incident_update",
+    ] {
+        assert!(
+            !names.contains(&write.to_string()),
+            "{write} needs a confirmation this client can't show: {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tool_catalog_keeps_writes_for_an_elicitation_capable_client() {
+    let names = tool_names_for_client(true).await;
+    for write in ["pause_monitor", "publish_incident", "unpublish_incident"] {
+        assert!(names.contains(&write.to_string()), "{write} in {names:?}");
+    }
+}
+
 fn mcp_post(authorization: Option<&str>) -> Request<Body> {
     mcp_post_body(
         authorization,

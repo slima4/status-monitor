@@ -302,15 +302,26 @@ pub struct FlowStepTrendSummary {
     pub steps: Vec<FlowStepTrendItem>,
 }
 
-/// `list_incidents` arguments.
+/// `list_incidents` arguments. All filters are optional.
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct ListIncidentsArgs {
+    /// Which incidents to return: `open` (default) for the ones still running,
+    /// or `all` to include resolved ones inside the window.
+    pub state: Option<String>,
+    /// RFC 3339 start of the window. Defaults to 30 days ago. An incident that
+    /// is still running is listed however long ago it opened.
+    pub from: Option<String>,
+    /// RFC 3339 end of the window. Defaults to now. Incidents that opened after
+    /// it are excluded, running or not.
+    pub to: Option<String>,
+    /// Restrict to one monitor (id from `list_monitors`).
+    pub monitor_id: Option<String>,
     /// Opaque pagination cursor from a previous call's `next_cursor`.
     pub cursor: Option<String>,
 }
 
-/// One open incident in `list_incidents`. Incident-centric (every item is
-/// currently open); for a monitor's full state use `get_monitor`/`get_org_health`.
+/// One incident in `list_incidents`. Incident-centric; for a monitor's full
+/// state use `get_monitor`/`get_org_health`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct IncidentSummary {
     /// Stable incident id. Pass to `get_incident` or `acknowledge_incident`.
@@ -323,6 +334,8 @@ pub struct IncidentSummary {
     pub severity: String,
     /// RFC 3339 incident start.
     pub opened_at: String,
+    /// RFC 3339 incident end, or `null` while ongoing.
+    pub resolved_at: Option<String>,
     /// Phase of the latest operator update: `investigating`, `identified`,
     /// `monitoring`, `resolved`, `postmortem`. `null` if no update was posted.
     pub latest_phase: Option<String>,
@@ -334,12 +347,16 @@ pub struct IncidentSummary {
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct IncidentList {
     pub items: Vec<IncidentSummary>,
+    /// RFC 3339 window actually read, after the defaults and the one-year cap.
+    /// Report spans from these, not from what was asked for.
+    pub from: String,
+    pub to: String,
     pub next_cursor: Option<String>,
 }
 
-/// `get_incident` argument.
+/// Argument of the incident tools that take only an id.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-pub struct GetIncidentArgs {
+pub struct IncidentIdArg {
     /// The incident id (from `list_incidents` or `get_org_health`).
     pub id: String,
 }
@@ -545,6 +562,26 @@ pub struct IncidentActionResult {
     pub acknowledged_at: Option<String>,
     /// RFC 3339 resolved (ended) time, when set.
     pub resolved_at: Option<String>,
+}
+
+/// `publish_incident` argument. The optional narration seeds what customers
+/// read on the status page; omitted fields keep whatever is stored.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct PublishIncidentArgs {
+    /// The incident id.
+    pub id: String,
+    /// Public headline shown on the status page.
+    pub public_title: Option<String>,
+    /// Public summary shown under the headline.
+    pub public_description: Option<String>,
+}
+
+/// `publish_incident` / `unpublish_incident` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct IncidentVisibilityResult {
+    pub incident_id: String,
+    /// Visibility after the change: `public` or `internal`.
+    pub visibility: String,
 }
 
 /// `post_incident_update` argument: appends a public, customer-facing entry to

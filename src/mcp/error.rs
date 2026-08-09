@@ -18,8 +18,11 @@ pub mod codes {
     pub const INVALID_ARGUMENT: &str = "invalid_argument";
     pub const NOT_FOUND: &str = "not_found";
     pub const INSUFFICIENT_SCOPE: &str = "insufficient_scope";
-    /// A write tool's elicitation was declined, cancelled, or unavailable.
+    /// A write tool's confirmation prompt was declined or cancelled.
     pub const NOT_CONFIRMED: &str = "not_confirmed";
+    /// The connected client cannot prompt for confirmation at all, so no write
+    /// tool can run through it. Distinct from a human saying no.
+    pub const ELICITATION_UNSUPPORTED: &str = "elicitation_unsupported";
     pub const UNAUTHENTICATED: &str = "unauthenticated";
     /// The org's per-category rate limit was exhausted; retry after a delay.
     pub const RATE_LIMITED: &str = "rate_limited";

@@ -1,7 +1,7 @@
 +++
 title = "Your monitors can talk to an AI, with your permission"
 date = "2026-06-03"
-updated = "2026-08-03"
+updated = "2026-08-09"
 slug = "mcp-server"
 excerpt = "Uptimepage now speaks MCP, so an LLM can answer \"what's broken and since when?\" in plain language, plus what we did to stop it from wrecking things."
 tags = ["mcp", "ai", "monitoring", "security", "api"]
@@ -16,11 +16,11 @@ Most of what's interesting here is about restraint, not cleverness.
 
 > **TL;DR**
 >
-> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are sixteen tools: ten read-only, six that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
+> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are twenty tools: twelve read-only, eight that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
 
-## Sixteen tools. Ten can only look.
+## Twenty tools. Twelve can only look.
 
-The server exposes sixteen tools. Ten are read-only: org health, monitor lists and history, incident timelines and metrics, status pages, usage against your plan. Six can actually *do* something: run a check on demand, pause or resume a monitor, acknowledge or resolve an incident, post an update to one.
+The server exposes twenty tools. Twelve are read-only: org health, monitor lists and history, incident timelines and metrics, status pages, usage against your plan. Eight can actually *do* something: run a check on demand, pause or resume a monitor, acknowledge or resolve an incident, put one on your status page or take it back down, post an update to one.
 
 That split is deliberate and enforced, not a naming convention. A read tool is structurally incapable of changing anything. An action tool can't fire without three independent gates. The token must carry the right scope, **you** must approve the specific action in the moment, and every outcome (success, denial, error) writes exactly one audit row.
 

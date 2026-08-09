@@ -6,7 +6,7 @@ It is another authorized front door to the same stores the web app and [`/api/v1
 
 - **Transport** — Streamable HTTP at `POST/GET /mcp`, served on its own host (`mcp.{DOMAIN}` in production).
 - **Auth** — an org-bound scoped API token (`sm_live_…`), minted either by hand (Settings → API tokens) or by the one-click OAuth 2.1 connector flow.
-- **Surface** — 10 read tools (always) + 6 write tools (each scope-gated, confirmed per action, and audited).
+- **Surface** — 12 read tools (always) + 8 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
 
 The server only mounts when enabled (see [Enabling](#enabling)); a deployment that leaves it off never exposes `/mcp`.
 
@@ -26,7 +26,7 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 | `get_monitor_history` | `targets:read` | One monitor's history over a `window` (`1h` / `24h` / `7d` / `30d`): uptime, latency series, failures with error text, incident windows. |
 | `get_flow_runs` | `targets:read` | A browser flow monitor's recent runs over a `window`: every declared step with its outcome and duration, the step a failure stopped on, and the page the browser saw. Answers *why* a login check failed. |
 | `get_flow_step_trend` | `targets:read` | Per step of a browser flow monitor, over a `window`: earliest and latest mean duration, the ratio between them, and how many runs passed or failed it. Answers *which step is getting slower* while the monitor still reports up. |
-| `list_incidents` | `incidents:read` | Currently-open incidents on the org's status pages: incident id, affected monitor, severity, latest update phase. Cursor-paginated. |
+| `list_incidents` | `incidents:read` | Incidents with their id, affected monitor, severity, open/resolved times, and latest update phase. Defaults to the currently-open ones; `state: "all"` adds resolved history inside a `from`/`to` window (default: the last 30 days, capped at a year), and `monitor_id` narrows to one monitor. The response repeats the window it actually read, so a clamped request is never reported as the span that was asked for. An incident still running is listed however long ago it opened. Cursor-paginated. |
 | `get_incident` | `incidents:read` | One incident: affected monitor, severity, open/resolved times, error sample, and the full operator-update timeline. |
 | `get_incident_metrics` | `incidents:read` | Incident metrics over a trailing window (default 30 days): MTTA/MTTR, total, counts by severity and state, auto- vs human-resolved, and the noisiest monitors. |
 | `list_status_pages` | `status_page:read` | The org's status pages: slug, name, public URL, enabled. Cursor-paginated. |
@@ -35,7 +35,7 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 
 A `window` is a request, not a promise: every history tool clamps it to what your plan retains at per-check detail, and one clamp covers the whole response so its fields never describe different spans. See [Quotas and limits](quotas.md).
 
-A status-page monitor is down → `get_org_health` gives the `incident_id` → `get_incident` shows the timeline → `acknowledge_incident` takes ownership → `post_incident_update` tells your customers. Incidents (and the `incident_id` / ack workflow) exist only for monitors that are status-page components; a monitor not on any status page can be failing with `incident_id: null` — `since` still reports how long it's been down. `run_check_now` and `get_monitor` return `http_status` for HTTP monitors so you can tell "wrong status code" from "no response".
+A status-page monitor is down → `get_org_health` gives the `incident_id` → `get_incident` shows the timeline → `acknowledge_incident` takes ownership → `publish_incident` puts it on the status page → `post_incident_update` tells your customers. Incidents (and the `incident_id` / ack workflow) exist only for monitors that are status-page components; a monitor not on any status page can be failing with `incident_id: null` — `since` still reports how long it's been down. `run_check_now` and `get_monitor` return `http_status` for HTTP monitors so you can tell "wrong status code" from "no response".
 
 ### Write tools
 
@@ -48,7 +48,11 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 | `resume_monitor` | `targets:write` | Restart a paused monitor's checks. Idempotent. |
 | `acknowledge_incident` | `incidents:write` | Take ownership of an incident and halt escalation. Internal only: it posts nothing to the public status page. Idempotent. |
 | `resolve_incident` | `incidents:write` | Mark the incident resolved. Internal only, same as acknowledge: the public page is untouched. Idempotent. |
-| `post_incident_update` | `incidents:write` | Post the customer-facing update to the incident's status-page timeline: a `message` plus optional `phase` (`investigating` / `identified` / `monitoring` / `resolved` / `postmortem`, default `investigating`). |
+| `publish_incident` | `incidents:write` | Put an incident on every status page carrying the affected monitor, optionally seeding `public_title` and `public_description`. Subscribers may be notified. Idempotent. |
+| `unpublish_incident` | `incidents:write` | Take a published incident back off the public pages. The operator timeline is untouched. Idempotent. |
+| `post_incident_update` | `incidents:write` | Post the customer-facing update to the incident's status-page timeline: a `message` plus optional `phase` (`investigating` / `identified` / `monitoring` / `resolved` / `postmortem`, default `investigating`). Requires a published incident. |
+
+Incidents start internal, so the customer-facing sequence is `publish_incident` then `post_incident_update`; posting to an unpublished incident is refused rather than written somewhere nobody reads.
 
 Write scopes are **never** granted unless explicitly requested — the OAuth connector defaults to read-only (see [Scopes](#scopes)).
 
@@ -66,6 +70,8 @@ A request with no/invalid token gets `401` with a `WWW-Authenticate: Bearer …`
 ### Two ways to get a token
 
 **1. By hand (manual connector).** Mint an org-bound, read-only, expiring token in the UI (Settings → API tokens; a verified email is required) and paste it into the client. Grant the least scope you need — `targets:read` + `status_page:read` + `incidents:read` for the read tools. This is the simplest path for Claude Desktop / Inspector and needs only `UPTIMEPAGE_MCP_ENABLED`.
+
+Either way, the token only decides what the connection *may* do. Whether the write tools appear at all depends on the client: one that can't prompt for confirmation is offered the read tools only. See [Confirmations](#confirmations).
 
 **2. One-click OAuth (claude.ai connector).** With `UPTIMEPAGE_MCP_OAUTH_ENABLED` on, the client discovers the authorization server, you log in with your existing session and approve a consent screen, and the server mints the same org-bound expiring token behind the scenes — no copy-paste. This is the only path that mints write scopes, and only when the consent screen's opt-in boxes are checked.
 
@@ -108,16 +114,18 @@ The connector advertises six grantable scopes. A request with no `scope` (or onl
 |---|---|---|
 | `targets:read` | all read tools over monitors | ✅ |
 | `status_page:read` | status-page read tools | ✅ |
-| `incidents:read` | `list_incidents`, `get_incident` | ✅ |
+| `incidents:read` | `list_incidents`, `get_incident`, `get_incident_metrics` | ✅ |
 | `targets:write` | `pause_monitor`, `resume_monitor` | opt-in |
 | `targets:execute` | `run_check_now` | opt-in |
-| `incidents:write` | `acknowledge_incident` | opt-in |
+| `incidents:write` | `acknowledge_incident`, `resolve_incident`, `publish_incident`, `unpublish_incident`, `post_incident_update` | opt-in |
 
 A granted write scope is **necessary but not sufficient** — every write tool still asks the user to confirm the specific action at call time.
 
 ## Confirmations
 
-Before any write tool acts, the server sends an MCP **elicitation** request describing the exact action (the monitor's name, the effect, and — for `acknowledge_incident` — the message and notify choice). The tool proceeds only on an explicit approval; a decline, a dismissal, or a client that can't elicit all fail closed with `not_confirmed`. There is no "remember my choice" — each action is confirmed on its own.
+Before any write tool acts, the server sends an MCP **elicitation** request describing the exact action: which monitor or incident it lands on, the effect, and for a public update the text customers will read. Nothing is ever confirmed unnamed, so an approval can't be steered onto a different incident than the one under discussion. The tool proceeds only on an explicit approval. A decline or a dismissal fails closed with `not_confirmed`. There is no "remember my choice", so each action is confirmed on its own.
+
+**Your client must support elicitation to use any write tool.** One that doesn't is offered the read tools only: the write tools are left out of its `tools/list`, since every one of them would refuse. If such a client calls a write tool anyway it gets `elicitation_unsupported`, which is a distinct code from `not_confirmed` so "your client can't ask" never reads as "you said no". Nothing about this weakens the guarantee: hiding is presentation, and the confirmation itself is what makes a write safe.
 
 ## Audit
 
@@ -224,7 +232,7 @@ curl -s https://mcp.uptimepage.dev/mcp \
        "params":{"name":"get_incident","arguments":{"id":"INCIDENT_ID"}}}'
 ```
 
-Write tools (`acknowledge_incident`, `pause_monitor`, …) follow the same `tools/call` shape but the client must support [elicitation](#confirmations) — curl can't approve the confirmation, so they're driven from a real MCP client.
+Write tools (`acknowledge_incident`, `pause_monitor`, …) follow the same `tools/call` shape but the client must support [elicitation](#confirmations). curl declares no such capability, so it won't see them in `tools/list` and gets `elicitation_unsupported` if it calls one anyway. Drive them from a real MCP client.
 
 A missing/invalid token returns `401` with `WWW-Authenticate: Bearer …`; a wrong `Host` returns `403`; a missing `MCP-Protocol-Version` on a non-initialize call returns `400`; notifications get `202`.
 
@@ -238,7 +246,10 @@ Once connected, drive it in natural language — the client picks the tool:
 - "Why did the login check fail last night?" → `get_flow_runs(window=24h)`
 - "Is any step of the sign-in getting slower?" → `get_flow_step_trend(window=30d)`
 - "What incidents are open, and what's been posted on them?" → `list_incidents` → `get_incident`
+- "What broke last week?" → `list_incidents(state=all, from=…, to=…)`
+- "How often did checkout fail this month?" → `list_incidents(state=all, monitor_id=…)`
 - "Acknowledge the payments incident — we're investigating." → `acknowledge_incident(phase=investigating)` (asks you to confirm)
+- "Put the payments outage on our status page." → `publish_incident` (asks you to confirm)
 - "Am I near any plan limits?" → `get_org_usage`
 - "Run a check on the payments monitor now." → `run_check_now` (asks you to confirm; may alert)
 - "Pause the staging monitor." → `pause_monitor` (asks you to confirm)

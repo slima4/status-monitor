@@ -109,7 +109,7 @@ The same numbers are available to automation through the MCP `get_incident_metri
 
 ## MCP tools
 
-An LLM connected through the [MCP server](mcp.md) can triage and operate incidents within its granted scopes: read the incident list and detail, read metrics, and — with write scope — acknowledge, resolve, and post public updates. Customer-supplied incident text is always returned as labelled data, never as instructions. See [MCP server](mcp.md) for the full tool table and scopes.
+An LLM connected through the [MCP server](mcp.md) can triage and operate incidents within its granted scopes: read the incident list (open ones, or resolved history in a window) and detail, read metrics, and — with write scope — acknowledge, resolve, publish or unpublish, and post public updates. Customer-supplied incident text is always returned as labelled data, never as instructions. See [MCP server](mcp.md) for the full tool table and scopes.
 
 ## Auth and scopes
 

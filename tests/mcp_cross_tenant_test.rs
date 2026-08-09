@@ -1,0 +1,324 @@
+//! Cross-tenant regression for the MCP front door. Two orgs share one router
+//! and one set of Postgres-backed stores; the connector holds an org-bound
+//! token for A. Org B's monitor and incident ids must read as `not_found`
+//! through every tool, and no write may act on them.
+//!
+//! The other cross-tenant suites drive `/api/v1` and the operator HTML. This
+//! one drives JSON-RPC `tools/call`, because MCP resolves its org from the
+//! token rather than from a session or a path.
+//!
+//! `#[ignore]`d by default; runs under `--run-ignored all` with `DATABASE_URL`
+//! set. The harness auto-applies migrations on first connect.
+
+mod common;
+
+use axum::Router;
+use axum::body::Body;
+use axum::http::Request;
+use common::{build_saas_router_with_pg_cfg, default_http_check, make_user, unique_slug};
+use serde_json::{Value, json};
+use sqlx::PgPool;
+use std::time::Duration;
+use tower::ServiceExt;
+use uptimepage::auth::scope::ScopeSet;
+use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, OrgId, UserId, WriteSource};
+use uptimepage::storage::{PostgresTargetStore, TargetStore, create_org_with_owner};
+use url::Url;
+use uuid::Uuid;
+
+/// A client that declares no elicitation capability: every write tool refuses
+/// at the confirmation gate, which is exactly what makes the contrast in
+/// `a_write_finds_nothing_to_publish_in_another_org` legible. The org checks
+/// run before that gate, so a foreign id still has to fail as `not_found`.
+const INITIALIZE: &str = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"tenancy-probe","version":"0"}}}"#;
+
+struct Connector {
+    app: Router,
+    token: String,
+    session: String,
+}
+
+impl Connector {
+    async fn call(&self, tool: &str, arguments: Value) -> Value {
+        let body = serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": { "name": tool, "arguments": arguments },
+        }))
+        .unwrap();
+        let resp = self
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/mcp")
+                    .header("content-type", "application/json")
+                    .header("host", "localhost")
+                    .header("accept", "application/json, text/event-stream")
+                    .header("authorization", format!("Bearer {}", self.token))
+                    .header("mcp-session-id", &self.session)
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(resp.status().is_success(), "{tool}: {}", resp.status());
+        let bytes = axum::body::to_bytes(resp.into_body(), 1 << 20)
+            .await
+            .unwrap();
+        let text = String::from_utf8(bytes.to_vec()).unwrap();
+        let frame = text
+            .lines()
+            .filter_map(|l| l.strip_prefix("data:"))
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or_else(|| panic!("no data frame for {tool}: {text:?}"));
+        serde_json::from_str(frame).expect("tool result json")
+    }
+}
+
+/// The `{code, message, retryable}` a tool-execution error carries, or `None`
+/// when the call succeeded.
+fn error_code(result: &Value) -> Option<String> {
+    let payload = &result["result"];
+    if payload["isError"] != Value::Bool(true) {
+        return None;
+    }
+    payload["structuredContent"]["error"]["code"]
+        .as_str()
+        .map(str::to_string)
+}
+
+fn secret_monitor() -> NewTarget {
+    let url = Url::parse("https://example.com/").unwrap();
+    NewTarget {
+        name: "secret-monitor".into(),
+        check: CheckSpec::Http(default_http_check(url, ExpectedStatus::Exact(200))),
+        interval: Duration::from_secs(30),
+        enabled: true,
+        tags: vec![],
+        alerts: Default::default(),
+        region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
+        renotify_interval_secs: 3600,
+        group_name: None,
+        owner_user_id: None,
+    }
+}
+
+async fn seed_org(pool: &PgPool, prefix: &str) -> (OrgId, UserId) {
+    let user = make_user(pool, prefix).await;
+    let org = create_org_with_owner(pool, user, &unique_slug(prefix), "svc", 3)
+        .await
+        .expect("create org")
+        .expect("org created")
+        .id;
+    (org, user)
+}
+
+async fn seed_monitor_with_incident(pool: &PgPool, org: OrgId) -> (Uuid, Uuid) {
+    // Through the store, so the row carries a `check_spec` the read path can
+    // actually decode.
+    let target_id = PostgresTargetStore::from_pool(pool.clone(), None)
+        .create(org, secret_monitor(), WriteSource::Api, i64::MAX, i64::MAX)
+        .await
+        .expect("insert target")
+        .id;
+    let incident_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, \
+                                state, visibility, origin) \
+         VALUES ($1, $2, now() - interval '10 minute', 'down', 1, 'triggered', 'internal', \
+                 'monitor') RETURNING id",
+    )
+    .bind(org.0)
+    .bind(target_id)
+    .fetch_one(pool)
+    .await
+    .expect("insert incident");
+    (target_id, incident_id)
+}
+
+/// Router with `/mcp` mounted, two orgs, and a connector bound to the first.
+async fn connect(pool: &PgPool) -> (Connector, OrgId, OrgId) {
+    let app = build_saas_router_with_pg_cfg(pool.clone(), |cfg| {
+        cfg.mcp.enabled = true;
+    })
+    .await;
+    let (org_a, user_a) = seed_org(pool, "mcpa").await;
+    let (org_b, _) = seed_org(pool, "mcpb").await;
+
+    let created = uptimepage::auth::api_tokens::create(
+        pool,
+        user_a,
+        "tenancy-probe",
+        &ScopeSet::from_strs(["full_access"]),
+        Some(org_a),
+        None,
+        16,
+        10,
+    )
+    .await
+    .expect("mint token");
+
+    let init = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header("content-type", "application/json")
+                .header("host", "localhost")
+                .header("accept", "application/json, text/event-stream")
+                .header("authorization", format!("Bearer {}", created.token))
+                .body(Body::from(INITIALIZE))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(init.status().is_success(), "initialize: {}", init.status());
+    let session = init
+        .headers()
+        .get("mcp-session-id")
+        .expect("session id")
+        .to_str()
+        .unwrap()
+        .to_string();
+
+    (
+        Connector {
+            app,
+            token: created.token,
+            session,
+        },
+        org_a,
+        org_b,
+    )
+}
+
+#[tokio::test]
+#[ignore]
+async fn reads_cannot_reach_another_orgs_monitor_or_incident() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, org_b) = connect(&pool).await;
+    let (a_target, a_incident) = seed_monitor_with_incident(&pool, org_a).await;
+    let (b_target, b_incident) = seed_monitor_with_incident(&pool, org_b).await;
+
+    // The connector's own rows are readable, so a `not_found` below is tenancy
+    // and not a broken fixture.
+    assert_eq!(
+        error_code(&mcp.call("get_monitor", json!({ "id": a_target })).await),
+        None
+    );
+    assert_eq!(
+        error_code(&mcp.call("get_incident", json!({ "id": a_incident })).await),
+        None
+    );
+
+    for (tool, args) in [
+        ("get_monitor", json!({ "id": b_target })),
+        (
+            "get_monitor_history",
+            json!({ "id": b_target, "window": "24h" }),
+        ),
+        ("get_flow_runs", json!({ "id": b_target, "window": "24h" })),
+        ("get_incident", json!({ "id": b_incident })),
+    ] {
+        assert_eq!(
+            error_code(&mcp.call(tool, args).await).as_deref(),
+            Some("not_found"),
+            "{tool} must not confirm another org's row exists"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore]
+async fn listings_carry_only_the_tokens_own_org() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, org_b) = connect(&pool).await;
+    let (a_target, a_incident) = seed_monitor_with_incident(&pool, org_a).await;
+    let (b_target, b_incident) = seed_monitor_with_incident(&pool, org_b).await;
+
+    let monitors = mcp.call("list_monitors", json!({})).await;
+    let ids: Vec<&str> = monitors["result"]["structuredContent"]["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&a_target.to_string().as_str()));
+    assert!(!ids.contains(&b_target.to_string().as_str()));
+
+    // `state: all` widens the window, which is the read that reaches furthest
+    // back; it must not reach sideways.
+    let incidents = mcp.call("list_incidents", json!({ "state": "all" })).await;
+    let ids: Vec<&str> = incidents["result"]["structuredContent"]["items"]
+        .as_array()
+        .expect("items")
+        .iter()
+        .map(|i| i["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&a_incident.to_string().as_str()));
+    assert!(!ids.contains(&b_incident.to_string().as_str()));
+
+    let health = mcp.call("get_org_health", json!({})).await;
+    let worst = &health["result"]["structuredContent"]["worst"];
+    assert!(
+        !worst.to_string().contains(&b_target.to_string()),
+        "org health leaked a foreign monitor: {worst}"
+    );
+}
+
+/// The org lookup runs before the confirmation gate, so the two failures are
+/// distinguishable: A's own incident gets as far as asking the user (and this
+/// client can't answer), while B's never resolves to a row at all.
+#[tokio::test]
+#[ignore]
+async fn a_write_finds_nothing_to_publish_in_another_org() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, org_b) = connect(&pool).await;
+    let (_, a_incident) = seed_monitor_with_incident(&pool, org_a).await;
+    let (b_target, b_incident) = seed_monitor_with_incident(&pool, org_b).await;
+
+    assert_eq!(
+        error_code(
+            &mcp.call("publish_incident", json!({ "id": a_incident }))
+                .await
+        )
+        .as_deref(),
+        Some("elicitation_unsupported"),
+    );
+    for (tool, args) in [
+        ("publish_incident", json!({ "id": b_incident })),
+        ("unpublish_incident", json!({ "id": b_incident })),
+        ("pause_monitor", json!({ "id": b_target })),
+        ("resume_monitor", json!({ "id": b_target })),
+    ] {
+        assert_eq!(
+            error_code(&mcp.call(tool, args).await).as_deref(),
+            Some("not_found"),
+            "{tool} must not act on another org's row"
+        );
+    }
+
+    // Nothing above may have changed B's row on its way to failing.
+    let (visibility, enabled): (String, bool) = sqlx::query_as(
+        "SELECT i.visibility::text, t.enabled FROM incidents i \
+         JOIN targets t ON t.id = i.target_id WHERE i.id = $1",
+    )
+    .bind(b_incident)
+    .fetch_one(&pool)
+    .await
+    .expect("read back org B");
+    assert_eq!(visibility, "internal");
+    assert!(enabled);
+}

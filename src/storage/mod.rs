@@ -60,7 +60,7 @@ pub use incident_ops::{
     IncidentOpsStore, IncidentSort, LifecycleOutcome, PendingNotification, PgIncidentOpsStore,
 };
 pub use incidents::{
-    ActiveIncident, InMemoryIncidentNarrationStore, IncidentNarrationStore,
+    InMemoryIncidentNarrationStore, IncidentBrief, IncidentBriefFilter, IncidentNarrationStore,
     PgIncidentNarrationStore,
 };
 pub use maintenance::{
