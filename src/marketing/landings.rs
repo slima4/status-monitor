@@ -2362,7 +2362,7 @@ resource "uptimepage_target" "api" {
         sections: &[
             Section {
                 heading: "Ask your monitoring in plain language",
-                body: "What’s down right now, and since when? Why is this check slow? Is that incident still open? Twenty tools answer from your live data. Twelve of them can only read: monitors and their history, incidents and their metrics, status pages, org health, usage against your plan. The model sees exactly what your dashboard sees, in your org, behind your permissions. Worst case, it tells you everything is fine, and you never had to open a dashboard to find out.",
+                body: "What’s down right now, and since when? Why is this check slow? Is that incident still open? Twenty-two tools answer from your live data. Fourteen of them can only read: monitors with the full config of what each check asserts, their history region by region, incidents and their metrics, status pages, org health, usage against your plan. The model sees exactly what your dashboard sees, in your org, behind your permissions. Worst case, it tells you everything is fine, and you never had to open a dashboard to find out.",
             },
             Section {
                 heading: "It says why, not just down",

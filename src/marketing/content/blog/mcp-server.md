@@ -16,11 +16,11 @@ Most of what's interesting here is about restraint, not cleverness.
 
 > **TL;DR**
 >
-> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are twenty tools: twelve read-only, eight that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
+> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are twenty-two tools: fourteen read-only, eight that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
 
-## Twenty tools. Twelve can only look.
+## Twenty-two tools. Fourteen can only look.
 
-The server exposes twenty tools. Twelve are read-only: org health, monitor lists and history, incident timelines and metrics, status pages, usage against your plan. Eight can actually *do* something: run a check on demand, pause or resume a monitor, acknowledge or resolve an incident, put one on your status page or take it back down, post an update to one.
+The server exposes twenty-two tools. Fourteen are read-only: org health, monitor lists, the full config of what each check asserts, history broken down by probe region, incident timelines and metrics, status pages, usage against your plan. Eight can actually *do* something: run a check on demand, pause or resume a monitor, acknowledge or resolve an incident, put one on your status page or take it back down, post an update to one.
 
 That split is deliberate and enforced, not a naming convention. A read tool is structurally incapable of changing anything. An action tool can't fire without three independent gates. The token must carry the right scope, **you** must approve the specific action in the moment, and every outcome (success, denial, error) writes exactly one audit row.
 
@@ -59,6 +59,8 @@ Audience binding (8707) means a token minted for some other service simply doesn
 "Down" is a useless answer at 2 a.m. So the tools hand the model the same forensics a good engineer would reach for.
 
 Ask why a check is failing and the model can tell apart a server returning the wrong status code from a server returning nothing at all, because the HTTP status comes back as its own field. Ask why something is slow and it can point at the actual culprit: DNS resolution, TCP connect, the TLS handshake, or time-to-first-byte, each reported separately. "Slow because TLS" and "slow because DNS" are different bugs with different fixes, and the model now knows which one it's looking at.
+
+Ask why a 301 counts as a failure and the model reads the check's own rules instead of guessing at them: which statuses you accept, whether redirects are followed, what the body has to contain, how long the probe waits. And when only part of the world sees a problem, the history splits by probe region, so "down everywhere" and "down from Singapore" stop looking like the same answer.
 
 For incidents there's a clean loop: ask what's broken, get the open incident's id, read its full update timeline, post an acknowledgement, all in one conversation, each write still gated by your approval.
 
