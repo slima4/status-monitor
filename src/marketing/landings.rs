@@ -2362,7 +2362,7 @@ resource "uptimepage_target" "api" {
         sections: &[
             Section {
                 heading: "Ask your monitoring in plain language",
-                body: "What’s down right now, and since when? Why is this check slow? Is that incident still open? Twenty-two tools answer from your live data. Fourteen of them can only read: monitors with the full config of what each check asserts, their history region by region, incidents and their metrics, status pages, org health, usage against your plan. The model sees exactly what your dashboard sees, in your org, behind your permissions. Worst case, it tells you everything is fine, and you never had to open a dashboard to find out.",
+                body: "What’s down right now, and since when? Why is this check slow? Is that incident still open? Twenty-three tools answer from your live data. Fourteen of them can only read: monitors with the full config of what each check asserts, their history region by region, incidents and their metrics, status pages, org health, usage against your plan. The model sees exactly what your dashboard sees, in your org, behind your permissions. Worst case, it tells you everything is fine, and you never had to open a dashboard to find out.",
             },
             Section {
                 heading: "It says why, not just down",
@@ -2370,7 +2370,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "Actions stay behind a human",
-                body: "Eight tools can act: run a check now, pause or resume a monitor, acknowledge or resolve an incident, publish one to your status page or take it back down, post an update to one. None of them can fire on its own. The token must carry the right scope, you must approve the exact action in the moment, and every outcome writes one audit row. There is no \"remember my choice\"; each action is its own decision. We let the AI pause a monitor. We did not let it pause a monitor without asking you. Those are different sentences, and the gap between them is most of the design.",
+                body: "Nine tools can act: run a check now, pause or resume a monitor, retune how loudly one is watched, acknowledge or resolve an incident, publish one to your status page or take it back down, post an update to one. None of them can fire on its own. The token must carry the right scope, you must approve the exact action in the moment, and every outcome writes one audit row. There is no \"remember my choice\"; each action is its own decision. We let the AI pause a monitor. We did not let it pause a monitor without asking you. Those are different sentences, and the gap between them is most of the design.",
             },
             Section {
                 heading: "Your data can’t hijack the assistant",

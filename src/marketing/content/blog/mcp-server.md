@@ -16,11 +16,11 @@ Most of what's interesting here is about restraint, not cleverness.
 
 > **TL;DR**
 >
-> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are twenty-two tools: fourteen read-only, eight that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
+> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are twenty-three tools: fourteen read-only, nine that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
 
-## Twenty-two tools. Fourteen can only look.
+## Twenty-three tools. Fourteen can only look.
 
-The server exposes twenty-two tools. Fourteen are read-only: org health, monitor lists, the full config of what each check asserts, history broken down by probe region, incident timelines and metrics, status pages, usage against your plan. Eight can actually *do* something: run a check on demand, pause or resume a monitor, acknowledge or resolve an incident, put one on your status page or take it back down, post an update to one.
+The server exposes twenty-three tools. Fourteen are read-only: org health, monitor lists, the full config of what each check asserts, history broken down by probe region, incident timelines and metrics, status pages, usage against your plan. Nine can actually *do* something: run a check on demand, pause or resume a monitor, retune how loudly one is watched, acknowledge or resolve an incident, put one on your status page or take it back down, post an update to one.
 
 That split is deliberate and enforced, not a naming convention. A read tool is structurally incapable of changing anything. An action tool can't fire without three independent gates. The token must carry the right scope, **you** must approve the specific action in the moment, and every outcome (success, denial, error) writes exactly one audit row.
 
@@ -74,7 +74,7 @@ We've [written before](/blog/boring-uptime) about why a monitor should be the du
 
 The MCP server adds a new way to *ask questions* and a tightly-fenced way to *take actions*. It does not add a new way for your monitoring to surprise you, lie to you, or fall over. The model can read everything it's allowed to and change nothing without your say-so. When it's wrong, it's wrong in a chat window, not in production.
 
-It's the same monitoring you can [manage entirely as code](/blog/monitoring-as-code): queried by an assistant over MCP on one side, declared in a pull request with Terraform on the other. Two front doors, one tenant-isolated data layer behind both.
+It's the same monitoring you can [manage entirely as code](/blog/monitoring-as-code): queried by an assistant over MCP on one side, declared in a pull request with Terraform on the other. Two front doors, one tenant-isolated data layer behind both. And they know about each other: a monitor declared in Terraform cannot be retuned, paused or resumed by the assistant, because an edit that a `terraform apply` silently reverts an hour later is worse than one that never happened. There is no override flag. The fix is to change the `.tf`, which is where that monitor's truth lives.
 
 Other monitoring tools are shipping MCP servers too, and they differ mostly in what they let a model change rather than read. [The monitoring MCP servers, compared](/compare/mcp-servers) lays out where each one draws that line.
 
