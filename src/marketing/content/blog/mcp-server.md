@@ -1,7 +1,7 @@
 +++
 title = "Your monitors can talk to an AI, with your permission"
 date = "2026-06-03"
-updated = "2026-08-09"
+updated = "2026-08-10"
 slug = "mcp-server"
 excerpt = "Uptimepage now speaks MCP, so an LLM can answer \"what's broken and since when?\" in plain language, plus what we did to stop it from wrecking things."
 tags = ["mcp", "ai", "monitoring", "security", "api"]
@@ -16,11 +16,11 @@ Most of what's interesting here is about restraint, not cleverness.
 
 > **TL;DR**
 >
-> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. There are twenty-three tools: fourteen read-only, nine that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
+> Uptimepage speaks MCP, so an assistant like Claude reads your real monitors and tells you what is down and for how long, instead of guessing. It can also set monitoring up: point it at a project and it creates the monitors, running each check once and showing you the result before anything is saved. There are twenty-five tools: fifteen read-only, ten that act. Every action needs a scoped token and your explicit approval in the moment, and each one writes an audit row. Nothing changes without you.
 
-## Twenty-three tools. Fourteen can only look.
+## Twenty-five tools. Fifteen can only look.
 
-The server exposes twenty-three tools. Fourteen are read-only: org health, monitor lists, the full config of what each check asserts, history broken down by probe region, incident timelines and metrics, status pages, usage against your plan. Nine can actually *do* something: run a check on demand, pause or resume a monitor, retune how loudly one is watched, acknowledge or resolve an incident, put one on your status page or take it back down, post an update to one.
+The server exposes twenty-five tools. Fifteen are read-only: org health, monitor lists, the full config of what each check asserts, history broken down by probe region, incident timelines and metrics, status pages, your notification channels by name, usage against your plan. Ten can actually *do* something: create a monitor, run a check on demand, pause or resume a monitor, retune how loudly one is watched, acknowledge or resolve an incident, put one on your status page or take it back down, post an update to one.
 
 That split is deliberate and enforced, not a naming convention. A read tool is structurally incapable of changing anything. An action tool can't fire without three independent gates. The token must carry the right scope, **you** must approve the specific action in the moment, and every outcome (success, denial, error) writes exactly one audit row.
 
@@ -63,6 +63,29 @@ Ask why a check is failing and the model can tell apart a server returning the w
 Ask why a 301 counts as a failure and the model reads the check's own rules instead of guessing at them: which statuses you accept, whether redirects are followed, what the body has to contain, how long the probe waits. And when only part of the world sees a problem, the history splits by probe region, so "down everywhere" and "down from Singapore" stop looking like the same answer.
 
 For incidents there's a clean loop: ask what's broken, get the open incident's id, read its full update timeline, post an acknowledgement, all in one conversation, each write still gated by your approval.
+
+## Setting monitoring up, not just reading it
+
+The tedious part of monitoring has never been watching it. It is the first hour: working out what to watch, one form at a time, before you have any of it.
+
+So the assistant can create monitors. Point it at a project and ask, and it reads what your service actually exposes and proposes monitors for it: the health endpoint, the certificate, the domain registration, the cron job that should check in nightly.
+
+Creating one runs the check **before** anything is saved. The confirmation you approve shows the real result rather than a promise:
+
+```
+Create monitor "checkout"?
+
+https://shop.example.com/health
+checked every 60s
+trial run: passed, HTTP 200 in 143ms
+alerts after 2 failing checks
+reminds every 3600s while unacknowledged
+notification channels: Ops Slack
+```
+
+A check that asserts the wrong thing is visible right there, while declining still costs nothing. The alternative is finding out at 3am, from a monitor that has been quietly wrong since the day it was made.
+
+Two things it deliberately cannot do. It cannot put credentials on a monitor: no request headers, no auth tokens, no browser-flow passwords. Those are secrets you type once into the app, not values that pass through a chat log. And it cannot create a notification channel, because that means handing it a Slack webhook or a Telegram bot token. It can bind a monitor to a channel you already made, by name, and the confirmation tells you if that channel is disabled or is an email address nobody ever verified — either way it delivers nothing, and you should know that before an outage teaches you.
 
 ## In-process, on purpose
 

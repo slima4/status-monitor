@@ -2181,7 +2181,7 @@ resource "uptimepage_status_page_component" "web" {
             },
             Section {
                 heading: "Where Uptimepage fits",
-                body: "Uptimepage's MCP server runs in-process at mcp.uptimepage.dev, with one-click OAuth, the same tenant isolation, scopes and rate limits as the dashboard, and writes fenced behind your approval. It covers monitors, incidents and status pages, so an assistant can tell you what is broken, how long it has been broken and what you told customers about it. That combination is good, and it is not rare, and both of those things are true. Hosted free with no card, or self-host it under AGPL.",
+                body: "Uptimepage's MCP server runs in-process at mcp.uptimepage.dev, with one-click OAuth, the same tenant isolation, scopes and rate limits as the dashboard, and writes fenced behind your approval. It covers monitors, incidents and status pages, so an assistant can tell you what is broken, how long it has been broken and what you told customers about it. It can also create monitors, and it runs each check once and shows you the result before saving anything, which is a stricter bar than most of this category sets for a write. That combination is good, and it is not rare, and both of those things are true. Hosted free with no card, or self-host it under AGPL.",
             },
         ],
         code: None,
@@ -2344,7 +2344,7 @@ resource "uptimepage_target" "api" {
             },
             Feature {
                 label: "Tools",
-                value: "16 (read + fenced writes)",
+                value: "25 (15 read + 10 fenced writes)",
             },
             Feature {
                 label: "Every write",
@@ -2362,7 +2362,15 @@ resource "uptimepage_target" "api" {
         sections: &[
             Section {
                 heading: "Ask your monitoring in plain language",
-                body: "What’s down right now, and since when? Why is this check slow? Is that incident still open? Twenty-three tools answer from your live data. Fourteen of them can only read: monitors with the full config of what each check asserts, their history region by region, incidents and their metrics, status pages, org health, usage against your plan. The model sees exactly what your dashboard sees, in your org, behind your permissions. Worst case, it tells you everything is fine, and you never had to open a dashboard to find out.",
+                body: "What’s down right now, and since when? Why is this check slow? Is that incident still open? Twenty-five tools answer from your live data. Fifteen of them can only read: monitors with the full config of what each check asserts, their history region by region, incidents and their metrics, status pages, org health, usage against your plan. The model sees exactly what your dashboard sees, in your org, behind your permissions. Worst case, it tells you everything is fine, and you never had to open a dashboard to find out.",
+            },
+            Section {
+                heading: "It sets the monitoring up too",
+                body: "The tedious part was never watching the monitors. It is the first hour, filling in forms before you have any. Point the assistant at a project and ask it to cover the service, and it proposes the monitors: the health endpoint, the certificate, the domain registration, the nightly job that should check in. Creating one runs the check first, so the confirmation you approve shows the real result, \"passed, HTTP 200 in 143ms\", rather than a promise. A check that asserts the wrong thing is visible while declining it still costs nothing, rather than at 3 a.m. from a monitor that has been quietly wrong since the day it was made.",
+            },
+            Section {
+                heading: "It never holds your secrets",
+                body: "The assistant cannot put credentials on a monitor: no request headers, no auth tokens, no browser-flow passwords. Those you type once into the app, rather than passing them through a chat log. It cannot create a notification channel either, because that means handing it a Slack webhook or a bot token. What it can do is bind a monitor to a channel you already made, by name, and tell you when that channel is disabled or is an email address nobody verified, since either one delivers nothing and an outage is a bad time to find out.",
             },
             Section {
                 heading: "It says why, not just down",
@@ -2370,7 +2378,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "Actions stay behind a human",
-                body: "Nine tools can act: run a check now, pause or resume a monitor, retune how loudly one is watched, acknowledge or resolve an incident, publish one to your status page or take it back down, post an update to one. None of them can fire on its own. The token must carry the right scope, you must approve the exact action in the moment, and every outcome writes one audit row. There is no \"remember my choice\"; each action is its own decision. We let the AI pause a monitor. We did not let it pause a monitor without asking you. Those are different sentences, and the gap between them is most of the design.",
+                body: "Ten tools can act: create a monitor, run a check now, pause or resume a monitor, retune how loudly one is watched, acknowledge or resolve an incident, publish one to your status page or take it back down, post an update to one. None of them can fire on its own. The token must carry the right scope, you must approve the exact action in the moment, and every outcome writes one audit row. There is no \"remember my choice\"; each action is its own decision. We let the AI pause a monitor. We did not let it pause a monitor without asking you. Those are different sentences, and the gap between them is most of the design.",
             },
             Section {
                 heading: "Your data can’t hijack the assistant",
