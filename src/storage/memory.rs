@@ -1160,6 +1160,72 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
+    /// A bulk add merges into what each monitor already carries, so a legal
+    /// request can still produce an illegal list. The cap lands on the result,
+    /// and the monitor it skipped is reported rather than called missing.
+    #[tokio::test]
+    async fn a_bulk_tag_add_stops_at_the_cap_and_names_the_monitor_it_skipped() {
+        use crate::domain::CheckSpec;
+        use crate::domain::target::MAX_TAGS_PER_TARGET;
+
+        let store = InMemoryTargetStore::new();
+        let org = OrgId(Uuid::nil());
+        let seed = |tags: Vec<String>| NewTarget {
+            name: "m".into(),
+            check: CheckSpec::Tcp(crate::domain::TcpCheck {
+                host: "example.com".into(),
+                port: 443,
+                timeout: std::time::Duration::from_secs(3),
+            }),
+            interval: std::time::Duration::from_secs(60),
+            enabled: true,
+            tags,
+            alerts: Default::default(),
+            region_policy: None,
+            alert_confirmations: 2,
+            notify_recovery: true,
+            renotify_interval_secs: 3600,
+            group_name: None,
+            owner_user_id: None,
+        };
+
+        let full: Vec<String> = (0..MAX_TAGS_PER_TARGET).map(|i| format!("t{i}")).collect();
+        let crowded = store
+            .create(org, seed(full), WriteSource::Ui, i64::MAX, i64::MAX)
+            .await
+            .unwrap()
+            .id;
+        let roomy = store
+            .create(
+                org,
+                seed(vec!["prod".into()]),
+                WriteSource::Ui,
+                i64::MAX,
+                i64::MAX,
+            )
+            .await
+            .unwrap()
+            .id;
+
+        let outcome = store
+            .add_tags(org, &[crowded, roomy], &["fresh".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(outcome.updated, vec![roomy]);
+        assert_eq!(outcome.over_cap, vec![crowded]);
+        let untouched = store.get(org, crowded).await.unwrap().unwrap();
+        assert_eq!(untouched.tags.len(), MAX_TAGS_PER_TARGET);
+        assert!(!untouched.tags.iter().any(|t| t == "fresh"));
+
+        // A tag it already carries is not a new one, so a full monitor takes it.
+        let outcome = store
+            .add_tags(org, &[crowded], &["t0".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(outcome.updated, vec![crowded]);
+        assert!(outcome.over_cap.is_empty());
+    }
+
     fn up_result(
         target: Uuid,
         base: DateTime<Utc>,

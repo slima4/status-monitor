@@ -1429,19 +1429,22 @@ impl McpServer {
             .await
             .map_err(|e| McpToolError::internal(format!("plan: {e}")))?;
 
-        // Where the app's own picker opens a new monitor of this kind, held to
-        // the plan floor. The hard minimum would be a legal answer but a far
-        // noisier one: it probes a certificate 12x more often than any other
-        // door does.
-        let mut default_interval = (plan.min_check_interval_secs as u64)
-            .max(crate::domain::interval_hints_for_kind(check.kind()).default);
+        let plan_floor = u64::try_from(plan.min_check_interval_secs).unwrap_or(60);
+        // No interval can satisfy both bounds, so say which two disagree rather
+        // than refuse an interval the caller never chose.
         if let Some(hb) = check.as_heartbeat() {
-            // A tick coarser than the window could never judge it, and the
-            // caller supplied the window, not the interval.
-            default_interval =
-                default_interval.min(hb.period.as_secs().saturating_add(hb.grace.as_secs()));
+            let window = hb.period.as_secs().saturating_add(hb.grace.as_secs());
+            if window < plan_floor {
+                return Err(McpToolError::invalid_argument(format!(
+                    "this plan checks no more often than every {plan_floor}s, so it cannot judge a \
+                     heartbeat whose period and grace add up to {window}s; raise period_secs or \
+                     grace_secs"
+                )));
+            }
         }
-        let interval_secs = args.interval_secs.unwrap_or(default_interval);
+        let interval_secs = args
+            .interval_secs
+            .unwrap_or_else(|| default_interval_secs(&check, plan_floor));
         fits_i32(interval_secs, "interval_secs")?;
         if let Some(n) = args.alert_confirmations {
             fits_i32(u64::from(n), "alert_confirmations")?;
@@ -2133,7 +2136,9 @@ fn build_monitor_patch(
     }
     if let Some(ids) = args.channel_ids.as_ref() {
         let alerts = resolve_bindings(ids, channels)?;
-        if alerts != target.alerts {
+        // A set, not a sequence: the same channels in another order alert the
+        // same people, and calling that a change spends a confirmation on one.
+        if bound_ids(&alerts) != bound_ids(&target.alerts) {
             moved(
                 "alerts",
                 channel_names(&target.alerts, channels),
@@ -2143,6 +2148,27 @@ fn build_monitor_patch(
         }
     }
     Ok((update, changes))
+}
+
+/// The cadence a caller gets for omitting one: where the app's own picker opens
+/// a monitor of this kind, raised to the plan floor. The hard minimum would be
+/// legal but far noisier, probing a certificate twelve times more often than
+/// any other front door does. A heartbeat is capped at its own window, since a
+/// tick coarser than that could never judge it.
+fn default_interval_secs(check: &CheckSpec, plan_floor_secs: u64) -> u64 {
+    let opening = plan_floor_secs.max(crate::domain::interval_hints_for_kind(check.kind()).default);
+    match check.as_heartbeat() {
+        // Never below the floor: a default the plan forbids would be refused
+        // as an argument the caller never sent.
+        Some(hb) => opening
+            .min(hb.period.as_secs().saturating_add(hb.grace.as_secs()))
+            .max(plan_floor_secs),
+        None => opening,
+    }
+}
+
+fn bound_ids(alerts: &TargetAlerts) -> std::collections::BTreeSet<Uuid> {
+    alerts.iter().map(|b| b.channel_id).collect()
 }
 
 /// Channel ids to bindings, refusing anything the org does not own. A duplicate
@@ -3776,6 +3802,320 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.code, codes::INVALID_ARGUMENT);
         assert!(!err.message.contains("hunter2"), "{}", err.message);
+    }
+
+    /// The read side of the kinds the write side can now create: what each one
+    /// asserts has to reach the model, or it reasons from a partial picture.
+    #[test]
+    fn the_non_http_kinds_report_what_they_assert() {
+        let cfg = |json: &str| check_config(&serde_json::from_str::<CheckSpec>(json).unwrap());
+
+        let CheckConfig::Tcp(tcp) =
+            cfg(r#"{"type":"tcp","host":"db.internal","port":5432,"timeout":3000}"#)
+        else {
+            panic!("expected tcp");
+        };
+        assert_eq!((tcp.host.as_str(), tcp.port), ("db.internal", 5432));
+        assert_eq!(tcp.timeout_ms, 3_000);
+
+        let CheckConfig::Dns(dns) = cfg(
+            r#"{"type":"dns","domain":"api.acme.com","record_type":"CNAME","expected_contains":"edge","timeout":2000}"#,
+        ) else {
+            panic!("expected dns");
+        };
+        // Reads report the wire spelling; `create_monitor` accepts either case,
+        // so a value round-tripped from `get_monitor` still parses.
+        assert_eq!(dns.record_type, "CNAME");
+        assert_eq!(dns.expected_contains.as_deref(), Some("edge"));
+
+        let CheckConfig::TlsCert(tls) = cfg(
+            r#"{"type":"tls_cert","host":"acme.com","port":8443,"warn_days":21,"critical_days":3,"timeout":5000}"#,
+        ) else {
+            panic!("expected tls_cert");
+        };
+        assert_eq!((tls.port, tls.warn_days, tls.critical_days), (8443, 21, 3));
+
+        let CheckConfig::DomainExpiry(reg) = cfg(
+            r#"{"type":"domain_expiry","domain":"acme.com","warn_days":60,"critical_days":14,"timeout":5000}"#,
+        ) else {
+            panic!("expected domain_expiry");
+        };
+        assert_eq!((reg.warn_days, reg.critical_days), (60, 14));
+        assert_eq!(reg.domain, "acme.com");
+    }
+
+    #[test]
+    fn every_creatable_kind_converts_with_the_defaults_it_documents() {
+        let spec = |c: NewCheck| new_check_spec(&c).unwrap();
+
+        let CheckSpec::Http(http) = spec(NewCheck::Http {
+            url: "https://example.com/health".into(),
+            method: None,
+            expected_status: None,
+            expected_body_contains: None,
+            timeout_ms: None,
+            follow_redirects: None,
+            verify_tls: None,
+        }) else {
+            panic!("expected http");
+        };
+        assert_eq!(http.method, crate::domain::HttpMethod::Get);
+        assert_eq!(http.timeout, std::time::Duration::from_secs(10));
+        assert!(http.follow_redirects);
+        // Following redirects means budgeting for some.
+        assert_eq!(http.max_redirects, 5);
+        assert_eq!(expected_status_str(&http.expected_status), "200-299");
+
+        let CheckSpec::Heartbeat(hb) = spec(NewCheck::Heartbeat {
+            period_secs: 3_600,
+            grace_secs: 300,
+            max_runtime_secs: Some(120),
+        }) else {
+            panic!("expected heartbeat");
+        };
+        assert_eq!(hb.period, std::time::Duration::from_secs(3_600));
+        assert_eq!(hb.grace, std::time::Duration::from_secs(300));
+        assert_eq!(hb.max_runtime, Some(std::time::Duration::from_secs(120)));
+
+        let CheckSpec::Tcp(tcp) = spec(NewCheck::Tcp {
+            host: "db.example.com".into(),
+            port: 5432,
+            timeout_ms: None,
+        }) else {
+            panic!("expected tcp");
+        };
+        assert_eq!((tcp.host.as_str(), tcp.port), ("db.example.com", 5432));
+        assert_eq!(tcp.timeout, std::time::Duration::from_secs(5));
+
+        let CheckSpec::Ping(ping) = spec(NewCheck::Ping {
+            host: "example.com".into(),
+            timeout_ms: Some(1_500),
+        }) else {
+            panic!("expected ping");
+        };
+        assert_eq!(ping.timeout, std::time::Duration::from_millis(1_500));
+
+        let CheckSpec::Dns(dns) = spec(NewCheck::Dns {
+            domain: "example.com".into(),
+            record_type: None,
+            resolver: None,
+            expected_contains: None,
+            timeout_ms: None,
+        }) else {
+            panic!("expected dns");
+        };
+        assert_eq!(dns.record_type, crate::domain::DnsRecordType::A);
+        assert!(dns.resolver.is_none(), "defaults to the agent's own");
+
+        let CheckSpec::TlsCert(tls) = spec(NewCheck::TlsCert {
+            host: "example.com".into(),
+            port: None,
+            warn_days: None,
+            critical_days: None,
+            timeout_ms: None,
+        }) else {
+            panic!("expected tls_cert");
+        };
+        assert_eq!((tls.port, tls.warn_days, tls.critical_days), (443, 30, 7));
+        assert!(tls.server_name.is_none());
+
+        let CheckSpec::DomainExpiry(reg) = spec(NewCheck::DomainExpiry {
+            domain: "example.com".into(),
+            warn_days: Some(45),
+            critical_days: None,
+            timeout_ms: None,
+        }) else {
+            panic!("expected domain_expiry");
+        };
+        assert_eq!((reg.warn_days, reg.critical_days), (45, 7));
+    }
+
+    #[test]
+    fn an_unknown_method_or_record_type_names_the_choices() {
+        let err = new_check_spec(&NewCheck::Http {
+            url: "https://example.com/".into(),
+            method: Some("fetch".into()),
+            expected_status: None,
+            expected_body_contains: None,
+            timeout_ms: None,
+            follow_redirects: None,
+            verify_tls: None,
+        })
+        .unwrap_err();
+        assert_eq!(err.code, codes::INVALID_ARGUMENT);
+        assert!(err.message.contains("get"), "{}", err.message);
+
+        let err = new_check_spec(&NewCheck::Dns {
+            domain: "example.com".into(),
+            record_type: Some("alias".into()),
+            resolver: None,
+            expected_contains: None,
+            timeout_ms: None,
+        })
+        .unwrap_err();
+        assert!(err.message.contains("cname"), "{}", err.message);
+        // Case is not the caller's problem.
+        assert!(
+            new_check_spec(&NewCheck::Dns {
+                domain: "example.com".into(),
+                record_type: Some("CNAME".into()),
+                resolver: None,
+                expected_contains: None,
+                timeout_ms: None,
+            })
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn an_omitted_interval_opens_where_the_picker_does() {
+        let http = http_check();
+        // The plan floor wins when it is stricter than the kind's opening.
+        assert_eq!(default_interval_secs(&http, 300), 300);
+        let tls: CheckSpec = serde_json::from_str(
+            r#"{"type":"tls_cert","host":"a.com","port":443,"warn_days":30,"critical_days":7,"timeout":5000}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            default_interval_secs(&tls, 60),
+            43_200,
+            "the picker's opening, not the 3600s hard minimum, which would probe \
+             a certificate twelve times harder"
+        );
+
+        // A heartbeat cannot tick slower than the window it judges, even when
+        // the kind's opening is coarser than the window the caller gave.
+        let hb = new_check_spec(&NewCheck::Heartbeat {
+            period_secs: 60,
+            grace_secs: 30,
+            max_runtime_secs: None,
+        })
+        .unwrap();
+        assert_eq!(default_interval_secs(&hb, 10), 90);
+        // ...but never under the plan floor, which would be refused as an
+        // interval the caller never sent.
+        assert_eq!(default_interval_secs(&hb, 180), 180);
+    }
+
+    #[test]
+    fn a_binding_is_a_set_of_channels_the_org_owns() {
+        let (a, b) = (Uuid::now_v7(), Uuid::now_v7());
+        let channels = vec![test_channel(a, "ops"), test_channel(b, "pager")];
+
+        let bound = resolve_bindings(&[a.to_string(), b.to_string()], &channels).unwrap();
+        assert_eq!(bound.iter().count(), 2);
+        assert!(resolve_bindings(&[], &channels).unwrap().is_empty());
+
+        let foreign = Uuid::now_v7();
+        let err = resolve_bindings(&[foreign.to_string()], &channels).unwrap_err();
+        assert_eq!(err.code, codes::INVALID_ARGUMENT);
+        assert!(err.message.contains("this organization"), "{}", err.message);
+
+        let err = resolve_bindings(&[a.to_string(), a.to_string()], &channels).unwrap_err();
+        assert!(err.message.contains("twice"), "{}", err.message);
+
+        assert_eq!(
+            resolve_bindings(&["not-a-uuid".into()], &channels)
+                .unwrap_err()
+                .code,
+            codes::INVALID_ARGUMENT
+        );
+    }
+
+    #[test]
+    fn reordering_the_same_channels_is_not_a_change() {
+        let (a, b) = (Uuid::now_v7(), Uuid::now_v7());
+        let channels = vec![test_channel(a, "ops"), test_channel(b, "pager")];
+        let mut target = stored_monitor();
+        target.alerts = TargetAlerts(vec![
+            AlertBinding { channel_id: a },
+            AlertBinding { channel_id: b },
+        ]);
+
+        let args = UpdateMonitorArgs {
+            channel_ids: Some(vec![b.to_string(), a.to_string()]),
+            ..patch_args()
+        };
+        let (update, changes) = build_monitor_patch(&args, &target, &channels).unwrap();
+        assert!(changes.is_empty(), "{changes:?}");
+        assert!(update.alerts.is_none());
+
+        // Dropping one is a change, and the prompt shows what leaves.
+        let args = UpdateMonitorArgs {
+            channel_ids: Some(vec![a.to_string()]),
+            ..patch_args()
+        };
+        let (_, changes) = build_monitor_patch(&args, &target, &channels).unwrap();
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        assert_eq!(changes[0].from, "ops, pager");
+        assert_eq!(changes[0].to, "ops");
+
+        // Clearing every binding is the destructive case the prompt exists for.
+        let args = UpdateMonitorArgs {
+            channel_ids: Some(vec![]),
+            ..patch_args()
+        };
+        let (update, changes) = build_monitor_patch(&args, &target, &channels).unwrap();
+        assert_eq!(changes.len(), 1, "{changes:?}");
+        assert_eq!(
+            (changes[0].from.as_str(), changes[0].to.as_str()),
+            ("ops, pager", "nobody")
+        );
+        assert_eq!(update.alerts, Some(TargetAlerts::default()));
+    }
+
+    #[test]
+    fn a_channel_that_delivers_nothing_says_so_where_it_is_named() {
+        let (live, off, unverified, gone) = (
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+            Uuid::now_v7(),
+        );
+        let mut disabled = test_channel(off, "pager");
+        disabled.enabled = false;
+        // Kind and config have to agree: a Slack config on an Email channel is
+        // a row the store cannot hold, and the next rule that reads config
+        // would be tested against a fiction.
+        let mut email = test_channel(unverified, "on-call inbox");
+        email.kind = crate::domain::notification_channel::ChannelKind::Email;
+        email.config = crate::domain::notification_channel::ChannelConfig::Email(
+            crate::domain::notification_channel::EmailConfig {
+                to: "on-call@example.com".into(),
+            },
+        );
+        let channels = vec![test_channel(live, "ops"), disabled, email];
+
+        assert_eq!(undeliverable_reason(&channels[0]), None);
+        assert_eq!(
+            undeliverable_reason(&channels[1]),
+            Some("disabled, delivers nothing")
+        );
+        assert_eq!(
+            undeliverable_reason(&channels[2]),
+            Some("address never verified, delivers nothing")
+        );
+
+        let named = |ids: &[Uuid]| {
+            channel_names(
+                &TargetAlerts(
+                    ids.iter()
+                        .map(|id| AlertBinding { channel_id: *id })
+                        .collect(),
+                ),
+                &channels,
+            )
+        };
+        assert_eq!(named(&[]), "nobody");
+        assert_eq!(named(&[live]), "ops");
+        assert_eq!(named(&[off]), "pager (disabled, delivers nothing)");
+        assert_eq!(
+            named(&[unverified]),
+            "on-call inbox (address never verified, delivers nothing)"
+        );
+        // A binding whose channel is gone is named, not dropped: a shorter list
+        // would read as one fewer channel losing its alerts.
+        assert_eq!(named(&[gone]), format!("a deleted channel ({gone})"));
     }
 
     #[test]

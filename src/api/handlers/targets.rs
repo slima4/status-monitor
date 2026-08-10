@@ -2392,6 +2392,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_tag_error_points_at_the_tag_not_the_list() {
+        use crate::domain::target::MAX_TAG_LEN;
+
+        let err = normalize_tags(&["ok".into(), "  ".into()]).unwrap_err();
+        let AppError::BadRequest { message, field, .. } = err else {
+            panic!("expected a bad request");
+        };
+        assert_eq!(field.as_deref(), Some("tags"));
+        // Position, since an invisible character is invisible in the message.
+        assert!(message.contains("tag 2"), "{message}");
+
+        let err = normalize_tags(&["fine".into(), "x".repeat(MAX_TAG_LEN + 1)]).unwrap_err();
+        assert!(format!("{err}").contains("tag 2"), "{err}");
+    }
+
     /// Trim and de-duplicate before the count, so a list that stores small is
     /// not refused for the shape it arrived in.
     #[test]

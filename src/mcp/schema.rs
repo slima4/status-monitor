@@ -529,8 +529,10 @@ pub struct CreateMonitorArgs {
     /// What the operator will see in lists and alerts.
     pub name: String,
     pub check: NewCheck,
-    /// Seconds between checks. Held to the plan's floor and the check kind's
-    /// own floor, and defaults to whichever of those is higher.
+    /// Seconds between checks, held to the plan's floor and the check kind's
+    /// own floor. Omit it to get the cadence the app's own picker opens this
+    /// kind at, which is well above the hard minimum for the slow-moving kinds:
+    /// a certificate is checked twice a day, a domain registration daily.
     pub interval_secs: Option<u64>,
     /// At most 50, each at most 50 characters.
     pub tags: Option<Vec<String>>,
