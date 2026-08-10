@@ -192,13 +192,7 @@ pub async fn create(
     let plan = state.quotas.limit_for_org(org).await?;
     canonicalize_check(&mut new.check)?;
     gate_flow(&new.check, &plan)?;
-    vet_new_target(
-        &state,
-        org,
-        &mut new,
-        i64::from(plan.min_check_interval_secs),
-    )
-    .await?;
+    vet_new_target(&state, org, &mut new, &plan).await?;
     verify_alert_channels(&state, org, &new.alerts).await?;
     validate_owner_is_member(&state, org, new.owner_user_id).await?;
     if matches!(&new.check, CheckSpec::Flow(_)) {
@@ -725,7 +719,7 @@ pub async fn bulk_create(
     for new in &mut items {
         canonicalize_check(&mut new.check)?;
         gate_flow(&new.check, &plan)?;
-        validate_new_target(new, &guard, i64::from(plan.min_check_interval_secs))?;
+        validate_new_target(new, &guard, &plan)?;
         validate_region_policy(new.region_policy, available.len())?;
         verify_alert_channels(&state, org, &new.alerts).await?;
         check_abuse(&state, org, &new.check)?;
@@ -1514,13 +1508,8 @@ pub(crate) async fn validate_patch_interval(
         .as_ref()
         .map(|c| c.kind())
         .or_else(|| stored.map(|t| t.check.kind()));
-    let plan_min = i64::from(
-        state
-            .quotas
-            .limit_for_org(org)
-            .await?
-            .min_check_interval_secs,
-    );
+    let plan = state.quotas.limit_for_org(org).await?;
+    let plan_min = i64::from(plan.min_check_interval_secs);
     // No kind means the read was skipped, which happens only when no kind floor
     // could bind. The plan floor applies either way.
     let effective_floor = plan_min.max(kind.map_or(0, |k| min_interval_secs_for_kind(k) as i64));
@@ -1528,7 +1517,7 @@ pub(crate) async fn validate_patch_interval(
         return Err(AppError::min_check_interval(
             requested,
             effective_floor,
-            "free",
+            plan.id.clone(),
         ));
     }
     // Either half can arrive alone, so the pairing is judged on the merge of
@@ -1549,10 +1538,10 @@ pub(crate) async fn vet_new_target(
     state: &AppState,
     org: OrgId,
     new: &mut NewTarget,
-    min_interval_secs: i64,
+    plan: &crate::domain::quota::Plan,
 ) -> Result<()> {
     canonicalize_check(&mut new.check)?;
-    validate_new_target(new, &ssrf_guard(state), min_interval_secs)?;
+    validate_new_target(new, &ssrf_guard(state), plan)?;
     let available = state.target_store.available_regions().await?;
     validate_region_policy(new.region_policy, available.len())?;
     check_abuse(state, org, &new.check)?;
@@ -1605,16 +1594,16 @@ pub(crate) async fn create_target(
 fn validate_new_target(
     new: &mut NewTarget,
     guard: &SsrfGuard,
-    min_interval_secs: i64,
+    plan: &crate::domain::quota::Plan,
 ) -> Result<()> {
     let requested = new.interval.as_secs() as i64;
     let kind_floor = min_interval_secs_for_kind(new.check.kind()) as i64;
-    let effective_floor = min_interval_secs.max(kind_floor);
+    let effective_floor = i64::from(plan.min_check_interval_secs).max(kind_floor);
     if requested < effective_floor {
         return Err(AppError::min_check_interval(
             requested,
             effective_floor,
-            "free",
+            plan.id.clone(),
         ));
     }
     validate_check(&new.check, guard)?;

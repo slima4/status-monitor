@@ -1498,14 +1498,9 @@ impl McpServer {
             }),
             owner_user_id: None,
         };
-        rest::vet_new_target(
-            &self.state,
-            auth.org,
-            &mut new,
-            i64::from(plan.min_check_interval_secs),
-        )
-        .await
-        .map_err(config_error)?;
+        rest::vet_new_target(&self.state, auth.org, &mut new, &plan)
+            .await
+            .map_err(config_error)?;
 
         // Ahead of the probe, not after it: a client that can never confirm must
         // not be able to spend probes at addresses it chooses. Behind argument

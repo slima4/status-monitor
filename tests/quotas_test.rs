@@ -269,6 +269,40 @@ async fn sub_minimum_interval_rejected_on_create() {
     assert_eq!(b["error"]["code"], "MIN_CHECK_INTERVAL");
 }
 
+/// The refusal names the plan the org is actually on. It carried the literal
+/// "free" for every org, so a paying customer was told to upgrade to the plan
+/// they had already left.
+#[tokio::test]
+async fn the_interval_refusal_names_the_orgs_own_plan() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (free_app, _free_org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+    let free = body_json(post_target(&free_app, &format!("f-{}", Uuid::now_v7()), 59).await).await;
+    assert_eq!(free["error"]["details"]["plan"], "free");
+
+    // Same request, same floor, different plan id. `seed_org_on_plan` clones the
+    // free plan, so only the id differs. The org has to move before the app's
+    // first request, since the quota service caches the plan per org.
+    let (paid_app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
+    let (pid, _seeded) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    sqlx::query("UPDATE organizations SET plan_id = $1 WHERE id = $2")
+        .bind(&pid)
+        .bind(org.0)
+        .execute(&pool)
+        .await
+        .expect("move the org onto the cloned plan");
+
+    let paid = body_json(post_target(&paid_app, &format!("p-{}", Uuid::now_v7()), 59).await).await;
+    assert_eq!(paid["error"]["code"], "MIN_CHECK_INTERVAL");
+    assert_eq!(paid["error"]["details"]["plan"], pid);
+    assert!(
+        !paid["error"]["message"].as_str().unwrap().contains("free"),
+        "{}",
+        paid["error"]["message"]
+    );
+}
+
 // ── tls_cert floors at 3600s, domain_expiry at 43200s, independent of plan ──
 #[tokio::test]
 async fn sub_kind_floor_interval_rejected_on_tls_cert_create() {
