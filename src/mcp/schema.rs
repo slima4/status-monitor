@@ -272,12 +272,30 @@ pub struct MonitorDetail {
     /// `update_monitor(channel_ids)`, which replaces the whole set. Empty means
     /// it alerts nobody. `list_notification_channels` puts names to these.
     pub alert_channel_ids: Vec<String>,
+    /// Consecutive failing checks before the monitor alerts.
+    pub alert_confirmations: u32,
+    /// Whether recovery is announced to the monitor's channels.
+    pub notify_recovery: bool,
+    /// Seconds between reminders while an outage stays unacknowledged. 0 means
+    /// reminders are off.
+    pub renotify_interval_secs: u32,
+    /// The detection quorum, in the same shape the write tools take. `null` for
+    /// a heartbeat, which has no probe regions to reach a quorum over. A stored
+    /// `count` can exceed the regions that exist today if one was later
+    /// disabled, and sending that back is refused; `list_regions` is the check.
+    pub region_policy: Option<RegionPolicyArg>,
+    /// Terraform declares this monitor, so `update_monitor`, `pause_monitor`
+    /// and `resume_monitor` all refuse it. Change it in the `.tf` instead.
+    pub managed_externally: bool,
     pub group_name: Option<String>,
     /// Operator tags. Untrusted data.
     pub tags: Vec<String>,
     /// Current state: `up`, `down`, `degraded`, `error`, or `no_data`.
     pub state: String,
-    /// RFC 3339 time of the most recent observation. `null` if never checked.
+    /// RFC 3339 time of the most recent observation in the last 24 hours.
+    /// `null` when nothing landed in that window, which is not the same as
+    /// never checked: a monitor paused yesterday, or a heartbeat on a longer
+    /// period, reads `null` here and `no_data` in `state`.
     pub last_checked_at: Option<String>,
     /// Most recent error text, when the last check failed. Untrusted data.
     pub last_error: Option<String>,
@@ -945,7 +963,7 @@ pub struct MonitorStateResult {
 }
 
 /// How the quorum is expressed. `count` carries its number in `count`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RegionPolicyMode {
     /// One region down is enough.
@@ -959,7 +977,9 @@ pub enum RegionPolicyMode {
 }
 
 /// How many regions must agree a monitor is down before an incident opens.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+/// `get_monitor` reads this back in the same shape, so the enum of legal modes
+/// is one definition rather than a written-out list that can drift.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct RegionPolicyArg {
     pub mode: RegionPolicyMode,

@@ -307,7 +307,7 @@ impl McpServer {
     /// Full config + current state + recent uptime for one monitor. Use after
     /// `list_monitors`/`get_org_health` to investigate a specific monitor.
     #[tool(
-        description = "One monitor's full configuration — everything the check asserts (expected status, body match, headers, timeout, redirect and TLS policy) plus the regions it probes from — with its current state, last error, and 24h/30d uptime. Read this before judging whether a response should have passed. Credentials are withheld. Read-only.",
+        description = "One monitor's full configuration — everything the check asserts (expected status, body match, headers, timeout, redirect and TLS policy), the regions it probes from, and how it alerts (failing checks before it pages, whether recovery is announced, the reminder interval, the multi-region quorum, and the ids of the channels it notifies) — with its current state, last error, and 24h/30d uptime. Every field update_monitor can change is readable here, in the shape that tool takes. Read this before judging whether a response should have passed, or before changing a monitor. Credentials are withheld. Read-only.",
         annotations(read_only_hint = true)
     )]
     async fn get_monitor(
@@ -389,6 +389,14 @@ impl McpServer {
                 .iter()
                 .map(|b| b.channel_id.to_string())
                 .collect(),
+            alert_confirmations: target.alert_confirmations,
+            notify_recovery: target.notify_recovery,
+            renotify_interval_secs: target.renotify_interval_secs,
+            // Blanked for the same reason `regions` is: a quorum over no probe
+            // regions describes nothing.
+            region_policy: (!target.check.is_passive())
+                .then(|| region_policy_view(target.region_policy)),
+            managed_externally: target.write_source == WriteSource::Terraform,
             group_name: target.group_name.as_deref().map(sanitize_data),
             tags: target.tags.iter().map(|t| sanitize_data(t)).collect(),
             state: last
@@ -2287,6 +2295,16 @@ fn tag_list(tags: &[String]) -> String {
     }
 }
 
+fn region_policy_view(policy: RegionIncidentPolicy) -> RegionPolicyArg {
+    let (mode, count) = match policy {
+        RegionIncidentPolicy::Any => (RegionPolicyMode::Any, None),
+        RegionIncidentPolicy::Majority => (RegionPolicyMode::Majority, None),
+        RegionIncidentPolicy::All => (RegionPolicyMode::All, None),
+        RegionIncidentPolicy::Count(n) => (RegionPolicyMode::Count, Some(n)),
+    };
+    RegionPolicyArg { mode, count }
+}
+
 fn parse_region_policy(arg: &RegionPolicyArg) -> Result<RegionIncidentPolicy, McpToolError> {
     match arg.mode {
         RegionPolicyMode::Any => Ok(RegionIncidentPolicy::Any),
@@ -4149,6 +4167,60 @@ mod tests {
             probe_line(&outcome("error", None, Some("dns failure"))),
             "error in 143ms — dns failure"
         );
+    }
+
+    #[test]
+    fn a_quorum_reads_back_in_the_shape_it_is_written() {
+        for stored in [
+            RegionIncidentPolicy::Any,
+            RegionIncidentPolicy::Majority,
+            RegionIncidentPolicy::All,
+            RegionIncidentPolicy::Count(3),
+        ] {
+            let view = region_policy_view(stored);
+            let sent: RegionPolicyArg =
+                serde_json::from_value(serde_json::to_value(&view).unwrap())
+                    .expect("the read shape deserializes as the write shape");
+            assert_eq!(
+                parse_region_policy(&sent).unwrap(),
+                stored,
+                "{view:?} did not round-trip"
+            );
+        }
+    }
+
+    /// `get_monitor` claims to carry every field `update_monitor` can change.
+    /// Without this, adding an editable field silently makes that claim false
+    /// and leaves the model reading from a partial picture.
+    #[test]
+    fn everything_writable_is_readable() {
+        fn properties<T: schemars::JsonSchema>() -> std::collections::BTreeSet<String> {
+            let schema = serde_json::to_value(schemars::schema_for!(T)).unwrap();
+            schema["properties"]
+                .as_object()
+                .expect("an object schema")
+                .keys()
+                .cloned()
+                .collect()
+        }
+
+        let readable = properties::<MonitorDetail>();
+        for field in properties::<UpdateMonitorArgs>() {
+            // The monitor being addressed, not a property of it.
+            if field == "id" {
+                continue;
+            }
+            // Ids are read back under a name that says what they are ids of.
+            let expected = if field == "channel_ids" {
+                "alert_channel_ids".to_string()
+            } else {
+                field
+            };
+            assert!(
+                readable.contains(&expected),
+                "update_monitor can change `{expected}`, but get_monitor does not report it"
+            );
+        }
     }
 
     #[test]
