@@ -687,6 +687,16 @@ pub struct FormPage {
     pub form: FormModel,
 }
 
+impl FormPage {
+    fn max_tags(&self) -> usize {
+        crate::domain::target::MAX_TAGS_PER_TARGET
+    }
+
+    fn max_tag_len(&self) -> usize {
+        crate::domain::target::MAX_TAG_LEN
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 pub struct NewParams {
     /// When set, prefill the create form from an existing monitor (the

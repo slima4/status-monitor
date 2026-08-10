@@ -615,6 +615,7 @@
               </label>
               {% endfor %}
               <input type="text" data-tag-new aria-label="New tag" spellcheck="false" autocomplete="off"
+                     maxlength="{{ self.max_tag_len() }}" data-tag-max="{{ self.max_tags() }}"
                      placeholder="new tag…" class="hidden chip-new-input">
               <button type="button" class="scope-token" data-tag-add aria-label="Add tag">+</button>
             </div>
