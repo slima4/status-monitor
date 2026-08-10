@@ -21,6 +21,7 @@ pub mod result;
 pub mod status_page;
 pub mod subscriber;
 pub mod target;
+pub mod text;
 pub mod user;
 pub mod variable;
 pub mod word_lists;

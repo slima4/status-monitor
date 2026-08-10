@@ -1,11 +1,13 @@
 //! Live-PG coverage for the targets store: the `kind` filter + `count_by_kind`
 //! pushdown (the generated `kind` column drives the SQL filter, and chip
-//! tallies are org-wide, not page-scoped), and who an update credits.
+//! tallies are org-wide, not page-scoped), who an update credits, and the tag
+//! cap on a server-side merge.
 
 mod common;
 
 use std::time::Duration;
 
+use uptimepage::domain::target::MAX_TAGS_PER_TARGET;
 use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, OrgId, TcpCheck, WriteSource};
 use uptimepage::storage::{PostgresTargetStore, TargetFilter, TargetStore, create_org_with_owner};
 use url::Url;
@@ -320,6 +322,86 @@ async fn an_update_can_decline_to_claim_authorship() {
         .unwrap()
         .expect("target exists");
     assert_eq!(updated.write_source, WriteSource::Api, "named writer wins");
+
+    common::drop_test_db(&name).await;
+}
+
+/// A bulk add merges server-side, so the cap lands on a list no request carried.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_bulk_tag_add_stops_at_the_cap_and_says_which_monitor_was_full() {
+    let Some((db, name)) = common::fresh_test_db("targets_tag_cap").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let user = common::make_user(&pool, "cap").await;
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("cap"), "Co", 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+
+    let make = |tags: Vec<String>, label: &str| NewTarget {
+        name: label.to_string(),
+        check: CheckSpec::Http(common::default_http_check(
+            Url::parse("https://example.com/").unwrap(),
+            ExpectedStatus::Exact(200),
+        )),
+        interval: Duration::from_secs(60),
+        enabled: true,
+        tags,
+        alerts: Default::default(),
+        region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
+        renotify_interval_secs: 3600,
+        group_name: None,
+        owner_user_id: None,
+    };
+
+    let full: Vec<String> = (0..MAX_TAGS_PER_TARGET).map(|i| format!("t{i}")).collect();
+    let crowded = store
+        .create(
+            org.id,
+            make(full, "crowded"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .unwrap()
+        .id;
+    let roomy = store
+        .create(
+            org.id,
+            make(vec!["prod".into()], "roomy"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .unwrap()
+        .id;
+
+    let outcome = store
+        .add_tags(org.id, &[crowded, roomy], &["fresh".to_string()])
+        .await
+        .unwrap();
+    assert_eq!(outcome.updated, vec![roomy]);
+    assert_eq!(outcome.over_cap, vec![crowded]);
+
+    let untouched = store.get(org.id, crowded).await.unwrap().unwrap();
+    assert_eq!(untouched.tags.len(), MAX_TAGS_PER_TARGET);
+    assert!(!untouched.tags.iter().any(|t| t == "fresh"));
+
+    // A tag already present is not a new one, so a full monitor still accepts it.
+    let outcome = store
+        .add_tags(org.id, &[crowded], &["t0".to_string()])
+        .await
+        .unwrap();
+    assert_eq!(outcome.updated, vec![crowded]);
 
     common::drop_test_db(&name).await;
 }

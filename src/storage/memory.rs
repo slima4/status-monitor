@@ -8,13 +8,14 @@ use crate::api::types::{
     PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount,
     TargetsSummary,
 };
+use crate::domain::target::MAX_TAGS_PER_TARGET;
 use crate::domain::{
     CheckResult, CheckStatus, NewTarget, OrgId, Target, TargetUpdate, UserId, WriteSource,
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    ClampedRange, RegionFlaps, RegionOption, ResultSink, ResultsStore, TargetFilter, TargetStore,
-    TimeRange, UptimeStats, rollup_bucket_secs,
+    ClampedRange, RegionFlaps, RegionOption, ResultSink, ResultsStore, TagAddOutcome, TargetFilter,
+    TargetStore, TimeRange, UptimeStats, rollup_bucket_secs,
 };
 
 #[derive(Default)]
@@ -1019,22 +1020,29 @@ impl TargetStore for InMemoryTargetStore {
         Ok(hit)
     }
 
-    async fn add_tags(&self, _org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+    async fn add_tags(&self, _org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<TagAddOutcome> {
         let mut guard = self.targets.lock();
         let now = Utc::now();
-        let mut hit = Vec::new();
+        let mut outcome = TagAddOutcome::default();
         for t in guard.iter_mut() {
-            if ids.contains(&t.id) {
-                for tag in tags {
-                    if !t.tags.iter().any(|x| x == tag) {
-                        t.tags.push(tag.clone());
-                    }
-                }
-                t.updated_at = now;
-                hit.push(t.id);
+            if !ids.contains(&t.id) {
+                continue;
             }
+            let mut merged = t.tags.clone();
+            for tag in tags {
+                if !merged.iter().any(|x| x == tag) {
+                    merged.push(tag.clone());
+                }
+            }
+            if merged.len() > MAX_TAGS_PER_TARGET {
+                outcome.over_cap.push(t.id);
+                continue;
+            }
+            t.tags = merged;
+            t.updated_at = now;
+            outcome.updated.push(t.id);
         }
-        Ok(hit)
+        Ok(outcome)
     }
 
     async fn remove_tags(&self, _org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {

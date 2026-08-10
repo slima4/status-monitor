@@ -9,6 +9,10 @@ use super::WriteSource;
 use super::alert::TargetAlerts;
 use super::check::CheckSpec;
 
+/// Tag bounds, applied by every write path.
+pub const MAX_TAGS_PER_TARGET: usize = 50;
+pub const MAX_TAG_LEN: usize = 50;
+
 /// How many regions must agree a monitor is down before it alerts. `Any`,
 /// `Majority`, and `All` track the live region count; `Count` is a fixed number
 /// the user chose. Resolved to a concrete threshold by [`Self::required`].
@@ -91,6 +95,7 @@ pub struct NewTarget {
     #[serde(default = "default_true")]
     pub enabled: bool,
     #[serde(default)]
+    #[schema(max_items = 50)]
     pub tags: Vec<String>,
     #[serde(default)]
     pub alerts: TargetAlerts,
@@ -128,6 +133,7 @@ pub struct TargetUpdate {
     pub alert_confirmations: Option<u32>,
     pub notify_recovery: Option<bool>,
     pub renotify_interval_secs: Option<u32>,
+    #[schema(max_items = 50)]
     pub tags: Option<Vec<String>>,
     pub alerts: Option<TargetAlerts>,
     #[serde(default, deserialize_with = "double_option")]

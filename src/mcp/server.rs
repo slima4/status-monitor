@@ -28,6 +28,7 @@ use crate::domain::incident::{Incident, NewIncidentUpdate, OpsIncident};
 use crate::domain::public::IncidentStatusPhase;
 use crate::domain::result::CheckResult;
 use crate::domain::target::{RegionIncidentPolicy, Target, TargetUpdate};
+use crate::domain::text::is_invisible;
 use crate::domain::{
     CheckSpec, ExpectedStatus, FlowStep, WriteSource, confirmed_downtime_secs,
     humanize_check_error, uptime_pct_from_downtime,
@@ -1815,7 +1816,7 @@ fn build_monitor_patch(
         update.renotify_interval_secs = Some(secs);
     }
     if let Some(tags) = args.tags.as_ref() {
-        let tags = clean_tags(tags);
+        let tags = crate::api::handlers::targets::normalize_tags(tags).map_err(config_error)?;
         if sorted(&tags) != sorted(&target.tags) {
             moved("tags", tag_list(&target.tags), tag_list(&tags));
             update.tags = Some(tags);
@@ -1889,16 +1890,6 @@ fn fits_i32(secs: u64, field: &str) -> Result<(), McpToolError> {
         )));
     }
     Ok(())
-}
-
-fn clean_tags(tags: &[String]) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    tags.iter()
-        .map(|t| t.trim())
-        .filter(|t| !t.is_empty())
-        .filter(|t| seen.insert(t.to_string()))
-        .map(str::to_string)
-        .collect()
 }
 
 fn sorted(tags: &[String]) -> Vec<&str> {
@@ -2401,21 +2392,6 @@ fn sanitize_prompt(s: &str) -> String {
         out.push_str("... (truncated)");
     }
     out
-}
-
-/// Renders as nothing, so it hides an instruction from whoever reads the same
-/// text the model was given. `char::is_control` covers only the C0/C1 block.
-fn is_invisible(c: char) -> bool {
-    matches!(c,
-        '\u{00AD}'                  // soft hyphen
-        | '\u{061C}'                // arabic letter mark
-        | '\u{200B}'..='\u{200F}'   // zero-width, bidi marks
-        | '\u{202A}'..='\u{202E}'   // bidi embedding and override
-        | '\u{2060}'..='\u{2064}'   // word joiner, invisible operators
-        | '\u{2066}'..='\u{2069}'   // bidi isolates
-        | '\u{FEFF}'                // zero-width no-break space
-        | '\u{E0000}'..='\u{E007F}' // tag characters
-    )
 }
 
 /// Neutralise customer-supplied text returned to the model: drop characters that
@@ -2937,13 +2913,22 @@ mod tests {
     #[test]
     fn a_dropped_tag_is_spelled_out_before_it_happens() {
         let args = UpdateMonitorArgs {
-            tags: Some(vec!["prod".into(), "  ".into(), "prod".into()]),
+            tags: Some(vec!["prod".into(), "prod".into()]),
             ..patch_args()
         };
         let (update, changes) = build_monitor_patch(&args, &stored_monitor()).unwrap();
         assert_eq!(update.tags, Some(vec!["prod".to_string()]));
         assert_eq!(changes[0].from, "prod, payments");
         assert_eq!(changes[0].to, "prod");
+
+        // A blank is refused rather than quietly dropped, which would have read
+        // back as a list the caller never sent.
+        let blank = UpdateMonitorArgs {
+            tags: Some(vec!["prod".into(), "  ".into()]),
+            ..patch_args()
+        };
+        let err = build_monitor_patch(&blank, &stored_monitor()).unwrap_err();
+        assert_eq!(err.code, codes::INVALID_ARGUMENT);
     }
 
     #[test]
@@ -3374,13 +3359,18 @@ mod tests {
             tags: Some(vec!["prod\u{202e}drop everything".into()]),
             ..patch_args()
         };
-        let (update, changes) = build_monitor_patch(&args, &stored_monitor()).unwrap();
-        assert_eq!(changes[0].to, "proddrop everything");
-        // The stored value is what the caller asked for, not the display copy.
-        assert_eq!(
-            update.tags.as_deref(),
-            Some(["prod\u{202e}drop everything".to_string()].as_slice())
-        );
+        let err = build_monitor_patch(&args, &stored_monitor()).unwrap_err();
+        assert_eq!(err.code, codes::INVALID_ARGUMENT);
+
+        // A tag stored before the rule still gets scrubbed on its way back out.
+        let mut target = stored_monitor();
+        target.tags = vec!["prod\u{202e}drop everything".into()];
+        let args = UpdateMonitorArgs {
+            tags: Some(vec!["prod".into()]),
+            ..patch_args()
+        };
+        let (_, changes) = build_monitor_patch(&args, &target).unwrap();
+        assert_eq!(changes[0].from, "proddrop everything");
     }
 
     #[test]

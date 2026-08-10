@@ -125,6 +125,9 @@ pub mod codes {
     pub const TITLE_TOO_LONG: &str = "TITLE_TOO_LONG";
     pub const DESCRIPTION_TOO_LONG: &str = "DESCRIPTION_TOO_LONG";
     pub const GROUP_TOO_LONG: &str = "GROUP_TOO_LONG";
+    pub const TAG_TOO_LONG: &str = "TAG_TOO_LONG";
+    pub const TOO_MANY_TAGS: &str = "TOO_MANY_TAGS";
+    pub const INVALID_TAG: &str = "INVALID_TAG";
     pub const OWNER_NOT_MEMBER: &str = "OWNER_NOT_MEMBER";
     pub const EMPTY_MESSAGE: &str = "EMPTY_MESSAGE";
     pub const MESSAGE_TOO_LONG: &str = "MESSAGE_TOO_LONG";

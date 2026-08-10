@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::api::types::{TagCount, TargetsSummary};
 use crate::config::PostgresConfig;
+use crate::domain::target::MAX_TAGS_PER_TARGET;
 use crate::domain::{
     CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate, UserId, WriteSource,
 };
@@ -18,7 +19,7 @@ use crate::error::{AppError, Result};
 use crate::security::Cipher;
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
-use crate::storage::traits::{RegionOption, TargetFilter, TargetSort, TargetStore};
+use crate::storage::traits::{RegionOption, TagAddOutcome, TargetFilter, TargetSort, TargetStore};
 
 /// Org-scoped Postgres-backed target store. Every query binds the `org`
 /// passed by the caller (resolved from the request's `CurrentOrg`) so reads,
@@ -929,27 +930,45 @@ impl TargetStore for PostgresTargetStore {
         Ok(rows.into_iter().map(|(id, _)| id).collect())
     }
 
-    async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {
+    async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<TagAddOutcome> {
         if ids.is_empty() || tags.is_empty() {
-            return Ok(Vec::new());
+            return Ok(TagAddOutcome::default());
         }
-        let rows: Vec<(Uuid,)> = sqlx::query_as(
-            r#"UPDATE targets
-               SET tags = (
-                 SELECT array_agg(DISTINCT t)
-                 FROM unnest(tags || $2) AS t
+        // Both the merge and the cap read `t.tags` rather than a CTE snapshot:
+        // under READ COMMITTED a concurrent add re-runs them against the row it
+        // re-fetched, where a snapshot would write back a list missing whatever
+        // the other statement just added.
+        let rows: Vec<(Uuid, bool)> = sqlx::query_as(
+            r#"WITH candidates AS (
+                 SELECT id FROM targets WHERE id = ANY($1) AND org_id = $3
                ),
-               updated_at = now()
-               WHERE id = ANY($1) AND org_id = $3
-               RETURNING id"#,
+               applied AS (
+                 UPDATE targets t
+                 SET tags = (
+                       SELECT array_agg(DISTINCT x) FROM unnest(t.tags || $2) AS x
+                     ),
+                     updated_at = now()
+                 WHERE t.id IN (SELECT id FROM candidates)
+                   AND t.org_id = $3
+                   AND cardinality((
+                         SELECT array_agg(DISTINCT x) FROM unnest(t.tags || $2) AS x
+                       )) <= $4
+                 RETURNING t.id
+               )
+               SELECT id, id IN (SELECT id FROM applied) AS applied FROM candidates"#,
         )
         .bind(ids)
         .bind(tags)
         .bind(org.0)
+        .bind(MAX_TAGS_PER_TARGET as i32)
         .fetch_all(&self.pool)
         .await
         .context("bulk add_tags")?;
-        Ok(rows.into_iter().map(|(id,)| id).collect())
+        let (updated, over_cap) = rows.into_iter().partition::<Vec<_>, _>(|(_, ok)| *ok);
+        Ok(TagAddOutcome {
+            updated: updated.into_iter().map(|(id, _)| id).collect(),
+            over_cap: over_cap.into_iter().map(|(id, _)| id).collect(),
+        })
     }
 
     async fn remove_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>> {

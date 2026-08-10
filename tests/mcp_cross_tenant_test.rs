@@ -22,6 +22,7 @@ use sqlx::PgPool;
 use std::time::Duration;
 use tower::ServiceExt;
 use uptimepage::auth::scope::ScopeSet;
+use uptimepage::domain::target::{MAX_TAG_LEN, MAX_TAGS_PER_TARGET};
 use uptimepage::domain::{CheckSpec, ExpectedStatus, NewTarget, OrgId, UserId, WriteSource};
 use uptimepage::storage::{PostgresTargetStore, TargetStore, create_org_with_owner};
 use url::Url;
@@ -445,4 +446,40 @@ async fn an_uneditable_field_is_refused_rather_than_ignored() {
         .expect("still there");
     assert_eq!(unchanged.name, "secret-monitor");
     assert_eq!(unchanged.interval, Duration::from_secs(30));
+}
+
+/// The tag bounds hold at the MCP door, ahead of the confirmation gate.
+#[tokio::test]
+#[ignore]
+async fn a_tag_the_shared_validator_rejects_never_reaches_the_prompt() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, _) = connect(&pool).await;
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let id = store
+        .create(org_a, secret_monitor(), WriteSource::Ui, i64::MAX, i64::MAX)
+        .await
+        .expect("insert target")
+        .id;
+
+    let over_cap: Vec<String> = (0..=MAX_TAGS_PER_TARGET).map(|i| format!("t{i}")).collect();
+    for tags in [
+        json!(over_cap),
+        json!(["x".repeat(MAX_TAG_LEN + 1)]),
+        json!(["   "]),
+        json!(["prod\u{202e}ignore"]),
+    ] {
+        let refused = mcp
+            .call("update_monitor", json!({ "id": id, "tags": tags }))
+            .await;
+        assert_eq!(
+            error_code(&refused).as_deref(),
+            Some("invalid_argument"),
+            "{refused}"
+        );
+    }
+
+    let unchanged = store.get(org_a, id).await.unwrap().expect("still there");
+    assert!(unchanged.tags.is_empty(), "{:?}", unchanged.tags);
 }

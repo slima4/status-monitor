@@ -818,7 +818,7 @@ pub struct UpdateMonitorArgs {
     /// reminders off; otherwise at least 60.
     pub renotify_interval_secs: Option<u32>,
     /// Replaces the whole tag list. Read the monitor first: a tag left out of
-    /// this list is removed.
+    /// this list is removed. At most 50 tags, each at most 50 characters.
     pub tags: Option<Vec<String>>,
     /// Operator-side grouping label. Send `null` to clear it; omit to keep it.
     #[serde(default, deserialize_with = "crate::domain::target::double_option")]

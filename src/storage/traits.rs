@@ -14,6 +14,13 @@ use crate::domain::{
 };
 use crate::error::Result;
 
+/// Which targets a bulk tag add actually touched, and which were already full.
+#[derive(Debug, Default)]
+pub struct TagAddOutcome {
+    pub updated: Vec<Uuid>,
+    pub over_cap: Vec<Uuid>,
+}
+
 #[async_trait]
 pub trait ResultSink: Send + Sync {
     async fn write_batch(&self, results: &[CheckResult]) -> Result<()>;
@@ -197,8 +204,10 @@ pub trait TargetStore: Send + Sync {
         ids: &[Uuid],
         actor: Option<UserId>,
     ) -> Result<Vec<Uuid>>;
-    /// Adds `tags` to every named target; returns the set that existed.
-    async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
+    /// Adds `tags` to every named target. One whose merged list would go over
+    /// the tag cap is left alone and reported in `over_cap`, so the caller can
+    /// say why instead of calling it missing.
+    async fn add_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<TagAddOutcome>;
     /// Removes `tags` from every named target; returns the set that existed.
     async fn remove_tags(&self, org: OrgId, ids: &[Uuid], tags: &[String]) -> Result<Vec<Uuid>>;
     /// Sets every named target's `group_name` to `group` (None clears).

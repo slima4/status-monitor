@@ -350,7 +350,9 @@ Use a dedicated low-privilege test account, never a real or admin credential: th
                               // only kind_min and the schema's own
                               // `interval_secs >= 10` check apply.
   "enabled": true,
-  "tags": ["prod", "tier1"],
+  "tags": ["prod", "tier1"], // at most 50, each at most 50 characters, no blank
+                             // and no control or invisible characters. Trimmed
+                             // and de-duplicated before the count is applied.
   "alerts": { /* optional, see below */ }
 }
 ```
@@ -767,6 +769,8 @@ Returns every tag currently in use across the caller's targets (enabled or disab
   //   { "type": "set_group",  "group": "tier1" } // null clears the group
 }
 ```
+
+`tag_add` merges into what each monitor already carries, so a target whose merged list would go over the 50-tag limit is left untouched and reported in `failed` as `TOO_MANY_TAGS`. `tag_remove` is not held to the tag rules, so a tag that predates them can still be cleaned up.
 
 ## Idempotency
 

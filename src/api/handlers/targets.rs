@@ -193,7 +193,7 @@ pub async fn create(
     let guard = ssrf_guard(&state);
     canonicalize_check(&mut new.check)?;
     gate_flow(&new.check, &plan)?;
-    validate_new_target(&new, &guard, i64::from(plan.min_check_interval_secs))?;
+    validate_new_target(&mut new, &guard, i64::from(plan.min_check_interval_secs))?;
     let available = state.target_store.available_regions().await?;
     validate_region_policy(new.region_policy, available.len())?;
     verify_alert_channels(&state, org, &new.alerts).await?;
@@ -319,6 +319,9 @@ pub async fn update(
     if let Some(alerts) = &update.alerts {
         validate_alerts(alerts)?;
         verify_alert_channels(&state, org, alerts).await?;
+    }
+    if let Some(tags) = update.tags.as_ref() {
+        update.tags = Some(normalize_tags(tags)?);
     }
     validate_alert_confirmations(update.alert_confirmations)?;
     validate_renotify_interval(update.renotify_interval_secs)?;
@@ -891,6 +894,7 @@ pub async fn bulk_action(
         ));
     }
 
+    let mut over_cap: Vec<Uuid> = Vec::new();
     let succeeded = match &req.action {
         BulkAction::Enable => state.target_store.set_enabled(org, &req.ids, true).await?,
         BulkAction::Disable => state.target_store.set_enabled(org, &req.ids, false).await?,
@@ -914,17 +918,22 @@ pub async fn bulk_action(
         BulkAction::TagAdd { tags } => {
             if tags.is_empty() {
                 return Err(AppError::bad_request_field(
-                    codes::INVALID_ALERT_CONFIG,
+                    codes::INVALID_TAG,
                     "tag_add requires at least one tag",
                     "action.tags",
                 ));
             }
-            state.target_store.add_tags(org, &req.ids, tags).await?
+            let tags = normalize_tags(tags)?;
+            let outcome = state.target_store.add_tags(org, &req.ids, &tags).await?;
+            over_cap = outcome.over_cap;
+            outcome.updated
         }
+        // Not normalized: removal is how a tag that predates the rules gets
+        // cleaned up, so it must accept one the write rules would reject.
         BulkAction::TagRemove { tags } => {
             if tags.is_empty() {
                 return Err(AppError::bad_request_field(
-                    codes::INVALID_ALERT_CONFIG,
+                    codes::INVALID_TAG,
                     "tag_remove requires at least one tag",
                     "action.tags",
                 ));
@@ -942,14 +951,30 @@ pub async fn bulk_action(
         }
     };
 
+    // Sets, not scans: `ids` runs to BULK_MAX and both lookups are per id.
+    let done: std::collections::HashSet<Uuid> = succeeded.iter().copied().collect();
+    let over_cap: std::collections::HashSet<Uuid> = over_cap.into_iter().collect();
     let failed: Vec<BulkActionFailure> = req
         .ids
         .iter()
-        .filter(|id| !succeeded.contains(id))
-        .map(|id| BulkActionFailure {
-            id: *id,
-            code: codes::TARGET_NOT_FOUND,
-            message: "target not found".into(),
+        .filter(|id| !done.contains(id))
+        .map(|id| {
+            if over_cap.contains(id) {
+                BulkActionFailure {
+                    id: *id,
+                    code: codes::TOO_MANY_TAGS,
+                    message: format!(
+                        "adding these would take it past the {} tag limit",
+                        crate::domain::target::MAX_TAGS_PER_TARGET
+                    ),
+                }
+            } else {
+                BulkActionFailure {
+                    id: *id,
+                    code: codes::TARGET_NOT_FOUND,
+                    message: "target not found".into(),
+                }
+            }
         })
         .collect();
 
@@ -1547,7 +1572,11 @@ pub(crate) async fn validate_patch_interval(
 /// Per-resource validation, including the plan's check-interval floor. Both
 /// `create` and `bulk_create` run this per item, so the floor is enforced by
 /// construction on every path rather than in one handler (I4).
-fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i64) -> Result<()> {
+fn validate_new_target(
+    new: &mut NewTarget,
+    guard: &SsrfGuard,
+    min_interval_secs: i64,
+) -> Result<()> {
     let requested = new.interval.as_secs() as i64;
     let kind_floor = min_interval_secs_for_kind(new.check.kind()) as i64;
     let effective_floor = min_interval_secs.max(kind_floor);
@@ -1560,6 +1589,7 @@ fn validate_new_target(new: &NewTarget, guard: &SsrfGuard, min_interval_secs: i6
     }
     validate_check(&new.check, guard)?;
     validate_heartbeat_cadence(&new.check, new.interval)?;
+    new.tags = normalize_tags(&new.tags)?;
     validate_alerts(&new.alerts)?;
     validate_alert_confirmations(Some(new.alert_confirmations))?;
     validate_renotify_interval(Some(new.renotify_interval_secs))?;
@@ -1608,6 +1638,58 @@ pub(crate) fn validate_alert_confirmations(n: Option<u32>) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+/// The one definition of a tag list, whichever front door it came through:
+/// trimmed, de-duplicated, and bounded. A blank tag cannot be selected or
+/// filtered on, and an invisible character in one reaches a confirmation prompt
+/// and a terminal. Returns what to store, so every door stores the same thing
+/// for the same request.
+pub(crate) fn normalize_tags(tags: &[String]) -> Result<Vec<String>> {
+    use crate::domain::target::{MAX_TAG_LEN, MAX_TAGS_PER_TARGET};
+
+    let mut out: Vec<String> = Vec::with_capacity(tags.len());
+    // Positions, not values: an invisible character is the one fault the
+    // operator cannot see in the tag the error would echo back.
+    for (i, tag) in tags.iter().enumerate() {
+        let nth = i + 1;
+        let tag = tag.trim();
+        if tag.is_empty() {
+            return Err(AppError::bad_request_field(
+                codes::INVALID_TAG,
+                format!("tag {nth} is blank"),
+                "tags",
+            ));
+        }
+        if tag
+            .chars()
+            .any(|c| c.is_control() || crate::domain::text::is_invisible(c))
+        {
+            return Err(AppError::bad_request_field(
+                codes::INVALID_TAG,
+                format!("tag {nth} contains a control or invisible character"),
+                "tags",
+            ));
+        }
+        if tag.chars().count() > MAX_TAG_LEN {
+            return Err(AppError::bad_request_field(
+                codes::TAG_TOO_LONG,
+                format!("tag {nth} is longer than {MAX_TAG_LEN} characters"),
+                "tags",
+            ));
+        }
+        if !out.iter().any(|kept| kept == tag) {
+            out.push(tag.to_string());
+        }
+    }
+    if out.len() > MAX_TAGS_PER_TARGET {
+        return Err(AppError::bad_request_field(
+            codes::TOO_MANY_TAGS,
+            format!("a monitor takes at most {MAX_TAGS_PER_TARGET} tags"),
+            "tags",
+        ));
+    }
+    Ok(out)
 }
 
 pub(crate) fn validate_group_name(group: Option<&str>) -> Result<()> {
@@ -2248,6 +2330,70 @@ fn check_ip(ip: IpAddr, guard: &SsrfGuard) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tag_is_bounded_in_length_count_and_content() {
+        use crate::domain::target::{MAX_TAG_LEN, MAX_TAGS_PER_TARGET};
+
+        assert_eq!(
+            normalize_tags(&["prod".into(), "eu west".into()]).unwrap(),
+            vec!["prod".to_string(), "eu west".to_string()]
+        );
+        assert!(normalize_tags(&[]).unwrap().is_empty());
+
+        let too_many: Vec<String> = (0..=MAX_TAGS_PER_TARGET).map(|i| format!("t{i}")).collect();
+        assert_eq!(
+            code_of(normalize_tags(&too_many).unwrap_err()),
+            codes::TOO_MANY_TAGS
+        );
+        assert_eq!(
+            code_of(normalize_tags(&["x".repeat(MAX_TAG_LEN + 1)]).unwrap_err()),
+            codes::TAG_TOO_LONG
+        );
+        normalize_tags(&["x".repeat(MAX_TAG_LEN)]).unwrap();
+        assert_eq!(
+            code_of(normalize_tags(&["  ".into()]).unwrap_err()),
+            codes::INVALID_TAG
+        );
+        // A tag rides into confirmation prompts and terminals.
+        assert_eq!(
+            code_of(normalize_tags(&["prod\u{202e}etc".into()]).unwrap_err()),
+            codes::INVALID_TAG
+        );
+    }
+
+    /// Trim and de-duplicate before the count, so a list that stores small is
+    /// not refused for the shape it arrived in.
+    #[test]
+    fn tags_are_normalized_the_same_way_at_every_door() {
+        use crate::domain::target::{MAX_TAG_LEN, MAX_TAGS_PER_TARGET};
+
+        assert_eq!(
+            normalize_tags(&[" prod ".into(), "prod".into(), "api".into()]).unwrap(),
+            vec!["prod".to_string(), "api".to_string()]
+        );
+        let padded = format!("  {}  ", "x".repeat(MAX_TAG_LEN));
+        assert_eq!(
+            normalize_tags(&[padded]).unwrap(),
+            vec!["x".repeat(MAX_TAG_LEN)]
+        );
+        let dupes: Vec<String> = (0..=MAX_TAGS_PER_TARGET).map(|_| "prod".into()).collect();
+        assert_eq!(normalize_tags(&dupes).unwrap(), vec!["prod".to_string()]);
+        // Case is meaning: `Prod` is not `prod`.
+        assert_eq!(
+            normalize_tags(&["Prod".into(), "prod".into()])
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    fn code_of(err: AppError) -> &'static str {
+        match err {
+            AppError::BadRequest { code, .. } => code,
+            other => panic!("expected a bad request, got {other:?}"),
+        }
+    }
 
     fn heartbeat_spec(period_s: u64, grace_s: u64) -> CheckSpec {
         CheckSpec::Heartbeat(crate::domain::HeartbeatCheck {
