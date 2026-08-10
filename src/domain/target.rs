@@ -141,7 +141,7 @@ pub struct TargetUpdate {
 /// Lifts the inner `Option<T>` into `Some(Option<T>)` so a missing field
 /// stays `None` (via `#[serde(default)]` = "leave unchanged") while an
 /// explicit JSON `null` becomes `Some(None)` (the "clear" intent).
-fn double_option<'de, T, D>(d: D) -> std::result::Result<Option<Option<T>>, D::Error>
+pub(crate) fn double_option<'de, T, D>(d: D) -> std::result::Result<Option<Option<T>>, D::Error>
 where
     T: Deserialize<'de>,
     D: serde::Deserializer<'de>,

@@ -237,7 +237,8 @@ pub struct FlowStepConfig {
     pub op: String,
     /// CSS selector the step acts on, where the action takes one. Untrusted data.
     pub selector: Option<String>,
-    /// Where a `goto` navigates. Untrusted data.
+    /// Where a `goto` navigates, as origin and path only: userinfo, query and
+    /// fragment are stripped. Untrusted data.
     pub url: Option<String>,
     /// What an `assert_text` / `assert_url` requires. Untrusted data.
     pub contains: Option<String>,
@@ -381,12 +382,12 @@ pub struct MonitorHistory {
     /// The region this answer was narrowed to, or `null` for all of them.
     pub region: Option<String>,
     pub latency_series: Vec<LatencyPoint>,
-    /// Per-region split of the same window — how a partial outage reads. Empty
-    /// unless the monitor runs in more than one region, since one region cannot
-    /// disagree with itself. Regions that ran no checks in the window are
-    /// omitted; this reads per-minute data, which is kept for 30 days, so at
-    /// the far edge of a `30d` window a region can be short of samples or
-    /// absent while the headline numbers still cover it.
+    /// Per-region split of the same window, so a partial outage is visible.
+    /// Always every region the monitor runs in, including under a `region`
+    /// filter, and empty when it runs in only one. Regions that ran no checks
+    /// in the window are omitted; this reads per-minute data, which is kept for
+    /// 30 days, so at the far edge of a `30d` window a region can be short of
+    /// samples or absent while the headline numbers still cover it.
     pub regions: Vec<RegionHealth>,
     /// Confirmed failures on the monitor as a whole. A `region` filter does not
     /// narrow these: an incident is raised for the monitor, not per region.
@@ -770,6 +771,78 @@ pub struct MonitorStateResult {
     pub id: String,
     /// The monitor's enabled state after the change.
     pub enabled: bool,
+}
+
+/// How the quorum is expressed. `count` carries its number in `count`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RegionPolicyMode {
+    /// One region down is enough.
+    Any,
+    /// More than half of them.
+    Majority,
+    /// Every region.
+    All,
+    /// A fixed number.
+    Count,
+}
+
+/// How many regions must agree a monitor is down before an incident opens.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RegionPolicyArg {
+    pub mode: RegionPolicyMode,
+    /// Required with `mode: "count"`, ignored otherwise. Must be between 1 and
+    /// the number of regions the fleet has; `list_regions` reports them.
+    pub count: Option<u32>,
+}
+
+/// `update_monitor` arguments. Every field except `id` is optional; omit what
+/// should stay as it is. Name, address or URL, assertions, expected status,
+/// headers, body, probe regions, alert channels and owner are not editable
+/// here, and passing one is an error rather than a silent no-op.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateMonitorArgs {
+    /// The monitor id (from `list_monitors`).
+    pub id: String,
+    /// Seconds between checks. Held to the plan's floor and the check kind's
+    /// own floor, whichever is higher.
+    pub interval_secs: Option<u64>,
+    /// Consecutive failing checks before the monitor alerts. Minimum 1. Raising
+    /// it quietens a flapping monitor at the cost of alerting later.
+    pub alert_confirmations: Option<u32>,
+    /// Whether recovery is announced to the monitor's channels.
+    pub notify_recovery: Option<bool>,
+    /// Seconds between reminders while an outage stays unacknowledged. 0 turns
+    /// reminders off; otherwise at least 60.
+    pub renotify_interval_secs: Option<u32>,
+    /// Replaces the whole tag list. Read the monitor first: a tag left out of
+    /// this list is removed.
+    pub tags: Option<Vec<String>>,
+    /// Operator-side grouping label. Send `null` to clear it; omit to keep it.
+    #[serde(default, deserialize_with = "crate::domain::target::double_option")]
+    pub group_name: Option<Option<String>>,
+    /// Detection quorum across probe regions.
+    pub region_policy: Option<RegionPolicyArg>,
+}
+
+/// One field an update actually moved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct FieldChange {
+    pub field: String,
+    /// The value before and after, rendered for reporting back to a human.
+    pub from: String,
+    pub to: String,
+}
+
+/// `update_monitor` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MonitorUpdateResult {
+    pub id: String,
+    /// What moved. Empty when every value sent already matched the stored one,
+    /// in which case nothing was written and no confirmation was asked for.
+    pub changes: Vec<FieldChange>,
 }
 
 /// `acknowledge_incident` / `resolve_incident` argument.

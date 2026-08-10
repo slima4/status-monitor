@@ -828,7 +828,7 @@ impl TargetStore for InMemoryTargetStore {
         _org: OrgId,
         id: Uuid,
         update: TargetUpdate,
-        source: WriteSource,
+        source: Option<WriteSource>,
     ) -> Result<Option<Target>> {
         let mut guard = self.targets.lock();
         let Some(t) = guard.iter_mut().find(|t| t.id == id) else {
@@ -870,7 +870,9 @@ impl TargetStore for InMemoryTargetStore {
         if let Some(v) = update.owner_user_id {
             t.owner_user_id = v;
         }
-        t.write_source = source;
+        if let Some(source) = source {
+            t.write_source = source;
+        }
         t.updated_at = Utc::now();
         Ok(Some(t.clone()))
     }

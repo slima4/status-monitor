@@ -1,7 +1,8 @@
-//! Cross-tenant regression for the MCP front door. Two orgs share one router
-//! and one set of Postgres-backed stores; the connector holds an org-bound
-//! token for A. Org B's monitor and incident ids must read as `not_found`
-//! through every tool, and no write may act on them.
+//! Cross-tenant and write-guard regressions for the MCP front door. Two orgs
+//! share one router and one set of Postgres-backed stores; the connector holds
+//! an org-bound token for A. Org B's monitor and incident ids must read as
+//! `not_found` through every tool, and no write may act on them. Write guards
+//! that run ahead of the confirmation gate are covered here too.
 //!
 //! The other cross-tenant suites drive `/api/v1` and the operator HTML. This
 //! one drives JSON-RPC `tools/call`, because MCP resolves its org from the
@@ -345,4 +346,103 @@ async fn a_write_finds_nothing_to_publish_in_another_org() {
     .expect("read back org B");
     assert_eq!(visibility, "internal");
     assert!(enabled);
+}
+
+/// The Terraform refusal runs before the confirmation gate, so a client that
+/// cannot confirm still hits it.
+#[tokio::test]
+#[ignore]
+async fn no_write_touches_a_terraform_managed_monitor() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, _) = connect(&pool).await;
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let declared = store
+        .create(
+            org_a,
+            secret_monitor(),
+            WriteSource::Terraform,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("insert terraform-managed target")
+        .id;
+
+    for (tool, args) in [
+        (
+            "update_monitor",
+            json!({ "id": declared, "interval_secs": 300 }),
+        ),
+        ("pause_monitor", json!({ "id": declared })),
+        ("resume_monitor", json!({ "id": declared })),
+    ] {
+        assert_eq!(
+            error_code(&mcp.call(tool, args).await).as_deref(),
+            Some("managed_externally"),
+            "{tool} must refuse a Terraform-managed monitor"
+        );
+    }
+
+    // An editable monitor gets as far as asking, which this client cannot answer.
+    let editable = store
+        .create(org_a, secret_monitor(), WriteSource::Ui, i64::MAX, i64::MAX)
+        .await
+        .expect("insert ui target")
+        .id;
+    assert_eq!(
+        error_code(
+            &mcp.call(
+                "update_monitor",
+                json!({ "id": editable, "interval_secs": 300 })
+            )
+            .await
+        )
+        .as_deref(),
+        Some("elicitation_unsupported"),
+    );
+
+    // Nothing above may have changed the declared row on its way to failing.
+    let after = store
+        .get(org_a, declared)
+        .await
+        .unwrap()
+        .expect("still there");
+    assert_eq!(after.interval, Duration::from_secs(30));
+    assert!(after.enabled);
+    assert_eq!(after.write_source, WriteSource::Terraform);
+}
+
+/// A field outside the allowlist must fail loudly, not be dropped by serde.
+#[tokio::test]
+#[ignore]
+async fn an_uneditable_field_is_refused_rather_than_ignored() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, _) = connect(&pool).await;
+    let id = PostgresTargetStore::from_pool(pool.clone(), None)
+        .create(org_a, secret_monitor(), WriteSource::Ui, i64::MAX, i64::MAX)
+        .await
+        .expect("insert target")
+        .id;
+
+    let refused = mcp
+        .call(
+            "update_monitor",
+            json!({ "id": id, "name": "renamed", "interval_secs": 300 }),
+        )
+        .await;
+    assert!(
+        refused["result"]["isError"] == Value::Bool(true) || refused["error"] != Value::Null,
+        "an unknown field must not be dropped: {refused}"
+    );
+    let unchanged = PostgresTargetStore::from_pool(pool.clone(), None)
+        .get(org_a, id)
+        .await
+        .unwrap()
+        .expect("still there");
+    assert_eq!(unchanged.name, "secret-monitor");
+    assert_eq!(unchanged.interval, Duration::from_secs(30));
 }

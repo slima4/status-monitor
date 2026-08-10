@@ -336,7 +336,11 @@ pub async fn update(
     // The disabled→enabled re-arm is folded into the store's enable statement,
     // so this path (and every other enable surface) inherits it.
     let check_rewritten = update.check.is_some();
-    match state.target_store.update(org, id, update, source).await? {
+    match state
+        .target_store
+        .update(org, id, update, Some(source))
+        .await?
+    {
         Some(t) => {
             if check_rewritten {
                 sync_heartbeat_kind(&state, org, &t).await?;
@@ -836,7 +840,7 @@ pub async fn bulk_create(
                         region_policy: Some(explicit.unwrap_or(derived)),
                         ..Default::default()
                     },
-                    source,
+                    Some(source),
                 )
                 .await?;
         }
@@ -1484,7 +1488,7 @@ fn check_abuse(state: &AppState, org: OrgId, check: &crate::domain::CheckSpec) -
 /// change is validated against the stored interval, since switching to a slower
 /// kind while omitting `interval` would otherwise keep a cadence that kind
 /// rejects. A missing target is left for the update itself to 404.
-async fn validate_patch_interval(
+pub(crate) async fn validate_patch_interval(
     state: &AppState,
     org: OrgId,
     id: Uuid,
@@ -1583,7 +1587,7 @@ fn validate_heartbeat_cadence(check: &CheckSpec, interval: std::time::Duration) 
 
 /// The outage reminder cadence is either off (0) or no tighter than a minute —
 /// a sub-minute reminder would just spam responders.
-fn validate_renotify_interval(secs: Option<u32>) -> Result<()> {
+pub(crate) fn validate_renotify_interval(secs: Option<u32>) -> Result<()> {
     if matches!(secs, Some(n) if n > 0 && n < 60) {
         return Err(AppError::bad_request_field(
             codes::INVALID_ALERT_CONFIG,
@@ -1595,7 +1599,7 @@ fn validate_renotify_interval(secs: Option<u32>) -> Result<()> {
 }
 
 /// One confirmation minimum — alerting after zero failures is meaningless.
-fn validate_alert_confirmations(n: Option<u32>) -> Result<()> {
+pub(crate) fn validate_alert_confirmations(n: Option<u32>) -> Result<()> {
     if matches!(n, Some(0)) {
         return Err(AppError::bad_request_field(
             codes::INVALID_ALERT_CONFIG,
@@ -1606,7 +1610,7 @@ fn validate_alert_confirmations(n: Option<u32>) -> Result<()> {
     Ok(())
 }
 
-fn validate_group_name(group: Option<&str>) -> Result<()> {
+pub(crate) fn validate_group_name(group: Option<&str>) -> Result<()> {
     use crate::api::handlers::validation;
     if let Some(g) = group {
         validation::check_length(g, "group_name", 50, codes::GROUP_TOO_LONG)?;
@@ -1658,7 +1662,10 @@ const MAX_QUORUM: u32 = 64;
 /// `any`/`majority`/`all` (and `None`) always pass — they track the live region
 /// count. A fixed `count` must be in `1..=min(64, region_count)`; a count larger
 /// than the regions that exist can never be met.
-fn validate_region_policy(policy: Option<RegionIncidentPolicy>, region_count: usize) -> Result<()> {
+pub(crate) fn validate_region_policy(
+    policy: Option<RegionIncidentPolicy>,
+    region_count: usize,
+) -> Result<()> {
     let max = (region_count as u32).clamp(1, MAX_QUORUM);
     match policy {
         Some(RegionIncidentPolicy::Count(n)) if !(1..=max).contains(&n) => {

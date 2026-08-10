@@ -490,7 +490,7 @@ impl TargetStore for PostgresTargetStore {
         org: OrgId,
         id: Uuid,
         update: TargetUpdate,
-        source: WriteSource,
+        source: Option<WriteSource>,
     ) -> Result<Option<Target>> {
         let check_json = update
             .check
@@ -535,7 +535,7 @@ impl TargetStore for PostgresTargetStore {
                  renotify_interval_secs = COALESCE($17, renotify_interval_secs),
                  group_name = CASE WHEN $8::bool THEN $9 ELSE group_name END,
                  owner_user_id = CASE WHEN $10::bool THEN $11 ELSE owner_user_id END,
-                 write_source = $13,
+                 write_source = COALESCE($13, write_source),
                  updated_at = now()
                WHERE id = $1 AND org_id = $12
                RETURNING id, name, check_spec, interval_secs, enabled, tags, alerts, region_policy,
@@ -556,7 +556,7 @@ impl TargetStore for PostgresTargetStore {
         .bind(update.owner_user_id.is_some())
         .bind(update.owner_user_id.flatten())
         .bind(org.0)
-        .bind(source.as_str())
+        .bind(source.map(WriteSource::as_str))
         .bind(region_policy_json)
         .bind(update.alert_confirmations.map(|n| n.max(1) as i32))
         .bind(update.notify_recovery)

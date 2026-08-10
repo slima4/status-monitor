@@ -131,7 +131,7 @@ pub(crate) fn redact_check_for_public(check: &mut CheckSpec) {
 }
 
 /// Drop credentials that can ride inside a URL: userinfo, query, and fragment.
-fn strip_url_credentials(url: &mut url::Url) {
+pub(crate) fn strip_url_credentials(url: &mut url::Url) {
     let _ = url.set_username("");
     let _ = url.set_password(None);
     url.set_query(None);

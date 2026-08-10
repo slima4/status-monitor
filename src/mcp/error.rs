@@ -29,6 +29,11 @@ pub mod codes {
     pub const PROBE_UNAVAILABLE: &str = "probe_unavailable";
     /// The org's per-category rate limit was exhausted; retry after a delay.
     pub const RATE_LIMITED: &str = "rate_limited";
+    /// The resource is declared in Terraform, which would revert a write here.
+    pub const MANAGED_EXTERNALLY: &str = "managed_externally";
+    /// The resource moved between reading it and confirming the write, so the
+    /// approved change no longer describes what would happen.
+    pub const CONFLICT: &str = "conflict";
     pub const INTERNAL: &str = "internal";
 }
 

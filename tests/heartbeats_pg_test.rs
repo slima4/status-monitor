@@ -190,7 +190,7 @@ async fn enable_rearms_only_disabled_heartbeats_live_pg() {
                 enabled: Some(true),
                 ..Default::default()
             },
-            WriteSource::Ui,
+            Some(WriteSource::Ui),
         )
         .await
         .unwrap();
@@ -248,7 +248,7 @@ async fn dead_tokens_stop_recording_and_sync_heals_rows_live_pg() {
                 ))),
                 ..Default::default()
             },
-            WriteSource::Ui,
+            Some(WriteSource::Ui),
         )
         .await
         .unwrap();

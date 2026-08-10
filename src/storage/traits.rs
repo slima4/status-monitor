@@ -148,12 +148,14 @@ pub trait TargetStore: Send + Sync {
         max_targets: i64,
         max_flow_checks: i64,
     ) -> Result<Target>;
+    /// A `source` of `None` leaves `write_source` as it was, for a writer that
+    /// must not claim authorship and erase another tool's marker.
     async fn update(
         &self,
         org: OrgId,
         id: Uuid,
         update: TargetUpdate,
-        source: WriteSource,
+        source: Option<WriteSource>,
     ) -> Result<Option<Target>>;
     /// A monitor is a hard delete, so the `target.deleted` audit row written in
     /// the same transaction is the only surviving record that it existed.

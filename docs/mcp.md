@@ -6,7 +6,7 @@ It is another authorized front door to the same stores the web app and [`/api/v1
 
 - **Transport** — Streamable HTTP at `POST/GET /mcp`, served on its own host (`mcp.{DOMAIN}` in production).
 - **Auth** — an org-bound scoped API token (`sm_live_…`), minted either by hand (Settings → API tokens) or by the one-click OAuth 2.1 connector flow.
-- **Surface** — 14 read tools (always) + 8 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
+- **Surface** — 14 read tools (always) + 9 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
 
 The server only mounts when enabled (see [Enabling](#enabling)); a deployment that leaves it off never exposes `/mcp`.
 
@@ -48,6 +48,7 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 | Tool | Scope | Effect |
 |---|---|---|
 | `run_check_now` | `targets:execute` | Probe a monitor immediately and record the result. A `down` result may fire the org's normal alerts. A heartbeat monitor has nothing to probe and is refused as `invalid_argument`, not as something to retry. |
+| `update_monitor` | `targets:write` | Change how loudly a monitor is watched: `interval_secs`, `alert_confirmations`, `notify_recovery`, `renotify_interval_secs`, `tags`, `group_name`, `region_policy`. Nothing else — see [What it will not change](#what-update_monitor-will-not-change). The confirmation names the monitor and states old → new for every field, and a request whose values already match writes nothing and never prompts. If the monitor moves between the prompt and the approval, the write is refused as `conflict` instead of landing on top of the newer value. Idempotent. |
 | `pause_monitor` | `targets:write` | Stop a monitor's checks until resumed. Idempotent. |
 | `resume_monitor` | `targets:write` | Restart a paused monitor's checks. Idempotent. |
 | `acknowledge_incident` | `incidents:write` | Take ownership of an incident and halt escalation. Internal only: it posts nothing to the public status page. Idempotent. |
@@ -57,6 +58,18 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 | `post_incident_update` | `incidents:write` | Post the customer-facing update to the incident's status-page timeline: a `message` plus optional `phase` (`investigating` / `identified` / `monitoring` / `resolved` / `postmortem`, default `investigating`). Requires a published incident. |
 
 Incidents start internal, so the customer-facing sequence is `publish_incident` then `post_incident_update`; posting to an unpublished incident is refused rather than written somewhere nobody reads.
+
+### What `update_monitor` will not change
+
+The line is drawn on one rule: **how loudly we watch** is editable, **what we watch** is not. Name, address or URL, assertions, expected status, request headers and body, probe regions, alert channels and owner are all refused, and passing one is an error rather than a silent no-op.
+
+This is not squeamishness about writes. Changing the interval or the confirmation count can only make alerting noisier or quieter, shows up on the next check, and is trivially reversible — that belongs in a conversation held during an incident. Changing what a check asserts can make a broken service report healthy, and that failure is silent and open-ended: nobody gets paged, and the monitor keeps saying everything is fine. That belongs in config-as-code, where it gets a diff and a review.
+
+### Terraform-managed monitors
+
+A monitor whose `write_source` is `terraform` is refused by `update_monitor`, `pause_monitor` and `resume_monitor` with `managed_externally`, naming the monitor and pointing at the `.tf` that declares it. There is no override argument. Without the guard the edit lands and the next `terraform apply` reverts it, which no confirmation prompt can warn about because the prompt is answered long before the revert.
+
+MCP writes also leave `write_source` as they found it, rather than restamping it. Otherwise the first MCP write would erase the `terraform` marker and the guard would protect exactly one edit. Attribution for MCP writes lives in the [audit](#audit) log, which records the token, the user, and the tool for every outcome.
 
 Write scopes are **never** granted unless explicitly requested — the OAuth connector defaults to read-only (see [Scopes](#scopes)).
 
@@ -260,6 +273,8 @@ Once connected, drive it in natural language — the client picks the tool:
 - "Am I near any plan limits?" → `get_org_usage`
 - "Run a check on the payments monitor now." → `run_check_now` (asks you to confirm; may alert)
 - "Pause the staging monitor." → `pause_monitor` (asks you to confirm)
+- "Checkout is flapping — make it wait for three failures before paging." → `update_monitor(alert_confirmations=3)` (asks you to confirm, showing 2 → 3)
+- "Stop paging until two regions agree it's down." → `update_monitor(region_policy={mode:"count",count:2})` (asks you to confirm)
 
 ## Security model
 

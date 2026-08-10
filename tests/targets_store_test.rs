@@ -1,6 +1,6 @@
-//! Live-PG coverage for the targets `kind` filter + `count_by_kind` pushdown:
-//! the generated `kind` column drives the SQL filter, and chip tallies are
-//! org-wide (not page-scoped).
+//! Live-PG coverage for the targets store: the `kind` filter + `count_by_kind`
+//! pushdown (the generated `kind` column drives the SQL filter, and chip
+//! tallies are org-wide, not page-scoped), and who an update credits.
 
 mod common;
 
@@ -242,6 +242,84 @@ async fn region_filter_and_distinct_groups_are_org_wide() {
     // Group options are org-wide, sorted, deduped — not page-scoped.
     let groups = store.distinct_groups(org.id).await.unwrap();
     assert_eq!(groups, vec!["alpha".to_string(), "beta".to_string()]);
+
+    common::drop_test_db(&name).await;
+}
+
+/// A `None` source leaves the `write_source` marker for the next writer to read.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn an_update_can_decline_to_claim_authorship() {
+    let Some((db, name)) = common::fresh_test_db("targets_write_source").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let user = common::make_user(&pool, "ws").await;
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("ws"), "Co", 10)
+        .await
+        .unwrap()
+        .unwrap();
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+
+    let declared = NewTarget {
+        name: "declared-in-tf".into(),
+        check: CheckSpec::Http(common::default_http_check(
+            Url::parse("https://example.com/").unwrap(),
+            ExpectedStatus::Exact(200),
+        )),
+        interval: Duration::from_secs(60),
+        enabled: true,
+        tags: vec![],
+        alerts: Default::default(),
+        region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
+        renotify_interval_secs: 3600,
+        group_name: None,
+        owner_user_id: None,
+    };
+    let id = store
+        .create(org.id, declared, WriteSource::Terraform, i64::MAX, i64::MAX)
+        .await
+        .unwrap()
+        .id;
+
+    let updated = store
+        .update(
+            org.id,
+            id,
+            uptimepage::domain::TargetUpdate {
+                interval: Some(Duration::from_secs(120)),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .expect("target exists");
+    assert_eq!(updated.interval, Duration::from_secs(120), "edit applied");
+    assert_eq!(
+        updated.write_source,
+        WriteSource::Terraform,
+        "an unattributed write must not repaint the marker"
+    );
+
+    let updated = store
+        .update(
+            org.id,
+            id,
+            uptimepage::domain::TargetUpdate {
+                interval: Some(Duration::from_secs(180)),
+                ..Default::default()
+            },
+            Some(WriteSource::Api),
+        )
+        .await
+        .unwrap()
+        .expect("target exists");
+    assert_eq!(updated.write_source, WriteSource::Api, "named writer wins");
 
     common::drop_test_db(&name).await;
 }
