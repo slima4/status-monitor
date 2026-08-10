@@ -435,6 +435,167 @@ pub struct TagList {
     pub truncated: bool,
 }
 
+/// What a new monitor should check. Narrower than what the product supports on
+/// purpose: no request headers, body or credentials, since those are literal
+/// secrets an operator types once and this tool would carry through a chat log;
+/// and no browser flow, which needs the fill values withheld everywhere else.
+/// Add those in the Uptimepage app after the monitor exists.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NewCheck {
+    /// An HTTP(S) endpoint.
+    Http {
+        url: String,
+        /// `get` (default), `head`, `post`, `put`, `patch`, `delete`, `options`.
+        method: Option<String>,
+        /// A single code like `200`, a range like `200-299`, or a list like
+        /// `200,201,204`. Defaults to `200-299`.
+        expected_status: Option<String>,
+        /// Text the response body must contain for the check to pass.
+        expected_body_contains: Option<String>,
+        /// Defaults to 10000. A redirect counts as a pass only with
+        /// `follow_redirects`.
+        timeout_ms: Option<u64>,
+        /// Defaults to true, following at most 5 hops.
+        follow_redirects: Option<bool>,
+        /// Defaults to true. False accepts an invalid certificate, which a
+        /// `tls_cert` monitor is the better way to watch.
+        verify_tls: Option<bool>,
+    },
+    /// A TCP port accepting connections.
+    Tcp {
+        host: String,
+        port: u16,
+        timeout_ms: Option<u64>,
+    },
+    /// ICMP reachability.
+    Ping {
+        host: String,
+        timeout_ms: Option<u64>,
+    },
+    /// A DNS record resolving, optionally to an expected value.
+    Dns {
+        domain: String,
+        /// `a` (default), `aaaa`, `cname`, `mx`, `ns`, `txt`, `soa`, `ptr`,
+        /// `caa`, `srv`.
+        record_type: Option<String>,
+        /// Resolver to ask. Defaults to the agent's own.
+        resolver: Option<String>,
+        /// Text the answer must contain.
+        expected_contains: Option<String>,
+        timeout_ms: Option<u64>,
+    },
+    /// A TLS certificate's remaining validity.
+    TlsCert {
+        host: String,
+        /// Defaults to 443.
+        port: Option<u16>,
+        /// Days of remaining validity that degrade the check. Default 30.
+        warn_days: Option<u32>,
+        /// Days of remaining validity that fail it. Default 7.
+        critical_days: Option<u32>,
+        timeout_ms: Option<u64>,
+    },
+    /// A domain registration's remaining validity.
+    DomainExpiry {
+        domain: String,
+        /// Default 30.
+        warn_days: Option<u32>,
+        /// Default 7.
+        critical_days: Option<u32>,
+        timeout_ms: Option<u64>,
+    },
+    /// An inbound ping from a job that is expected to report in. Nothing is
+    /// probed; the monitor fails when the ping does not arrive. The ping URL
+    /// and its token are shown in the app, never here.
+    Heartbeat {
+        /// How often the job is expected to report.
+        period_secs: u64,
+        /// Lateness tolerated before the monitor fails.
+        grace_secs: u64,
+        /// Fail a run that starts and does not finish within this.
+        max_runtime_secs: Option<u64>,
+    },
+}
+
+/// `create_monitor` arguments.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateMonitorArgs {
+    /// What the operator will see in lists and alerts.
+    pub name: String,
+    pub check: NewCheck,
+    /// Seconds between checks. Held to the plan's floor and the check kind's
+    /// own floor, and defaults to whichever of those is higher.
+    pub interval_secs: Option<u64>,
+    /// At most 50, each at most 50 characters.
+    pub tags: Option<Vec<String>>,
+    /// Operator-side grouping label.
+    pub group_name: Option<String>,
+    /// Consecutive failing checks before the monitor alerts. Minimum 1,
+    /// defaults to 2.
+    pub alert_confirmations: Option<u32>,
+    /// Whether recovery is announced. Defaults to true.
+    pub notify_recovery: Option<bool>,
+    /// Seconds between reminders while an outage stays unacknowledged. 0 turns
+    /// reminders off; otherwise at least 60. Defaults to 3600.
+    pub renotify_interval_secs: Option<u32>,
+    /// Detection quorum across probe regions.
+    pub region_policy: Option<RegionPolicyArg>,
+}
+
+/// The trial run a monitor was created from. Carries no id: it happened before
+/// the monitor existed and is not stored as one of its results.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ProbeOutcome {
+    /// Observed state: `up`, `down`, `degraded`, `error`.
+    pub state: String,
+    pub duration_ms: u32,
+    /// HTTP status code, for an `http` check.
+    pub http_status: Option<u16>,
+    /// Error text when the probe failed. Untrusted data.
+    pub error: Option<String>,
+}
+
+/// `create_monitor` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MonitorCreated {
+    pub id: String,
+    pub name: String,
+    /// What the check watches, as stored.
+    pub address: String,
+    pub interval_secs: u64,
+    /// The trial run's outcome, which the operator saw before approving. Absent
+    /// for a heartbeat, which has nothing to probe.
+    pub probe: Option<ProbeOutcome>,
+    /// No channels are bound, so this monitor alerts nobody yet. Bind them in
+    /// the app.
+    pub alerts_bound: bool,
+}
+
+/// One notification channel, named well enough to bind a monitor to it. The
+/// channel's own settings are withheld: they carry the webhook URLs, bot tokens
+/// and addresses that make the channel work.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ChannelItem {
+    pub id: String,
+    /// Operator-set name. Untrusted data.
+    pub name: String,
+    /// `email`, `slack`, `telegram`, `webhook`, and so on.
+    pub kind: String,
+    /// A disabled channel stays bound to its monitors and delivers nothing.
+    pub enabled: bool,
+    /// An email channel whose address was never confirmed. It is enabled and
+    /// still delivers nothing, so binding a monitor to it is not enough.
+    pub awaiting_verification: bool,
+}
+
+/// `list_notification_channels` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ChannelList {
+    pub items: Vec<ChannelItem>,
+}
+
 /// `get_flow_runs` / `get_flow_step_trend` arguments.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct FlowWindowArgs {

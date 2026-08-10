@@ -6,7 +6,7 @@ It is another authorized front door to the same stores the web app and [`/api/v1
 
 - **Transport** — Streamable HTTP at `POST/GET /mcp`, served on its own host (`mcp.{DOMAIN}` in production).
 - **Auth** — an org-bound scoped API token (`sm_live_…`), minted either by hand (Settings → API tokens) or by the one-click OAuth 2.1 connector flow.
-- **Surface** — 14 read tools (always) + 9 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
+- **Surface** — 15 read tools (always) + 10 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
 
 The server only mounts when enabled (see [Enabling](#enabling)); a deployment that leaves it off never exposes `/mcp`.
 
@@ -34,6 +34,7 @@ Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, o
 | `list_status_pages` | `status_page:read` | The org's status pages: slug, name, public URL, enabled. Cursor-paginated. |
 | `get_status_page` | `status_page:read` | One status page with its components and each linked monitor's current state. |
 | `get_org_usage` | `targets:read` | Resource usage against plan limits (monitors, status pages, members, components) + key policy values. |
+| `list_notification_channels` | `channels:read` | The org's notification channels: id, operator-set name, kind, enabled, and `awaiting_verification` for an email address that was never confirmed and therefore delivers nothing. The settings that make a channel work — webhook URLs, bot tokens, addresses — are withheld. Channels are created in the app, never here. `channels:read` is not one of the default connector scopes: a client that never touches alerting is not offered the inventory. |
 
 A `window` is a request, not a promise: every history tool clamps it to what your plan retains at per-check detail, and one clamp covers the whole response so its fields never describe different spans. See [Quotas and limits](quotas.md).
 
@@ -47,6 +48,7 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 
 | Tool | Scope | Effect |
 |---|---|---|
+| `create_monitor` | `targets:write` + `targets:execute` | Create an `http`, `tcp`, `ping`, `dns`, `tls_cert`, `domain_expiry` or `heartbeat` monitor. See [How creation is guarded](#how-creation-is-guarded). |
 | `run_check_now` | `targets:execute` | Probe a monitor immediately and record the result. A `down` result may fire the org's normal alerts. A heartbeat monitor has nothing to probe and is refused as `invalid_argument`, not as something to retry. |
 | `update_monitor` | `targets:write` | Change how loudly a monitor is watched: `interval_secs`, `alert_confirmations`, `notify_recovery`, `renotify_interval_secs`, `tags`, `group_name`, `region_policy`. Nothing else — see [What it will not change](#what-update-monitor-will-not-change). `tags` replaces the whole list and takes at most 50, each at most 50 characters, with no blank and no invisible characters. The confirmation names the monitor and states old → new for every field, and a request whose values already match writes nothing and never prompts. If the monitor moves between the prompt and the approval, the write is refused as `conflict` instead of landing on top of the newer value. Idempotent. |
 | `pause_monitor` | `targets:write` | Stop a monitor's checks until resumed. Idempotent. |
@@ -58,6 +60,24 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 | `post_incident_update` | `incidents:write` | Post the customer-facing update to the incident's status-page timeline: a `message` plus optional `phase` (`investigating` / `identified` / `monitoring` / `resolved` / `postmortem`, default `investigating`). Requires a published incident. |
 
 Incidents start internal, so the customer-facing sequence is `publish_incident` then `post_incident_update`; posting to an unpublished incident is refused rather than written somewhere nobody reads.
+
+### How creation is guarded
+
+`create_monitor` is the one tool that brings something into existence, so it carries three constraints the others don't need.
+
+**The check runs before anything is saved.** The trial result — passed, HTTP status, duration, or the error text — is part of the confirmation the operator reads, so a check that asserts the wrong thing is visible while it can still be declined rather than after it starts paging. That is also why the tool needs `targets:execute` alongside `targets:write`: it dispatches a real probe at a caller-supplied address, and that probe is metered against the same `test_now` budget as `POST /targets/test`. If no agent is serving the region, creation is refused as `probe_unavailable` rather than persisted untried, since a monitor nothing can check is not worth having.
+
+Two consequences worth stating plainly. The probe necessarily happens **before** the human answers, so declining the prompt still means one request was made to that address — the confirmation decides whether the monitor is created, not whether the check was tried. And a client that never negotiated elicitation is refused *before* the probe, so it cannot use this tool to reach an address it chooses without ever being able to create anything.
+
+**The confirmation lists every setting**, not just the address: interval, tags, group, how many failing checks it alerts after, whether recovery is announced, the reminder cadence, and the multi-region quorum. A field the prompt omitted would be approved unread.
+
+**Credentials cannot be set here.** No request headers, no request body, no basic auth, no bearer token. A custom `Authorization` or `X-Api-Key` header is a literal secret, and a tool that accepted one would carry it through a chat log. Browser flows are excluded for the same reason: their fill values are withheld from every other MCP tool. Add both in the app, on a monitor that already exists.
+
+**A new monitor is bound to no notification channels**, so it alerts nobody until someone binds one. `list_notification_channels` names them; binding is done in the app.
+
+The interval defaults to where the app's own picker opens a monitor of that kind, held up to the plan's floor — not to the hard minimum, which is legal but would probe a certificate twelve times more often than any other front door does. For a heartbeat it is capped at `period + grace`, since a tick coarser than the window could never judge it.
+
+A monitor created here gets the same region set, heartbeat ping row and immediate first check that `POST /targets` gives it, because both doors go through one creation path. Without that a heartbeat would have no ping URL to call, and a multi-region plan would quietly get single-region monitors.
 
 ### What `update_monitor` will not change
 
@@ -275,6 +295,8 @@ Once connected, drive it in natural language — the client picks the tool:
 - "Pause the staging monitor." → `pause_monitor` (asks you to confirm)
 - "Checkout is flapping — make it wait for three failures before paging." → `update_monitor(alert_confirmations=3)` (asks you to confirm, showing 2 → 3)
 - "Stop paging until two regions agree it's down." → `update_monitor(region_policy={mode:"count",count:2})` (asks you to confirm)
+- "Watch https://shop.example.com and page me if it stops returning 200." → `create_monitor` (runs the check once, shows you the result, asks you to confirm)
+- "Set up monitors for the endpoints in this repo." → the model reads the project, then calls `create_monitor` per endpoint, each with its own trial run and confirmation
 
 ## Security model
 

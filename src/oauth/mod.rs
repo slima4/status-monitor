@@ -55,6 +55,9 @@ const GRANTABLE_SCOPES: &[Scope] = &[
     Scope::TargetsRead,
     Scope::StatusPageRead,
     Scope::IncidentsRead,
+    // Not in the defaults: a connector that never touches alerting should not
+    // be handed the channel inventory.
+    Scope::ChannelsRead,
     Scope::TargetsWrite,
     Scope::TargetsExecute,
     Scope::IncidentsWrite,

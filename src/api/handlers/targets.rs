@@ -190,48 +190,21 @@ pub async fn create(
     Redacted<Target>,
 )> {
     let plan = state.quotas.limit_for_org(org).await?;
-    let guard = ssrf_guard(&state);
     canonicalize_check(&mut new.check)?;
     gate_flow(&new.check, &plan)?;
-    validate_new_target(&mut new, &guard, i64::from(plan.min_check_interval_secs))?;
-    let available = state.target_store.available_regions().await?;
-    validate_region_policy(new.region_policy, available.len())?;
+    vet_new_target(
+        &state,
+        org,
+        &mut new,
+        i64::from(plan.min_check_interval_secs),
+    )
+    .await?;
     verify_alert_channels(&state, org, &new.alerts).await?;
     validate_owner_is_member(&state, org, new.owner_user_id).await?;
-    check_abuse(&state, org, &new.check)?;
-    validate_variable_refs(&state, org, &new.check).await?;
-    // Friendly pre-check; the store INSERT enforces the same cap atomically.
-    state.quotas.check_can_create_targets(org, None, 1).await?;
     if matches!(&new.check, CheckSpec::Flow(_)) {
         state.quotas.check_can_create_flow(org, None, 1).await?;
     }
-    let default_region = state.cfg.scheduler.effective_default_region().to_string();
-    let available = flow_restrict_regions(&state, &new.check, available).await?;
-    let regions = default_region_set(available, plan.max_regions, &default_region);
-    ensure_flow_regions_covered(&state, &new.check, &regions).await?;
-    // None → the store applies the column default (Majority).
-    let t = state
-        .target_store
-        .create(
-            org,
-            new,
-            source,
-            i64::from(plan.max_targets),
-            i64::from(plan.max_flow_checks),
-        )
-        .await?;
-    if t.check.is_passive() {
-        ensure_heartbeat(&state, org, t.id).await?;
-    }
-    // The store seeds only the default region; widen to the full set. Passive
-    // kinds have no probe region, so skip the seed.
-    if regions.len() > 1 && !t.check.is_passive() {
-        state
-            .target_store
-            .set_target_regions(org, t.id, &regions)
-            .await?;
-    }
-    dispatch_first_check(&state, org, &t, &regions).await;
+    let t = create_target(&state, org, new, source, &plan).await?;
     // UUID hex is always ASCII-safe → infallible.
     let location = HeaderValue::from_str(&format!("/api/v1/targets/{}", t.id))
         .expect("uuid produces ascii-only path");
@@ -1158,7 +1131,7 @@ async fn dispatch_first_check(state: &AppState, org: OrgId, target: &Target, reg
 /// Dispatch an interactive check to an agent holding `region` and wait for the
 /// result. 503 when no agent is holding the region (fast) or none answers in
 /// time.
-async fn run_ad_hoc(
+pub(crate) async fn run_ad_hoc(
     state: &AppState,
     org: OrgId,
     region: &str,
@@ -1569,9 +1542,66 @@ pub(crate) async fn validate_patch_interval(
     Ok(())
 }
 
-/// Per-resource validation, including the plan's check-interval floor. Both
-/// `create` and `bulk_create` run this per item, so the floor is enforced by
-/// construction on every path rather than in one handler (I4).
+/// What every front door checks before a monitor may exist, the plan's
+/// check-interval floor among them. Flow gating, alert bindings and owner stay
+/// with the REST handler, the only caller that accepts them.
+pub(crate) async fn vet_new_target(
+    state: &AppState,
+    org: OrgId,
+    new: &mut NewTarget,
+    min_interval_secs: i64,
+) -> Result<()> {
+    canonicalize_check(&mut new.check)?;
+    validate_new_target(new, &ssrf_guard(state), min_interval_secs)?;
+    let available = state.target_store.available_regions().await?;
+    validate_region_policy(new.region_policy, available.len())?;
+    check_abuse(state, org, &new.check)?;
+    validate_variable_refs(state, org, &new.check).await?;
+    state.quotas.check_can_create_targets(org, None, 1).await
+}
+
+/// Persist a vetted monitor and everything that has to exist alongside it: a
+/// heartbeat's ping row, the region set its plan pays for, and a first check so
+/// the monitor reports a state instead of sitting blank until its next tick.
+/// A caller that only writes the row leaves a monitor that cannot be pinged,
+/// probes from one region, and shows nothing.
+pub(crate) async fn create_target(
+    state: &AppState,
+    org: OrgId,
+    new: NewTarget,
+    source: crate::domain::WriteSource,
+    plan: &crate::domain::quota::Plan,
+) -> Result<Target> {
+    let default_region = state.cfg.scheduler.effective_default_region().to_string();
+    let available = state.target_store.available_regions().await?;
+    let available = flow_restrict_regions(state, &new.check, available).await?;
+    let regions = default_region_set(available, plan.max_regions, &default_region);
+    ensure_flow_regions_covered(state, &new.check, &regions).await?;
+    let t = state
+        .target_store
+        .create(
+            org,
+            new,
+            source,
+            i64::from(plan.max_targets),
+            i64::from(plan.max_flow_checks),
+        )
+        .await?;
+    if t.check.is_passive() {
+        ensure_heartbeat(state, org, t.id).await?;
+    }
+    // The store seeds only the default region; widen to the full set. Passive
+    // kinds have no probe region, so skip the seed.
+    if regions.len() > 1 && !t.check.is_passive() {
+        state
+            .target_store
+            .set_target_regions(org, t.id, &regions)
+            .await?;
+    }
+    dispatch_first_check(state, org, &t, &regions).await;
+    Ok(t)
+}
+
 fn validate_new_target(
     new: &mut NewTarget,
     guard: &SsrfGuard,

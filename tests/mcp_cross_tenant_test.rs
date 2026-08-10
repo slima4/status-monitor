@@ -448,6 +448,63 @@ async fn an_uneditable_field_is_refused_rather_than_ignored() {
     assert_eq!(unchanged.interval, Duration::from_secs(30));
 }
 
+/// Creation is vetted and then tried before it can persist, so both gates run
+/// ahead of the confirmation and none of them leaves a monitor behind.
+#[tokio::test]
+#[ignore]
+async fn a_monitor_is_not_created_when_the_check_is_refused_or_cannot_be_tried() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, _) = connect(&pool).await;
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let before = store.list(org_a, Default::default()).await.unwrap().len();
+
+    for (case, args) in [
+        (
+            "a url that does not parse",
+            json!({ "name": "bad url", "check": { "type": "http", "url": "not-a-url" } }),
+        ),
+        (
+            "credentials in the url",
+            json!({ "name": "creds", "check": { "type": "http", "url": "https://u:p@example.com/" } }),
+        ),
+        (
+            "a second count too wide for the column",
+            json!({ "name": "wide", "check": { "type": "http", "url": "https://example.com/" }, "interval_secs": 4_294_967_356u64 }),
+        ),
+    ] {
+        let refused = mcp.call("create_monitor", args).await;
+        assert_eq!(
+            error_code(&refused).as_deref(),
+            Some("invalid_argument"),
+            "{case}: {refused}"
+        );
+    }
+
+    // This harness never negotiated elicitation. The refusal must come from
+    // that, before any probe is dispatched at a caller-supplied address —
+    // asserting `probe_unavailable` here would pin the suite to whether a live
+    // agent happens to serve the region.
+    let untried = mcp
+        .call(
+            "create_monitor",
+            json!({ "name": "shop", "check": { "type": "http", "url": "https://example.com/" } }),
+        )
+        .await;
+    assert_eq!(
+        error_code(&untried).as_deref(),
+        Some("elicitation_unsupported"),
+        "{untried}"
+    );
+
+    assert_eq!(
+        store.list(org_a, Default::default()).await.unwrap().len(),
+        before,
+        "no refusal may leave a monitor behind"
+    );
+}
+
 /// The tag bounds hold at the MCP door, ahead of the confirmation gate.
 #[tokio::test]
 #[ignore]
