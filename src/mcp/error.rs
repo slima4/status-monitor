@@ -20,6 +20,8 @@ pub mod codes {
     pub const INSUFFICIENT_SCOPE: &str = "insufficient_scope";
     /// A write tool's confirmation prompt was declined or cancelled.
     pub const NOT_CONFIRMED: &str = "not_confirmed";
+    /// The client failed the elicitation round trip, so no human ever decided.
+    pub const CONFIRMATION_FAILED: &str = "confirmation_failed";
     /// The connected client cannot prompt for confirmation at all, so no write
     /// tool can run through it. Distinct from a human saying no.
     pub const ELICITATION_UNSUPPORTED: &str = "elicitation_unsupported";
@@ -44,6 +46,8 @@ pub struct McpToolError {
     pub message: String,
     /// Hint to the caller: would an identical retry plausibly succeed later?
     pub retryable: bool,
+    /// Refines `code` for the audit trail. Never sent to the caller.
+    pub detail: Option<&'static str>,
 }
 
 impl McpToolError {
@@ -52,6 +56,21 @@ impl McpToolError {
             code,
             message: message.into(),
             retryable,
+            detail: None,
+        }
+    }
+
+    pub fn with_detail(mut self, detail: &'static str) -> Self {
+        self.detail = Some(detail);
+        self
+    }
+
+    /// The code always leads, so one `LIKE 'not_confirmed%'` still spans rows
+    /// written before refusals carried a reason.
+    pub fn audit_detail(&self) -> String {
+        match self.detail {
+            Some(d) => format!("{}:{d}", self.code),
+            None => self.code.to_string(),
         }
     }
 

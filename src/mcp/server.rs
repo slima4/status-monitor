@@ -1298,20 +1298,26 @@ impl McpServer {
     ) -> Result<T, McpToolError> {
         let (outcome, detail) = match &result {
             Ok(_) => (Outcome::Success, None),
-            Err(e) => (outcome_for(e), Some(e.code)),
+            Err(e) => {
+                // A client that can't confirm can't write at all — worth seeing
+                // in the dashboards, not only in one caller's transcript.
+                if matches!(
+                    e.code,
+                    codes::ELICITATION_UNSUPPORTED | codes::CONFIRMATION_FAILED
+                ) {
+                    tracing::warn!(
+                        target: "mcp",
+                        org_id = %auth.org.0,
+                        token_id = %auth.token_id,
+                        tool,
+                        detail = e.audit_detail(),
+                        "mcp write refused: client could not confirm"
+                    );
+                }
+                (outcome_for(e), Some(e.audit_detail()))
+            }
         };
-        // A client that can't confirm can't write at all — worth seeing in the
-        // dashboards, not only in one caller's transcript.
-        if detail == Some(codes::ELICITATION_UNSUPPORTED) {
-            tracing::warn!(
-                target: "mcp",
-                org_id = %auth.org.0,
-                token_id = %auth.token_id,
-                tool,
-                "mcp write refused: client cannot elicit confirmation"
-            );
-        }
-        audit::record(pool, auth, tool, args_json, outcome, detail).await;
+        audit::record(pool, auth, tool, args_json, outcome, detail.as_deref()).await;
         result
     }
 

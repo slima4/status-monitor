@@ -872,7 +872,7 @@
           "f": "mcp",
           "t": "stores",
           "h": "perform write",
-          "d": "Decline, cancel, an unsupported client or an unparseable answer all fail closed with NOT_CONFIRMED."
+          "d": "Everything but an explicit approval fails closed. A human decision records NOT_CONFIRMED; a client that cannot ask or never answers records its own code."
         },
         {
           "f": "mcp",
