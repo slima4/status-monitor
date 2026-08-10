@@ -268,6 +268,10 @@ pub struct MonitorDetail {
     pub regions: Vec<String>,
     pub enabled: bool,
     pub interval_secs: u64,
+    /// Channel ids this monitor alerts, for the read half of
+    /// `update_monitor(channel_ids)`, which replaces the whole set. Empty means
+    /// it alerts nobody. `list_notification_channels` puts names to these.
+    pub alert_channel_ids: Vec<String>,
     pub group_name: Option<String>,
     /// Operator tags. Untrusted data.
     pub tags: Vec<String>,
@@ -542,6 +546,10 @@ pub struct CreateMonitorArgs {
     pub renotify_interval_secs: Option<u32>,
     /// Detection quorum across probe regions.
     pub region_policy: Option<RegionPolicyArg>,
+    /// Channel ids from `list_notification_channels` to alert. Omit to create a
+    /// monitor that alerts nobody. The channels themselves are set up in the
+    /// app, since they hold the tokens and addresses.
+    pub channel_ids: Option<Vec<String>>,
 }
 
 /// The trial run a monitor was created from. Carries no id: it happened before
@@ -568,9 +576,9 @@ pub struct MonitorCreated {
     /// The trial run's outcome, which the operator saw before approving. Absent
     /// for a heartbeat, which has nothing to probe.
     pub probe: Option<ProbeOutcome>,
-    /// No channels are bound, so this monitor alerts nobody yet. Bind them in
-    /// the app.
-    pub alerts_bound: bool,
+    /// The channels this monitor will alert, by name, or `nobody` when none is
+    /// bound. A channel that cannot deliver says so here.
+    pub alerts: String,
 }
 
 /// One notification channel, named well enough to bind a monitor to it. The
@@ -960,8 +968,8 @@ pub struct RegionPolicyArg {
 
 /// `update_monitor` arguments. Every field except `id` is optional; omit what
 /// should stay as it is. Name, address or URL, assertions, expected status,
-/// headers, body, probe regions, alert channels and owner are not editable
-/// here, and passing one is an error rather than a silent no-op.
+/// headers, body, probe regions and owner are not editable here, and passing
+/// one is an error rather than a silent no-op.
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct UpdateMonitorArgs {
@@ -986,6 +994,10 @@ pub struct UpdateMonitorArgs {
     pub group_name: Option<Option<String>>,
     /// Detection quorum across probe regions.
     pub region_policy: Option<RegionPolicyArg>,
+    /// Replaces the whole set of alerted channels, by id from
+    /// `list_notification_channels`. Read the monitor first: a channel left out
+    /// of this list stops being alerted. An empty list silences the monitor.
+    pub channel_ids: Option<Vec<String>>,
 }
 
 /// One field an update actually moved.

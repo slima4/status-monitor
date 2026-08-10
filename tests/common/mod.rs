@@ -28,8 +28,8 @@ use uptimepage::storage::{
     DomainExpiryStateStore, InMemoryDomainExpiryStateStore, InMemoryIncidentNarrationStore,
     InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink,
     InMemoryStatusPageStore, InMemoryTargetStore, IncidentNarrationStore, MaintenanceStore,
-    NotificationChannelStore, PgIncidentNarrationStore, PgStatusPageStore, PostgresTargetStore,
-    ResultSink, ResultsStore,
+    NotificationChannelStore, PgIncidentNarrationStore, PgNotificationChannelStore,
+    PgStatusPageStore, PostgresTargetStore, ResultSink, ResultsStore,
 };
 use uptimepage::worker::domain_expiry::{DEFAULT_MAX_STALENESS, DomainExpiryRuntime};
 use uptimepage::worker::host_throttle::HostThrottle;
@@ -470,8 +470,11 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
     let maintenance_store: Arc<dyn MaintenanceStore> = Arc::new(InMemoryMaintenanceStore::new());
     let incident_narration_store: Arc<dyn IncidentNarrationStore> =
         Arc::new(PgIncidentNarrationStore::new(pool.clone()));
+    // Postgres for the same reason as the incident store: the in-memory
+    // stand-in answers by id alone, so a channel tenancy test against it proves
+    // nothing.
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
-        Arc::new(InMemoryNotificationChannelStore::new());
+        Arc::new(PgNotificationChannelStore::new(pool.clone(), None));
     let status_page_store = Arc::new(PgStatusPageStore::new(pool.clone()));
     let state = AppState::new(
         cfg,

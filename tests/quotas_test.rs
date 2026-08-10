@@ -1557,10 +1557,23 @@ fn every_quota_create_path_is_gated() {
     let root = env!("CARGO_MANIFEST_DIR");
     // (relative path, fn signature prefix, required gate token)
     let registry: &[(&str, &str, &str)] = &[
+        // `create` and MCP's `create_monitor` both reach the cap through
+        // `vet_new_target`, so the gate is asserted where it now lives; the
+        // handler is asserted to still go through it.
         (
             "src/api/handlers/targets.rs",
             "pub async fn create(",
+            "vet_new_target",
+        ),
+        (
+            "src/api/handlers/targets.rs",
+            "pub(crate) async fn vet_new_target(",
             "check_can_create_targets",
+        ),
+        (
+            "src/mcp/server.rs",
+            "async fn create_monitor_inner(",
+            "vet_new_target",
         ),
         (
             "src/api/handlers/targets.rs",

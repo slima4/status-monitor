@@ -25,10 +25,12 @@ use crate::app::AppState;
 use crate::auth::scope::Scope;
 use crate::domain::IncidentVisibility;
 use crate::domain::incident::{Incident, NewIncidentUpdate, OpsIncident};
+use crate::domain::notification_channel::NotificationChannel;
 use crate::domain::public::IncidentStatusPhase;
 use crate::domain::result::CheckResult;
 use crate::domain::target::{NewTarget, RegionIncidentPolicy, Target, TargetUpdate};
 use crate::domain::text::is_invisible;
+use crate::domain::{AlertBinding, TargetAlerts};
 use crate::domain::{
     CheckSpec, ExpectedStatus, FlowStep, WriteSource, confirmed_downtime_secs,
     humanize_check_error, uptime_pct_from_downtime,
@@ -382,6 +384,11 @@ impl McpServer {
             },
             enabled: target.enabled,
             interval_secs: target.interval.as_secs(),
+            alert_channel_ids: target
+                .alerts
+                .iter()
+                .map(|b| b.channel_id.to_string())
+                .collect(),
             group_name: target.group_name.as_deref().map(sanitize_data),
             tags: target.tags.iter().map(|t| sanitize_data(t)).collect(),
             state: last
@@ -1030,7 +1037,7 @@ impl McpServer {
     /// Create a monitor. The check runs once first and its result is shown in
     /// the confirmation, so a misconfigured check is visible before it exists.
     #[tool(
-        description = "Create a monitor for an http, tcp, ping, dns, tls_cert, domain_expiry or heartbeat check. The check is run once before anything is saved and the result is shown to the user with the monitor's name, address and interval; nothing is created unless they approve. Request headers, request bodies and credentials cannot be set here, and browser flows cannot be created here — add those in the app. The new monitor is bound to no notification channels, so it alerts nobody until someone binds one. Not read-only.",
+        description = "Create a monitor for an http, tcp, ping, dns, tls_cert, domain_expiry or heartbeat check. The check is run once before anything is saved and the result is shown to the user along with every setting it would apply; nothing is created unless they approve. Pass channel_ids from list_notification_channels to have it alert those channels (this needs the channels:read scope); without them the monitor alerts nobody. Request headers, request bodies and credentials cannot be set here, a URL carrying a username or password is refused, and browser flows cannot be created here — add those in the app. Not read-only.",
         annotations(read_only_hint = false, idempotent_hint = false)
     )]
     async fn create_monitor(
@@ -1047,6 +1054,8 @@ impl McpServer {
                 "name": created.name,
                 "address": created.address,
                 "interval_secs": created.interval_secs,
+                // Who this pages is the part an incident review asks about.
+                "alerts": created.alerts,
             }),
             Err(_) => json!({ "name": args.name }),
         };
@@ -1055,9 +1064,9 @@ impl McpServer {
     }
 
     /// Retune an existing monitor's alerting and cadence. Read it first with
-    /// `get_monitor`: tags are replaced whole, not merged.
+    /// `get_monitor`: tags and channel bindings are replaced whole, not merged.
     #[tool(
-        description = "Change how loudly a monitor is watched: check interval, alert confirmations, recovery notices, reminder interval, tags, group, and the multi-region detection quorum. It cannot change what the check watches — name, address, assertions, expected status, headers, body, probe regions, alert channels and owner are refused. A monitor managed by Terraform is refused outright. Shows the old and new value of every field before it runs, and requires confirmation. Not read-only.",
+        description = "Change how loudly a monitor is watched: check interval, alert confirmations, recovery notices, reminder interval, tags, group, the multi-region detection quorum, and which notification channels it alerts (channel_ids replaces the whole set, and needs the channels:read scope). It cannot change what the check watches — name, address, assertions, expected status, headers, body, probe regions and owner are refused. A monitor managed by Terraform is refused outright. Shows the old and new value of every field before it runs, and requires confirmation. Not read-only.",
         annotations(read_only_hint = false, idempotent_hint = true)
     )]
     async fn update_monitor(
@@ -1441,13 +1450,26 @@ impl McpServer {
             fits_i32(u64::from(n), "renotify_interval_secs")?;
         }
 
+        // An empty list binds nothing, exactly like omitting the field, so it
+        // does not demand the scope or spend the query.
+        let wants_channels = args
+            .channel_ids
+            .as_deref()
+            .is_some_and(|ids| !ids.is_empty());
+        let channels = self.channels_for_binding(auth, wants_channels).await?;
+        let alerts = match args.channel_ids.as_deref() {
+            Some(ids) if wants_channels => resolve_bindings(ids, &channels)?,
+            _ => TargetAlerts::default(),
+        };
+        let channel_summary = channel_names(&alerts, &channels);
+
         let mut new = NewTarget {
             name: name.to_string(),
             check,
             interval: std::time::Duration::from_secs(interval_secs),
             enabled: true,
             tags: args.tags.clone().unwrap_or_default(),
-            alerts: Default::default(),
+            alerts,
             region_policy: args
                 .region_policy
                 .as_ref()
@@ -1496,10 +1518,10 @@ impl McpServer {
         require_confirmation(
             ctx,
             format!(
-                "Create monitor \"{}\"?\n\n{}\n{}\n\nIt will alert nobody until a notification channel is bound to it.",
+                "Create monitor \"{}\"?\n\n{}\n{}",
                 sanitize_prompt(&new.name),
                 sanitize_prompt(&address),
-                create_prompt_lines(&new, probe.as_ref()).join("\n"),
+                create_prompt_lines(&new, probe.as_ref(), &channel_summary).join("\n"),
             ),
         )
         .await?;
@@ -1514,8 +1536,29 @@ impl McpServer {
             address: sanitize_data(&address),
             interval_secs: created.interval.as_secs(),
             probe,
-            alerts_bound: false,
+            alerts: channel_summary,
         }))
+    }
+
+    /// The org's channel inventory, read once so every diff and prompt names
+    /// the same rows. Empty when the caller is not touching bindings.
+    async fn channels_for_binding(
+        &self,
+        auth: &McpAuth,
+        binding: bool,
+    ) -> Result<Vec<NotificationChannel>, McpToolError> {
+        if !binding {
+            return Ok(Vec::new());
+        }
+        // Naming and validating a channel is reading the inventory, so the
+        // caller needs the scope that reading it needs. Checked before any
+        // budget is spent on a call that cannot succeed without it.
+        auth.require(Scope::ChannelsRead)?;
+        self.state
+            .notification_channel_store
+            .list(auth.org)
+            .await
+            .map_err(|e| McpToolError::internal(format!("list channels: {e}")))
     }
 
     /// Run the check once, unsaved, so the confirmation can show what it does.
@@ -1564,7 +1607,14 @@ impl McpServer {
         let id = parse_uuid(&args.id, "monitor id")?;
         let target = self.load_writable_target(auth.org, id).await?;
 
-        let (update, changes) = build_monitor_patch(args, &target)?;
+        // Read once and handed to every diff: the patch is rebuilt after the
+        // confirmation and the two must agree field for field, so channels
+        // cannot be diffed outside it.
+        let channels = self
+            .channels_for_binding(auth, args.channel_ids.is_some())
+            .await?;
+
+        let (update, changes) = build_monitor_patch(args, &target, &channels)?;
         if changes.is_empty() {
             return Ok(Json(MonitorUpdateResult {
                 id: id.to_string(),
@@ -1613,7 +1663,7 @@ impl McpServer {
         // The monitor can move while a human reads the prompt, and the approval
         // describes the diff as it stood then.
         let current = self.load_writable_target(auth.org, id).await?;
-        let (update, still) = build_monitor_patch(args, &current)?;
+        let (update, still) = build_monitor_patch(args, &current, &channels)?;
         if still != changes {
             return Err(McpToolError::new(
                 codes::CONFLICT,
@@ -1989,6 +2039,7 @@ fn index_by_target(rollup: Vec<DashboardMetrics>) -> HashMap<Uuid, DashboardMetr
 fn build_monitor_patch(
     args: &UpdateMonitorArgs,
     target: &Target,
+    channels: &[NotificationChannel],
 ) -> Result<(TargetUpdate, Vec<FieldChange>), McpToolError> {
     let mut update = TargetUpdate::default();
     let mut changes = Vec::new();
@@ -2080,7 +2131,79 @@ fn build_monitor_patch(
             update.region_policy = Some(policy);
         }
     }
+    if let Some(ids) = args.channel_ids.as_ref() {
+        let alerts = resolve_bindings(ids, channels)?;
+        if alerts != target.alerts {
+            moved(
+                "alerts",
+                channel_names(&target.alerts, channels),
+                channel_names(&alerts, channels),
+            );
+            update.alerts = Some(alerts);
+        }
+    }
     Ok((update, changes))
+}
+
+/// Channel ids to bindings, refusing anything the org does not own. A duplicate
+/// is an error rather than a silent collapse, matching the REST validator.
+fn resolve_bindings(
+    ids: &[String],
+    channels: &[NotificationChannel],
+) -> Result<TargetAlerts, McpToolError> {
+    let mut bindings: Vec<AlertBinding> = Vec::with_capacity(ids.len());
+    for id in ids {
+        let channel_id = parse_uuid(id, "channel id")?;
+        // Absent from the org's own inventory covers both "does not exist" and
+        // "belongs to someone else".
+        if !channels.iter().any(|c| c.id == channel_id) {
+            return Err(McpToolError::invalid_argument(format!(
+                "no notification channel {channel_id} in this organization"
+            )));
+        }
+        if bindings.iter().any(|b| b.channel_id == channel_id) {
+            return Err(McpToolError::invalid_argument(format!(
+                "notification channel {channel_id} is listed twice"
+            )));
+        }
+        bindings.push(AlertBinding { channel_id });
+    }
+    Ok(TargetAlerts(bindings))
+}
+
+/// Bindings as the names a human approves, flagging any that deliver nothing.
+/// A binding whose channel is gone is named as deleted rather than dropped from
+/// the line, which would read as one fewer channel losing its alerts.
+fn channel_names(alerts: &TargetAlerts, channels: &[NotificationChannel]) -> String {
+    if alerts.is_empty() {
+        return "nobody".to_string();
+    }
+    alerts
+        .iter()
+        .map(|b| match channels.iter().find(|c| c.id == b.channel_id) {
+            Some(c) => match undeliverable_reason(c) {
+                Some(why) => format!("{} ({why})", sanitize_data(&c.name)),
+                None => sanitize_data(&c.name),
+            },
+            None => format!("a deleted channel ({})", b.channel_id),
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// Why a channel would deliver nothing if a monitor were bound to it. One
+/// definition, so a new undeliverable state cannot be added to the listing and
+/// forgotten in the confirmation.
+fn undeliverable_reason(channel: &NotificationChannel) -> Option<&'static str> {
+    if !channel.enabled {
+        return Some("disabled, delivers nothing");
+    }
+    if channel.kind == crate::domain::notification_channel::ChannelKind::Email
+        && channel.verified_at.is_none()
+    {
+        return Some("address never verified, delivers nothing");
+    }
+    None
 }
 
 /// Origin and path only: userinfo, query and fragment can each carry a token.
@@ -2103,6 +2226,7 @@ fn requested_fields(args: &UpdateMonitorArgs) -> Vec<&'static str> {
         ("tags", args.tags.is_some()),
         ("group_name", args.group_name.is_some()),
         ("region_policy", args.region_policy.is_some()),
+        ("channel_ids", args.channel_ids.is_some()),
     ]
     .into_iter()
     .filter_map(|(name, sent)| sent.then_some(name))
@@ -2165,6 +2289,7 @@ fn field_label(field: &str) -> &str {
         "notify_recovery" => "announce recovery",
         "renotify_interval_secs" => "reminder interval (seconds)",
         "group_name" => "group",
+        "alerts" => "notification channels",
         "region_policy" => "opens an incident on",
         other => other,
     }
@@ -2172,7 +2297,11 @@ fn field_label(field: &str) -> &str {
 
 /// Every setting the monitor would be created with. What the prompt leaves out
 /// is approved unread, so nothing the caller chose is omitted here.
-fn create_prompt_lines(new: &NewTarget, probe: Option<&ProbeOutcome>) -> Vec<String> {
+fn create_prompt_lines(
+    new: &NewTarget,
+    probe: Option<&ProbeOutcome>,
+    channel_summary: &str,
+) -> Vec<String> {
     let mut lines = vec![format!("checked every {}s", new.interval.as_secs())];
     lines.push(match probe {
         Some(p) => format!("trial run: {}", sanitize_prompt(&probe_line(p))),
@@ -2201,6 +2330,14 @@ fn create_prompt_lines(new: &NewTarget, probe: Option<&ProbeOutcome>) -> Vec<Str
             region_policy_str(policy)
         ));
     }
+    lines.push(if new.alerts.is_empty() {
+        "notification channels: none, so it alerts nobody until one is bound".to_string()
+    } else {
+        format!(
+            "notification channels: {}",
+            sanitize_prompt(channel_summary)
+        )
+    });
     lines
 }
 
@@ -3287,6 +3424,24 @@ mod tests {
         assert!(!serde_json::to_string(&config).unwrap().contains("token"));
     }
 
+    fn test_channel(id: Uuid, name: &str) -> NotificationChannel {
+        use crate::domain::notification_channel::{ChannelConfig, ChannelKind, SlackConfig};
+        NotificationChannel {
+            id,
+            name: name.to_string(),
+            kind: ChannelKind::Slack,
+            config: ChannelConfig::Slack(SlackConfig {
+                webhook_url: "https://hooks.slack.example/T/B/x".into(),
+            }),
+            enabled: true,
+            disabled_reason: None,
+            verified_at: None,
+            write_source: WriteSource::Ui,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
     fn stored_monitor() -> Target {
         Target {
             id: Uuid::nil(),
@@ -3318,6 +3473,7 @@ mod tests {
             tags: None,
             group_name: None,
             region_policy: None,
+            channel_ids: None,
         }
     }
 
@@ -3332,7 +3488,7 @@ mod tests {
             }),
             ..patch_args()
         };
-        let (update, changes) = build_monitor_patch(&args, &stored_monitor()).unwrap();
+        let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
         assert_eq!(update.interval, Some(std::time::Duration::from_secs(300)));
         assert_eq!(update.alert_confirmations, Some(3));
         assert_eq!(update.region_policy, Some(RegionIncidentPolicy::Count(2)));
@@ -3348,6 +3504,35 @@ mod tests {
         );
     }
 
+    /// The write path builds the patch twice, once for the prompt and once
+    /// after approval, and refuses as `conflict` if they differ. A field diffed
+    /// outside this function makes that guard fire on an unchanged monitor.
+    #[test]
+    fn the_patch_is_the_same_both_times_it_is_built() {
+        let channel = Uuid::now_v7();
+        let channels = vec![test_channel(channel, "ops-slack")];
+        let args = UpdateMonitorArgs {
+            interval_secs: Some(300),
+            tags: Some(vec!["prod".into()]),
+            channel_ids: Some(vec![channel.to_string()]),
+            ..patch_args()
+        };
+        let target = stored_monitor();
+        let (_, first) = build_monitor_patch(&args, &target, &channels).unwrap();
+        let (update, second) = build_monitor_patch(&args, &target, &channels).unwrap();
+        assert_eq!(first, second);
+        assert!(
+            first.iter().any(|c| c.field == "alerts"),
+            "channels must be part of the diff, not beside it: {first:?}"
+        );
+        assert_eq!(
+            update.alerts,
+            Some(TargetAlerts(vec![AlertBinding {
+                channel_id: channel
+            }]))
+        );
+    }
+
     #[test]
     fn a_value_that_already_matches_is_not_a_change() {
         let args = UpdateMonitorArgs {
@@ -3360,7 +3545,7 @@ mod tests {
             }),
             ..patch_args()
         };
-        let (update, changes) = build_monitor_patch(&args, &stored_monitor()).unwrap();
+        let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
         assert!(changes.is_empty(), "{changes:?}");
         assert!(update.interval.is_none());
         assert!(update.tags.is_none());
@@ -3372,7 +3557,7 @@ mod tests {
             tags: Some(vec!["prod".into(), "prod".into()]),
             ..patch_args()
         };
-        let (update, changes) = build_monitor_patch(&args, &stored_monitor()).unwrap();
+        let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
         assert_eq!(update.tags, Some(vec!["prod".to_string()]));
         assert_eq!(changes[0].from, "prod, payments");
         assert_eq!(changes[0].to, "prod");
@@ -3383,7 +3568,7 @@ mod tests {
             tags: Some(vec!["prod".into(), "  ".into()]),
             ..patch_args()
         };
-        let err = build_monitor_patch(&blank, &stored_monitor()).unwrap_err();
+        let err = build_monitor_patch(&blank, &stored_monitor(), &[]).unwrap_err();
         assert_eq!(err.code, codes::INVALID_ARGUMENT);
     }
 
@@ -3393,7 +3578,7 @@ mod tests {
             group_name: Some(None),
             ..patch_args()
         };
-        let (update, changes) = build_monitor_patch(&cleared, &stored_monitor()).unwrap();
+        let (update, changes) = build_monitor_patch(&cleared, &stored_monitor(), &[]).unwrap();
         assert_eq!(update.group_name, Some(None));
         assert_eq!(
             (changes[0].from.as_str(), changes[0].to.as_str()),
@@ -3404,7 +3589,7 @@ mod tests {
             group_name: Some(Some("   ".into())),
             ..patch_args()
         };
-        let err = build_monitor_patch(&blank, &stored_monitor()).unwrap_err();
+        let err = build_monitor_patch(&blank, &stored_monitor(), &[]).unwrap_err();
         assert_eq!(err.code, codes::INVALID_ARGUMENT);
     }
 
@@ -3415,23 +3600,23 @@ mod tests {
             interval_secs: Some(4_294_967_356),
             ..patch_args()
         };
-        let err = build_monitor_patch(&args, &stored_monitor()).unwrap_err();
+        let err = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap_err();
         assert_eq!(err.code, codes::INVALID_ARGUMENT);
         let args = UpdateMonitorArgs {
             renotify_interval_secs: Some(u32::MAX),
             ..patch_args()
         };
-        assert!(build_monitor_patch(&args, &stored_monitor()).is_err());
+        assert!(build_monitor_patch(&args, &stored_monitor(), &[]).is_err());
         let args = UpdateMonitorArgs {
             alert_confirmations: Some(u32::MAX),
             ..patch_args()
         };
-        assert!(build_monitor_patch(&args, &stored_monitor()).is_err());
+        assert!(build_monitor_patch(&args, &stored_monitor(), &[]).is_err());
         let args = UpdateMonitorArgs {
             interval_secs: Some(86_400),
             ..patch_args()
         };
-        assert!(build_monitor_patch(&args, &stored_monitor()).is_ok());
+        assert!(build_monitor_patch(&args, &stored_monitor(), &[]).is_ok());
     }
 
     #[test]
@@ -3542,7 +3727,11 @@ mod tests {
             group_name: Some("API".into()),
             owner_user_id: None,
         };
-        let lines = create_prompt_lines(&new, None).join("\n");
+        new.alerts = TargetAlerts(vec![AlertBinding {
+            channel_id: Uuid::nil(),
+        }]);
+        let summary = "ops-slack, pager (disabled, delivers nothing)";
+        let lines = create_prompt_lines(&new, None, summary).join("\n");
         for expected in [
             "checked every 300s",
             "tags: prod",
@@ -3551,6 +3740,7 @@ mod tests {
             "recovery is not announced",
             "no reminders",
             "2 regions down",
+            "notification channels: ops-slack, pager (disabled, delivers nothing)",
         ] {
             assert!(
                 lines.contains(expected),
@@ -3564,9 +3754,12 @@ mod tests {
         new.renotify_interval_secs = 3_600;
         new.tags.clear();
         new.group_name = None;
-        let lines = create_prompt_lines(&new, None).join("\n");
+        new.alerts = TargetAlerts::default();
+        let lines = create_prompt_lines(&new, None, "nobody").join("\n");
         assert!(lines.contains("reminds every 3600s"));
         assert!(!lines.contains("tags:"));
+        // Silence is the one state worth stating outright.
+        assert!(lines.contains("alerts nobody until one is bound"));
     }
 
     #[test]
@@ -3937,7 +4130,7 @@ mod tests {
             tags: Some(tags),
             ..patch_args()
         };
-        let (_, changes) = build_monitor_patch(&args, &stored_monitor()).unwrap();
+        let (_, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
         let shown = sanitize_prompt(&changes[0].to);
         assert!(shown.ends_with("... (truncated)"), "{shown}");
         assert_eq!(sanitize_prompt("short"), "short");
@@ -3949,7 +4142,7 @@ mod tests {
             tags: Some(vec!["prod\u{202e}drop everything".into()]),
             ..patch_args()
         };
-        let err = build_monitor_patch(&args, &stored_monitor()).unwrap_err();
+        let err = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap_err();
         assert_eq!(err.code, codes::INVALID_ARGUMENT);
 
         // A tag stored before the rule still gets scrubbed on its way back out.
@@ -3959,7 +4152,7 @@ mod tests {
             tags: Some(vec!["prod".into()]),
             ..patch_args()
         };
-        let (_, changes) = build_monitor_patch(&args, &target).unwrap();
+        let (_, changes) = build_monitor_patch(&args, &target, &[]).unwrap();
         assert_eq!(changes[0].from, "proddrop everything");
     }
 

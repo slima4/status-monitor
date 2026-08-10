@@ -153,6 +153,30 @@ async fn seed_tagged_monitor(pool: &PgPool, org: OrgId, tag: &str) {
         .expect("insert tagged target");
 }
 
+async fn seed_channel(pool: &PgPool, org: OrgId, name: &str) -> Uuid {
+    use uptimepage::domain::notification_channel::{
+        ChannelConfig, NewNotificationChannel, SlackConfig,
+    };
+    use uptimepage::storage::NotificationChannelStore;
+    uptimepage::storage::PgNotificationChannelStore::new(pool.clone(), None)
+        .create(
+            org,
+            NewNotificationChannel {
+                name: name.to_string(),
+                config: ChannelConfig::Slack(SlackConfig {
+                    webhook_url: "https://hooks.slack.example/T/B/x".into(),
+                }),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .expect("insert channel")
+        .id
+}
+
 /// Router with `/mcp` mounted, two orgs, and a connector bound to the first.
 async fn connect(pool: &PgPool) -> (Connector, OrgId, OrgId) {
     let app = build_saas_router_with_pg_cfg(pool.clone(), |cfg| {
@@ -503,6 +527,59 @@ async fn a_monitor_is_not_created_when_the_check_is_refused_or_cannot_be_tried()
         before,
         "no refusal may leave a monitor behind"
     );
+}
+
+/// A channel id is only bindable by the org that owns it, and a missing one is
+/// refused rather than silently dropped from the binding set.
+#[tokio::test]
+#[ignore]
+async fn a_channel_from_another_org_cannot_be_bound() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (mcp, org_a, org_b) = connect(&pool).await;
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let id = store
+        .create(org_a, secret_monitor(), WriteSource::Ui, i64::MAX, i64::MAX)
+        .await
+        .expect("insert target")
+        .id;
+    let b_channel = seed_channel(&pool, org_b, "b-slack").await;
+
+    let a_channel = seed_channel(&pool, org_a, "a-slack").await;
+
+    for (case, ids) in [
+        ("another org's channel", vec![b_channel]),
+        ("a channel that does not exist", vec![Uuid::now_v7()]),
+        ("the same channel twice", vec![a_channel, a_channel]),
+    ] {
+        let refused = mcp
+            .call("update_monitor", json!({ "id": id, "channel_ids": ids }))
+            .await;
+        assert_eq!(
+            error_code(&refused).as_deref(),
+            Some("invalid_argument"),
+            "{case}: {refused}"
+        );
+    }
+
+    // The org's own channel gets as far as the confirmation this client cannot
+    // answer. Without this the suite would pass on a binding that can never
+    // succeed, since every refusal above looks the same as a broken diff.
+    let asked = mcp
+        .call(
+            "update_monitor",
+            json!({ "id": id, "channel_ids": [a_channel] }),
+        )
+        .await;
+    assert_eq!(
+        error_code(&asked).as_deref(),
+        Some("elicitation_unsupported"),
+        "{asked}"
+    );
+
+    let unchanged = store.get(org_a, id).await.unwrap().expect("still there");
+    assert!(unchanged.alerts.is_empty(), "{:?}", unchanged.alerts);
 }
 
 /// The tag bounds hold at the MCP door, ahead of the confirmation gate.
