@@ -95,6 +95,33 @@ impl Matrix {
     }
 }
 
+/// One of the three "which of these is for you" cards above the table. The
+/// last card is always ours, so the template highlights by position rather
+/// than a flag every card has to carry.
+pub struct PickCard {
+    pub label: &'static str,
+    pub body: &'static str,
+}
+
+/// One pane of the hero config viewer. `lines` is authored one line per
+/// entry so the gutter can number them, and each carries `mk-conf__*` token
+/// spans rather than going through the Markdown highlighter, whose Nord
+/// palette is scoped to article and doc bodies.
+pub struct ConfigPane {
+    pub id: &'static str,
+    pub tab: &'static str,
+    pub cmd: &'static str,
+    pub tag: &'static str,
+    pub note: &'static str,
+    pub lines: &'static [&'static str],
+}
+
+/// `/vs/` and `/compare/` share the head-to-head layout; use-case landings
+/// keep the plain stacked one.
+fn is_comparison(path: &str) -> bool {
+    path.starts_with("/vs/") || path.starts_with("/compare/")
+}
+
 /// A use-case or comparison landing page. Comparison and use-case pages
 /// share one shape — the only difference is copy — so there is no kind
 /// discriminant to keep in lockstep.
@@ -781,38 +808,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/uptimerobot",
         created: "2026-06-16",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-11",
         title: "An UptimeRobot Alternative with Status Pages",
         eyebrow: "switching monitors",
         h1: "Looking for an UptimeRobot alternative?",
         meta_description: "Comparing uptime monitors? Uptimepage pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Free to start.",
         lede: "If you are comparing monitors, here is what Uptimepage gives you by default. Everything below is on the free tier, no card.",
-        features: &[
-            Feature {
-                label: "Check interval",
-                value: "every 60s",
-            },
-            Feature {
-                label: "Status pages",
-                value: "built in, branded",
-            },
-            Feature {
-                label: "Check types",
-                value: "HTTP, TCP, DNS, TLS, ping",
-            },
-            Feature {
-                label: "Alerts",
-                value: "Slack, Telegram, PagerDuty, SMS + more",
-            },
-            Feature {
-                label: "Data export",
-                value: "JSON, RSS, SVG badge",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "Monitoring and status page in one",
@@ -847,38 +849,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/statuspage",
         created: "2026-06-19",
-        lastmod: "2026-08-08",
+        lastmod: "2026-08-11",
         title: "Statuspage Alternative with Monitoring Built In",
         eyebrow: "switching status pages",
         h1: "A Statuspage alternative with monitoring built in",
         meta_description: "Uptimepage pairs a branded public status page with uptime monitoring in one product: 60s checks, email and webhook subscribers, incidents. Free to start.",
         lede: "Here the status page and the monitoring behind it are the same product. Flip any monitor public and customers get a branded page on your own subdomain, all of it on the free tier.",
-        features: &[
-            Feature {
-                label: "Status page",
-                value: "built in, branded subdomain",
-            },
-            Feature {
-                label: "Monitoring",
-                value: "included, every 60s",
-            },
-            Feature {
-                label: "Subscribers",
-                value: "email + webhook",
-            },
-            Feature {
-                label: "Incidents",
-                value: "auto-open + scheduled maintenance",
-            },
-            Feature {
-                label: "Public history",
-                value: "90 days",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "The page and the monitoring are one product",
@@ -913,38 +890,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/better-stack",
         created: "2026-06-19",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-11",
         title: "Better Uptime (Better Stack) Alternative",
         eyebrow: "comparing platforms",
         h1: "The Better Uptime (Better Stack) alternative you self-host",
         meta_description: "Better Uptime is now Better Stack. Want self-hosted monitoring and status pages you drive as code? Uptimepage is one AGPL binary with Terraform and MCP.",
         lede: "Better Uptime rebranded to Better Stack, and if it got too expensive or you want your data on your own servers, Uptimepage is a focused monitor and status page you run yourself. One binary, open source under AGPL, and everything you can click you can also declare in code. Start free on the hosted tier, no card.",
-        features: &[
-            Feature {
-                label: "Run it",
-                value: "hosted free, or self-host AGPL",
-            },
-            Feature {
-                label: "Deploy",
-                value: "one binary + docker compose up",
-            },
-            Feature {
-                label: "As code",
-                value: "Terraform provider + MCP",
-            },
-            Feature {
-                label: "Probes",
-                value: "multi-region, run your own",
-            },
-            Feature {
-                label: "Checks",
-                value: "HTTP, TCP, DNS, TLS, ping",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "Yours to run",
@@ -975,38 +927,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/oneuptime",
         created: "2026-06-19",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-11",
         title: "A OneUptime Alternative That’s Quick to Run",
         eyebrow: "comparing open source",
         h1: "A OneUptime alternative that’s quick to run",
         meta_description: "An open-source monitor and status page that’s quick to run: one binary plus Postgres and ClickHouse, Terraform and MCP, AGPL. Free on the hosted tier.",
         lede: "Uptimepage is open source and focused on two jobs done well: uptime monitoring and a public status page. One binary plus two databases, up with a single command, or skip hosting it and use the free tier. No card.",
-        features: &[
-            Feature {
-                label: "License",
-                value: "AGPL, self-host",
-            },
-            Feature {
-                label: "Stack",
-                value: "one binary + Postgres + ClickHouse",
-            },
-            Feature {
-                label: "Deploy",
-                value: "docker compose up",
-            },
-            Feature {
-                label: "As code",
-                value: "Terraform provider + MCP",
-            },
-            Feature {
-                label: "Status pages",
-                value: "built in, branded",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "Up in minutes",
@@ -1031,38 +958,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/uptime-kuma",
         created: "2026-06-20",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-11",
         title: "An Uptime Kuma Alternative You Run as Code",
         eyebrow: "comparing open source",
         h1: "An Uptime Kuma alternative you run as code",
         meta_description: "Open-source uptime monitoring and branded status pages, managed as code with Terraform, a REST API and MCP. Team roles and subscribers. Free to start, no card.",
         lede: "Uptimepage is open source and does two jobs well: uptime monitoring and a public status page. Manage all of it as code, give your team roles, and let customers subscribe to status updates. Run the single binary yourself or use the free hosted tier. No card.",
-        features: &[
-            Feature {
-                label: "License",
-                value: "AGPL, self-host",
-            },
-            Feature {
-                label: "Manage as code",
-                value: "Terraform + REST API + MCP",
-            },
-            Feature {
-                label: "Teams",
-                value: "organizations, roles, invites",
-            },
-            Feature {
-                label: "Status pages",
-                value: "branded, with subscribers",
-            },
-            Feature {
-                label: "Stack",
-                value: "one binary + Postgres + ClickHouse",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "Everything as code",
@@ -1134,38 +1036,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/pingdom",
         created: "2026-06-25",
-        lastmod: "2026-08-06",
+        lastmod: "2026-08-11",
         title: "Pingdom Alternative with Status Pages Built In",
         eyebrow: "switching monitors",
         h1: "A Pingdom alternative with status pages built in",
         meta_description: "A Pingdom alternative that pairs 60s HTTP, TCP, DNS and TLS checks with branded status pages and Slack, email and webhook alerts. Open source, free to start.",
         lede: "If you are looking for a Pingdom alternative, here is what Uptimepage gives you by default: the checks and a public status page are the same product, the source is open, and you can start free with no card.",
-        features: &[
-            Feature {
-                label: "Check interval",
-                value: "every 60s",
-            },
-            Feature {
-                label: "Status pages",
-                value: "built in, branded",
-            },
-            Feature {
-                label: "Check types",
-                value: "HTTP, TCP, DNS, TLS, ping",
-            },
-            Feature {
-                label: "Alerts",
-                value: "Slack, Telegram, PagerDuty, SMS + more",
-            },
-            Feature {
-                label: "Run it",
-                value: "hosted free, or self-host AGPL",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "Monitoring and status page in one",
@@ -1208,38 +1085,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/self-hosted-status-pages",
         created: "2026-07-01",
-        lastmod: "2026-08-08",
+        lastmod: "2026-08-11",
         title: "Uptimepage vs Upptime, Cachet & Statping",
         eyebrow: "comparing self-hosted",
         h1: "Uptimepage vs Upptime, Cachet and Statping",
         meta_description: "How Uptimepage compares to Upptime, Cachet and Statping in 2026: built-in monitoring, 60-second checks, status pages, subscribers and config-as-code.",
         lede: "Three popular self-hosted status tools, one honest table. Upptime and Statping run their own checks; Cachet is a status page that has only recently, and partially, added checks of its own. Here is where each fits, and where Uptimepage does both jobs in one product. Start free on the hosted tier or self-host under AGPL, no card.",
-        features: &[
-            Feature {
-                label: "Built-in checks",
-                value: "HTTP, TCP, DNS, TLS, ping",
-            },
-            Feature {
-                label: "Check interval",
-                value: "every 60s",
-            },
-            Feature {
-                label: "Status page",
-                value: "branded, subscribers",
-            },
-            Feature {
-                label: "As code",
-                value: "Terraform + REST + MCP",
-            },
-            Feature {
-                label: "Run it",
-                value: "hosted free, or self-host AGPL",
-            },
-            Feature {
-                label: "Price to start",
-                value: "free, no card",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "Upptime: monitoring inside your GitHub repo",
@@ -1290,38 +1142,13 @@ docker compose up -d"#,
     Landing {
         path: "/vs/self-hosted-monitoring",
         created: "2026-07-01",
-        lastmod: "2026-07-19",
+        lastmod: "2026-08-11",
         title: "Uptimepage vs the Self-Hosted Monitoring Tools",
         eyebrow: "comparing self-hosted",
         h1: "Uptimepage vs the self-hosted monitoring tools",
         meta_description: "How Uptimepage compares to Uptime Kuma, OpenStatus, OneUptime, Gatus and Kener in 2026: checks, status pages, multi-region probes and config-as-code.",
         lede: "The modern self-hosted crowd, compared honestly. Uptime Kuma and Gatus check the most protocols and run the lightest; OpenStatus and OneUptime match Uptimepage on config-as-code and multi-region; Kener has the prettiest status page. Uptimepage sits where monitoring, a real subscriber status page and Terraform, REST and MCP meet in one binary. Start free on the hosted tier or self-host under AGPL, no card.",
-        features: &[
-            Feature {
-                label: "Built-in checks",
-                value: "HTTP, TCP, DNS, TLS, ping, domain",
-            },
-            Feature {
-                label: "Check interval",
-                value: "every 60s",
-            },
-            Feature {
-                label: "Status page",
-                value: "branded, subscribers",
-            },
-            Feature {
-                label: "Probes",
-                value: "multi-region, run your own",
-            },
-            Feature {
-                label: "As code",
-                value: "Terraform + REST + MCP",
-            },
-            Feature {
-                label: "Run it",
-                value: "one binary, hosted or AGPL",
-            },
-        ],
+        features: &[],
         sections: &[
             Section {
                 heading: "Uptime Kuma: the broadest checks, the lightest footprint",
@@ -1338,10 +1165,6 @@ docker compose up -d"#,
             Section {
                 heading: "Kener: the polished status page",
                 body: "Kener is the best-looking status page of the group: separate light and dark palettes, custom CSS and footer HTML, twenty-four locales, embeddable widgets, four badge styles and custom RBAC roles. It checks real services too, including gRPC, SQL and heartbeats. The gaps are on the monitoring platform side: no multi-region probing, four alert channels (email, webhook, Slack, Discord), email-and-RSS subscribers only, a single tenant, and a hard Redis dependency. Uptimepage gives up a little status-page theming for multi-region probes, more alert channels and config-as-code.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage is not the very fastest interval or the widest protocol list here, and it is honest about that. What it does is put the two halves together: real HTTP, TCP, DNS, TLS-certificate, ping and domain-expiry monitoring, and a branded public status page with confirmed email and webhook subscribers, auto-opened incidents and scheduled maintenance. All of it is driven from code with a Terraform provider, a full REST API and an MCP server, isolated per organization with roles, and checked from probes you can run in any region. It runs as one binary with Postgres and ClickHouse, hosted for free or self-hosted under AGPL.",
             },
         ],
         code: None,
@@ -1384,7 +1207,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/openstatus-vs-uptime-kuma",
         created: "2026-07-05",
-        lastmod: "2026-07-05",
+        lastmod: "2026-08-11",
         title: "OpenStatus vs Uptime Kuma",
         eyebrow: "comparing self-hosted",
         h1: "OpenStatus vs Uptime Kuma: which fits how you work?",
@@ -1403,14 +1226,6 @@ docker compose up -d"#,
             Section {
                 heading: "Where OpenStatus is ahead",
                 body: "Teams and check locations. OpenStatus runs a hosted probe fleet across twenty-eight regions on three cloud providers, so you see your service the way users on other continents do, without running agents yourself. It has organizations with unlimited members on paid tiers, status pages that take email, webhook and Slack subscribers on top of RSS, and auto-resolving incident handling. Kuma is single-login with no roles, checks from wherever you installed it unless you reach for its Globalping monitor type, and its status pages offer an RSS feed rather than subscriber notifications.",
-            },
-            Section {
-                heading: "The honest caveats on both",
-                body: "OpenStatus self-hosted is a multi-service TypeScript stack with external database dependencies, harder to operate than Kuma's single container, and its open-source checker covers fewer protocols than its API schema advertises. Kuma's limits are structural: multi-user support and a management API have been open feature requests for years because the architecture was built for one operator with a browser.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage sits deliberately between them: one Rust binary built for teams the way Kuma isn't, with the as-code approach OpenStatus is known for. You get HTTP, TCP, DNS, TLS and ping checks, organizations with roles, a Terraform provider, a REST API and an MCP server, plus a branded status page with confirmed email and webhook subscribers and auto-opened incidents. Probes are multi-region and you can run your own. Hosted free with no card, or self-host under AGPL with docker compose.",
             },
         ],
         code: None,
@@ -1449,14 +1264,6 @@ docker compose up -d"#,
                 heading: "What each does well",
                 body: "Kuma wins on reach: 31 monitor types including databases, MQTT, SNMP and a real browser check, 94 notification services, one-second intervals since the 2.x line, and the biggest community in the category. Gatus wins on discipline: eleven endpoint protocols including gRPC, SSH, WebSocket and UDP, a condition language that asserts on status, response time, JSON body paths, certificate expiry and domain expiry, and a tiny static Go binary that can even run without a database.",
             },
-            Section {
-                heading: "What neither gives you",
-                body: "A customer-facing status page with subscribers, and a team. Kuma's status pages are real but nobody can subscribe to them, and the whole app is one shared login. Gatus's dashboard doubles as its status page: fine for an internal dashboard, not something you show customers, and its access control is one basic-auth or OIDC gate. Both check from wherever you run them, unless you set up more instances yourself or use Kuma's Globalping monitor type.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "If the YAML-versus-clicks debate ends with 'actually we need customers to see a status page and teammates to have accounts', that is the gap Uptimepage fills. Checks over HTTP, TCP, DNS, TLS and ping, configured in the UI or declared with the Terraform provider and REST API, organizations with roles, multi-region probes you can run yourself, and a branded status page with email and webhook subscribers where incidents open automatically. One binary, hosted free or AGPL self-hosted.",
-            },
         ],
         code: None,
         resources: &[
@@ -1482,7 +1289,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/pingdom-vs-statuscake",
         created: "2026-07-05",
-        lastmod: "2026-07-14",
+        lastmod: "2026-08-11",
         title: "Pingdom vs StatusCake",
         eyebrow: "comparing hosted monitors",
         h1: "Pingdom vs StatusCake: what you actually get",
@@ -1497,14 +1304,6 @@ docker compose up -d"#,
             Section {
                 heading: "What each does well",
                 body: "Pingdom is the fuller experience suite: scripted browser transactions, real user monitoring with 13-month retention, roughly a hundred probe locations, and unlimited users on every plan. StatusCake covers more protocols for the money: HTTP, HEAD, TCP, DNS, SMTP, SSH, ping and push heartbeats, with SSL, domain-expiry and basic Linux server monitoring bundled into the same plans, and one-minute checks arriving on its first paid tier.",
-            },
-            Section {
-                heading: "The status page problem",
-                body: "Read this before picking either for a customer-facing status page. Pingdom includes public status pages in its plans. StatusCake sells status pages as a separate product with its own tiers, capped by page count and subscriber count, billed on top of monitoring. If the status page is the point, that add-on can cost more than the monitoring beside it.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage does not do browser transactions or RUM, and says so plainly. What it does is pair the monitoring with the status page in one product and one price: HTTP, TCP, DNS, TLS, ping and domain checks every 60 seconds on the free tier, a branded status page with confirmed email and webhook subscribers included, incidents that open automatically, and a Terraform provider, REST API and MCP server for teams who keep config in code. It is also open source under AGPL, so you can always self-host instead of being locked in.",
             },
         ],
         code: None,
@@ -1531,7 +1330,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-healthchecks",
         created: "2026-07-14",
-        lastmod: "2026-08-03",
+        lastmod: "2026-08-11",
         title: "Uptime Kuma vs Healthchecks",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Healthchecks: they don't do the same job",
@@ -1550,14 +1349,6 @@ docker compose up -d"#,
             Section {
                 heading: "What Uptime Kuma is genuinely best at",
                 body: "Reach and immediacy. The 2.x line covers 31 monitor types including databases, MQTT, SNMP, gRPC and a real Chromium browser check, notifies 94 different services, and drops its minimum interval to one second. It is one container and a five-minute install. It also has a push monitor, which is a simple dead man's switch, and that overlap is the reason people ask this question at all.",
-            },
-            Section {
-                heading: "The overlap, and where it breaks",
-                body: "Kuma's push monitor handles the easy case: something should check in every N minutes, tell me when it stops. Reach for Healthchecks when the schedule itself is the thing you care about, because a push monitor understands an interval and nothing else. It does not know that your job is supposed to run at 03:00 in Europe/Helsinki, it will not tell you the run took nine minutes when it usually takes two, and it will not keep the failing job's stack trace for you. Going the other way, Healthchecks will never watch a URL. Plenty of teams run both, and that is a reasonable answer rather than a cop-out.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage is on Kuma's side of the line and does not pretend otherwise: HTTP, TCP, DNS, TLS, ping and domain checks that go out and ask. If cron correctness is your actual problem, use Healthchecks; it is better at that than we are. What Uptimepage adds over both is the part neither one covers, which is the customers. A branded status page on your own subdomain, confirmed email and webhook subscribers, incidents opened automatically from failing checks, organizations with roles instead of one shared login, and a Terraform provider, REST API and MCP server. Hosted free with no card, or self-host under AGPL.",
             },
         ],
         code: None,
@@ -1588,7 +1379,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-cachet",
         created: "2026-07-14",
-        lastmod: "2026-08-08",
+        lastmod: "2026-08-11",
         title: "Uptime Kuma vs Cachet",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Cachet: monitor or status page?",
@@ -1611,10 +1402,6 @@ docker compose up -d"#,
             Section {
                 heading: "The two-system setup people actually build",
                 body: "The classic pairing is Kuma (or anything else) doing the checking, pushing component states and incidents into Cachet over its API, which is genuinely good: scoped bearer tokens, an OpenAPI spec, sensible resources. It works. It is also two deployments, two upgrade paths, two sets of credentials, and a piece of glue code you now own, so that a failing check in one system becomes an incident in the other.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage is that pairing collapsed into one binary. Checks over HTTP, TCP, DNS, TLS, ping and domain expiry run every 60 seconds from multiple regions, a failing check opens an incident by itself, and the incident lands on a branded status page where visitors have subscribed with confirmed email or a signed webhook. No glue code, one deployment, one set of roles. Hosted free with no card, or self-host under AGPL with docker compose.",
             },
         ],
         code: None,
@@ -1645,7 +1432,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/openstatus-vs-gatus",
         created: "2026-07-14",
-        lastmod: "2026-07-14",
+        lastmod: "2026-08-11",
         title: "OpenStatus vs Gatus",
         eyebrow: "comparing self-hosted",
         h1: "OpenStatus vs Gatus: hosted probes or your own YAML?",
@@ -1664,14 +1451,6 @@ docker compose up -d"#,
             Section {
                 heading: "Where OpenStatus is ahead",
                 body: "Everything customer-facing and everything team-shaped. Status pages on custom domains that take email, webhook and Slack subscribers on top of RSS, Atom and JSON feeds, organizations with unlimited members on paid tiers, auto-resolving incidents, and in 2026 it added private locations so you can run probes inside your own network alongside its hosted fleet. Its Terraform provider is vendor-maintained and shipping, which puts it in the same bracket as Uptimepage, Better Stack and Checkly rather than the abandoned community forks some incumbents leave you with.",
-            },
-            Section {
-                heading: "The honest caveats on both",
-                body: "Gatus is explicitly a side project: its maintainer has said so in release notes, and reviews and merges have slowed. Its multi-step suites are labelled alpha and its remote-instance federation is labelled experimental, so treat both as such. It has no subscribers, no incident timeline and one basic-auth or OIDC gate for the whole app. OpenStatus's cost is operational: self-hosting it is a multi-service TypeScript stack of about eleven apps with external database dependencies, its hosted free tier is one monitor at ten-minute intervals, and its open-source checker implements HTTP, TCP and DNS even though ICMP, UDP and TLS-certificate types appear in its API schema. It also ships continuously with no tagged releases, so there is no version to pin.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage takes OpenStatus's shape (teams, subscribers, Terraform, multi-region) and Gatus's operational weight (one binary you can actually run). Checks over HTTP, TCP, DNS, TLS, ping and domain expiry, configured in the UI or declared with the Terraform provider, REST API and MCP server. Probes are multi-region and you can run your own. Incidents open themselves and land on a branded status page with confirmed email and webhook subscribers. Hosted free with no card, or self-host under AGPL with docker compose and no external services to rent.",
             },
         ],
         code: None,
@@ -1698,7 +1477,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/blackbox-exporter-vs-uptime-kuma",
         created: "2026-07-14",
-        lastmod: "2026-07-14",
+        lastmod: "2026-08-11",
         title: "Blackbox exporter vs Uptime Kuma",
         eyebrow: "comparing self-hosted",
         h1: "Blackbox exporter vs Uptime Kuma: a part or a product?",
@@ -1717,14 +1496,6 @@ docker compose up -d"#,
             Section {
                 heading: "Where Uptime Kuma wins",
                 body: "It is finished. One container, five minutes, and you have 31 monitor types, 94 notification integrations, a dashboard, a status page and intervals down to one second. Someone who is not an engineer can add a check. With the exporter, adding a check is a YAML edit plus a Prometheus relabel rule plus a config reload, and turning certificate expiry into an alert means writing PromQL against a gauge yourself, because expiry is exposed as a metric rather than asserted by the probe.",
-            },
-            Section {
-                heading: "The blind spot they share",
-                body: "Neither watches itself. If your Prometheus is down, nothing probes and nobody is told. If your single Kuma container is on the host that just died, the same. Self-hosted monitoring that lives next to the thing it monitors will always miss the outage that takes both down, which is the whole argument for a probe that runs somewhere else.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage is a finished product like Kuma, but it checks from outside your infrastructure by default, from multiple regions, and you can still run your own probe agent inside the network for the private targets that only the exporter could reach before. On top of the checks: a branded status page with confirmed email and webhook subscribers, incidents opened automatically, organizations with roles, and a Terraform provider, REST API and MCP server, so the config stays in Git the way a Prometheus setup does. Hosted free with no card, or self-host under AGPL.",
             },
         ],
         code: None,
@@ -1751,7 +1522,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-zabbix",
         created: "2026-07-27",
-        lastmod: "2026-07-27",
+        lastmod: "2026-08-11",
         title: "Uptime Kuma vs Zabbix",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Zabbix: from outside, or from inside?",
@@ -1779,14 +1550,6 @@ docker compose up -d"#,
                 heading: "Neither one keeps your config in Git",
                 body: "This is the part that bites teams later. Uptime Kuma is UI-only with no management API, so the monitors exist wherever someone clicked them. Zabbix is better, with a full JSON-RPC API and templates you can export as YAML or XML, but there is no official Terraform provider. The registry carries at least five community ones, from nzolot, claranet, elastic-infra, fe80 and tpretz, maintained at whatever pace their authors choose. If your infrastructure is declared in Terraform and reviewed in pull requests, your monitoring being a pile of manual UI state is a real gap, and adopting an unofficial provider for it is a bet on a volunteer.",
             },
-            Section {
-                heading: "The blind spot they share",
-                body: "Both run inside the estate they watch. If the host running your Zabbix server dies, nothing collects and nothing alerts. If your single Kuma container sits on the machine that just went down, the same. Self-hosted monitoring that lives next to the thing it monitors will always miss the outage that takes both down, and that outage is the one your customers notice. It is the whole argument for a probe somewhere else.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage does the outside-in job, from several regions by default, and you can run your own probe agent inside the network for the private targets an external checker cannot see. It checks over HTTP, TCP, DNS, TLS, ping and domain expiry at 60 seconds on the free tier and 10 seconds self-hosted. The config lives in Git through a Terraform provider we publish and maintain, a REST API and an MCP server, so monitoring is reviewed like the rest of your infrastructure. On top: a branded status page with confirmed email and webhook subscribers, incidents opened automatically from failing checks, and organizations with roles instead of one shared password. It is one Rust binary. It is also AGPL-3.0, the same license Zabbix uses, so self-hosting is a real exit rather than a trial. It does not replace Zabbix for CPU graphs and capacity planning, and it is not trying to. Plenty of teams run Zabbix inside and Uptimepage outside.",
-            },
         ],
         code: None,
         resources: &[
@@ -1812,7 +1575,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-upptime",
         created: "2026-07-17",
-        lastmod: "2026-07-17",
+        lastmod: "2026-08-11",
         title: "Uptime Kuma vs Upptime",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Upptime: a server, or no server at all?",
@@ -1831,14 +1594,6 @@ docker compose up -d"#,
             Section {
                 heading: "What Uptime Kuma does better",
                 body: "Speed and range. Upptime can check every five minutes at most, because that is the fastest a GitHub Actions schedule allows. Uptime Kuma 2.x checks every second. It supports 31 monitor types, including databases, MQTT, SNMP and a real Chromium browser check, and it sends alerts to 94 services. It also has the largest community of these tools, so someone has usually solved your problem already. If you need to know about downtime within one minute, Upptime cannot tell you.",
-            },
-            Section {
-                heading: "The limits of both",
-                body: "Upptime keeps its data in the repository, so if you delete the repository the data goes too. Its checks run on GitHub's servers, not in a place you choose. Its status page shows what happened, but customers cannot subscribe to it. Uptime Kuma has different limits, and they come from how it is built. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. And it checks from the server where you installed it, unless you add its Globalping monitor type, which borrows community-hosted probes you do not control.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "You may like Upptime because its settings live in version control, but five minutes is too slow for you. Or you may like Uptime Kuma's checks, but one login is not enough. Uptimepage sits between the two. It checks every 60 seconds over HTTP, TCP, DNS, TLS and ping. You can set it up in the UI, or declare it with the Terraform provider and REST API. It has organizations with user roles, and probes in several regions that you can also run yourself. Its status page is branded, and customers can subscribe by email or webhook. Incidents open on their own. It is one Rust binary. Host it free with no card, or self-host it under AGPL.",
             },
         ],
         code: None,
@@ -1865,7 +1620,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-oneuptime",
         created: "2026-07-17",
-        lastmod: "2026-07-17",
+        lastmod: "2026-08-11",
         title: "Uptime Kuma vs OneUptime",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs OneUptime: one tool, or the whole stack?",
@@ -1884,14 +1639,6 @@ docker compose up -d"#,
             Section {
                 heading: "What Uptime Kuma does better",
                 body: "Focus, and the checks. Kuma supports 31 monitor types from the start, including databases, MQTT, SNMP and a real Chromium browser check. It sends alerts to 94 services, and version 2.x checks every second. You install it as one container in about five minutes, and it has by far the biggest community of these tools. If you only need uptime checks, OneUptime is a very large platform to run for one job.",
-            },
-            Section {
-                heading: "The limits of both",
-                body: "OneUptime's size is also its price. It runs as many services, and it publishes sizing guides because you need them. Choosing it changes your whole setup, so it is harder to leave than a single monitor. Uptime Kuma has the usual limits. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. And it sees your service from the server where you installed it, unless you add its Globalping monitor type, which borrows community-hosted probes you do not control.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Most teams that grow past Kuma do not want a full observability platform. They want the two or three things Kuma lacks: an account for each teammate, a status page customers can subscribe to, and monitoring settings kept in version control. Uptimepage adds those things and little else, on purpose. It checks every 60 seconds over HTTP, TCP, DNS, TLS and ping. It has organizations with user roles, a Terraform provider, a REST API and an MCP server. Its probes run in several regions, and you can run your own. Its status page is branded, and customers can subscribe by email or webhook. It is one binary. Host it free, or self-host it under AGPL.",
             },
         ],
         code: None,
@@ -1918,7 +1665,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-kener",
         created: "2026-07-17",
-        lastmod: "2026-07-17",
+        lastmod: "2026-08-11",
         title: "Uptime Kuma vs Kener",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Kener: monitoring first, or the status page first?",
@@ -1937,14 +1684,6 @@ docker compose up -d"#,
             Section {
                 heading: "What Uptime Kuma does better",
                 body: "The checks, by a long way. Kuma supports 31 monitor types, including databases, MQTT, SNMP and a real Chromium browser check. Kener supports eight: API, ping, TCP, DNS, SSL, SQL, heartbeat and GameDig. Kuma sends alerts to 94 services. Kener sends email, webhook, Slack and Discord. Kuma 2.x checks every second, and its community is much larger. If the checks matter more to you than the page, choose Kuma.",
-            },
-            Section {
-                heading: "The limits of both",
-                body: "Kener's official compose setup runs Redis next to the app, so you run two parts, not one. Its check list is short, so an unusual protocol may be missing. Uptime Kuma's limits come from how it is built. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. Its status pages take no subscribers, and it checks from the server where you installed it, unless you add its Globalping monitor type.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Kener already handles branding well, so Uptimepage's advantages here are narrow. Uptimepage is one binary, with no second service to run. Its probes check from several regions, not one. You can declare monitors with a Terraform provider, a REST API and an MCP server. Its status pages take email and webhook subscribers once they confirm. And incidents open on their own when checks fail, so nobody has to write them by hand. Host it free with no card, or self-host it under AGPL.",
             },
         ],
         code: None,
@@ -1971,7 +1710,7 @@ docker compose up -d"#,
     Landing {
         path: "/compare/terraform-providers",
         created: "2026-07-14",
-        lastmod: "2026-07-20",
+        lastmod: "2026-08-11",
         title: "Uptime Monitors With Terraform Providers (2026)",
         eyebrow: "comparing monitoring as code",
         h1: "Which uptime monitors have a Terraform provider?",
@@ -1994,10 +1733,6 @@ docker compose up -d"#,
             Section {
                 heading: "Who does this well, including our rivals",
                 body: "Credit where it is due, because a comparison page that only flatters its author is worthless. Better Stack, Checkly, Uptime.com, UptimeRobot and OneUptime all ship vendor-maintained providers that manage monitors and status pages, and most of them shipped a release this month. Better Stack's covers on-call policies too. Uptimepage is not alone here and does not claim to be. The gap is specific and it is with the incumbents above, the ones most teams are actually migrating away from.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "The Uptimepage provider covers the three things together: monitors, status pages and alert channels, against the same REST API the dashboard uses, with scoped tokens so a Terraform run gets a write-scoped credential rather than an all-or-nothing key. Declare a check, the page it appears on and the channel that gets paged, review it in a pull request, and apply. There is an MCP server on the same API if you would rather ask an assistant what is broken. Hosted free with no card, or self-host the whole thing under AGPL.",
             },
         ],
         code: Some(CodeSample {
@@ -2083,10 +1818,6 @@ resource "uptimepage_status_page_component" "api" {
                 heading: "The credential it asks for",
                 body: "The provider block takes an endpoint, a username and a password, or the UPTIMEKUMA_PASSWORD variable. That is your Uptime Kuma admin login. Terraform state, your CI runner and anyone who can read a plan get a credential that does everything the UI does, deletion included. There is no scope to narrow and no expiry to lean on, because Kuma has no token to issue. For a homelab that is fine. For a shared pipeline it is the part to think about before the feature list.",
             },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "If monitoring as code is the reason you are reading this, the provider being ours rather than a fork is the difference. Monitors, status pages, components and notification channels are all resources, against the same documented REST API the dashboard uses, and a Terraform run authenticates with a scoped, expiring token rather than an account password. There is an MCP server on that API too. Hosted free with no card, or self-host the whole thing under AGPL.",
-            },
         ],
         code: Some(CodeSample {
             caption: "A monitor, and a token that only writes monitors",
@@ -2149,10 +1880,6 @@ resource "uptimepage_target" "api" {
             Section {
                 heading: "The gap is incidents and components",
                 body: "There is no incident resource, no component resource and no subscriber resource. Announcements are the only way the page speaks, and someone writes them by hand rather than a failing check opening them. If your reason for putting this in code was an audited trail of what broke and who was told, that part stays in the dashboard.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "The Uptimepage provider covers the parts that stop at the page boundary elsewhere: the status page, the components that bind it to real monitors, and the notification channels, alongside the checks. Incidents open automatically from failing checks rather than being typed, and confirmed email and webhook subscribers hear about them. Scoped, expiring tokens for the Terraform run. Hosted free with no card, or self-hosted under AGPL.",
             },
         ],
         code: Some(CodeSample {
@@ -2221,10 +1948,6 @@ resource "uptimepage_status_page_component" "api" {
             Section {
                 heading: "Neither creates the page",
                 body: "The maintained provider offers component, component_group, incident, metric, metric_provider, page_access_group, page_access_user and subscriber. There is no page resource in it. So you click the Statuspage together by hand, then let Terraform fill it in, which is exactly the boundary that makes people give up on the idea. Statuspage also publishes status without running any checks, so whatever actually watches your service is a second tool, a second provider and a second bill.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "The page is a resource. So are its components, which bind to real monitors rather than to a name you keep in step by hand, and so are the notification channels. Incidents open automatically from failing checks and reach confirmed email and webhook subscribers. Monitoring and the public page are the same binary, so there is one provider and one bill. Hosted free with no card, or self-hosted under AGPL.",
             },
         ],
         code: Some(CodeSample {
@@ -2361,7 +2084,7 @@ resource "uptimepage_status_page_component" "web" {
     Landing {
         path: "/compare/mcp-servers",
         created: "2026-07-14",
-        lastmod: "2026-07-14",
+        lastmod: "2026-08-11",
         title: "Which Monitors Ship an MCP Server",
         eyebrow: "comparing monitoring as code",
         h1: "Which uptime monitors ship an MCP server?",
@@ -2384,10 +2107,6 @@ resource "uptimepage_status_page_component" "web" {
             Section {
                 heading: "Ask what it can change, not just what it can read",
                 body: "Reading is the easy half. The question worth asking a vendor is what an assistant is allowed to do, and what stands between a confused model and your production monitoring. The emerging norm is a fence of some kind: PagerDuty ships read-only until you pass a flag, Grafana Cloud makes you consent to writes at authorization time, OpenStatus filters mutating tools out for read-only keys and forces an explicit notify flag, OneUptime annotates its destructive tools. Uptimepage takes the same line: reads are open, and every write asks you first and is audited afterwards.",
-            },
-            Section {
-                heading: "Where Uptimepage fits",
-                body: "Uptimepage's MCP server runs in-process at mcp.uptimepage.dev, with one-click OAuth, the same tenant isolation, scopes and rate limits as the dashboard, and writes fenced behind your approval. It covers monitors, incidents and status pages, so an assistant can tell you what is broken, how long it has been broken and what you told customers about it. It can also create monitors, and it runs each check once and shows you the result before saving anything, which is a stricter bar than most of this category sets for a write. That combination is good, and it is not rare, and both of those things are true. Hosted free with no card, or self-host it under AGPL.",
             },
         ],
         code: None,
@@ -2752,6 +2471,14 @@ struct LandingDoc {
     sections: &'static [Section],
     code: Option<&'static CodeSample>,
     matrix: Option<&'static Matrix>,
+    /// Head-to-head layout: the two-column hero, the pick cards, the
+    /// callout and the closing pitch beside the mock.
+    comparison: bool,
+    picks: &'static [PickCard],
+    config: &'static [ConfigPane],
+    callout: Option<&'static Section>,
+    fit: Option<&'static str>,
+    mock_rows: &'static [MockRow],
     figures: &'static [Figure],
     resources: &'static [ResourceLink],
     cta: &'static str,
@@ -4276,7 +4003,7 @@ fn page_figures(path: &str) -> &'static [Figure] {
     }
 }
 
-fn page_matrix(path: &str) -> Option<&'static Matrix> {
+pub(super) fn page_matrix(path: &str) -> Option<&'static Matrix> {
     match path {
         "/compare/openstatus-vs-uptime-kuma" => Some(&OPENSTATUS_KUMA_MATRIX),
         "/compare/uptime-kuma-vs-gatus" => Some(&KUMA_GATUS_MATRIX),
@@ -4306,6 +4033,324 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
         _ => None,
     }
 }
+
+/// The closing "where we fit" pitch every `/vs/` and `/compare/` page ends
+/// on, printed beside the status-page mock. Ours to make, so it states no
+/// competitor fact; the heading is fixed in the template.
+static FITS: &[(&str, &str)] = &[
+    (
+        "/vs/uptimerobot",
+        "Everything on this page is one product and one account: HTTP, TCP, DNS, TLS, ping and domain checks every 60 seconds, a branded status page on your own subdomain, and incidents that open themselves when a check fails. Teammates get their own logins with roles, customers subscribe by confirmed email or signed webhook, and the whole configuration can live in Git through a Terraform provider, a REST API and an MCP server. Hosted free with no card, or self-hosted under AGPL when you would rather hold the data yourself.",
+    ),
+    (
+        "/vs/statuspage",
+        "The page is not a separate purchase here. A monitor you flip public becomes a component on a branded page at your own subdomain, a failing check opens the incident, and confirmed email and webhook subscribers hear about it without anyone writing an update by hand. Pages, components and channels are all Terraform resources, so what customers read is reviewed in the same pull request as the checks behind it. Hosted free with no card, or self-hosted under AGPL.",
+    ),
+    (
+        "/vs/better-stack",
+        "Uptimepage is deliberately smaller: uptime monitoring and a status page, with no log platform or incident suite beside them. It is one Rust binary with Postgres and ClickHouse, so self-hosting is a compose file rather than a project, and the licence is AGPL, so leaving the hosted tier is a migration instead of a rewrite. Checks run from several regions, and you can run your own probe agent for targets that never leave your network.",
+    ),
+    (
+        "/vs/oneuptime",
+        "Two jobs done properly, with no platform built around them. Checks over HTTP, TCP, DNS, TLS, ping and domain expiry, organizations with roles, a Terraform provider, a REST API and an MCP server, and a branded status page where incidents open on their own and customers subscribe by confirmed email or signed webhook. One binary and two databases, up with a single command, or hosted free with no card.",
+    ),
+    (
+        "/vs/uptime-kuma",
+        "The parts a homelab never needs and a team always does: an account per teammate with roles, a status page customers can subscribe to, probes in several regions plus any you run yourself, and every monitor declarable through a Terraform provider, a REST API and an MCP server. Checks cover HTTP, TCP, DNS, TLS, ping and domain expiry, and a failing one opens its own incident. Still one binary, hosted free with no card or self-hosted under AGPL.",
+    ),
+    (
+        "/vs/pingdom",
+        "The checks and the public page are one product at one price. HTTP, TCP, DNS, TLS, ping and domain checks every 60 seconds on the free tier, timings that point at the cause, incidents opened automatically, and a branded status page with confirmed email and webhook subscribers. Configuration lives in Git when you want it there, through a Terraform provider, a REST API and an MCP server. Open source under AGPL, so self-hosting is always the fallback.",
+    ),
+    (
+        "/vs/self-hosted-status-pages",
+        "Uptimepage is one binary doing both halves: checks over HTTP, TCP, DNS, TLS, ping and domain expiry, and the branded page those checks feed. Incidents open automatically, subscribers get them by confirmed email or signed webhook, teammates get roles rather than a shared login, and the whole configuration is reachable as Terraform, REST and MCP. Hosted free with no card, or self-hosted under AGPL with docker compose.",
+    ),
+    (
+        "/vs/self-hosted-monitoring",
+        "Uptimepage is not the very fastest interval or the widest protocol list here, and it is honest about that. What it does is put the two halves together: real HTTP, TCP, DNS, TLS-certificate, ping and domain-expiry monitoring, and a branded public status page with confirmed email and webhook subscribers, auto-opened incidents and scheduled maintenance. All of it is driven from code with a Terraform provider, a full REST API and an MCP server, isolated per organization with roles, and checked from probes you can run in any region. It runs as one binary with Postgres and ClickHouse, hosted for free or self-hosted under AGPL.",
+    ),
+    (
+        "/compare/openstatus-vs-uptime-kuma",
+        "Uptimepage sits deliberately between them: one Rust binary built for teams the way Kuma isn't, with the as-code approach OpenStatus is known for. You get HTTP, TCP, DNS, TLS and ping checks, organizations with roles, a Terraform provider, a REST API and an MCP server, plus a branded status page with confirmed email and webhook subscribers and auto-opened incidents. Probes are multi-region and you can run your own. Hosted free with no card, or self-host under AGPL with docker compose.",
+    ),
+    (
+        "/compare/uptime-kuma-vs-gatus",
+        "If the YAML-versus-clicks debate ends with 'actually we need customers to see a status page and teammates to have accounts', that is the gap Uptimepage fills. Checks over HTTP, TCP, DNS, TLS and ping, configured in the UI or declared with the Terraform provider and REST API, organizations with roles, multi-region probes you can run yourself, and a branded status page with email and webhook subscribers where incidents open automatically. One binary, hosted free or AGPL self-hosted.",
+    ),
+    (
+        "/compare/pingdom-vs-statuscake",
+        "Uptimepage does not do browser transactions or RUM, and says so plainly. What it does is pair the monitoring with the status page in one product and one price: HTTP, TCP, DNS, TLS, ping and domain checks every 60 seconds on the free tier, a branded status page with confirmed email and webhook subscribers included, incidents that open automatically, and a Terraform provider, REST API and MCP server for teams who keep config in code. It is also open source under AGPL, so you can always self-host instead of being locked in.",
+    ),
+    (
+        "/compare/uptime-kuma-vs-healthchecks",
+        "Uptimepage is on Kuma's side of the line and does not pretend otherwise: HTTP, TCP, DNS, TLS, ping and domain checks that go out and ask. If cron correctness is your actual problem, use Healthchecks; it is better at that than we are. What Uptimepage adds over both is the part neither one covers, which is the customers. A branded status page on your own subdomain, confirmed email and webhook subscribers, incidents opened automatically from failing checks, organizations with roles instead of one shared login, and a Terraform provider, REST API and MCP server. Hosted free with no card, or self-host under AGPL.",
+    ),
+    (
+        "/compare/uptime-kuma-vs-cachet",
+        "Uptimepage is that pairing collapsed into one binary. Checks over HTTP, TCP, DNS, TLS, ping and domain expiry run every 60 seconds from multiple regions, a failing check opens an incident by itself, and the incident lands on a branded status page where visitors have subscribed with confirmed email or a signed webhook. No glue code, one deployment, one set of roles. Hosted free with no card, or self-host under AGPL with docker compose.",
+    ),
+    (
+        "/compare/openstatus-vs-gatus",
+        "Uptimepage takes OpenStatus's shape (teams, subscribers, Terraform, multi-region) and Gatus's operational weight (one binary you can actually run). Checks over HTTP, TCP, DNS, TLS, ping and domain expiry, configured in the UI or declared with the Terraform provider, REST API and MCP server. Probes are multi-region and you can run your own. Incidents open themselves and land on a branded status page with confirmed email and webhook subscribers. Hosted free with no card, or self-host under AGPL with docker compose and no external services to rent.",
+    ),
+    (
+        "/compare/blackbox-exporter-vs-uptime-kuma",
+        "Uptimepage is a finished product like Kuma, but it checks from outside your infrastructure by default, from multiple regions, and you can still run your own probe agent inside the network for the private targets that only the exporter could reach before. On top of the checks: a branded status page with confirmed email and webhook subscribers, incidents opened automatically, organizations with roles, and a Terraform provider, REST API and MCP server, so the config stays in Git the way a Prometheus setup does. Hosted free with no card, or self-host under AGPL.",
+    ),
+    (
+        "/compare/uptime-kuma-vs-zabbix",
+        "Uptimepage does the outside-in job, from several regions by default, and you can run your own probe agent inside the network for the private targets an external checker cannot see. It checks over HTTP, TCP, DNS, TLS, ping and domain expiry at 60 seconds on the free tier and 10 seconds self-hosted. The config lives in Git through a Terraform provider we publish and maintain, a REST API and an MCP server, so monitoring is reviewed like the rest of your infrastructure. On top: a branded status page with confirmed email and webhook subscribers, incidents opened automatically from failing checks, and organizations with roles instead of one shared password. It is one Rust binary. It is also AGPL-3.0, the same license Zabbix uses, so self-hosting is a real exit rather than a trial. It does not replace Zabbix for CPU graphs and capacity planning, and it is not trying to. Plenty of teams run Zabbix inside and Uptimepage outside.",
+    ),
+    (
+        "/compare/uptime-kuma-vs-upptime",
+        "You may like Upptime because its settings live in version control, but five minutes is too slow for you. Or you may like Uptime Kuma's checks, but one login is not enough. Uptimepage sits between the two. It checks every 60 seconds over HTTP, TCP, DNS, TLS and ping. You can set it up in the UI, or declare it with the Terraform provider and REST API. It has organizations with user roles, and probes in several regions that you can also run yourself. Its status page is branded, and customers can subscribe by email or webhook. Incidents open on their own. It is one Rust binary. Host it free with no card, or self-host it under AGPL.",
+    ),
+    (
+        "/compare/uptime-kuma-vs-oneuptime",
+        "Most teams that grow past Kuma do not want a full observability platform. They want the two or three things Kuma lacks: an account for each teammate, a status page customers can subscribe to, and monitoring settings kept in version control. Uptimepage adds those things and little else, on purpose. It checks every 60 seconds over HTTP, TCP, DNS, TLS and ping. It has organizations with user roles, a Terraform provider, a REST API and an MCP server. Its probes run in several regions, and you can run your own. Its status page is branded, and customers can subscribe by email or webhook. It is one binary. Host it free, or self-host it under AGPL.",
+    ),
+    (
+        "/compare/uptime-kuma-vs-kener",
+        "Kener already handles branding well, so Uptimepage's advantages here are narrow. Uptimepage is one binary, with no second service to run. Its probes check from several regions, not one. You can declare monitors with a Terraform provider, a REST API and an MCP server. Its status pages take email and webhook subscribers once they confirm. And incidents open on their own when checks fail, so nobody has to write them by hand. Host it free with no card, or self-host it under AGPL.",
+    ),
+    (
+        "/compare/terraform-providers",
+        "The Uptimepage provider covers the three things together: monitors, status pages and alert channels, against the same REST API the dashboard uses, with scoped tokens so a Terraform run gets a write-scoped credential rather than an all-or-nothing key. Declare a check, the page it appears on and the channel that gets paged, review it in a pull request, and apply. There is an MCP server on the same API if you would rather ask an assistant what is broken. Hosted free with no card, or self-host the whole thing under AGPL.",
+    ),
+    (
+        "/compare/terraform-uptime-kuma",
+        "If monitoring as code is the reason you are reading this, the provider being ours rather than a fork is the difference. Monitors, status pages, components and notification channels are all resources, against the same documented REST API the dashboard uses, and a Terraform run authenticates with a scoped, expiring token rather than an account password. There is an MCP server on that API too. Hosted free with no card, or self-host the whole thing under AGPL.",
+    ),
+    (
+        "/compare/terraform-uptimerobot",
+        "The Uptimepage provider covers the parts that stop at the page boundary elsewhere: the status page, the components that bind it to real monitors, and the notification channels, alongside the checks. Incidents open automatically from failing checks rather than being typed, and confirmed email and webhook subscribers hear about them. Scoped, expiring tokens for the Terraform run. Hosted free with no card, or self-hosted under AGPL.",
+    ),
+    (
+        "/compare/terraform-statuspage",
+        "The page is a resource. So are its components, which bind to real monitors rather than to a name you keep in step by hand, and so are the notification channels. Incidents open automatically from failing checks and reach confirmed email and webhook subscribers. Monitoring and the public page are the same binary, so there is one provider and one bill. Hosted free with no card, or self-hosted under AGPL.",
+    ),
+    (
+        "/compare/mcp-servers",
+        "Uptimepage's MCP server runs in-process at mcp.uptimepage.dev, with one-click OAuth, the same tenant isolation, scopes and rate limits as the dashboard, and writes fenced behind your approval. It covers monitors, incidents and status pages, so an assistant can tell you what is broken, how long it has been broken and what you told customers about it. It can also create monitors, and it runs each check once and shows you the result before saving anything, which is a stricter bar than most of this category sets for a write. That combination is good, and it is not rare, and both of those things are true. Hosted free with no card, or self-host it under AGPL.",
+    ),
+];
+
+pub(super) fn page_fit(path: &str) -> Option<&'static str> {
+    FITS.iter().find(|(p, _)| *p == path).map(|(_, body)| *body)
+}
+
+/// The one section on a face-off page that indicts both tools at once. It
+/// reads as a callout rather than another column of prose.
+static CALLOUTS: &[(&str, Section)] = &[
+    (
+        "/compare/openstatus-vs-uptime-kuma",
+        Section {
+            heading: "The honest caveats on both",
+            body: "OpenStatus self-hosted is a multi-service TypeScript stack with external database dependencies, harder to operate than Kuma's single container, and its open-source checker covers fewer protocols than its API schema advertises. Kuma's limits are structural: multi-user support and a management API have been open feature requests for years because the architecture was built for one operator with a browser.",
+        },
+    ),
+    (
+        "/compare/uptime-kuma-vs-gatus",
+        Section {
+            heading: "What neither gives you",
+            body: "A customer-facing status page with subscribers, and a team. Kuma's status pages are real but nobody can subscribe to them, and the whole app is one shared login. Gatus's dashboard doubles as its status page: fine for an internal dashboard, not something you show customers, and its access control is one basic-auth or OIDC gate. Both check from wherever you run them, unless you set up more instances yourself or use Kuma's Globalping monitor type.",
+        },
+    ),
+    (
+        "/compare/pingdom-vs-statuscake",
+        Section {
+            heading: "The status page problem",
+            body: "Read this before picking either for a customer-facing status page. Pingdom includes public status pages in its plans. StatusCake sells status pages as a separate product with its own tiers, capped by page count and subscriber count, billed on top of monitoring. If the status page is the point, that add-on can cost more than the monitoring beside it.",
+        },
+    ),
+    (
+        "/compare/uptime-kuma-vs-healthchecks",
+        Section {
+            heading: "The overlap, and where it breaks",
+            body: "Kuma's push monitor handles the easy case: something should check in every N minutes, tell me when it stops. Reach for Healthchecks when the schedule itself is the thing you care about, because a push monitor understands an interval and nothing else. It does not know that your job is supposed to run at 03:00 in Europe/Helsinki, it will not tell you the run took nine minutes when it usually takes two, and it will not keep the failing job's stack trace for you. Going the other way, Healthchecks will never watch a URL. Plenty of teams run both, and that is a reasonable answer rather than a cop-out.",
+        },
+    ),
+    (
+        "/compare/openstatus-vs-gatus",
+        Section {
+            heading: "The honest caveats on both",
+            body: "Gatus is explicitly a side project: its maintainer has said so in release notes, and reviews and merges have slowed. Its multi-step suites are labelled alpha and its remote-instance federation is labelled experimental, so treat both as such. It has no subscribers, no incident timeline and one basic-auth or OIDC gate for the whole app. OpenStatus's cost is operational: self-hosting it is a multi-service TypeScript stack of about eleven apps with external database dependencies, its hosted free tier is one monitor at ten-minute intervals, and its open-source checker implements HTTP, TCP and DNS even though ICMP, UDP and TLS-certificate types appear in its API schema. It also ships continuously with no tagged releases, so there is no version to pin.",
+        },
+    ),
+    (
+        "/compare/blackbox-exporter-vs-uptime-kuma",
+        Section {
+            heading: "The blind spot they share",
+            body: "Neither watches itself. If your Prometheus is down, nothing probes and nobody is told. If your single Kuma container is on the host that just died, the same. Self-hosted monitoring that lives next to the thing it monitors will always miss the outage that takes both down, which is the whole argument for a probe that runs somewhere else.",
+        },
+    ),
+    (
+        "/compare/uptime-kuma-vs-zabbix",
+        Section {
+            heading: "The blind spot they share",
+            body: "Both run inside the estate they watch. If the host running your Zabbix server dies, nothing collects and nothing alerts. If your single Kuma container sits on the machine that just went down, the same. Self-hosted monitoring that lives next to the thing it monitors will always miss the outage that takes both down, and that outage is the one your customers notice. It is the whole argument for a probe somewhere else.",
+        },
+    ),
+    (
+        "/compare/uptime-kuma-vs-upptime",
+        Section {
+            heading: "The limits of both",
+            body: "Upptime keeps its data in the repository, so if you delete the repository the data goes too. Its checks run on GitHub's servers, not in a place you choose. Its status page shows what happened, but customers cannot subscribe to it. Uptime Kuma has different limits, and they come from how it is built. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. And it checks from the server where you installed it, unless you add its Globalping monitor type, which borrows community-hosted probes you do not control.",
+        },
+    ),
+    (
+        "/compare/uptime-kuma-vs-oneuptime",
+        Section {
+            heading: "The limits of both",
+            body: "OneUptime's size is also its price. It runs as many services, and it publishes sizing guides because you need them. Choosing it changes your whole setup, so it is harder to leave than a single monitor. Uptime Kuma has the usual limits. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. And it sees your service from the server where you installed it, unless you add its Globalping monitor type, which borrows community-hosted probes you do not control.",
+        },
+    ),
+    (
+        "/compare/uptime-kuma-vs-kener",
+        Section {
+            heading: "The limits of both",
+            body: "Kener's official compose setup runs Redis next to the app, so you run two parts, not one. Its check list is short, so an unusual protocol may be missing. Uptime Kuma's limits come from how it is built. It has one shared login and no user roles. It has no official REST API to manage monitors, and no Terraform provider. Its status pages take no subscribers, and it checks from the server where you installed it, unless you add its Globalping monitor type.",
+        },
+    ),
+];
+
+pub(super) fn page_callout(path: &str) -> Option<&'static Section> {
+    CALLOUTS.iter().find(|(p, _)| *p == path).map(|(_, s)| s)
+}
+
+/// Reader triage above the table, in the page's own order: the tools it
+/// compares first, us last. Facts about the others stay inside what the
+/// page's matrix already states.
+static KUMA_GATUS_PICKS: &[PickCard] = &[
+    PickCard {
+        label: "pick uptime kuma if",
+        body: "It is your homelab, you want the widest check list and one-second intervals, and one shared login is fine.",
+    },
+    PickCard {
+        label: "pick gatus if",
+        body: "Every check belongs in Git, the dashboard is for you and your team, and nobody outside needs to see it.",
+    },
+    PickCard {
+        label: "pick uptimepage if",
+        body: "Customers need a status page they can subscribe to, teammates need their own accounts, and you still want the config in Git.",
+    },
+];
+
+fn page_picks(path: &str) -> &'static [PickCard] {
+    match path {
+        "/compare/uptime-kuma-vs-gatus" => KUMA_GATUS_PICKS,
+        _ => &[],
+    }
+}
+
+/// The same monitor three ways, so the hero shows the difference the page
+/// argues about instead of describing it. Panes are ours to demonstrate;
+/// the rival's pane quotes only its documented configuration format.
+static KUMA_GATUS_CONFIG: &[ConfigPane] = &[
+    ConfigPane {
+        id: "gatus",
+        tab: "gatus.yaml",
+        cmd: "cat gatus.yaml",
+        tag: "YAML ONLY",
+        note: "gatus has no editing UI, so every change is a redeploy",
+        lines: &[
+            "<span class=\"mk-conf__k\">endpoints</span>:",
+            "  - <span class=\"mk-conf__k\">name</span>: <span class=\"mk-conf__s\">api</span>",
+            "    <span class=\"mk-conf__k\">url</span>: <span class=\"mk-conf__s\">\"https://api.acme.dev/health\"</span>",
+            "    <span class=\"mk-conf__k\">interval</span>: <span class=\"mk-conf__s\">60s</span>",
+            "    <span class=\"mk-conf__k\">conditions</span>:",
+            "      - <span class=\"mk-conf__s\">\"[STATUS] == 200\"</span>",
+            "      - <span class=\"mk-conf__s\">\"[RESPONSE_TIME] &lt; 300\"</span>",
+            "<span class=\"mk-conf__c\"># redeploy the config to apply</span>",
+        ],
+    },
+    ConfigPane {
+        id: "tf",
+        tab: "uptimepage.tf",
+        cmd: "cat uptimepage.tf",
+        tag: "CONFIG AS CODE",
+        note: "the same monitor, declared, or clicked together in the UI",
+        lines: &[
+            "<span class=\"mk-conf__k\">resource</span> <span class=\"mk-conf__s\">\"uptimepage_target\"</span> <span class=\"mk-conf__s\">\"api\"</span> {",
+            "  <span class=\"mk-conf__k\">name</span>     = <span class=\"mk-conf__s\">\"api\"</span>",
+            "  <span class=\"mk-conf__k\">interval</span> = <span class=\"mk-conf__s\">60</span>",
+            "  <span class=\"mk-conf__k\">check</span>    = {",
+            "    <span class=\"mk-conf__k\">type</span> = <span class=\"mk-conf__s\">\"http\"</span>",
+            "    <span class=\"mk-conf__k\">http</span> = { <span class=\"mk-conf__k\">url</span> = <span class=\"mk-conf__s\">\"https://api.acme.dev/health\"</span> }",
+            "  }",
+            "}",
+        ],
+    },
+    ConfigPane {
+        id: "rest",
+        tab: "rest",
+        cmd: "history | tail -1",
+        tag: "201 CREATED",
+        note: "monitor live, and its first check runs straight away",
+        lines: &[
+            "<span class=\"mk-conf__k\">curl</span> -X POST https://app.uptimepage.dev/api/v1/targets \\",
+            "  -H <span class=\"mk-conf__s\">\"Authorization: Bearer $UPTIMEPAGE_TOKEN\"</span> \\",
+            "  -d <span class=\"mk-conf__s\">'{\"name\":\"api\",\"interval\":60,</span>",
+            "      <span class=\"mk-conf__s\">\"check\":{\"type\":\"http\",</span>",
+            "        <span class=\"mk-conf__s\">\"http\":{\"url\":\"https://api.acme.dev/health\"}}}'</span>",
+        ],
+    },
+];
+
+fn page_config(path: &str) -> &'static [ConfigPane] {
+    match path {
+        "/compare/uptime-kuma-vs-gatus" => KUMA_GATUS_CONFIG,
+        _ => &[],
+    }
+}
+
+/// One monitor in the status-page mock beside the closing pitch. `days` is
+/// one character per day, oldest first: `u` up, `d` degraded, `x` down.
+pub struct MockRow {
+    pub name: &'static str,
+    pub uptime: &'static str,
+    pub note: &'static str,
+    pub days: &'static str,
+}
+
+impl MockRow {
+    /// A class per day, so the template prints the bar without carrying
+    /// forty-five spans of markup per row.
+    pub fn cells(&self) -> Vec<&'static str> {
+        self.days
+            .chars()
+            .map(|day| match day {
+                'x' => "mk-mock__day mk-mock__day--down",
+                'd' => "mk-mock__day mk-mock__day--warn",
+                _ => "mk-mock__day",
+            })
+            .collect()
+    }
+}
+
+/// Illustration, not data: a made-up page showing what the checks on a
+/// comparison page's left-hand column end up producing.
+static MOCK_ROWS: &[MockRow] = &[
+    MockRow {
+        name: "api",
+        uptime: "99.98%",
+        note: "p95 142ms · one incident in 45 days",
+        days: "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuxuuuuuuuuuuuuu",
+    },
+    MockRow {
+        name: "dashboard",
+        uptime: "99.91%",
+        note: "p95 318ms · two degraded days",
+        days: "uuuuuuuuuuuudduuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+    },
+    MockRow {
+        name: "webhooks",
+        uptime: "99.99%",
+        note: "p95 88ms · no incidents",
+        days: "uuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuuu",
+    },
+];
 
 /// Third-party face-off for `/compare/openstatus-vs-uptime-kuma`, verified
 /// July 2026 against each project's repository, docs and plan pages. The
@@ -5766,6 +5811,12 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
                 sections: l.sections,
                 code: l.code.as_ref(),
                 matrix: page_matrix(l.path),
+                comparison: is_comparison(l.path),
+                picks: page_picks(l.path),
+                config: page_config(l.path),
+                callout: page_callout(l.path),
+                fit: page_fit(l.path),
+                mock_rows: MOCK_ROWS,
                 figures: page_figures(l.path),
                 resources: l.resources,
                 cta: l.cta,
@@ -5962,6 +6013,96 @@ mod tests {
                     m.columns.len(),
                 );
             }
+        }
+    }
+
+    /// The closing pitch is what every head-to-head page is written to
+    /// reach, and it is the block the status-page mock hangs off.
+    #[test]
+    fn comparison_pages_carry_a_fit_and_nothing_else_does() {
+        for l in LANDINGS {
+            assert_eq!(
+                page_fit(l.path).is_some(),
+                is_comparison(l.path),
+                "{} fit block does not match its layout",
+                l.path
+            );
+        }
+    }
+
+    /// Every optional extra is looked up by path, so a renamed page silently
+    /// drops its cards rather than failing to build.
+    #[test]
+    fn per_page_extras_name_real_pages() {
+        let paths: std::collections::HashSet<_> = LANDINGS.iter().map(|l| l.path).collect();
+        let keyed = FITS
+            .iter()
+            .map(|(p, _)| *p)
+            .chain(CALLOUTS.iter().map(|(p, _)| *p))
+            .chain(["/compare/uptime-kuma-vs-gatus"]);
+        for path in keyed {
+            assert!(paths.contains(path), "{path} is keyed but is not a landing");
+            assert!(is_comparison(path), "{path} is not a comparison page");
+        }
+    }
+
+    /// A head-to-head page states its facts in the matrix, in both columns.
+    /// A one-column summary beside it only repeats the table a scroll down.
+    #[test]
+    fn comparison_pages_state_their_facts_once() {
+        for l in LANDINGS.iter().filter(|l| is_comparison(l.path)) {
+            assert!(
+                l.features.is_empty(),
+                "{} repeats its matrix as a feature list",
+                l.path
+            );
+        }
+    }
+
+    #[test]
+    fn config_panes_are_distinct_and_captioned() {
+        for l in LANDINGS {
+            let mut seen = std::collections::HashSet::new();
+            for pane in page_config(l.path) {
+                assert!(seen.insert(pane.id), "{} repeats pane {}", l.path, pane.id);
+                assert!(
+                    !pane.lines.is_empty(),
+                    "{} pane {} is empty",
+                    l.path,
+                    pane.id
+                );
+            }
+        }
+    }
+
+    /// The strip is drawn on a fixed 45-day grid, so a row of another length
+    /// would leave a ragged edge next to the ones beside it.
+    #[test]
+    fn mock_rows_cover_the_same_window() {
+        for row in MOCK_ROWS {
+            assert_eq!(row.days.chars().count(), 45, "{} strip is ragged", row.name);
+            assert!(
+                row.days.chars().all(|d| matches!(d, 'u' | 'd' | 'x')),
+                "{} strip holds a day with no class",
+                row.name
+            );
+        }
+    }
+
+    #[test]
+    fn every_landing_renders() {
+        let cfg = MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: false,
+            mcp_url: None,
+        };
+        for (path, page) in render_all(&cfg) {
+            let html = std::str::from_utf8(&page.body).expect("landings render UTF-8");
+            assert!(
+                !html.contains("landing render failed"),
+                "{path} failed to render"
+            );
         }
     }
 

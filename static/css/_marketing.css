@@ -1268,6 +1268,359 @@ html:has(.marketing-shell) {
 .cmp .part { color: oklch(0.62 0.13 66); }
 .cmp__note { font-family: var(--mk-font-mono); font-size: 0.6875rem; color: var(--mk-quiet); margin-top: 0.6rem; }
 
+/* ── Comparison pages (/vs, /compare) ─────────────────────────────────
+   Hero splits copy from a config viewer, the table keeps its own block,
+   and the page closes on the pitch beside a mock of what it produces. */
+.mk-cmp-hero {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 24rem), 1fr));
+    gap: 2.5rem 3rem;
+    align-items: start;
+}
+/* Capped so a page with no config viewer beside it keeps the same measure
+   as one that has it, instead of running the h1 across the whole grid. */
+.mk-cmp-hero__copy { max-width: 44rem; }
+.mk-cmp-hero__copy > * + * { margin-top: 1.1rem; }
+.mk-cmp-hero__copy .mk-body { max-width: 40rem; }
+.mk-cmp-hero__cta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; }
+/* Nothing to set beside the copy, so the column centres instead of leaving
+   half the row empty. */
+.mk-cmp-hero:has(> :only-child) { grid-template-columns: minmax(0, 44rem); justify-content: center; }
+
+/* Dark in both themes: it stands for a shell, not for the page surface. */
+.mk-conf {
+    --mk-conf-bg:   oklch(0.16 0.014 240);
+    --mk-conf-chr:  oklch(0.20 0.013 240);
+    --mk-conf-rule: oklch(0.26 0.012 240);
+    --mk-conf-dim:  oklch(0.62 0.010 240);
+    --mk-conf-ink:  oklch(0.90 0.004 240);
+    --mk-conf-ok:   oklch(0.70 0.15 158);
+    border: 1px solid var(--mk-conf-rule);
+    border-radius: 4px;
+    background: var(--mk-conf-bg);
+    overflow: hidden;
+    font-family: var(--mk-font-mono);
+    box-shadow: 0 22px 44px -28px oklch(0 0 0 / 0.55);
+}
+.mk-conf__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    border-bottom: 1px solid var(--mk-conf-rule);
+    background: var(--mk-conf-chr);
+}
+.mk-conf__path {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    border-right: 1px solid var(--mk-conf-rule);
+    font-size: 0.6875rem;
+    color: var(--mk-conf-dim);
+}
+.mk-conf__dot {
+    width: 0.375rem;
+    height: 0.375rem;
+    border-radius: 50%;
+    background: var(--mk-conf-ok);
+}
+.mk-conf__tabs { display: flex; }
+.mk-conf__tab {
+    padding: 0.5625rem 0.8125rem;
+    border: 0;
+    border-right: 1px solid var(--mk-conf-rule);
+    background: transparent;
+    font: inherit;
+    font-size: 0.71875rem;
+    font-weight: 500;
+    line-height: 1.2;
+    color: var(--mk-conf-dim);
+    cursor: pointer;
+    transition: color 140ms ease, background-color 140ms ease;
+}
+.mk-conf__tab:hover { color: var(--mk-conf-ink); }
+.mk-conf__tab.is-on {
+    background: var(--mk-conf-bg);
+    color: var(--mk-conf-ink);
+    box-shadow: inset 0 -2px 0 var(--mk-conf-ok);
+}
+.mk-conf__pane { padding: 0.875rem 1rem 0; }
+.mk-conf__pane[hidden] { display: none; }
+.mk-conf__cmd { font-size: 0.78125rem; color: var(--mk-conf-dim); }
+.mk-conf__prompt { color: var(--mk-conf-ok); margin-right: 0.5rem; }
+.mk-conf__lines {
+    counter-reset: mk-conf-line;
+    margin: 0.5rem 0 0;
+    font-size: 0.78125rem;
+    line-height: 1.7;
+    color: var(--mk-conf-ink);
+    overflow-x: auto;
+}
+.mk-conf__lines li { white-space: pre; counter-increment: mk-conf-line; }
+/* A gutter rather than a list marker: no period, and the digits line up. */
+.mk-conf__lines li::before {
+    content: counter(mk-conf-line);
+    display: inline-block;
+    width: 1.5rem;
+    margin-right: 0.875rem;
+    text-align: right;
+    color: var(--mk-conf-dim);
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+}
+.mk-conf__lines li:last-child::after {
+    content: "";
+    display: inline-block;
+    width: 0.55em;
+    height: 1em;
+    margin-left: 0.3em;
+    vertical-align: -0.12em;
+    background: var(--mk-conf-ok);
+    animation: mk-blink 1.05s steps(2) infinite;
+}
+.mk-conf__k { color: var(--mk-conf-ok); }
+.mk-conf__s { color: oklch(0.80 0.13 80); }
+.mk-conf__c { color: var(--mk-conf-dim); }
+.mk-conf__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem 0.75rem;
+    margin: 0.875rem -1rem 0;
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--mk-conf-rule);
+    background: var(--mk-conf-chr);
+    font-size: 0.6875rem;
+    color: var(--mk-conf-dim);
+}
+.mk-conf__tag {
+    padding: 0.125rem 0.4375rem;
+    border: 1px solid var(--mk-conf-ok);
+    border-radius: 2px;
+    color: var(--mk-conf-ok);
+    font-weight: 600;
+}
+.mk-conf__more {
+    padding: 0.5rem 0.75rem;
+    border-top: 1px solid var(--mk-conf-rule);
+    font-size: 0.6875rem;
+    text-align: right;
+}
+.mk-conf__more a { color: var(--mk-conf-ok); }
+.mk-conf__more a:hover { color: var(--mk-conf-ink); }
+
+/* Reader triage: the tools the page compares, then us. Ours is marked by a
+   rule and a green label, never a tinted surface. */
+.mk-picks {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+    gap: 1px;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-rule);
+    overflow: hidden;
+}
+.mk-picks__cell { background: var(--mk-surface); padding: 1.25rem; }
+.mk-picks__cell--us { box-shadow: inset 0 2px 0 var(--mk-ink); }
+.mk-picks__key { font-family: var(--mk-font-mono); font-size: 0.75rem; color: var(--mk-quiet); }
+.mk-picks__cell--us .mk-picks__key { color: var(--mk-ok); font-weight: 600; }
+.mk-picks .mk-body { margin-top: 0.5rem; }
+.mk-picks__cell--us .mk-body { color: var(--mk-ink); }
+.mk-picks__go {
+    display: inline-block;
+    margin-top: 0.75rem;
+    font-family: var(--mk-font-mono);
+    font-size: 0.78125rem;
+    font-weight: 600;
+    color: var(--mk-ink);
+}
+.mk-picks__go:hover { color: var(--mk-ok); }
+
+.mk-cmp-prose {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+    gap: 2rem;
+    align-items: start;
+    max-width: 64rem;
+    margin-inline: auto;
+}
+
+/* The one claim that indicts both tools at once; amber rules it as a caveat
+   rather than another paragraph. */
+.mk-callout {
+    border: 1px solid var(--mk-rule);
+    border-left: 3px solid var(--mk-mark);
+    border-radius: 2px;
+    background: var(--mk-surface);
+    padding: 1.5rem 1.625rem;
+}
+.mk-callout .mk-body { margin-top: 0.625rem; max-width: 78ch; }
+
+.mk-fit {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+    gap: 2.5rem;
+    align-items: start;
+}
+.mk-fit__copy > * + * { margin-top: 0.875rem; }
+.mk-fit__steps { list-style: none; margin: 1.375rem 0 0; padding: 0; }
+.mk-fit__steps li {
+    display: flex;
+    gap: 0.625rem;
+    align-items: baseline;
+    color: var(--mk-ink-soft);
+    font-size: 0.9375rem;
+}
+.mk-fit__steps li + li { margin-top: 0.5rem; }
+.mk-fit__num { font-family: var(--mk-font-mono); font-size: 0.75rem; color: var(--mk-ok); }
+.mk-fit__cta { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.5rem; }
+
+/* A drawn example of what the checks produce, not live data. */
+.mk-mock {
+    margin: 0;
+    border: 1px solid var(--mk-rule);
+    border-radius: 8px;
+    background: var(--mk-surface);
+    box-shadow: var(--mk-shadow-frame);
+}
+.mk-mock__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.625rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--mk-rule);
+    font-family: var(--mk-font-mono);
+    font-size: 0.6875rem;
+    color: var(--mk-quiet);
+}
+.mk-mock__dot {
+    width: 0.4375rem;
+    height: 0.4375rem;
+    border-radius: 50%;
+    background: var(--mk-ok);
+    box-shadow: 0 0 0 3px var(--mk-ok-soft);
+}
+.mk-mock__name { font-size: 0.78125rem; font-weight: 600; color: var(--mk-ink); }
+.mk-mock__sub {
+    margin-left: auto;
+    padding: 0.1875rem 0.625rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 9999px;
+    color: var(--mk-ink);
+}
+.mk-mock__body { padding: 1rem; font-family: var(--mk-font-mono); }
+.mk-mock__banner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6875rem 0.75rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    background: var(--mk-bg-2);
+    font-size: 0.78125rem;
+    color: var(--mk-ink);
+}
+.mk-mock__pulse {
+    width: 0.4375rem;
+    height: 0.4375rem;
+    border-radius: 50%;
+    background: var(--mk-ok);
+    animation: mk-mock-pulse 2.4s ease-in-out infinite;
+}
+/* Not `mk-pulse`: that name is the live pill's expanding ring, and keyframe
+   names are global, so reusing it would flatten the ring into a blink. */
+@keyframes mk-mock-pulse { 0%, 45% { opacity: 1; } 50%, 95% { opacity: 0.15; } }
+.mk-mock__ago { margin-left: auto; font-size: 0.6875rem; color: var(--mk-quiet); }
+.mk-mock__row { margin-top: 1rem; }
+.mk-mock__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--mk-ink);
+    font-variant-numeric: tabular-nums;
+}
+.mk-mock__head span:last-child { color: var(--mk-quiet); }
+.mk-mock__strip { display: grid; grid-template-columns: repeat(45, 1fr); gap: 2px; margin-top: 0.4375rem; }
+.mk-mock__day { height: 1.625rem; border-radius: 1px; background: var(--mk-ok); }
+.mk-mock__day--warn { background: var(--mk-warn); }
+.mk-mock__day--down { background: var(--mk-down); }
+.mk-mock__note { margin-top: 0.375rem; font-size: 0.6875rem; color: var(--mk-quiet); }
+.mk-mock__incident { margin-top: 1.125rem; padding-top: 0.875rem; border-top: 1px solid var(--mk-rule); }
+.mk-mock__tag {
+    padding: 0.125rem 0.375rem;
+    border: 1px solid var(--mk-rule);
+    border-radius: 2px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    color: var(--mk-ink);
+}
+.mk-mock__title { margin-top: 0.5rem; font-family: var(--mk-font-body); font-size: 0.875rem; color: var(--mk-ink); }
+.mk-mock__ok   { color: var(--mk-ok); font-weight: 500; }
+.mk-mock__warn { color: var(--mk-warn); font-weight: 500; }
+.mk-mock__legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.875rem;
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--mk-rule);
+    font-size: 0.6875rem;
+    color: var(--mk-quiet);
+}
+.mk-mock__legend span { display: inline-flex; align-items: center; gap: 0.3125rem; }
+.mk-mock__key { width: 0.5rem; height: 0.5rem; border-radius: 1px; background: var(--mk-ok); }
+.mk-mock__key--warn { background: var(--mk-warn); }
+.mk-mock__key--down { background: var(--mk-down); }
+.mk-mock__span { margin-left: auto; }
+.mk-mock__caption {
+    padding: 0.625rem 1rem;
+    border-top: 1px solid var(--mk-rule);
+    font-family: var(--mk-font-mono);
+    font-size: 0.6875rem;
+    color: var(--mk-quiet);
+}
+
+.mk-cmp-links { display: flex; flex-wrap: wrap; gap: 0.5rem 1.375rem; }
+.mk-cmp-links a { color: var(--mk-ink); font-size: 0.9375rem; }
+.mk-cmp-links a:hover { color: var(--mk-ok); }
+
+/* Stands in for the hero button once it has scrolled away. The script
+   reveals it; it stays hidden wherever another call is already on screen. */
+.mk-cmp-bar {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 40;
+    border-top: 1px solid var(--mk-rule);
+    background: var(--mk-surface);
+}
+.mk-cmp-bar__inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem 1.25rem;
+    max-width: 68rem;
+    margin-inline: auto;
+    padding: 0.625rem 1.5rem;
+    font-family: var(--mk-font-mono);
+    font-size: 0.78125rem;
+    color: var(--mk-ink-soft);
+}
+.mk-cmp-bar__inner .mk-cta { margin-left: auto; }
+@media (max-width: 40rem) {
+    .mk-cmp-bar__inner { justify-content: center; text-align: center; }
+    .mk-cmp-bar__inner .mk-cta { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .mk-conf__lines li:last-child::after,
+    .mk-mock__pulse { animation: none; }
+}
+
 /* ── Free tools: interactive calculator ───────────────────────────── */
 .tool-calc { padding: 1.5rem; border-radius: 2px; box-shadow: var(--mk-shadow-frame); }
 .tool-calc__head { display: flex; flex-direction: column; align-items: center; gap: 0.4rem; }

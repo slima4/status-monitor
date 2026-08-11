@@ -764,8 +764,24 @@ fn build_llms_full(cfg: &MarketingCfg) -> Bytes {
             }
             s.push('\n');
         }
+        // Our own column only. A comparison page's prose is mostly about the
+        // rivals, so without this the entry would describe them and never say
+        // what this product does.
+        if let Some(m) = landings::page_matrix(l.path) {
+            s.push_str("What you get:\n");
+            for row in m.rows {
+                s.push_str(&format!("- {}: {}\n", row.label, row.cells[m.us_col()].0));
+            }
+            s.push('\n');
+        }
         for sec in l.sections {
             s.push_str(&format!("### {}\n{}\n\n", sec.heading, sec.body));
+        }
+        if let Some(c) = landings::page_callout(l.path) {
+            s.push_str(&format!("### {}\n{}\n\n", c.heading, c.body));
+        }
+        if let Some(fit) = landings::page_fit(l.path) {
+            s.push_str(&format!("### Where Uptimepage fits\n{fit}\n\n"));
         }
     }
 
@@ -1040,6 +1056,32 @@ mod tests {
         );
         for (shot, json) in gallery::SHOTS.iter().zip(shots) {
             assert_eq!(json["caption"], shot.caption);
+        }
+    }
+
+    /// A comparison page's prose is mostly about the rival. If the pitch and
+    /// the matrix are left out, the entry reads as an advert for them.
+    #[test]
+    fn llms_full_says_what_this_product_does_on_every_comparison_page() {
+        let cfg = MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: false,
+            mcp_url: None,
+        };
+        let txt = String::from_utf8(build_llms_full(&cfg).to_vec()).expect("llms-full is UTF-8");
+        for l in landings::LANDINGS {
+            let Some(fit) = landings::page_fit(l.path) else {
+                continue;
+            };
+            assert!(txt.contains(fit), "{} pitch missing from llms-full", l.path);
+            let m = landings::page_matrix(l.path).expect("a comparison page carries a matrix");
+            let row = &m.rows[0];
+            assert!(
+                txt.contains(row.cells[m.us_col()].0),
+                "{} matrix column missing from llms-full",
+                l.path
+            );
         }
     }
 
