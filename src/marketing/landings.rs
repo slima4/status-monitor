@@ -1433,11 +1433,11 @@ docker compose up -d"#,
     Landing {
         path: "/compare/uptime-kuma-vs-gatus",
         created: "2026-07-05",
-        lastmod: "2026-07-17",
+        lastmod: "2026-08-11",
         title: "Uptime Kuma vs Gatus",
         eyebrow: "comparing self-hosted",
         h1: "Uptime Kuma vs Gatus: clicks or YAML?",
-        meta_description: "Uptime Kuma configures in a UI, Gatus lives in YAML. Check types, status pages, alerting and team features compared honestly. July 2026.",
+        meta_description: "Gatus vs Uptime Kuma: Kuma configures in a UI, Gatus lives in YAML. Check types, status pages, alerting and team features compared honestly. August 2026.",
         lede: "The two most-loved self-hosted monitors answer one question differently: should monitoring be clicked together in a dashboard, or declared in a file and reviewed in a pull request? Everything else follows from that split.",
         features: &[],
         sections: &[
@@ -2026,6 +2026,18 @@ resource "uptimepage_status_page_component" "api" {
         }),
         resources: &[
             ResourceLink {
+                label: "Uptime Kuma in Terraform",
+                href: "/compare/terraform-uptime-kuma",
+            },
+            ResourceLink {
+                label: "UptimeRobot in Terraform",
+                href: "/compare/terraform-uptimerobot",
+            },
+            ResourceLink {
+                label: "Atlassian Statuspage in Terraform",
+                href: "/compare/terraform-statuspage",
+            },
+            ResourceLink {
                 label: "Terraform docs",
                 href: "/docs/terraform",
             },
@@ -2044,6 +2056,200 @@ resource "uptimepage_status_page_component" "api" {
             ResourceLink {
                 label: "MCP servers, compared",
                 href: "/compare/mcp-servers",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/terraform-uptime-kuma",
+        created: "2026-08-11",
+        lastmod: "2026-08-11",
+        title: "Terraform Provider for Uptime Kuma",
+        eyebrow: "comparing monitoring as code",
+        h1: "Does Uptime Kuma have a Terraform provider?",
+        meta_description: "Uptime Kuma publishes none of its own. Seven community providers do, one of them is good, and all of them want your admin password. August 2026.",
+        lede: "Uptime Kuma has no provider of its own, and no documented management API to build one on. What the registry offers instead is seven community providers riding an unofficial client library. One of them is genuinely good. The thing to weigh is what it asks for to log in.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "What the registry actually has",
+                body: "The Uptime Kuma project publishes nothing. Searching the registry in August 2026 returns seven community providers: breml/uptimekuma, kenlee20/kuma, kenlee20/upkuapi, ehealth-co-id/uptimekuma, zahornyak/uptime-kuma-wapi, kurtmc/uptimekuma and TheodoreHerzfeld's. The most complete by a wide margin is breml/uptimekuma, 63 stars, v0.4.0 released 25 July 2026 with commits this month. It covers more than thirty monitor types, around a hundred notification services, proxies, maintenance windows, tags, and a status page with incidents. If you need one, that is the one.",
+            },
+            Section {
+                heading: "Why they all ride an unofficial client",
+                body: "Uptime Kuma drives its UI over Socket.IO and documents no management API. Its own API keys read metrics and nothing else. So every provider here talks to Kuma through a reverse-engineered client library, and breml's README says so plainly: capabilities are limited to what go-uptime-kuma-client supports. Coverage therefore tracks a third repository rather than Kuma releases, and a Kuma upgrade can move ahead of both.",
+            },
+            Section {
+                heading: "The credential it asks for",
+                body: "The provider block takes an endpoint, a username and a password, or the UPTIMEKUMA_PASSWORD variable. That is your Uptime Kuma admin login. Terraform state, your CI runner and anyone who can read a plan get a credential that does everything the UI does, deletion included. There is no scope to narrow and no expiry to lean on, because Kuma has no token to issue. For a homelab that is fine. For a shared pipeline it is the part to think about before the feature list.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "If monitoring as code is the reason you are reading this, the provider being ours rather than a fork is the difference. Monitors, status pages, components and notification channels are all resources, against the same documented REST API the dashboard uses, and a Terraform run authenticates with a scoped, expiring token rather than an account password. There is an MCP server on that API too. Hosted free with no card, or self-host the whole thing under AGPL.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "A monitor, and a token that only writes monitors",
+            body: r#"provider "uptimepage" {
+  token = var.uptimepage_write_token # scoped, expiring
+  org   = "acme"
+}
+
+resource "uptimepage_target" "api" {
+  name     = "api"
+  interval = 60
+  check = {
+    type = "http"
+    http = {
+      url             = "https://example.com/healthz"
+      expected_status = { kind = "exact", exact = 200 }
+    }
+  }
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Which uptime monitors have a provider?",
+                href: "/compare/terraform-providers",
+            },
+            ResourceLink {
+                label: "Uptimepage vs Uptime Kuma",
+                href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Terraform docs",
+                href: "/docs/terraform",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/blog/monitoring-as-code",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/terraform-uptimerobot",
+        created: "2026-08-11",
+        lastmod: "2026-08-11",
+        title: "Terraform Provider for UptimeRobot",
+        eyebrow: "comparing monitoring as code",
+        h1: "UptimeRobot in Terraform: what the provider covers",
+        meta_description: "UptimeRobot maintains its own provider, v1.10.0 in July 2026. Monitors, alert contacts and a public status page in code, and the gap. August 2026.",
+        lede: "UptimeRobot is one of the few monitoring vendors that maintains its own Terraform provider instead of leaving it to a fork. It covers more than most of the incumbents do. The gap is narrow and worth naming exactly.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "It is genuinely the vendor's",
+                body: "The repository is uptimerobot/terraform-provider-uptimerobot, in UptimeRobot's own GitHub organization, published to the registry as uptimerobot/uptimerobot. Latest release v1.10.0 on 22 July 2026, with commits this month. The registry badge reads community, which here means HashiCorp has not verified the publisher, not that a stranger wrote it. Read the owning organization and the last release date; the badge alone will mislead you.",
+            },
+            Section {
+                heading: "What it manages",
+                body: "Seven resources as of August 2026: monitor, monitor_group, alert_contact, integration, maintenance_window, psp and psp_announcement. So the checks, how they are grouped, who gets paged, planned maintenance, and a public status page with announcements posted to it. That is a real monitoring-as-code story, and more than Pingdom or Statuspage can offer from any namespace they own.",
+            },
+            Section {
+                heading: "The gap is incidents and components",
+                body: "There is no incident resource, no component resource and no subscriber resource. Announcements are the only way the page speaks, and someone writes them by hand rather than a failing check opening them. If your reason for putting this in code was an audited trail of what broke and who was told, that part stays in the dashboard.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "The Uptimepage provider covers the parts that stop at the page boundary elsewhere: the status page, the components that bind it to real monitors, and the notification channels, alongside the checks. Incidents open automatically from failing checks rather than being typed, and confirmed email and webhook subscribers hear about them. Scoped, expiring tokens for the Terraform run. Hosted free with no card, or self-hosted under AGPL.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "The component that ties the page to a real check",
+            body: r#"resource "uptimepage_target" "api" {
+  name     = "api"
+  interval = 60
+  check = {
+    type = "http"
+    http = {
+      url             = "https://example.com/healthz"
+      expected_status = { kind = "exact", exact = 200 }
+    }
+  }
+}
+
+resource "uptimepage_status_page" "public" {
+  slug = "acme"
+  name = "Acme Status"
+}
+
+resource "uptimepage_status_page_component" "api" {
+  status_page_id = uptimepage_status_page.public.id
+  target_id      = uptimepage_target.api.id
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Which uptime monitors have a provider?",
+                href: "/compare/terraform-providers",
+            },
+            ResourceLink {
+                label: "Uptimepage vs UptimeRobot",
+                href: "/vs/uptimerobot",
+            },
+            ResourceLink {
+                label: "Terraform status page",
+                href: "/terraform-status-page",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/blog/monitoring-as-code",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
+        path: "/compare/terraform-statuspage",
+        created: "2026-08-11",
+        lastmod: "2026-08-11",
+        title: "Terraform for Atlassian Statuspage",
+        eyebrow: "comparing monitoring as code",
+        h1: "Atlassian Statuspage in Terraform: two forks, one gap",
+        meta_description: "Atlassian ships no Terraform provider for Statuspage. Two community ones exist, the popular one stopped in 2022, and neither creates the page. August 2026.",
+        lede: "Search the registry for a Statuspage provider and you get two, neither from Atlassian. The one with the stars stopped shipping in 2022. The one still shipping has eight of them. And the resource you probably came for is in neither.",
+        features: &[],
+        sections: &[
+            Section {
+                heading: "Atlassian publishes none",
+                body: "Atlassian does have an official provider on the registry, atlassian/atlassian-operations at v2.0.5, but it manages Jira Service Management operations and has nothing to do with Statuspage. For Statuspage itself there is no provider under any Atlassian namespace. Everything you will find is community-maintained.",
+            },
+            Section {
+                heading: "The two forks, dated",
+                body: "yannh/statuspage is the one search puts first, with 52 stars. Its last release is v0.1.12 from May 2022 and its last commit is from January 2025. sbecker59/statuspage is the maintained one: v1.1.0 released 1 August 2026, eight stars. Popularity and maintenance point at different repositories here, and the star count is what most teams pick on. Check the release date first.",
+            },
+            Section {
+                heading: "Neither creates the page",
+                body: "The maintained provider offers component, component_group, incident, metric, metric_provider, page_access_group, page_access_user and subscriber. There is no page resource in it. So you click the Statuspage together by hand, then let Terraform fill it in, which is exactly the boundary that makes people give up on the idea. Statuspage also publishes status without running any checks, so whatever actually watches your service is a second tool, a second provider and a second bill.",
+            },
+            Section {
+                heading: "Where Uptimepage fits",
+                body: "The page is a resource. So are its components, which bind to real monitors rather than to a name you keep in step by hand, and so are the notification channels. Incidents open automatically from failing checks and reach confirmed email and webhook subscribers. Monitoring and the public page are the same binary, so there is one provider and one bill. Hosted free with no card, or self-hosted under AGPL.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "The resource neither Statuspage fork has",
+            body: r#"resource "uptimepage_status_page" "public" {
+  slug = "acme"
+  name = "Acme Status"
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Which uptime monitors have a provider?",
+                href: "/compare/terraform-providers",
+            },
+            ResourceLink {
+                label: "Uptimepage vs Statuspage",
+                href: "/vs/statuspage",
+            },
+            ResourceLink {
+                label: "8 Statuspage alternatives, compared",
+                href: "/blog/statuspage-alternatives",
+            },
+            ResourceLink {
+                label: "Terraform status page",
+                href: "/terraform-status-page",
             },
         ],
         cta: "Start free",
@@ -2656,6 +2862,60 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
                 "Better Stack, Checkly, Uptime.com, UptimeRobot, OneUptime and Uptimepage. That is the honest list; we are not alone. The vendors that cannot are Pingdom, StatusCake and Atlassian Statuspage, plus Grafana and Datadog, which have no status-page product to manage.",
             ),
         ],
+        "/compare/terraform-uptime-kuma" => &[
+            (
+                "Does Uptime Kuma have an official Terraform provider?",
+                "No. The Uptime Kuma project publishes none, and there is no documented management API to build one on. Seven community providers exist on the registry as of August 2026; breml/uptimekuma is the most complete, at v0.4.0 released 25 July 2026.",
+            ),
+            (
+                "Which Uptime Kuma Terraform provider should I use?",
+                "breml/uptimekuma if you need one. It has the most stars, the most resources, commits this month, and it covers status pages as well as monitors. Read its client library first, because the provider can only do what go-uptime-kuma-client supports.",
+            ),
+            (
+                "How does a Terraform provider authenticate to Uptime Kuma?",
+                "With your Uptime Kuma username and password, in the provider block or the UPTIMEKUMA_PASSWORD variable. Kuma's own API keys read metrics only, so there is no scoped token to hand a CI job. Terraform ends up holding an admin credential with no expiry.",
+            ),
+            (
+                "Can Terraform manage an Uptime Kuma status page?",
+                "Yes, with breml's provider, which has status-page and status-page-incident resources. It is community-maintained on top of an unofficial client, so treat it as a dependency you own rather than something the project supports.",
+            ),
+        ],
+        "/compare/terraform-uptimerobot" => &[
+            (
+                "Does UptimeRobot have an official Terraform provider?",
+                "Yes. It is published from UptimeRobot's own GitHub organization and appears on the registry as uptimerobot/uptimerobot. Latest release v1.10.0 on 22 July 2026, with commits this month.",
+            ),
+            (
+                "What can the UptimeRobot Terraform provider manage?",
+                "Seven resources as of August 2026: monitor, monitor_group, alert_contact, integration, maintenance_window, psp and psp_announcement. So checks, grouping, who gets paged, planned maintenance, and a public status page with announcements.",
+            ),
+            (
+                "Can Terraform create an UptimeRobot status page?",
+                "Yes. The psp resource creates the page and psp_announcement posts to it. There is no component, incident or subscriber resource, so those parts of the page stay in the dashboard.",
+            ),
+            (
+                "Is the community badge on the registry a warning?",
+                "No. Community means HashiCorp has not verified the publisher, not that a stranger wrote it. UptimeRobot's own provider carries that badge, and so does ours. Check the owning organization and the last release date instead.",
+            ),
+        ],
+        "/compare/terraform-statuspage" => &[
+            (
+                "Is there an official Atlassian Terraform provider for Statuspage?",
+                "No. Atlassian publishes atlassian/atlassian-operations at v2.0.5 for Jira Service Management operations, and nothing for Statuspage. Both Statuspage providers on the registry are community-maintained.",
+            ),
+            (
+                "Which Statuspage Terraform provider is maintained?",
+                "sbecker59/statuspage, which released v1.1.0 on 1 August 2026. The one search puts first, yannh/statuspage, has more stars but last released v0.1.12 in May 2022 and last saw a commit in January 2025.",
+            ),
+            (
+                "Can Terraform create a Statuspage page?",
+                "No. Neither community provider has a resource for the page itself. You create it by hand in the UI, then manage its components, incidents, metrics, access groups and subscribers in code.",
+            ),
+            (
+                "Does Statuspage include monitoring?",
+                "No. Statuspage publishes status and runs no checks, so whatever monitors your service is a separate tool with its own provider and its own bill.",
+            ),
+        ],
         "/compare/mcp-servers" => &[
             (
                 "Which uptime monitoring vendors ship an MCP server?",
@@ -2783,6 +3043,10 @@ fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
         ],
         "/compare/uptime-kuma-vs-gatus" => &[
+            (
+                "Is Gatus better than Uptime Kuma?",
+                "Only for a team that wants monitoring in version control. Gatus declares every endpoint in YAML and asserts on status, response time, JSON body paths and certificate expiry, which reviews like code. Uptime Kuma covers far more monitor types and notification services and needs no config file at all. Neither one wins on merit; they answer different questions.",
+            ),
             (
                 "Should I pick Uptime Kuma or Gatus?",
                 "Pick by workflow. If you want to click monitors together in a dashboard, Kuma. If you want every check declared in YAML, reviewed in a pull request and deployed like code, Gatus. Feature lists matter less than that split.",
@@ -4022,6 +4286,9 @@ fn page_matrix(path: &str) -> Option<&'static Matrix> {
         "/compare/pingdom-vs-statuscake" => Some(&PINGDOM_STATUSCAKE_MATRIX),
         "/compare/uptime-kuma-vs-healthchecks" => Some(&KUMA_HEALTHCHECKS_MATRIX),
         "/compare/terraform-providers" => Some(&TERRAFORM_PROVIDER_MATRIX),
+        "/compare/terraform-uptime-kuma" => Some(&TERRAFORM_KUMA_MATRIX),
+        "/compare/terraform-uptimerobot" => Some(&TERRAFORM_UPTIMEROBOT_MATRIX),
+        "/compare/terraform-statuspage" => Some(&TERRAFORM_STATUSPAGE_MATRIX),
         "/compare/mcp-servers" => Some(&MCP_SERVER_MATRIX),
         "/compare/uptime-kuma-vs-cachet" => Some(&KUMA_CACHET_MATRIX),
         "/compare/openstatus-vs-gatus" => Some(&OPENSTATUS_GATUS_MATRIX),
@@ -5262,6 +5529,144 @@ static TERRAFORM_PROVIDER_MATRIX: Matrix = Matrix {
     ],
 };
 
+/// Uptime Kuma's Terraform story for `/compare/terraform-uptime-kuma`, verified
+/// 11 August 2026 against the registry and each provider's repository. The
+/// community column describes breml/uptimekuma, the most complete of the seven.
+static TERRAFORM_KUMA_MATRIX: Matrix = Matrix {
+    heading: "What seven community forks add up to",
+    columns: &["Uptime Kuma", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "provider from the vendor",
+            cells: &[("none", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "providers on the registry",
+            cells: &[("7, all community", "part"), ("one, ours", "yes")],
+        },
+        MatrixRow {
+            label: "best community option",
+            cells: &[("breml/uptimekuma v0.4.0", ""), ("not needed", "")],
+        },
+        MatrixRow {
+            label: "monitors as code",
+            cells: &[("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "status page as code",
+            cells: &[("yes, community", "part"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "management API",
+            cells: &[("none documented", "no"), ("REST, documented", "yes")],
+        },
+        MatrixRow {
+            label: "how Terraform authenticates",
+            cells: &[("admin user and password", "no"), ("scoped token", "yes")],
+        },
+    ],
+    notes: &[
+        "The Uptime Kuma project publishes no provider. The registry returns seven community ones: breml/uptimekuma, kenlee20/kuma, kenlee20/upkuapi, ehealth-co-id/uptimekuma, zahornyak/uptime-kuma-wapi, kurtmc/uptimekuma and TheodoreHerzfeld's.",
+        "breml/uptimekuma is the most complete: 63 stars, v0.4.0 released 25 July 2026, commits this month, and resources for monitors, notifications, proxies, maintenance, tags, status pages and status-page incidents.",
+        "Uptime Kuma documents no management API, so every provider here depends on a reverse-engineered client. breml's README states its capabilities are limited to what go-uptime-kuma-client supports.",
+        "Uptime Kuma's own API keys expose metrics only, so the provider takes an account username and password instead of a scoped token.",
+        "Verified 11 August 2026 against the Terraform Registry and each provider's repository. Providers ship often, so check before you decide.",
+    ],
+};
+
+/// UptimeRobot's Terraform coverage for `/compare/terraform-uptimerobot`,
+/// verified 11 August 2026 against the vendor's repository. It is one of the
+/// better vendor providers, so the page says so before naming the gap.
+static TERRAFORM_UPTIMEROBOT_MATRIX: Matrix = Matrix {
+    heading: "Where the vendor provider stops",
+    columns: &["UptimeRobot", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "provider from the vendor",
+            cells: &[("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "latest release",
+            cells: &[("v1.10.0, 22 Jul 2026", ""), ("shipping", "")],
+        },
+        MatrixRow {
+            label: "monitors as code",
+            cells: &[("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "alerting as code",
+            cells: &[("alert contacts", "yes"), ("channels", "yes")],
+        },
+        MatrixRow {
+            label: "status page as code",
+            cells: &[("page and announcements", "part"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "components as code",
+            cells: &[("no resource", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "incidents as code",
+            cells: &[("no resource", "no"), ("open from checks", "yes")],
+        },
+        MatrixRow {
+            label: "self-host it",
+            cells: &[("no", "no"), ("yes, AGPL", "yes")],
+        },
+    ],
+    notes: &[
+        "The provider lives at uptimerobot/terraform-provider-uptimerobot in UptimeRobot's own GitHub organization and publishes as uptimerobot/uptimerobot. Latest release v1.10.0 on 22 July 2026, commits this month.",
+        "Its resources are monitor, monitor_group, alert_contact, integration, maintenance_window, psp and psp_announcement. There is no component, incident or subscriber resource.",
+        "The registry badge reads community, which means the publisher is unverified rather than third-party. Uptimepage carries the same badge.",
+        "Verified 11 August 2026 against the provider's repository. Providers ship often, so check before you decide.",
+    ],
+};
+
+/// Atlassian Statuspage's Terraform options for `/compare/terraform-statuspage`,
+/// verified 11 August 2026. The popular fork and the maintained fork are
+/// different repositories, which is the whole point of the page.
+static TERRAFORM_STATUSPAGE_MATRIX: Matrix = Matrix {
+    heading: "Two forks, neither from Atlassian",
+    columns: &["Statuspage", "Uptimepage"],
+    rows: &[
+        MatrixRow {
+            label: "provider from the vendor",
+            cells: &[("none", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "who maintains it",
+            cells: &[("two community forks", "no"), ("Uptimepage", "yes")],
+        },
+        MatrixRow {
+            label: "most-starred fork",
+            cells: &[("yannh, last release 2022", "no"), ("not needed", "")],
+        },
+        MatrixRow {
+            label: "maintained fork",
+            cells: &[("sbecker59 v1.1.0, Aug 2026", "part"), ("ours", "yes")],
+        },
+        MatrixRow {
+            label: "create the page in code",
+            cells: &[("no resource", "no"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "components and incidents",
+            cells: &[("yes", "yes"), ("yes", "yes")],
+        },
+        MatrixRow {
+            label: "monitoring included",
+            cells: &[("none, bring your own", "no"), ("built in", "yes")],
+        },
+    ],
+    notes: &[
+        "Atlassian publishes atlassian/atlassian-operations at v2.0.5 for Jira Service Management operations, and no provider for Statuspage under any namespace it owns.",
+        "yannh/statuspage has 52 stars, last release v0.1.12 in May 2022 and last commit in January 2025. sbecker59/statuspage has 8 stars and released v1.1.0 on 1 August 2026.",
+        "The maintained fork offers component, component_group, incident, metric, metric_provider, page_access_group, page_access_user and subscriber. Neither fork has a resource that creates the page.",
+        "Statuspage publishes status and does not run checks, so the monitoring behind it is a separate tool and a separate provider.",
+        "Verified 11 August 2026 against the Terraform Registry and each provider's repository. Providers ship often, so check before you decide.",
+    ],
+};
+
 /// MCP landscape for `/compare/mcp-servers`, verified 14 July 2026 against each
 /// vendor's documentation. Hosted OAuth servers are common here now; the page
 /// says so rather than implying ours is rare.
@@ -5443,6 +5848,11 @@ const ALIASES: &[(&str, &str)] = &[
     ),
     // Same pitch as the open-source page, which draws far more search demand.
     ("/self-hosted-status-page", "/open-source-status-page"),
+    // Searchers name these pairs in either order; one page answers both.
+    (
+        "/compare/gatus-vs-uptime-kuma",
+        "/compare/uptime-kuma-vs-gatus",
+    ),
 ];
 
 #[cfg(test)]
