@@ -6,8 +6,8 @@
 //! user can still restore). The user row's FK `ON DELETE CASCADE`
 //! erases memberships, oauth_identities, api_tokens, invitations, sessions and
 //! re-auth grants; rows that reference the user as an actor (`login_attempts`,
-//! `org_audit_log`, `quota_events`, `plan_overrides`) keep their rows with the
-//! actor nulled — audit survives, identity does not.
+//! `org_audit_log`, `quota_events`, `plan_overrides`, `mcp_audit`) keep their
+//! rows with the actor nulled — audit survives, identity does not.
 //!
 //! Two-step outbox pattern across Postgres and ClickHouse. The naive shape
 //! ("DELETE in PG, then DELETE in CH") leaves orphan rows in ClickHouse if the

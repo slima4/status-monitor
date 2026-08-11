@@ -294,6 +294,7 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
         ("quota_events_days", r.quota_events_days),
         ("audit_log_days", r.audit_log_days),
         ("mcp_audit_days", r.mcp_audit_days),
+        ("api_tokens_post_expiry_days", r.api_tokens_post_expiry_days),
     ] {
         assert!(
             shipped
