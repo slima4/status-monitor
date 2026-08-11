@@ -1340,15 +1340,28 @@ impl AppConfig {
                 )));
             }
         }
-        // A zero window is `created_at < now()`, which empties the table on the
-        // next tick instead of retaining nothing older than the window.
+        // Zero is "keep nothing", not "keep nothing older than the window".
         for (days, field) in [
-            (self.retention.login_attempts_days, "login_attempts_days"),
-            (self.retention.quota_events_days, "quota_events_days"),
-            (self.retention.audit_log_days, "audit_log_days"),
-            (self.retention.mcp_audit_days, "mcp_audit_days"),
+            (
+                self.retention.login_attempts_days,
+                "retention.login_attempts_days",
+            ),
+            (
+                self.retention.quota_events_days,
+                "retention.quota_events_days",
+            ),
+            (self.retention.audit_log_days, "retention.audit_log_days"),
+            (self.retention.mcp_audit_days, "retention.mcp_audit_days"),
+            (
+                self.auth.session.idle_timeout_days,
+                "auth.session.idle_timeout_days",
+            ),
+            (
+                self.tenancy.deletion_grace_period_days,
+                "tenancy.deletion_grace_period_days",
+            ),
         ] {
-            ge1_u64(u64::from(days), &format!("retention.{field}"))?;
+            ge1_u64(u64::from(days), field)?;
         }
         Ok(())
     }
@@ -1683,6 +1696,29 @@ mod tests {
         assert!(!cfg.support_enabled(), "whitespace is not an address");
         cfg.support_address = "hello@example.test".into();
         assert!(cfg.support_enabled());
+    }
+
+    #[test]
+    fn every_purge_window_the_nightly_job_binds_rejects_zero() {
+        for set_zero in [
+            (|c: &mut AppConfig| c.retention.login_attempts_days = 0) as fn(&mut AppConfig),
+            |c: &mut AppConfig| c.retention.quota_events_days = 0,
+            |c: &mut AppConfig| c.retention.audit_log_days = 0,
+            |c: &mut AppConfig| c.retention.mcp_audit_days = 0,
+            |c: &mut AppConfig| c.auth.session.idle_timeout_days = 0,
+            |c: &mut AppConfig| c.tenancy.deletion_grace_period_days = 0,
+        ] {
+            let mut cfg = AppConfig::load().expect("load");
+            assert!(
+                cfg.validate_quotas_and_limits().is_ok(),
+                "defaults are sane"
+            );
+            set_zero(&mut cfg);
+            assert!(
+                cfg.validate_quotas_and_limits().is_err(),
+                "a zero purge window must not boot"
+            );
+        }
     }
 
     #[test]

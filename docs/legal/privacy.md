@@ -155,7 +155,7 @@ Two channels — use whichever is convenient:
 
 **Self-service (recommended):**
 
-- **Export:** Visit /settings/account → "Export My Data". You receive a JSON file with all data associated with your account.
+- **Export:** Visit /settings/account → "Export My Data". You receive a JSON file with the data associated with your account. Activity logs (sign-ins, audit events, MCP write actions) cover the last 90 days; ask us by email if you need the full retained history.
 - **Deletion:** Visit /settings/account → "Delete My Account". The account is immediately suspended and permanently purged after 30 days.
 
 **Email:** Send a request to hello@uptimepage.dev. We will:

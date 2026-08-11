@@ -277,6 +277,9 @@ pub async fn data_export(
         .into_response())
 }
 
+/// Retention runs longer, but the whole export is serialized in memory.
+const EXPORT_ACTIVITY_DAYS: u32 = 90;
+
 /// Build the export. Export-specific queries deliberately do NOT inherit the
 /// universal `deleted_at IS NULL` filter — within the purge grace a
 /// soft-deleted org is still personal data the controller holds, so it is
@@ -351,30 +354,34 @@ async fn build_export(pool: &sqlx::PgPool, user_id: UserId) -> Result<UserDataEx
     .await
     .map_err(db_err("memberships"))?;
 
-    let login_history: Vec<LoginAttemptExport> = sqlx::query_as(
+    let login_history: Vec<LoginAttemptExport> = sqlx::query_as(&format!(
         "SELECT method, success, ip_hash, user_agent_hash, failure_reason, occurred_at \
          FROM login_attempts \
-         WHERE user_id = $1 AND occurred_at > now() - INTERVAL '90 days' \
-         ORDER BY occurred_at DESC",
-    )
+         WHERE user_id = $1 AND occurred_at > now() - INTERVAL '{EXPORT_ACTIVITY_DAYS} days' \
+         ORDER BY occurred_at DESC"
+    ))
     .bind(user_id.0)
     .fetch_all(pool)
     .await
     .map_err(db_err("login_history"))?;
 
-    let audit_entries: Vec<AuditEntryExport> = sqlx::query_as(
+    let audit_entries: Vec<AuditEntryExport> = sqlx::query_as(&format!(
         "SELECT org_id, action, metadata, occurred_at \
-         FROM org_audit_log WHERE actor_id = $1 ORDER BY occurred_at DESC",
-    )
+         FROM org_audit_log \
+         WHERE actor_id = $1 AND occurred_at > now() - INTERVAL '{EXPORT_ACTIVITY_DAYS} days' \
+         ORDER BY occurred_at DESC"
+    ))
     .bind(user_id.0)
     .fetch_all(pool)
     .await
     .map_err(db_err("audit_entries"))?;
 
-    let mcp_write_actions: Vec<McpAuditExport> = sqlx::query_as(
+    let mcp_write_actions: Vec<McpAuditExport> = sqlx::query_as(&format!(
         "SELECT org_id, tool, arguments, outcome, detail, created_at \
-         FROM mcp_audit WHERE user_id = $1 ORDER BY created_at DESC",
-    )
+         FROM mcp_audit \
+         WHERE user_id = $1 AND created_at > now() - INTERVAL '{EXPORT_ACTIVITY_DAYS} days' \
+         ORDER BY created_at DESC"
+    ))
     .bind(user_id.0)
     .fetch_all(pool)
     .await
