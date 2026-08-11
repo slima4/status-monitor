@@ -66,6 +66,11 @@ use super::schema::{
 };
 use crate::storage::{Actor, LifecycleOutcome};
 
+/// Protocol identity. The server card and the registry entry both key off this,
+/// so it is the one place the published name lives.
+pub const SERVER_NAME: &str = "uptimepage";
+pub const SERVER_TITLE: &str = "Uptimepage";
+
 /// Max length of an incident-update message. Shares the REST bound so the two
 /// front doors can't drift.
 const MAX_INCIDENT_MESSAGE_LEN: usize = MAX_MESSAGE;
@@ -123,6 +128,7 @@ impl McpServer {
     /// Use this first when asked about overall health or outages.
     #[tool(
         description = "Org health summary: per-state monitor totals and the worst currently-failing monitors. The one-shot answer to 'what is broken right now?'. Read-only.",
+        title = "Org health",
         annotations(read_only_hint = true)
     )]
     async fn get_org_health(
@@ -244,6 +250,7 @@ impl McpServer {
     /// `get_org_health` for a quick "what's broken" overview.
     #[tool(
         description = "List monitors with optional state/type/tag filters and cursor pagination. Each item carries its current state and last-checked time. Read-only.",
+        title = "List monitors",
         annotations(read_only_hint = true)
     )]
     async fn list_monitors(
@@ -308,6 +315,7 @@ impl McpServer {
     /// `list_monitors`/`get_org_health` to investigate a specific monitor.
     #[tool(
         description = "One monitor's full configuration — everything the check asserts (expected status, body match, headers, timeout, redirect and TLS policy), the regions it probes from, and how it alerts (failing checks before it pages, whether recovery is announced, the reminder interval, the multi-region quorum, and the ids of the channels it notifies) — with its current state, last error, and 24h/30d uptime. Every field update_monitor can change is readable here, in the shape that tool takes. Read this before judging whether a response should have passed, or before changing a monitor. Credentials are withheld. Read-only.",
+        title = "Monitor details",
         annotations(read_only_hint = true)
     )]
     async fn get_monitor(
@@ -417,6 +425,7 @@ impl McpServer {
     /// failing observations (with error text), and incident windows.
     #[tool(
         description = "One monitor's history over a window (1h/24h/7d/30d): uptime, latency series, a per-region split of the same window, failures with error text, and incident windows. Pass `region` to narrow it to one probe region and tell a partial outage from a total one. Read-only.",
+        title = "Monitor history",
         annotations(read_only_hint = true)
     )]
     async fn get_monitor_history(
@@ -542,6 +551,7 @@ impl McpServer {
     /// valid one to `get_monitor_history`.
     #[tool(
         description = "The fleet's probe regions: id, display name, city, country, continent. Use it to name where a check runs from and to pass a valid `region` to get_monitor_history. Read-only.",
+        title = "List probe regions",
         annotations(read_only_hint = true)
     )]
     async fn list_regions(
@@ -573,6 +583,7 @@ impl McpServer {
     /// and this is the only way to learn which ones exist.
     #[tool(
         description = "Every tag in use across the org's monitors, most-used first, with how many monitors carry each. Pass one back as the `tag` filter to list_monitors. Read-only.",
+        title = "List tags",
         annotations(read_only_hint = true)
     )]
     async fn list_tags(
@@ -606,6 +617,7 @@ impl McpServer {
     /// tokens and addresses are entered; this only names them.
     #[tool(
         description = "The org's notification channels: id, operator-set name, kind (email, slack, telegram, webhook, and so on), and whether the channel is enabled. Channel settings are withheld, since they hold webhook URLs and bot tokens. Channels are created in the Uptimepage app, not here. Read-only.",
+        title = "List notification channels",
         annotations(read_only_hint = true)
     )]
     async fn list_notification_channels(
@@ -640,6 +652,7 @@ impl McpServer {
 
     #[tool(
         description = "A browser flow monitor's recent runs over a window (1h/24h/7d/30d): every declared step with its outcome and duration, the step a failure stopped on, and the page the browser saw. Use this to answer why a login check failed. Read-only.",
+        title = "Browser flow runs",
         annotations(read_only_hint = true)
     )]
     async fn get_flow_runs(
@@ -669,6 +682,7 @@ impl McpServer {
 
     #[tool(
         description = "How long each step of a browser flow monitor takes over a window (1h/24h/7d/30d), and how far it has moved: per step the earliest and latest mean duration, their ratio, and how many runs passed or failed it. Use this to spot a step drifting toward failure while the monitor still reports up. Read-only.",
+        title = "Browser flow step trend",
         annotations(read_only_hint = true)
     )]
     async fn get_flow_step_trend(
@@ -700,6 +714,7 @@ impl McpServer {
     /// pages do I publish?".
     #[tool(
         description = "List the org's status pages: slug, name, public URL, enabled. Cursor-paginated. Read-only.",
+        title = "List status pages",
         annotations(read_only_hint = true)
     )]
     async fn list_status_pages(
@@ -739,6 +754,7 @@ impl McpServer {
     /// the "what do customers see" view.
     #[tool(
         description = "One status page: name, public URL, enabled, and its components with each linked monitor's current state. Read-only.",
+        title = "Status page details",
         annotations(read_only_hint = true)
     )]
     async fn get_status_page(
@@ -797,6 +813,7 @@ impl McpServer {
     /// or acknowledge.
     #[tool(
         description = "List the org's incidents: incident id, affected monitor, severity, open/resolved times, and latest update phase. Defaults to currently-open ones; pass state=\"all\" with an optional from/to window (default: last 30 days) for resolved history, and monitor_id to narrow to one monitor. Read-only.",
+        title = "List incidents",
         annotations(read_only_hint = true)
     )]
     async fn list_incidents(
@@ -871,6 +888,7 @@ impl McpServer {
     /// acknowledging.
     #[tool(
         description = "One incident: affected monitor, severity, open/resolved times, error sample, and the full operator-update timeline. Read-only.",
+        title = "Incident details",
         annotations(read_only_hint = true)
     )]
     async fn get_incident(
@@ -907,6 +925,7 @@ impl McpServer {
     /// severity/state, auto-vs-human resolution, and the noisiest monitors.
     #[tool(
         description = "Incident metrics over a trailing window (default 30 days): MTTA/MTTR in seconds, total incidents, counts by severity and state, auto- vs human-resolved, and the noisiest monitors. Read-only.",
+        title = "Incident metrics",
         annotations(read_only_hint = true)
     )]
     async fn get_incident_metrics(
@@ -955,6 +974,7 @@ impl McpServer {
     /// Org usage against plan limits. For "am I near my caps?".
     #[tool(
         description = "Org resource usage against plan limits: monitors, status pages, members, components, and key policy values. Read-only.",
+        title = "Usage against plan",
         annotations(read_only_hint = true)
     )]
     async fn get_org_usage(
@@ -1010,7 +1030,12 @@ impl McpServer {
 
     #[tool(
         description = "Run a check on a monitor immediately and record the result. Requires user confirmation; a down result may fire the org's normal alerts. Heartbeat monitors cannot be probed (they wait for your systems to ping them). Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = false)
+        title = "Run check now",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
     )]
     async fn run_check_now(
         &self,
@@ -1027,7 +1052,12 @@ impl McpServer {
 
     #[tool(
         description = "Pause a monitor (stop its checks until resumed). Requires user confirmation. Not read-only; idempotent.",
-        annotations(read_only_hint = false, idempotent_hint = true)
+        title = "Pause monitor",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true
+        )
     )]
     async fn pause_monitor(
         &self,
@@ -1046,7 +1076,12 @@ impl McpServer {
     /// the confirmation, so a misconfigured check is visible before it exists.
     #[tool(
         description = "Create a monitor for an http, tcp, ping, dns, tls_cert, domain_expiry or heartbeat check. The check is run once before anything is saved and the result is shown to the user along with every setting it would apply; nothing is created unless they approve. Pass channel_ids from list_notification_channels to have it alert those channels (this needs the channels:read scope); without them the monitor alerts nobody. Request headers, request bodies and credentials cannot be set here, a URL carrying a username or password is refused, and browser flows cannot be created here — add those in the app. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = false)
+        title = "Create monitor",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
     )]
     async fn create_monitor(
         &self,
@@ -1075,7 +1110,12 @@ impl McpServer {
     /// `get_monitor`: tags and channel bindings are replaced whole, not merged.
     #[tool(
         description = "Change how loudly a monitor is watched: check interval, alert confirmations, recovery notices, reminder interval, tags, group, the multi-region detection quorum, and which notification channels it alerts (channel_ids replaces the whole set, and needs the channels:read scope). It cannot change what the check watches — name, address, assertions, expected status, headers, body, probe regions and owner are refused. A monitor managed by Terraform is refused outright. Shows the old and new value of every field before it runs, and requires confirmation. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = true)
+        title = "Retune monitor",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true
+        )
     )]
     async fn update_monitor(
         &self,
@@ -1097,7 +1137,12 @@ impl McpServer {
 
     #[tool(
         description = "Resume a paused monitor (restart its checks). Requires user confirmation. Not read-only; idempotent.",
-        annotations(read_only_hint = false, idempotent_hint = true)
+        title = "Resume monitor",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
     )]
     async fn resume_monitor(
         &self,
@@ -1114,7 +1159,12 @@ impl McpServer {
 
     #[tool(
         description = "Acknowledge an incident: take ownership and halt escalation. Internal/operational only — does NOT post anything to the public status page. Use post_incident_update for customer-facing updates. Requires confirmation. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = true)
+        title = "Acknowledge incident",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
     )]
     async fn acknowledge_incident(
         &self,
@@ -1131,7 +1181,9 @@ impl McpServer {
 
     #[tool(
         description = "Resolve an incident (mark the operational state resolved). Internal only — does not post to the public status page. Requires confirmation. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = true)
+        title = "Resolve incident",
+        // Closing a live incident ends the escalation that would page someone.
+        annotations(read_only_hint = false, destructive_hint = true, idempotent_hint = true)
     )]
     async fn resolve_incident(
         &self,
@@ -1148,7 +1200,12 @@ impl McpServer {
 
     #[tool(
         description = "Post a public, customer-facing update to an incident's status-page timeline (phase + message). This is what your subscribers and status-page visitors see. Requires confirmation. Not read-only.",
-        annotations(read_only_hint = false, idempotent_hint = false)
+        title = "Post incident update",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
     )]
     async fn post_incident_update(
         &self,
@@ -1165,7 +1222,12 @@ impl McpServer {
 
     #[tool(
         description = "Publish an incident so it appears on every status page carrying the affected monitor, optionally seeding the public title and description. Status-page subscribers may be notified. Requires confirmation. Not read-only; idempotent.",
-        annotations(read_only_hint = false, idempotent_hint = true)
+        title = "Publish incident",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
     )]
     async fn publish_incident(
         &self,
@@ -1182,7 +1244,12 @@ impl McpServer {
 
     #[tool(
         description = "Hide a published incident from the public status pages again. Its operator timeline is untouched. Requires confirmation. Not read-only; idempotent.",
-        annotations(read_only_hint = false, idempotent_hint = true)
+        title = "Unpublish incident",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = true
+        )
     )]
     async fn unpublish_incident(
         &self,
@@ -2001,7 +2068,8 @@ impl ServerHandler for McpServer {
             .enable_tools()
             .enable_tool_list_changed()
             .build();
-        info.server_info.name = "uptimepage".to_string();
+        info.server_info.name = SERVER_NAME.to_string();
+        info.server_info.title = Some(SERVER_TITLE.to_string());
         info.server_info.version = env!("CARGO_PKG_VERSION").to_string();
         info.instructions = Some(
             "Tools for one Uptimepage organization's monitors, status pages, and health. \
@@ -3331,6 +3399,74 @@ mod tests {
         assert!(read.iter().any(|t| t.name == "list_regions"));
         assert!(read.iter().any(|t| t.name == "list_tags"));
         assert!(!read.iter().any(|t| t.name == "pause_monitor"));
+    }
+
+    /// The connector directory rejects a server whose tools lack either. The
+    /// title belongs on the tool, not in its annotations: clients read the
+    /// annotation only as a fallback, and untrusted-server guidance tells them
+    /// not to make decisions from annotations at all.
+    #[test]
+    fn every_tool_carries_a_title_and_the_hint_that_applies_to_it() {
+        for tool in McpServer::tool_router().list_all() {
+            assert!(
+                tool.title.as_ref().is_some_and(|t| !t.trim().is_empty()),
+                "{} has no title",
+                tool.name
+            );
+            let ann = tool
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} has no annotations", tool.name));
+            assert!(
+                ann.read_only_hint == Some(true) || ann.destructive_hint.is_some(),
+                "{} is a write tool with no destructive hint, so it inherits the \
+                 spec default of destructive",
+                tool.name
+            );
+        }
+    }
+
+    /// The landing page names every tool and counts them, and an assistant
+    /// quoting it cannot tell that the list went stale. Renaming or adding a
+    /// tool has to fail here rather than in someone's chat window.
+    #[test]
+    fn the_landing_page_names_every_tool_this_server_serves() {
+        let page = crate::marketing::landings::LANDINGS
+            .iter()
+            .find(|l| l.path == "/mcp-server")
+            .expect("the MCP landing exists");
+        let prose: String = page.sections.iter().map(|s| s.body).collect();
+        let tools = McpServer::tool_router().list_all();
+
+        for tool in &tools {
+            assert!(
+                prose.contains(tool.name.as_ref()),
+                "{} is served but the page never names it",
+                tool.name
+            );
+        }
+
+        let reads = tools
+            .iter()
+            .filter(|t| {
+                t.annotations
+                    .as_ref()
+                    .is_some_and(|a| a.read_only_hint == Some(true))
+            })
+            .count();
+        let claimed = page
+            .features
+            .iter()
+            .find(|f| f.label == "Tools")
+            .expect("the page states a tool count");
+        assert_eq!(
+            claimed.value,
+            format!(
+                "{} ({reads} read + {} fenced writes)",
+                tools.len(),
+                tools.len() - reads
+            )
+        );
     }
 
     fn http_check() -> CheckSpec {

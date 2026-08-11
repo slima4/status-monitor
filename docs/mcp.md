@@ -6,7 +6,7 @@ It is another authorized front door to the same stores the web app and [`/api/v1
 
 - **Transport** — Streamable HTTP at `POST/GET /mcp`, served on its own host (`mcp.{DOMAIN}` in production).
 - **Auth** — an org-bound scoped API token (`sm_live_…`), minted either by hand (Settings → API tokens) or by the one-click OAuth 2.1 connector flow.
-- **Surface** — 15 read tools (always) + 10 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
+- **Surface** — 15 read tools (14 of them under the default grant; `list_notification_channels` needs `channels:read`) + 10 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
 
 The server only mounts when enabled (see [Enabling](#enabling)); a deployment that leaves it off never exposes `/mcp`.
 
@@ -16,7 +16,7 @@ All tools return typed `structuredContent`. Customer free text (monitor names, g
 
 ### Read tools
 
-Side-effect-free (`readOnlyHint`). Require `targets:read`, `status_page:read`, or `incidents:read`.
+Side-effect-free (`readOnlyHint`). Each requires the scope named in its row: `targets:read`, `status_page:read` and `incidents:read` are in the default grant, `channels:read` is not.
 
 | Tool | Scope | Returns |
 |---|---|---|
@@ -112,7 +112,7 @@ A request with no/invalid token gets `401` with a `WWW-Authenticate: Bearer …`
 
 Either way, the token only decides what the connection *may* do. Whether the write tools appear at all depends on the client: one that can't prompt for confirmation is offered the read tools only. See [Confirmations](#confirmations).
 
-**2. One-click OAuth (claude.ai connector).** With `UPTIMEPAGE_MCP_OAUTH_ENABLED` on, the client discovers the authorization server, you log in with your existing session and approve a consent screen, and the server mints the same org-bound expiring token behind the scenes — no copy-paste. This is the only path that mints write scopes, and only when the consent screen's opt-in boxes are checked.
+**2. One-click OAuth (claude.ai connector).** With `UPTIMEPAGE_MCP_OAUTH_ENABLED` on, the client discovers the authorization server, you log in with your existing session and approve a consent screen, and the server mints the same org-bound expiring token behind the scenes — no copy-paste. This is the only path that mints write scopes, and only the ones the client asked for: the consent screen lists exactly what is about to be granted and approval covers that whole set, so a client asking for more than it needs is declined as a whole rather than trimmed.
 
 ### Why OAuth at all?
 
@@ -147,15 +147,16 @@ A read-only request shows "wants read-only access" with no warning banner; a req
 
 ## Scopes
 
-The connector advertises six grantable scopes. A request with no `scope` (or only unknown scopes) grants the **read-only default**; write scopes are opt-in.
+The connector advertises seven grantable scopes. A request with no `scope` (or only unknown scopes) grants the **read-only default**; everything else is opt-in.
 
 | Scope | Grants | In default set? |
 |---|---|---|
 | `targets:read` | all read tools over monitors | ✅ |
 | `status_page:read` | status-page read tools | ✅ |
 | `incidents:read` | `list_incidents`, `get_incident`, `get_incident_metrics` | ✅ |
-| `targets:write` | `pause_monitor`, `resume_monitor` | opt-in |
-| `targets:execute` | `run_check_now` | opt-in |
+| `channels:read` | `list_notification_channels`, and binding channels on `create_monitor` / `update_monitor` | opt-in |
+| `targets:write` | `create_monitor`, `update_monitor`, `pause_monitor`, `resume_monitor` | opt-in |
+| `targets:execute` | `run_check_now`, and the trial probe `create_monitor` runs | opt-in |
 | `incidents:write` | `acknowledge_incident`, `resolve_incident`, `publish_incident`, `unpublish_incident`, `post_incident_update` | opt-in |
 
 A granted write scope is **necessary but not sufficient** — every write tool still asks the user to confirm the specific action at call time.

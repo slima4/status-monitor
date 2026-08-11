@@ -70,6 +70,34 @@ fn reverse_dns(host: &str) -> String {
 mod tests {
     use super::*;
 
+    /// `server.json` is what the MCP registry publishes, and every downstream
+    /// directory mirrors from there. Drift leaves one server wearing two
+    /// identities, so a release that bumps the crate must bump the entry too.
+    #[test]
+    fn the_published_registry_entry_matches_the_card() {
+        let entry: serde_json::Value =
+            serde_json::from_str(include_str!("../../server.json")).expect("server.json parses");
+        let namespace = reverse_dns(host_of("https://uptimepage.dev"));
+
+        assert_eq!(
+            entry["name"],
+            json!(format!("{namespace}/{}", super::super::server::SERVER_NAME))
+        );
+        assert_eq!(entry["title"], json!(super::super::server::SERVER_TITLE));
+        assert_eq!(entry["version"], json!(env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            entry["remotes"][0]["url"],
+            json!(crate::marketing::config::MCP_URL),
+            "the registry would hand every client an endpoint we no longer serve"
+        );
+        assert!(
+            entry["description"]
+                .as_str()
+                .is_some_and(|d| d.len() <= 100),
+            "the registry caps description at 100 characters and rejects at publish time"
+        );
+    }
+
     #[test]
     fn namespace_is_the_domain_reversed() {
         assert_eq!(

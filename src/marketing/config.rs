@@ -30,6 +30,10 @@ pub const META_DESCRIPTION: &str = "Uptime monitoring and public status pages th
 /// Automation surfaces on their own prod hosts — not derived from
 /// `canonical_origin` (separate hostnames), so authored absolute.
 pub const MCP_URL: &str = "https://mcp.uptimepage.dev/mcp";
+/// The official MCP registry has no per-server permalink; its catalogue links
+/// outward, so a search query is the only stable public proof of the listing.
+pub const MCP_REGISTRY_URL: &str =
+    "https://registry.modelcontextprotocol.io/v0.1/servers?search=dev.uptimepage/uptimepage";
 pub const TERRAFORM_URL: &str = "https://registry.terraform.io/providers/uptimepage/uptimepage";
 pub const SOURCE_URL: &str = "https://github.com/uptimepage/uptimepage";
 

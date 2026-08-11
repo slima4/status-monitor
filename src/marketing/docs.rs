@@ -287,7 +287,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Letting an LLM client answer operational questions and take guarded actions on one org.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-08-10",
+        lastmod: "2026-08-11",
         source: include_str!("../../docs/mcp.md"),
         dir: "",
     },

@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "dev.uptimepage/uptimepage",
+  "title": "Uptimepage",
+  "description": "Monitor uptime and incidents, run checks, and publish status updates from your Uptimepage org.",
+  "version": "1.0.0",
+  "websiteUrl": "https://uptimepage.dev/mcp-server",
+  "repository": {
+    "url": "https://github.com/uptimepage/uptimepage",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://uptimepage.dev/static/img/org-icon.png",
+      "mimeType": "image/png",
+      "sizes": ["1024x1024"]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.uptimepage.dev/mcp"
+    }
+  ]
+}
