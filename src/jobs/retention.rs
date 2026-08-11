@@ -8,10 +8,10 @@
 //! Each tick, in order:
 //!  1. The soft-deleted org cascade + ClickHouse drain + recovery-aware user
 //!     hard-purge — reused from [`purge_deleted`], not reimplemented.
-//!  2. Row deletes for `login_attempts`, `quota_events`, `org_audit_log` past
-//!     their configured windows. Every window is bound from `[retention]`
-//!     config — never a literal — so config, code and the Privacy Policy
-//!     cannot drift apart.
+//!  2. Row deletes for `login_attempts`, `quota_events`, `org_audit_log` and
+//!     `mcp_audit` past their configured windows. Every window is bound from
+//!     `[retention]` config — never a literal — so config, code and the
+//!     Privacy Policy cannot drift apart.
 //!  3. The session sweep: a row is reaped when it passes its absolute expiry
 //!     **or** its idle window. Idle (`idle_timeout_days`, 30d) is the binding
 //!     constraint; absolute (90d) is the policy ceiling. So an abandoned
@@ -49,6 +49,7 @@ pub struct RetentionReport {
     pub login_attempts: u64,
     pub quota_events: u64,
     pub audit_log: u64,
+    pub mcp_audit: u64,
     pub sessions: u64,
     pub api_tokens: u64,
 }
@@ -114,6 +115,7 @@ fn emit_metrics(r: &RetentionReport) {
         .increment(r.quota_events);
     metrics::counter!("retention_purged_rows_total", "table" => "org_audit_log")
         .increment(r.audit_log);
+    metrics::counter!("retention_purged_rows_total", "table" => "mcp_audit").increment(r.mcp_audit);
     metrics::counter!("retention_purged_rows_total", "table" => "sessions").increment(r.sessions);
     metrics::counter!("retention_purged_rows_total", "table" => "api_tokens")
         .increment(r.api_tokens);
@@ -168,6 +170,17 @@ pub async fn purge_old_data(
     )
     .await?;
 
+    // Not partitioned, so this is a plain boundary delete rather than a
+    // partition drop.
+    let mcp_audit = delete_older_than(
+        pool,
+        "DELETE FROM mcp_audit \
+         WHERE created_at < now() - ($1::int * INTERVAL '1 day')",
+        retention.mcp_audit_days,
+        "retention: mcp_audit",
+    )
+    .await?;
+
     let sessions = sweep_sessions(pool, session.idle_timeout_days).await?;
 
     // Expired API tokens: hard-deleted after `api_tokens_post_expiry_days`.
@@ -191,6 +204,7 @@ pub async fn purge_old_data(
         login_attempts,
         quota_events,
         audit_log,
+        mcp_audit,
         sessions,
         api_tokens,
     })

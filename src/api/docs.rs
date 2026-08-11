@@ -364,6 +364,7 @@ use crate::storage::UptimeStats;
             handlers::account::MembershipExport,
             handlers::account::LoginAttemptExport,
             handlers::account::AuditEntryExport,
+            handlers::account::McpAuditExport,
             handlers::account::DeletionConfirmation,
             handlers::api_tokens::NewApiTokenRequest,
             handlers::api_tokens::NewApiTokenResponse,

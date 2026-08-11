@@ -1,23 +1,18 @@
 # Privacy Policy
 
-**Last updated:** 2026-08-04
+**Last updated:** 2026-08-11
 
-This Privacy Policy explains how the uptimepage service ("we", "us")
-collects and processes personal data. It is intended to satisfy our
-obligations under the EU General Data Protection Regulation (GDPR) and
-similar laws.
+This Privacy Policy explains how the uptimepage service ("we", "us") collects and processes personal data. It is intended to satisfy our obligations under the EU General Data Protection Regulation (GDPR) and similar laws.
 
 ## 1. Data Controller
 
-Artem Senenko, Nicosia, Cyprus, is the data controller for personal data
-processed via the Service. The controller is a natural person; no company
-is currently registered.
+Artem Senenko, Nicosia, Cyprus, is the data controller for personal data processed via the Service. The controller is a natural person; no company is currently registered.
 
 **Contact:** hello@uptimepage.dev
+
 **For data-subject requests:** hello@uptimepage.dev (see §10)
 
-We do not have a designated Data Protection Officer as we do not meet
-the thresholds under GDPR Article 37.
+We do not have a designated Data Protection Officer as we do not meet the thresholds under GDPR Article 37.
 
 ## 2. What Data We Collect
 
@@ -36,6 +31,7 @@ We collect data in three ways:
 - Check results (technical metrics: status codes, latencies, error codes)
 - Login attempts (success/failure, method, hashed IP, hashed user agent)
 - Audit events (organisation membership changes, target changes)
+- MCP write actions (which tool ran, what it acted on, and whether it succeeded or was refused)
 
 **We collect via your browser:**
 - Session cookie (`_sm_session`) — necessary for authentication
@@ -58,18 +54,16 @@ We do **not** use third-party analytics services that export your data (no Googl
 | Sessions, API tokens | Authenticate API requests | Contract |
 | Hashed IP, login attempts | Detect security threats | Legitimate interest |
 | Audit log | Compliance and accountability | Legitimate interest |
+| MCP write actions | Account for changes an AI assistant made on your behalf | Legitimate interest |
 | Aggregate analytics (marketing and sign-in pages) | Understand site usage and improve content and sign-in | Legitimate interest |
 
 **Browser flow monitors:** when a flow monitor you configured fails, we keep what the page showed at that moment — the URL the browser ended on, the page title, its visible text, and anything the page logged to the browser console. Because the flow signs in, that text can come from a page behind your own login. It is stored to explain the failure and for nothing else, it is never put into an alert or notification, and any value the flow typed from a secret variable is removed before it is stored. It is deleted on a shorter clock than the run itself.
 
-**Heartbeat monitors:** if your job POSTs a body to its ping URL, we keep the
-first few kilobytes of it as that run's output, so a failure can be read without
-going back to the machine that ran it. Whatever the job prints is what we store,
-so do not print secrets to it. It is never put into an alert or notification,
-and it is deleted on a shorter clock than the ping itself.
+**Heartbeat monitors:** if your job POSTs a body to its ping URL, we keep the first few kilobytes of it as that run's output, so a failure can be read without going back to the machine that ran it. Whatever the job prints is what we store, so do not print secrets to it. It is never put into an alert or notification, and it is deleted on a shorter clock than the ping itself.
 
-We do not engage in automated decision-making with significant effects on
-you (no profiling, no scoring).
+**MCP connector:** when you connect an AI assistant to our MCP server, it reads your monitoring because you asked it to, and every action that would change something is recorded, whether it succeeded, was refused, or you declined it. The record names the tool, identifies what it acted on, and states the outcome, so it can include a monitor's name and address, the tags and group a retune moved it to, and the names of the channels it alerts. A refused action is recorded too, which means a monitor name your assistant proposed can be kept even though you declined it. What you write for customers is not kept here: an incident's public title and description, the updates you post, and any note on acknowledging or resolving are not part of this record. Read-only calls are not recorded at all. We never receive or store your conversation with the assistant, only the tool calls it makes. The client you connect is one you chose and someone else operates, so the answers it asks for reach whoever runs it; that is your instruction to it, not a transfer we make (see §6).
+
+We do not engage in automated decision-making with significant effects on you (no profiling, no scoring).
 
 ## 4. How Long We Keep It
 
@@ -86,13 +80,13 @@ you (no profiling, no scoring).
 | Output posted with a heartbeat ping | 7 days |
 | Login attempts | 180 days |
 | Audit log | 2 years |
+| MCP write actions (tool, what it acted on, outcome, and the person and token behind it) | 2 years |
 | Quota events | 90 days |
 | Server access logs | 30 days |
 | Application error logs | 30 days |
 | Aggregate analytics (marketing and sign-in pages) | Indefinite (aggregate only; no identifiers that single you out) |
 
-Deleted accounts are recoverable for 30 days, after which data is
-permanently purged.
+Deleted accounts are recoverable for 30 days, after which data is permanently purged.
 
 ## 5. Who We Share It With
 
@@ -115,10 +109,9 @@ We may disclose data:
 
 ## 6. International Transfers
 
-Data is primarily stored in Finland (Hetzner data centre, Helsinki).
-Resend, GitHub, and Google are based in the United States; transfers to them are
-protected by Standard Contractual Clauses adopted by the European
-Commission.
+Data is primarily stored in Finland (Hetzner data centre, Helsinki). Resend, GitHub, and Google are based in the United States; transfers to them are protected by Standard Contractual Clauses adopted by the European Commission.
+
+An AI assistant you connect over MCP (see §3) reads your monitoring wherever that assistant runs, which may be outside the EU. You choose that client and its operator, and it retrieves only what it asks for on your instruction, so we do not treat it as a processor acting for us. If that matters to you, the connector is optional and revoking it in Settings stops it.
 
 Monitoring checks can run from probe regions outside the EU. Those probes receive the check configuration they need to run (URL, headers, resolved credentials) and produce technical results (status codes, latencies, error text) that are sent back to our EU infrastructure; long-term storage stays in Finland.
 
@@ -133,9 +126,7 @@ Technical measures include:
 - Application errors logged without request bodies
 - Daily automated security patches via Docker image rebuilds
 
-We will notify affected users without undue delay if we become aware of
-a personal-data breach affecting your data, and we will notify the
-competent supervisory authority within 72 hours where required.
+We will notify affected users without undue delay if we become aware of a personal-data breach affecting your data, and we will notify the competent supervisory authority within 72 hours where required.
 
 ## 8. Your Rights
 
@@ -146,19 +137,13 @@ Under GDPR, you have the right to:
 - **Erase** your data (Article 17) — see §10 ("right to be forgotten")
 - **Restrict** processing (Article 18) — contact us
 - **Data portability** (Article 20) — see §10
-- **Object** to processing based on legitimate interest (Article 21) —
-  contact us
-- **Withdraw consent** (Article 7(3)) — applies only if we relied on
-  consent for processing
-- **Lodge a complaint** with your local supervisory authority. Our
-  supervisory authority is the Office of the Commissioner for Personal
-  Data Protection, Cyprus (https://www.dataprotection.gov.cy/)
+- **Object** to processing based on legitimate interest (Article 21) — contact us
+- **Withdraw consent** (Article 7(3)) — applies only if we relied on consent for processing
+- **Lodge a complaint** with your local supervisory authority. Our supervisory authority is the Office of the Commissioner for Personal Data Protection, Cyprus (https://www.dataprotection.gov.cy/)
 
 ## 9. Cookies
 
-We use one cookie: `_sm_session`, which holds your session identifier.
-This is **strictly necessary** for the Service to function and does not
-require consent.
+We use one cookie: `_sm_session`, which holds your session identifier. This is **strictly necessary** for the Service to function and does not require consent.
 
 We do not use analytics, advertising, or third-party tracking cookies.
 
@@ -170,10 +155,8 @@ Two channels — use whichever is convenient:
 
 **Self-service (recommended):**
 
-- **Export:** Visit /settings/account → "Export My Data". You receive a
-  JSON file with all data associated with your account.
-- **Deletion:** Visit /settings/account → "Delete My Account". The account
-  is immediately suspended and permanently purged after 30 days.
+- **Export:** Visit /settings/account → "Export My Data". You receive a JSON file with all data associated with your account.
+- **Deletion:** Visit /settings/account → "Delete My Account". The account is immediately suspended and permanently purged after 30 days.
 
 **Email:** Send a request to hello@uptimepage.dev. We will:
 
@@ -181,21 +164,15 @@ Two channels — use whichever is convenient:
 - Verify your identity (typically: email match with account email)
 - Fulfil your request within 30 days
 
-You can use the email channel if you are locked out of your account, if
-you are acting on behalf of someone else (e.g., deceased user), or if
-you have requirements beyond what the self-service tools provide.
+You can use the email channel if you are locked out of your account, if you are acting on behalf of someone else (e.g., deceased user), or if you have requirements beyond what the self-service tools provide.
 
 ## 11. Children
 
-The Service is not directed to children under 16. We do not knowingly
-collect data from children under 16. If you become aware that a child
-has provided us with personal data without parental consent, please
-contact us so we can delete it.
+The Service is not directed to children under 16. We do not knowingly collect data from children under 16. If you become aware that a child has provided us with personal data without parental consent, please contact us so we can delete it.
 
 ## 12. Changes
 
-We may update this Policy. Material changes will be announced via email
-30 days in advance.
+We may update this Policy. Material changes will be announced via email 30 days in advance.
 
 ## 13. Contact
 

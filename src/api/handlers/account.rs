@@ -45,6 +45,7 @@ pub struct UserDataExport {
     pub memberships: Vec<MembershipExport>,
     pub login_history: Vec<LoginAttemptExport>,
     pub audit_entries: Vec<AuditEntryExport>,
+    pub mcp_write_actions: Vec<McpAuditExport>,
 }
 
 #[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
@@ -198,6 +199,21 @@ pub struct AuditEntryExport {
     #[schema(value_type = Object)]
     pub metadata: serde_json::Value,
     pub occurred_at: DateTime<Utc>,
+}
+
+/// One write an AI assistant made on this user's behalf over MCP. `token_id`
+/// is deliberately absent: the token belongs to the connection, and the
+/// `api_tokens` block above already carries what the user may see of it.
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct McpAuditExport {
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub org_id: Option<Uuid>,
+    pub tool: String,
+    #[schema(value_type = Object)]
+    pub arguments: serde_json::Value,
+    pub outcome: String,
+    pub detail: Option<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[utoipa::path(
@@ -355,6 +371,15 @@ async fn build_export(pool: &sqlx::PgPool, user_id: UserId) -> Result<UserDataEx
     .await
     .map_err(db_err("audit_entries"))?;
 
+    let mcp_write_actions: Vec<McpAuditExport> = sqlx::query_as(
+        "SELECT org_id, tool, arguments, outcome, detail, created_at \
+         FROM mcp_audit WHERE user_id = $1 ORDER BY created_at DESC",
+    )
+    .bind(user_id.0)
+    .fetch_all(pool)
+    .await
+    .map_err(db_err("mcp_write_actions"))?;
+
     Ok(UserDataExport {
         exported_at: Utc::now(),
         user,
@@ -365,6 +390,7 @@ async fn build_export(pool: &sqlx::PgPool, user_id: UserId) -> Result<UserDataEx
         memberships,
         login_history,
         audit_entries,
+        mcp_write_actions,
     })
 }
 

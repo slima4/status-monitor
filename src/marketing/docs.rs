@@ -357,7 +357,7 @@ pub const DOCS: &[DocPage] = &[
         description: "Every configuration key, its default, and the environment variable that overrides it.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-08-07",
+        lastmod: "2026-08-11",
         source: include_str!("../../docs/configuration.md"),
         dir: "",
     },

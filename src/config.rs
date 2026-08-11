@@ -742,6 +742,10 @@ pub struct RetentionConfig {
     pub quota_events_days: u32,
     /// `org_audit_log` rows older than this are deleted.
     pub audit_log_days: u32,
+    /// `mcp_audit` rows older than this are deleted. A row identifies what the
+    /// tool acted on, which for a monitor means its name and address, so the
+    /// trail gets a bounded life rather than outliving every other record.
+    pub mcp_audit_days: u32,
     /// Days after an API token's `expires_at` before its row is
     /// hard-deleted. Live tokens never count against the per-user cap
     /// (`api_tokens::count_for_user` filters by expiry) so the only purpose
@@ -757,6 +761,7 @@ impl Default for RetentionConfig {
             login_attempts_days: 180,
             quota_events_days: 90,
             audit_log_days: 730,
+            mcp_audit_days: 730,
             api_tokens_post_expiry_days: 30,
         }
     }
@@ -1334,6 +1339,16 @@ impl AppConfig {
                     self.escalation.max_attempts
                 )));
             }
+        }
+        // A zero window is `created_at < now()`, which empties the table on the
+        // next tick instead of retaining nothing older than the window.
+        for (days, field) in [
+            (self.retention.login_attempts_days, "login_attempts_days"),
+            (self.retention.quota_events_days, "quota_events_days"),
+            (self.retention.audit_log_days, "audit_log_days"),
+            (self.retention.mcp_audit_days, "mcp_audit_days"),
+        ] {
+            ge1_u64(u64::from(days), &format!("retention.{field}"))?;
         }
         Ok(())
     }

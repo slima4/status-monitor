@@ -46,8 +46,10 @@ async fn purges_past_window_and_keeps_fresh_rows() {
         .expect("org created")
         .id;
 
-    // login_attempts: one well past 180d, one fresh.
-    for (days_ago, _label) in [(200_i64, "old"), (1_i64, "fresh")] {
+    // Each table gets a row past its own window, a row that sits between its
+    // window and its neighbours' (so binding another table's window to this
+    // query changes the surviving count), and a fresh row.
+    for (days_ago, _label) in [(200_i64, "old"), (100_i64, "between"), (1_i64, "fresh")] {
         sqlx::query(
             "INSERT INTO login_attempts (user_id, method, success, ip_hash, occurred_at) \
              VALUES ($1, 'test', false, $2, now() - ($3::int * INTERVAL '1 day'))",
@@ -59,8 +61,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
         .await
         .expect("insert login_attempt");
     }
-    // quota_events: one past 90d, one fresh.
-    for days_ago in [120_i64, 1] {
+    for days_ago in [120_i64, 100, 1] {
         sqlx::query(
             "INSERT INTO quota_events (org_id, user_id, event, ip_hash, occurred_at) \
              VALUES ($1, $2, 'test', $3, now() - ($4::int * INTERVAL '1 day'))",
@@ -73,8 +74,8 @@ async fn purges_past_window_and_keeps_fresh_rows() {
         .await
         .expect("insert quota_event");
     }
-    // org_audit_log: one past 730d, one fresh. Tag the action with the marker.
-    for days_ago in [800_i64, 1] {
+    // Tag the action with the marker.
+    for days_ago in [800_i64, 650, 1] {
         sqlx::query(
             "INSERT INTO org_audit_log (org_id, action, occurred_at) \
              VALUES ($1, $2, now() - ($3::int * INTERVAL '1 day'))",
@@ -85,6 +86,20 @@ async fn purges_past_window_and_keeps_fresh_rows() {
         .execute(&pool)
         .await
         .expect("insert audit row");
+    }
+    // Tag the tool with the marker.
+    for days_ago in [800_i64, 600, 1] {
+        sqlx::query(
+            "INSERT INTO mcp_audit (org_id, user_id, tool, outcome, created_at) \
+             VALUES ($1, $2, $3, 'success', now() - ($4::int * INTERVAL '1 day'))",
+        )
+        .bind(org.0)
+        .bind(user.0)
+        .bind(&marker)
+        .bind(days_ago)
+        .execute(&pool)
+        .await
+        .expect("insert mcp_audit row");
     }
     // sessions: absolute-expired, idle-expired (alive absolute), and fresh.
     let sid = |k: &str| format!("{marker}-{k}");
@@ -116,15 +131,24 @@ async fn purges_past_window_and_keeps_fresh_rows() {
     .await
     .expect("insert fresh session");
 
-    let retention = RetentionConfig::default(); // 30/180/90/730
+    // Every window distinct, so binding the wrong config field to a query
+    // fails here instead of passing on a coincidence of equal defaults.
+    let retention = RetentionConfig {
+        login_attempts_days: 150,
+        quota_events_days: 60,
+        audit_log_days: 700,
+        mcp_audit_days: 500,
+        ..RetentionConfig::default()
+    };
     let session = SessionConfig::default(); // idle 30d
     let grace = TenancyConfig::default().deletion_grace_period_days;
 
-    purge_old_data(&pool, &ch, &retention, &session, grace, &cache())
+    let report = purge_old_data(&pool, &ch, &retention, &session, grace, &cache())
         .await
         .expect("retention run");
 
-    // Old rows gone, fresh rows survive — scoped to this run's marker.
+    // Each count below is unique to that table's own window: reach for a
+    // neighbour's and the "between" row lands on the wrong side.
     assert_eq!(
         scalar_i64(
             &pool,
@@ -132,8 +156,8 @@ async fn purges_past_window_and_keeps_fresh_rows() {
             &marker
         )
         .await,
-        1,
-        "only the fresh login_attempt should remain"
+        2,
+        "the 100-day and fresh login_attempts should remain under a 150-day window"
     );
     assert_eq!(
         scalar_i64(
@@ -143,7 +167,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
         )
         .await,
         1,
-        "only the fresh quota_event should remain"
+        "only the fresh quota_event should remain under a 60-day window"
     );
     assert_eq!(
         scalar_i64(
@@ -152,8 +176,24 @@ async fn purges_past_window_and_keeps_fresh_rows() {
             &marker
         )
         .await,
+        2,
+        "the 650-day and fresh audit rows should remain under a 700-day window"
+    );
+    assert_eq!(
+        scalar_i64(
+            &pool,
+            "SELECT count(*) FROM mcp_audit WHERE tool = $1",
+            &marker
+        )
+        .await,
         1,
-        "only the fresh audit row should remain"
+        "only the fresh MCP audit row should remain under a 500-day window"
+    );
+    assert!(
+        report.mcp_audit >= 2,
+        "the report feeds the only metric this table has, so it must count the \
+         rows the delete actually removed (got {})",
+        report.mcp_audit
     );
     assert_eq!(
         scalar_i64(
@@ -238,6 +278,32 @@ fn windows_match_privacy_policy_and_clickhouse_ttl() {
         policy.contains("| Audit log | 2 years |"),
         "Privacy Policy audit-log retention line changed"
     );
+    assert_eq!(r.mcp_audit_days, 730, "MCP audit window changed");
+    assert!(
+        policy.contains(
+            "| MCP write actions (tool, what it acted on, outcome, and the person and token behind it) | 2 years |"
+        ),
+        "Privacy Policy MCP audit retention line changed"
+    );
+
+    // Production loads default.toml, not the Rust `Default`, so pinning the
+    // policy to only one of them leaves the other free to drift.
+    let shipped = include_str!("../config/default.toml");
+    for (key, days) in [
+        ("login_attempts_days", r.login_attempts_days),
+        ("quota_events_days", r.quota_events_days),
+        ("audit_log_days", r.audit_log_days),
+        ("mcp_audit_days", r.mcp_audit_days),
+    ] {
+        assert!(
+            shipped
+                .lines()
+                .filter_map(|l| l.split_once('='))
+                .any(|(k, v)| k.trim() == key
+                    && v.split('#').next().unwrap_or_default().trim() == days.to_string()),
+            "config/default.toml {key} disagrees with RetentionConfig::default() ({days})"
+        );
+    }
 
     let m1 = include_str!("../migrations/clickhouse/001_initial.sql");
     assert!(

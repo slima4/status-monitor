@@ -181,6 +181,7 @@ deletion_grace_period_days = 30
 login_attempts_days = 180
 quota_events_days = 90
 audit_log_days = 730              # 2 years
+mcp_audit_days = 730              # 2 years
 
 # `base_domain` is required when tenancy.subdomain_public_routes = true; the
 # startup assertion refuses to boot without it (would let the slug extractor

@@ -169,7 +169,7 @@ Before any write tool acts, the server sends an MCP **elicitation** request desc
 
 ## Audit
 
-Every write-tool invocation writes one row to `mcp_audit`, on **every** path — success, user-declined, scope-denied, bad input, not-found, or server error — recording: `actor_type = mcp`, the token id, the acting user + org, the tool name, the arguments, the outcome (`success` / `denied` / `error`), and a detail that leads with the refusal code and adds its reason where there is one (`not_confirmed:declined`, `confirmation_failed:timed_out`). The same event is emitted to tracing. Reads are not audit-logged (they're side-effect-free and already rate-limited).
+Every write-tool invocation writes one row to `mcp_audit`, on **every** path — success, user-declined, scope-denied, bad input, not-found, or server error — recording: `actor_type = mcp`, the token id, the acting user + org, the tool name, what it acted on, the outcome (`success` / `denied` / `error`), and a detail that leads with the refusal code and adds its reason where there is one (`not_confirmed:declined`, `confirmation_failed:timed_out`). "What it acted on" is the id for most tools, the created monitor's name, address, interval and bound channels for `create_monitor`, and the old → new pairs for `update_monitor`; a refused call records only what identifies the attempt. Customer-facing incident text is never recorded — not a public title, a description, an update `message`, nor an ack/resolve note. The same event is emitted to tracing. Reads are not audit-logged (they're side-effect-free and already rate-limited). Rows are kept for `retention.mcp_audit_days` (2 years by default), then deleted by the daily retention job.
 
 ## Enabling
 
