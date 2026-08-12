@@ -620,6 +620,7 @@ async fn main() -> Result<()> {
                 batch_limit: 200,
                 base_domain: cfg.public_status.base_domain.clone(),
                 public_base_url: cfg.auth.public_base_url.clone(),
+                subdomain_routes: uptimepage::api::subdomain_public_routes_enabled(&cfg),
                 unsubscribe_secret: unsubscribe_secret.clone(),
                 from_address: cfg.email.from_address.clone(),
                 from_name: cfg.email.from_name.clone(),

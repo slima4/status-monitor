@@ -7,8 +7,8 @@
 use askama::Template;
 use askama_web::WebTemplate;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
-use axum::response::{IntoResponse, Response};
+use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Redirect, Response};
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -27,7 +27,9 @@ use crate::public_status::HistoryIncidentMarker;
 use crate::storage::orgs::{OrgBranding, load_page_branding};
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::filters;
-use crate::web::host::{HostShape, parse_host_shape, resolve_status_page};
+use crate::web::host::{
+    HostShape, is_subdomain_public_request, parse_host_shape, resolve_status_page,
+};
 use crate::web::views::humanize_duration;
 
 #[derive(Debug, Default, Deserialize)]
@@ -74,6 +76,8 @@ pub struct IncidentArchivePage {
     /// renders when set.
     pub next_cursor: Option<String>,
     pub rss_url: &'static str,
+    /// Per-page robots directive; see [`archive_robots`].
+    pub robots: &'static str,
     pub og: OgMeta,
 }
 
@@ -131,11 +135,18 @@ pub async fn index(
         // branding lookup is skipped on the 30s poll.
         StatusRegion { view }.into_response()
     } else {
-        let branding = resolve_branding(&state, page_ref.org, page_ref.page, &page.site_name).await;
+        let branding = resolve_branding(
+            &state,
+            &headers,
+            page_ref.org,
+            page_ref.page,
+            &page.site_name,
+        )
+        .await;
         let og = build_og_meta(
             &state,
             &headers,
-            "/status",
+            branding.home,
             format!("{} Status", branding.display_name),
             format!(
                 "Live and past status for {}: current uptime for every component, open and recent incidents, scheduled maintenance windows, and email or webhook updates.",
@@ -146,6 +157,33 @@ pub async fn index(
         );
         StatusFullPage { view, branding, og }.into_response()
     }
+}
+
+/// A tenant host answers the same page at `/`, so `/status` there is a second
+/// URL for one page: it splits search ranking and gives visitors two addresses
+/// to share. Redirect to the one the page links to itself. A path-based deploy
+/// serves the operator dashboard at `/`, so `/status` stays the page there.
+pub async fn status_path(
+    State(state): State<AppState>,
+    uri: Uri,
+    headers: HeaderMap,
+    query: Query<StatusParams>,
+) -> Response {
+    if !is_subdomain_public_request(&state, &headers) {
+        return index(State(state), headers, query).await;
+    }
+    // Resolve before redirecting so a host with no live page still 404s here
+    // rather than answering for one it cannot serve.
+    if let Err(err) = resolve_status_page(&state, &headers).await {
+        return render_public_error(err);
+    }
+    // The 30s refresh poll of an already-open tab still asks for `?fragment=1`
+    // here, and losing the query would swap the whole page into the region.
+    let target = match uri.query() {
+        Some(q) => format!("/?{q}"),
+        None => "/".to_owned(),
+    };
+    Redirect::permanent(&target).into_response()
 }
 
 /// Serves the page's uploaded logo (or 404 when none is set). Same host→page
@@ -182,16 +220,18 @@ pub async fn logo(State(state): State<AppState>, headers: HeaderMap) -> Response
     }
 }
 
-/// The component name is a lookup that can come back empty, so the subject
-/// falls back to the page itself rather than rendering a dangling "for ".
-fn incident_description(component_name: &str, display_name: &str) -> String {
-    let subject = if component_name.is_empty() {
-        format!("Incident report on the {display_name} status page")
+/// Leads with the title: every incident on one component would otherwise ship
+/// a byte-identical description. The component name is a lookup that can come
+/// back empty, so it drops out rather than leaving a dangling "affecting ".
+fn incident_description(title: &str, component_name: &str, display_name: &str) -> String {
+    let affected = if component_name.is_empty() {
+        String::new()
     } else {
-        format!("Incident report for {component_name} on the {display_name} status page")
+        format!(", affecting {component_name}")
     };
     format!(
-        "{subject}: current phase, when it started and ended, which components were affected, and every public update posted."
+        "{}{affected}: current phase, when it started and ended, and every update posted on the {display_name} status page.",
+        crate::notifier::truncate_chars(title, 60)
     )
 }
 
@@ -216,14 +256,21 @@ pub async fn incident(
         Ok(p) => p.site_name.clone(),
         Err(err) => return render_public_error(err),
     };
-    let branding = resolve_branding(&state, page_ref.org, page_ref.page, &fallback_name).await;
+    let branding = resolve_branding(
+        &state,
+        &headers,
+        page_ref.org,
+        page_ref.page,
+        &fallback_name,
+    )
+    .await;
     let now = Utc::now();
     let og = build_og_meta(
         &state,
         &headers,
         &format!("/status/incidents/{id}"),
         format!("{} · {} Status", inc.title, branding.display_name),
-        incident_description(&inc.component_name, &branding.display_name),
+        incident_description(&inc.title, &inc.component_name, &branding.display_name),
         "article",
         &branding,
     );
@@ -276,12 +323,19 @@ pub async fn archive(
         Ok(l) => l,
         Err(err) => return render_public_error(err),
     };
-    let branding = resolve_branding(&state, page_ref.org, page_ref.page, &fallback_name).await;
+    let branding = resolve_branding(
+        &state,
+        &headers,
+        page_ref.org,
+        page_ref.page,
+        &fallback_name,
+    )
+    .await;
     let now = Utc::now();
     let months = bucket_by_month(&listing.items, now);
-    // Each keyset page holds different incidents, so the cursor stays in the
-    // canonical: dropping it would declare every page past the first a
-    // duplicate of the first, and the archive is the only crawl path to them.
+    // Self-canonical, cursor included. Pointing a cursor page at the entry
+    // point instead would pair a canonical with the `noindex` below, and the
+    // entry point can inherit that `noindex` — the one page here worth indexing.
     let path = match params.cursor.as_deref() {
         Some(cursor) => format!("/status/incidents?cursor={cursor}"),
         None => "/status/incidents".to_string(),
@@ -303,6 +357,7 @@ pub async fn archive(
         months,
         next_cursor: listing.next_cursor,
         rss_url: RSS_URL,
+        robots: archive_robots(params.cursor.as_deref()),
         og,
     }
     .into_response()
@@ -388,8 +443,17 @@ pub fn public_base(cfg: &crate::config::AppConfig, slug: &str) -> Option<String>
 /// Public page URL from an origin: the apex in subdomain mode, `{origin}/status`
 /// in path mode.
 pub fn public_status_url(cfg: &crate::config::AppConfig, origin: &str) -> String {
-    use crate::api::routes::subdomain_public_routes_enabled;
-    if subdomain_public_routes_enabled(cfg) {
+    status_url_for(
+        crate::api::routes::subdomain_public_routes_enabled(cfg),
+        origin,
+    )
+}
+
+/// Same rule for callers that carry the tenancy flag instead of the whole
+/// config. One predicate: a subdomain deploy gives the page a host of its own,
+/// a path deploy shares the operator host, whose root is the dashboard.
+pub fn status_url_for(subdomain_routes: bool, origin: &str) -> String {
+    if subdomain_routes {
         origin.to_owned()
     } else {
         format!("{origin}/status")
@@ -543,10 +607,13 @@ pub struct BrandingView {
     pub logo_url: Option<String>,
     pub show_powered_by: bool,
     pub style: &'static str,
+    /// Where the status page lives on this host: every self-link and its
+    /// canonical URL use it. See [`status_home`].
+    pub home: &'static str,
 }
 
 impl BrandingView {
-    fn from_org(o: &OrgBranding, cfg: &PublicStatusConfig) -> Self {
+    fn from_org(o: &OrgBranding, cfg: &PublicStatusConfig, home: &'static str) -> Self {
         let display_name = o.resolved_display_name().to_owned();
         let about_html = o
             .branding
@@ -572,6 +639,7 @@ impl BrandingView {
                 .map(|h| format!("{LOGO_ROUTE}?v={h}")),
             show_powered_by: o.branding.show_powered_by(cfg.default_show_powered_by),
             style: o.branding.public_style.as_str(),
+            home,
         }
     }
 }
@@ -581,15 +649,17 @@ impl BrandingView {
 /// the status page must still render if branding can't be read.
 async fn resolve_branding(
     state: &AppState,
+    headers: &HeaderMap,
     org: OrgId,
     page: StatusPageId,
     fallback_name: &str,
 ) -> BrandingView {
     let cfg = &state.cfg.public_status;
+    let home = status_home(state, headers);
     let mut view = if let Some(pool) = state.db.as_ref()
         && let Ok(Some(ob)) = load_page_branding(pool, page).await
     {
-        BrandingView::from_org(&ob, cfg)
+        BrandingView::from_org(&ob, cfg, home)
     } else {
         BrandingView::from_org(
             &OrgBranding {
@@ -598,6 +668,7 @@ async fn resolve_branding(
                 branding: PublicOrgBranding::default(),
             },
             cfg,
+            home,
         )
     };
     // On a plan-lookup fault, fail closed (badge shown) but log it — otherwise a
@@ -615,6 +686,27 @@ async fn resolve_branding(
         white_label,
     );
     view
+}
+
+/// A cursor is opaque but forgeable, and every forgery resolves to a valid
+/// page, so only the cursor-less entry point is offered to the index. The
+/// rest stay crawlable: the archive is the only path to older incidents.
+fn archive_robots(cursor: Option<&str>) -> &'static str {
+    match cursor {
+        Some(_) => "noindex,follow",
+        None => "index,follow",
+    }
+}
+
+/// A tenant subdomain serves the status page at its root, which is the URL
+/// customers hand out, so that is the one to link and to declare canonical.
+/// A path-based deploy keeps `/status`, its root being the operator dashboard.
+fn status_home(state: &AppState, headers: &HeaderMap) -> &'static str {
+    if is_subdomain_public_request(state, headers) {
+        "/"
+    } else {
+        "/status"
+    }
 }
 
 /// White-label is Pro-only: on SaaS a plan without white-label always shows the
@@ -1222,6 +1314,7 @@ mod tests {
                 branding: PublicOrgBranding::default(),
             },
             &PublicStatusConfig::default(),
+            "/",
         )
     }
 
@@ -1239,7 +1332,8 @@ mod tests {
         assert!(html.contains("Acme Status"));
         assert!(html.contains("All Systems Operational"));
         assert!(html.contains("Gateway"));
-        assert!(html.contains(r#"hx-get="/status?fragment=1""#));
+        // Relative so the poll stays on whichever URL served the page.
+        assert!(html.contains(r#"hx-get="?fragment=1""#));
         assert!(html.contains(r#"hx-trigger="every 30s""#));
         assert!(html.contains("data-tz"));
         assert!(html.contains(&crate::web::assets::url("js/htmx.min.js")));
@@ -1556,6 +1650,7 @@ mod tests {
                 branding: b,
             },
             &PublicStatusConfig::default(),
+            "/",
         )
     }
 
@@ -1694,8 +1789,21 @@ mod tests {
 
     #[test]
     fn incident_description_drops_the_subject_when_the_component_is_unnamed() {
-        assert!(incident_description("API", "Acme").starts_with("Incident report for API on the"));
-        assert!(incident_description("", "Acme").starts_with("Incident report on the Acme"));
+        assert!(
+            incident_description("Checkout 500s", "API", "Acme")
+                .starts_with("Checkout 500s, affecting API:")
+        );
+        assert!(
+            incident_description("Checkout 500s", "", "Acme").starts_with("Checkout 500s: current")
+        );
+    }
+
+    #[test]
+    fn incident_descriptions_differ_per_incident() {
+        assert_ne!(
+            incident_description("Checkout 500s", "API", "Acme"),
+            incident_description("Latency spike", "API", "Acme")
+        );
     }
 
     #[test]
@@ -1833,6 +1941,7 @@ mod tests {
             months,
             next_cursor: Some("opaque-cursor-token".into()),
             rss_url: RSS_URL,
+            robots: "index,follow",
             og: OgMeta::default(),
         };
         let html = page.render().unwrap();
@@ -1846,17 +1955,40 @@ mod tests {
     }
 
     #[test]
+    fn status_url_puts_the_page_where_the_deploy_serves_it() {
+        assert_eq!(
+            status_url_for(true, "https://acme.example.com"),
+            "https://acme.example.com"
+        );
+        assert_eq!(
+            status_url_for(false, "https://status.acme.test"),
+            "https://status.acme.test/status"
+        );
+    }
+
+    #[test]
+    fn only_the_cursorless_archive_page_is_indexable() {
+        assert_eq!(archive_robots(None), "index,follow");
+        assert_eq!(
+            archive_robots(Some("opaque-cursor-token")),
+            "noindex,follow"
+        );
+    }
+
+    #[test]
     fn archive_page_renders_empty_state_without_next_link() {
         let page = IncidentArchivePage {
             branding: sample_branding(),
             months: Vec::new(),
             next_cursor: None,
             rss_url: RSS_URL,
+            robots: "noindex,follow",
             og: OgMeta::default(),
         };
         let html = page.render().unwrap();
         assert!(html.contains("No incidents recorded."));
         assert!(!html.contains("Older incidents"));
+        assert!(html.contains(r#"<meta name="robots" content="noindex,follow">"#));
     }
 
     #[test]

@@ -355,7 +355,7 @@ async fn status_fragment_returns_region_without_doctype() {
     assert!(html.contains(PUBLIC_COMPONENT_NAME));
     // Region keeps the self-rearming HTMX hooks so subsequent swaps continue
     // (acceptance #5: "auto-refreshes every 30 s without full reload").
-    assert!(html.contains(r#"hx-get="/status?fragment=1""#));
+    assert!(html.contains(r#"hx-get="?fragment=1""#));
     assert!(html.contains(r#"hx-trigger="every 30s""#));
 }
 

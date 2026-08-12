@@ -5,7 +5,7 @@
 {% import "public/_incident_chips.html" as chips %}
 {% import "public/_incident_card.html" as card %}
 <div id="status-region"
-     hx-get="/status?fragment=1"
+     hx-get="?fragment=1"
      hx-trigger="every 30s"
      hx-swap="outerHTML"
      class="space-y-10">

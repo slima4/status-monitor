@@ -91,6 +91,14 @@ async fn get_status(app: &axum::Router, host: Option<&str>) -> StatusCode {
 
 /// `GET <path>` against the SaaS-subdomain app with an explicit `Host`.
 async fn get_path(app: &axum::Router, path: &str, host: Option<&str>) -> StatusCode {
+    get_response(app, path, host).await.status()
+}
+
+async fn get_response(
+    app: &axum::Router,
+    path: &str,
+    host: Option<&str>,
+) -> axum::response::Response {
     let mut req = Request::builder().uri(path);
     if let Some(h) = host {
         req = req.header("host", h);
@@ -99,7 +107,6 @@ async fn get_path(app: &axum::Router, path: &str, host: Option<&str>) -> StatusC
         .oneshot(req.body(Body::empty()).unwrap())
         .await
         .expect("oneshot")
-        .status()
 }
 
 fn saas_subdomain(cfg: &mut uptimepage::config::AppConfig) {
@@ -171,13 +178,14 @@ async fn subdomain_status_page_gates_on_enabled_and_slug_shape() {
 
     let (app, _default) = common::build_test_app_with_pg(pool, saas_subdomain).await;
 
-    // Enabled slug: extractor admits the request and the page renders (200).
-    // The blocked shapes below all 404, so 200-vs-404 isolates the gate.
+    // Enabled slug: the extractor admits the request, and `/status` hands the
+    // page to `/`. The blocked shapes below all 404, so redirect-vs-404
+    // isolates the gate.
     let admitted = get_status(&app, Some(&status_host(&on))).await;
     assert_eq!(
         admitted,
-        StatusCode::OK,
-        "enabled slug must render its page"
+        StatusCode::PERMANENT_REDIRECT,
+        "enabled slug must reach its page"
     );
 
     // Every blocked shape collapses to 404 at the extractor.
@@ -252,6 +260,30 @@ async fn subdomain_root_serves_public_page() {
 
 #[tokio::test]
 #[ignore]
+async fn subdomain_status_path_redirects_to_root() {
+    // One page reachable at two URLs splits its search ranking and gives
+    // visitors two addresses to share, so `/status` hands off to `/`.
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let slug = unique_slug("alias");
+    seed_org(&pool, &slug, true).await;
+    let (app, _default) = common::build_test_app_with_pg(pool, saas_subdomain).await;
+    let host = status_host(&slug);
+
+    let res = get_response(&app, "/status", Some(&host)).await;
+    assert_eq!(res.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(res.headers().get("location").unwrap(), "/");
+
+    // The auto-refresh poll of an already-open tab still asks here, and a
+    // redirect that dropped the query would answer it with the whole page.
+    let res = get_response(&app, "/status?fragment=1", Some(&host)).await;
+    assert_eq!(res.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(res.headers().get("location").unwrap(), "/?fragment=1");
+}
+
+#[tokio::test]
+#[ignore]
 async fn tenant_host_isolates_operator_surface() {
     // Default-deny: a tenant subdomain (`{slug}.{base}`) must only
     // serve the public-status allow-list. Operator UI (`/login`),
@@ -299,7 +331,7 @@ async fn tenant_host_isolates_operator_surface() {
     }
 
     // Allow-list paths still resolve on tenant hosts. `/` rewrites to
-    // the public-status page; `/status` is the canonical public route.
+    // the public-status page; `/status` redirects there.
     assert_eq!(
         get_path(&app, "/", Some(&tenant_host)).await,
         StatusCode::OK,
@@ -307,8 +339,8 @@ async fn tenant_host_isolates_operator_surface() {
     );
     assert_eq!(
         get_path(&app, "/status", Some(&tenant_host)).await,
-        StatusCode::OK,
-        "tenant host `/status` must still serve the public page"
+        StatusCode::PERMANENT_REDIRECT,
+        "tenant host `/status` must still reach the public page"
     );
 
     // Health probes are exempt — Caddy active-health may carry an
@@ -392,7 +424,7 @@ async fn disabling_via_operator_path_takes_the_page_offline() {
     let host = status_host(&slug);
 
     assert_eq!(
-        get_status(&app, Some(&host)).await,
+        get_path(&app, "/", Some(&host)).await,
         StatusCode::OK,
         "enabled org renders its page"
     );
@@ -401,7 +433,7 @@ async fn disabling_via_operator_path_takes_the_page_offline() {
     set_enabled(&pool, org, false).await;
 
     assert_eq!(
-        get_status(&app, Some(&host)).await,
+        get_path(&app, "/", Some(&host)).await,
         StatusCode::NOT_FOUND,
         "disabled org no longer resolves on its subdomain"
     );

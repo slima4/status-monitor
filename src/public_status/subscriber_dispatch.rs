@@ -28,6 +28,9 @@ pub struct SubscriberDispatchConfig {
     /// self-host deploy, where `public_base_url` is used instead.
     pub base_domain: String,
     pub public_base_url: String,
+    /// Whether pages are served on hosts of their own; decides where on the
+    /// origin the page itself lives.
+    pub subdomain_routes: bool,
     pub unsubscribe_secret: String,
     pub from_address: String,
     pub from_name: String,
@@ -174,11 +177,16 @@ impl SubscriberDispatcher {
         );
         let unsubscribe_url = self.unsubscribe_url(&origin, p.subscriber_id);
         if p.channel == "webhook" {
+            let page_url = self.page_url(
+                &p.slug,
+                p.custom_domain.as_deref(),
+                p.custom_domain_verified,
+            );
             let payload = serde_json::json!({
                 "type": "incident_update",
                 "incident": { "id": p.incident_id, "title": p.incident_title },
                 "update": { "id": p.update_id, "phase": p.phase, "message": p.message },
-                "page": { "name": p.page_name, "url": format!("{origin}/status") },
+                "page": { "name": p.page_name, "url": page_url },
                 "incident_url": format!("{origin}/status/incidents/{}", p.incident_id),
                 "unsubscribe_url": unsubscribe_url,
             });
@@ -208,6 +216,11 @@ impl SubscriberDispatcher {
             m.custom_domain_verified,
         );
         let unsubscribe_url = self.unsubscribe_url(&origin, m.subscriber_id);
+        let page_url = self.page_url(
+            &m.slug,
+            m.custom_domain.as_deref(),
+            m.custom_domain_verified,
+        );
         if m.channel == "webhook" {
             let payload = serde_json::json!({
                 "type": "maintenance",
@@ -219,7 +232,7 @@ impl SubscriberDispatcher {
                     "starts_at": m.starts_at,
                     "ends_at": m.ends_at,
                 },
-                "page": { "name": m.page_name, "url": format!("{origin}/status") },
+                "page": { "name": m.page_name, "url": page_url },
                 "unsubscribe_url": unsubscribe_url,
             });
             return self
@@ -236,7 +249,7 @@ impl SubscriberDispatcher {
                 phase: m.phase.clone(),
                 starts_at: m.starts_at,
                 ends_at: m.ends_at,
-                page_url: format!("{origin}/status"),
+                page_url,
                 unsubscribe_url,
             },
         };
@@ -285,6 +298,15 @@ impl SubscriberDispatcher {
             slug,
             custom_domain,
             verified,
+        )
+    }
+
+    /// The page's own address. Subscribers keep it, so it has to be the URL
+    /// the page answers on rather than one that redirects there.
+    fn page_url(&self, slug: &str, custom_domain: Option<&str>, verified: bool) -> String {
+        crate::web::views::public_status::status_url_for(
+            self.cfg.subdomain_routes,
+            &self.origin(slug, custom_domain, verified),
         )
     }
 

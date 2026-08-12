@@ -258,7 +258,7 @@ pub fn routes(state: AppState) -> Router {
 
     if public_routes_active(cfg) {
         r = r
-            .route("/status", get(views::public_status::index))
+            .route("/status", get(views::public_status::status_path))
             .route("/status/incidents", get(views::public_status::archive))
             .route(
                 "/status/incidents/{id}",

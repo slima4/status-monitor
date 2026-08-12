@@ -490,6 +490,7 @@ fn dispatcher(
             batch_limit: 100,
             base_domain: "example.com".into(),
             public_base_url: "https://app.example.com".into(),
+            subdomain_routes: true,
             unsubscribe_secret: "dispatch-secret".into(),
             from_address: "status@example.com".into(),
             from_name: "Status".into(),
