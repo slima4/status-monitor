@@ -26,7 +26,7 @@ use uptimepage::domain::{
     OverallStatus, PageRef, PublicComponent, PublicComponentGroup, PublicComponentStatus,
     PublicIncident, PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
-use uptimepage::public_status::{IncidentListQuery, PublicSource};
+use uptimepage::public_status::{IncidentListQuery, PublicSource, source::FeedLinks};
 
 const OPERATOR_TITLE: &str = "API down in EU-WEST — investigating router";
 const PUBLIC_COMPONENT_NAME: &str = "Public API";
@@ -115,7 +115,7 @@ impl PublicSource for PublishedSource {
     async fn incidents_rss(
         &self,
         _page: PageRef,
-        _base_url: &str,
+        _links: FeedLinks<'_>,
     ) -> Result<String, PublicAppError> {
         unimplemented!("not exercised by HTML page tests")
     }
@@ -183,7 +183,7 @@ impl PublicSource for EmptyDataSource {
     async fn incidents_rss(
         &self,
         _page: PageRef,
-        _base_url: &str,
+        _links: FeedLinks<'_>,
     ) -> Result<String, PublicAppError> {
         unimplemented!()
     }
@@ -263,7 +263,7 @@ impl PublicSource for MaintenanceDominatesSource {
     async fn incidents_rss(
         &self,
         _page: PageRef,
-        _base_url: &str,
+        _links: FeedLinks<'_>,
     ) -> Result<String, PublicAppError> {
         unimplemented!()
     }

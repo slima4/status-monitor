@@ -11,7 +11,7 @@
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use utoipa::IntoParams;
@@ -27,6 +27,7 @@ use crate::domain::{
 };
 use crate::public_status::IncidentListQuery;
 use crate::public_status::badge::{component_badge, overall_badge, render_badge};
+use crate::public_status::source::FeedLinks;
 use crate::web::host::ResolvedStatusPage;
 
 const RSS_CONTENT_TYPE: HeaderValue =
@@ -200,18 +201,33 @@ pub async fn public_incident(
 pub async fn public_incidents_rss(
     State(state): State<AppState>,
     ResolvedStatusPage(page): ResolvedStatusPage,
+    headers: HeaderMap,
 ) -> Result<Response, PublicAppError> {
-    let base_url = format!(
-        "http://{}",
+    // A reader keeps these links and follows them days later, so they have to
+    // be the address it fetched the feed from, not whatever the process bound.
+    let configured = || {
         state
             .cfg
-            .server
-            .api_bind
-            .split(':')
-            .next()
-            .unwrap_or("localhost")
-    );
-    let body = state.public_source.incidents_rss(page, &base_url).await?;
+            .auth
+            .public_base_url
+            .trim_end_matches('/')
+            .to_owned()
+    };
+    let subdomain_routes = crate::api::subdomain_public_routes_enabled(&state.cfg);
+    // Only a subdomain deploy resolves the page from the Host. Where every host
+    // serves the same page, the Host names no better origin than the config.
+    let origin = if subdomain_routes {
+        crate::web::host::request_origin(&headers, &state.cfg.public_status.base_domain)
+            .unwrap_or_else(configured)
+    } else {
+        configured()
+    };
+    let page_url = crate::web::views::public_status::status_url_for(subdomain_routes, &origin);
+    let links = FeedLinks {
+        page: &page_url,
+        origin: &origin,
+    };
+    let body = state.public_source.incidents_rss(page, links).await?;
     let mut resp = (StatusCode::OK, body).into_response();
     resp.headers_mut()
         .insert(header::CONTENT_TYPE, RSS_CONTENT_TYPE);

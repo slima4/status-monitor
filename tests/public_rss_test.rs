@@ -28,7 +28,9 @@ use uptimepage::domain::{
     ComponentHistoryResponse, IncidentSeverity, IncidentStatusPhase, PageRef, PublicIncident,
     PublicIncidentUpdate, PublicMaintenanceList, PublicStatusPage,
 };
-use uptimepage::public_status::{IncidentListQuery, PublicSource, source::build_rss};
+use uptimepage::public_status::{
+    IncidentListQuery, PublicSource, source::FeedLinks, source::build_rss,
+};
 
 const INCIDENT_TITLE: &str = "Edge proxy 5xx spike";
 const INCIDENT_BODY: &str = "First report from the edge fleet — investigating.";
@@ -102,25 +104,41 @@ impl PublicSource for TwoIncidentSource {
     async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
         unimplemented!("not exercised by RSS test")
     }
-    async fn incidents_rss(&self, page: PageRef, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        page: PageRef,
+        links: FeedLinks<'_>,
+    ) -> Result<String, PublicAppError> {
         let items = self
             .list_incidents(page, IncidentListQuery::default())
             .await?
             .items;
-        Ok(build_rss("uptimepage", base_url, &items))
+        Ok(build_rss("uptimepage", links, &items))
     }
 }
 
+const BASE_DOMAIN: &str = "example.test";
+const PUBLIC_BASE_URL: &str = "https://status.example.test";
+
 async fn fetch_rss() -> String {
-    let app = build_test_app_with_public_source(|_| {}, Arc::new(TwoIncidentSource));
-    let resp = app
-        .oneshot(
-            Request::get("/api/public/v1/incidents.rss")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
+    fetch_rss_from(None).await
+}
+
+/// Fetch the feed with an explicit `Host`, on a deployment that owns
+/// `{slug}.example.test`.
+async fn fetch_rss_from(host: Option<&str>) -> String {
+    let app = build_test_app_with_public_source(
+        |cfg| {
+            cfg.public_status.base_domain = BASE_DOMAIN.into();
+            cfg.auth.public_base_url = PUBLIC_BASE_URL.into();
+        },
+        Arc::new(TwoIncidentSource),
+    );
+    let mut req = Request::get("/api/public/v1/incidents.rss");
+    if let Some(h) = host {
+        req = req.header("host", h);
+    }
+    let resp = app.oneshot(req.body(Body::empty()).unwrap()).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let bytes = axum::body::to_bytes(resp.into_body(), 8 << 20)
         .await
@@ -296,6 +314,49 @@ async fn rss_item_link_parses_as_absolute_uri() {
             "link must be http(s): {raw}"
         );
     }
+}
+
+#[tokio::test]
+async fn rss_links_ignore_the_host_where_every_host_serves_one_page() {
+    // Single-tenant: the page is the same whatever the Host says, so a Host
+    // header names no better origin than the config — and a forged one would
+    // otherwise rewrite links a reader keeps.
+    for host in [
+        None,
+        Some("acme.example.test"),
+        Some("evil.test"),
+        Some("a.b.example.test"),
+    ] {
+        let xml = fetch_rss_from(host).await;
+        let parsed = parse(&xml);
+        for block in &parsed.item_blocks {
+            let raw = item_text(block, "link").expect("link present");
+            assert!(
+                raw.starts_with(&format!("{PUBLIC_BASE_URL}/status/incidents/")),
+                "host {host:?} reached a feed link: {raw}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn rss_channel_link_is_the_page_not_the_operator_root() {
+    // Single-tenant serves the dashboard at `/`, so a reader clicking the feed
+    // title there would land on the login screen.
+    let xml = fetch_rss().await;
+    assert!(
+        xml.contains(&format!("<link>{PUBLIC_BASE_URL}/status</link>")),
+        "{xml}"
+    );
+}
+
+#[tokio::test]
+async fn rss_links_are_never_the_listen_address() {
+    let xml = fetch_rss().await;
+    assert!(
+        !xml.contains("127.0.0.1") && !xml.contains("0.0.0.0"),
+        "feed links must be reachable off-box:\n{xml}"
+    );
 }
 
 #[tokio::test]

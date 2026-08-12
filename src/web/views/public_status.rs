@@ -27,9 +27,7 @@ use crate::public_status::HistoryIncidentMarker;
 use crate::storage::orgs::{OrgBranding, load_page_branding};
 use crate::web::error::{NotFoundPage, UnavailablePage};
 use crate::web::filters;
-use crate::web::host::{
-    HostShape, is_subdomain_public_request, parse_host_shape, resolve_status_page,
-};
+use crate::web::host::{is_subdomain_public_request, request_origin, resolve_status_page};
 use crate::web::views::humanize_duration;
 
 #[derive(Debug, Default, Deserialize)]
@@ -224,14 +222,18 @@ pub async fn logo(State(state): State<AppState>, headers: HeaderMap) -> Response
 /// a byte-identical description. The component name is a lookup that can come
 /// back empty, so it drops out rather than leaving a dangling "affecting ".
 fn incident_description(title: &str, component_name: &str, display_name: &str) -> String {
+    // Every interpolated value is customer text, so each is capped: three
+    // unbounded names would push the tag well past what a SERP snippet shows.
+    let cap = crate::notifier::truncate_chars;
     let affected = if component_name.is_empty() {
         String::new()
     } else {
-        format!(", affecting {component_name}")
+        format!(", affecting {}", cap(component_name, 30))
     };
     format!(
-        "{}{affected}: current phase, when it started and ended, and every update posted on the {display_name} status page.",
-        crate::notifier::truncate_chars(title, 60)
+        "{}{affected}: current phase, when it started and ended, and every update posted on the {} status page.",
+        cap(title, 60),
+        cap(display_name, 30)
     )
 }
 
@@ -787,33 +789,8 @@ fn build_og_meta(
     og_type: &'static str,
     branding: &BrandingView,
 ) -> OgMeta {
-    let scheme = headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .filter(|s| matches!(*s, "http" | "https"))
-        .unwrap_or("https");
-    let host = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    let canonical = match parse_host_shape(host, &state.cfg.public_status.base_domain) {
-        HostShape::Apex | HostShape::Subdomain(_) => {
-            // Strip port + trailing dot the same way `parse_host_shape` does,
-            // and lower-case what is left: it matches hosts case-insensitively,
-            // so every casing of one host would otherwise claim its own URL.
-            let stripped = host.split(':').next().unwrap_or(host);
-            Some(
-                stripped
-                    .strip_suffix('.')
-                    .unwrap_or(stripped)
-                    .to_ascii_lowercase(),
-            )
-        }
-        HostShape::Other => None,
-    };
-    let url = canonical
-        .as_ref()
-        .map(|h| format!("{scheme}://{h}{path}"))
+    let url = request_origin(headers, &state.cfg.public_status.base_domain)
+        .map(|origin| format!("{origin}{path}"))
         .unwrap_or_default();
 
     let image = og_image(&state.cfg.marketing.canonical_origin);

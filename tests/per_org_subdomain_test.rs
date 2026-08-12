@@ -284,6 +284,35 @@ async fn subdomain_status_path_redirects_to_root() {
 
 #[tokio::test]
 #[ignore]
+async fn rss_links_stay_on_the_tenant_host() {
+    // A reader keeps these links and follows them days later, so they have to
+    // name the page's own host, not whatever address the process bound.
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let slug = unique_slug("feed");
+    seed_org(&pool, &slug, true).await;
+    let (app, _default) = common::build_test_app_with_pg(pool, saas_subdomain).await;
+    let host = status_host(&slug);
+
+    let res = get_response(&app, "/api/public/v1/incidents.rss", Some(&host)).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(res.into_body(), 8 << 20)
+        .await
+        .unwrap();
+    let xml = String::from_utf8(bytes.to_vec()).expect("utf-8");
+    assert!(
+        xml.contains(&format!("<link>https://{host}</link>")),
+        "channel link must be the tenant page:\n{xml}"
+    );
+    assert!(
+        !xml.contains("127.0.0.1") && !xml.contains("0.0.0.0"),
+        "feed must not publish the listen address:\n{xml}"
+    );
+}
+
+#[tokio::test]
+#[ignore]
 async fn tenant_host_isolates_operator_surface() {
     // Default-deny: a tenant subdomain (`{slug}.{base}`) must only
     // serve the public-status allow-list. Operator UI (`/login`),

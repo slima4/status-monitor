@@ -115,7 +115,7 @@ async fn public_source_trait_threads_org_param_to_distinct_responses() {
     use uptimepage::domain::{
         ComponentHistoryResponse, PageRef, PublicIncident, PublicMaintenanceList, StatusPageId,
     };
-    use uptimepage::public_status::{IncidentListQuery, PublicSource};
+    use uptimepage::public_status::{IncidentListQuery, PublicSource, source::FeedLinks};
 
     // Public reads are keyed by status page, not org — isolation is per-page.
     struct PageKeyedSource {
@@ -160,7 +160,7 @@ async fn public_source_trait_threads_org_param_to_distinct_responses() {
         async fn incidents_rss(
             &self,
             _page: PageRef,
-            _base_url: &str,
+            _links: FeedLinks<'_>,
         ) -> Result<String, PublicAppError> {
             unreachable!()
         }

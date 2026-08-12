@@ -23,7 +23,7 @@ use uptimepage::domain::{
 use uptimepage::email::{EmailSender, build_email_sender};
 use uptimepage::http_client::{HttpClients, build_clients};
 use uptimepage::http_outbound::{OutboundHttpClient, build_outbound_client};
-use uptimepage::public_status::{NoopPublicSource, PublicSource};
+use uptimepage::public_status::{NoopPublicSource, PublicSource, source::FeedLinks};
 use uptimepage::storage::{
     DomainExpiryStateStore, InMemoryDomainExpiryStateStore, InMemoryIncidentNarrationStore,
     InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink,
@@ -854,7 +854,7 @@ impl PublicSource for UnavailablePublicSource {
     async fn incidents_rss(
         &self,
         _page: PageRef,
-        _base_url: &str,
+        _links: FeedLinks<'_>,
     ) -> Result<String, uptimepage::api::public_error::PublicAppError> {
         Err(uptimepage::api::public_error::PublicAppError::Unavailable)
     }

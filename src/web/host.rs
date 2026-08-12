@@ -124,8 +124,7 @@ pub fn parse_host_shape<'a>(host: &'a str, base_domain: &str) -> HostShape<'a> {
     if base_domain.is_empty() || !base_domain.contains('.') {
         return HostShape::Other;
     }
-    let host = host.split(':').next().unwrap_or(host);
-    let host = host.strip_suffix('.').unwrap_or(host);
+    let host = normalize_host(host);
     if host.eq_ignore_ascii_case(base_domain) {
         return HostShape::Apex;
     }
@@ -143,6 +142,43 @@ pub fn parse_host_shape<'a>(host: &'a str, base_domain: &str) -> HostShape<'a> {
         return HostShape::Other;
     }
     HostShape::Subdomain(head)
+}
+
+/// Strip the port and the FQDN trailing dot. Hosts compare case-insensitively,
+/// so a caller building a URL out of the result has to lower-case it too.
+fn normalize_host(host: &str) -> &str {
+    let host = host.split(':').next().unwrap_or(host);
+    host.strip_suffix('.').unwrap_or(host)
+}
+
+/// Absolute origin the request arrived on, or `None` when the `Host` is
+/// neither this deployment's apex nor one of its tenant subdomains. Links we
+/// publish outlive the request that produced them, so a forged `Host` must
+/// never reach one; callers fall back to their configured public URL.
+pub fn request_origin(headers: &HeaderMap, base_domain: &str) -> Option<String> {
+    let raw = headers.get(HOST).and_then(|v| v.to_str().ok())?;
+    match parse_host_shape(raw, base_domain) {
+        HostShape::Apex | HostShape::Subdomain(_) => {
+            let scheme = headers
+                .get("x-forwarded-proto")
+                .and_then(|v| v.to_str().ok())
+                .filter(|s| matches!(*s, "http" | "https"))
+                .unwrap_or("https");
+            // The port stays: a deploy off 443 still has to publish links that
+            // resolve. Anything but digits is not one, so it is dropped rather
+            // than pasted into a URL.
+            let port = raw
+                .split_once(':')
+                .map(|(_, p)| p)
+                .filter(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+            let host = normalize_host(raw).to_ascii_lowercase();
+            Some(match port {
+                Some(port) => format!("{scheme}://{host}:{port}"),
+                None => format!("{scheme}://{host}"),
+            })
+        }
+        HostShape::Other => None,
+    }
 }
 
 /// Classify a request's `Host` header against the production wire
@@ -713,5 +749,99 @@ mod tests {
         assert!(HostScheme::from_base_domain("").is_err());
         assert!(HostScheme::from_base_domain("   ").is_err());
         assert!(HostScheme::from_base_domain("local").is_err());
+    }
+
+    fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                v.parse().unwrap(),
+            );
+        }
+        h
+    }
+
+    #[test]
+    fn request_origin_accepts_this_deployments_hosts() {
+        assert_eq!(
+            request_origin(&headers(&[("host", "acme.example.com")]), "example.com").as_deref(),
+            Some("https://acme.example.com")
+        );
+        assert_eq!(
+            request_origin(&headers(&[("host", "example.com")]), "example.com").as_deref(),
+            Some("https://example.com")
+        );
+    }
+
+    #[test]
+    fn request_origin_normalizes_the_host() {
+        // Casing and the FQDN trailing dot name the same host; each would
+        // otherwise publish its own spelling of every link.
+        for host in ["ACME.Example.com", "acme.example.com."] {
+            assert_eq!(
+                request_origin(&headers(&[("host", host)]), "example.com").as_deref(),
+                Some("https://acme.example.com"),
+                "{host}"
+            );
+        }
+    }
+
+    #[test]
+    fn request_origin_keeps_a_real_port_and_drops_a_bogus_one() {
+        // A dev or self-host deploy off 443 publishes links that have to
+        // resolve, so the port survives — but only when it is one.
+        assert_eq!(
+            request_origin(
+                &headers(&[("host", "acme.example.com:8080")]),
+                "example.com"
+            )
+            .as_deref(),
+            Some("https://acme.example.com:8080")
+        );
+        for bogus in ["acme.example.com:", "acme.example.com:80a"] {
+            assert_eq!(
+                request_origin(&headers(&[("host", bogus)]), "example.com").as_deref(),
+                Some("https://acme.example.com"),
+                "{bogus}"
+            );
+        }
+    }
+
+    #[test]
+    fn request_origin_rejects_a_host_this_deployment_does_not_serve() {
+        // A forged Host would otherwise rewrite every link in a feed a reader
+        // keeps, so anything off this deployment yields no origin at all.
+        for host in ["evil.test", "a.b.example.com", ".example.com", ""] {
+            assert_eq!(
+                request_origin(&headers(&[("host", host)]), "example.com"),
+                None,
+                "{host}"
+            );
+        }
+        assert_eq!(request_origin(&HeaderMap::new(), "example.com"), None);
+    }
+
+    #[test]
+    fn request_origin_follows_the_proxys_scheme_but_only_a_real_one() {
+        assert_eq!(
+            request_origin(
+                &headers(&[("host", "acme.example.com"), ("x-forwarded-proto", "http")]),
+                "example.com"
+            )
+            .as_deref(),
+            Some("http://acme.example.com")
+        );
+        assert_eq!(
+            request_origin(
+                &headers(&[
+                    ("host", "acme.example.com"),
+                    ("x-forwarded-proto", "javascript"),
+                ]),
+                "example.com"
+            )
+            .as_deref(),
+            Some("https://acme.example.com")
+        );
     }
 }

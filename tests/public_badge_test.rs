@@ -27,7 +27,7 @@ use uptimepage::domain::{
     PublicComponentGroup, PublicComponentStatus, PublicIncident, PublicMaintenanceList,
     PublicStatusPage,
 };
-use uptimepage::public_status::{IncidentListQuery, PublicSource};
+use uptimepage::public_status::{IncidentListQuery, PublicSource, source::FeedLinks};
 
 fn known_component_id() -> Uuid {
     Uuid::parse_str("00000000-0000-0000-0000-000000000c01").unwrap()
@@ -92,7 +92,7 @@ impl PublicSource for BadgeSource {
     async fn incidents_rss(
         &self,
         _page: PageRef,
-        _base_url: &str,
+        _links: FeedLinks<'_>,
     ) -> Result<String, PublicAppError> {
         unimplemented!()
     }

@@ -83,7 +83,11 @@ pub trait PublicSource: Send + Sync {
         id: Uuid,
     ) -> Result<PublicIncident, PublicAppError>;
     async fn maintenance(&self, page: PageRef) -> Result<PublicMaintenanceList, PublicAppError>;
-    async fn incidents_rss(&self, page: PageRef, base_url: &str) -> Result<String, PublicAppError>;
+    async fn incidents_rss(
+        &self,
+        page: PageRef,
+        links: FeedLinks<'_>,
+    ) -> Result<String, PublicAppError>;
 
     /// Drop the cached snapshot for a page. The settings handler calls this on
     /// a branding/enable/component edit so a stale page can't outlive its TTL.
@@ -277,14 +281,18 @@ impl PublicSource for OrgPublicSource {
         })
     }
 
-    async fn incidents_rss(&self, page: PageRef, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        page: PageRef,
+        links: FeedLinks<'_>,
+    ) -> Result<String, PublicAppError> {
         let q = IncidentListQuery {
             limit: self.rss_max_items,
             cursor: None,
             ongoing_only: false,
         };
         let listed = self.list_incidents(page, q).await?;
-        Ok(build_rss(&self.site_name, base_url, &listed.items))
+        Ok(build_rss(&self.site_name, links, &listed.items))
     }
 
     async fn invalidate(&self, page: crate::domain::StatusPageId) {
@@ -428,9 +436,19 @@ struct UpdateRow {
     message: String,
 }
 
+/// Where a feed's links point. The channel link is the page a reader lands on
+/// from the feed title, which is not the origin on a deploy that serves the
+/// page under a path.
+#[derive(Debug, Clone, Copy)]
+pub struct FeedLinks<'a> {
+    pub page: &'a str,
+    pub origin: &'a str,
+}
+
 /// Minimal RSS 2.0 builder — keeps us free of an extra crate just to emit
 /// a few dozen lines of XML. Items are the most recent public incidents.
-pub fn build_rss(site_name: &str, base_url: &str, items: &[PublicIncident]) -> String {
+pub fn build_rss(site_name: &str, links: FeedLinks<'_>, items: &[PublicIncident]) -> String {
+    let base_url = links.origin.trim_end_matches('/');
     let now = Utc::now().to_rfc2822();
     let mut out = String::with_capacity(512 + items.len() * 256);
     out.push_str(r#"<?xml version="1.0" encoding="UTF-8"?>"#);
@@ -438,7 +456,7 @@ pub fn build_rss(site_name: &str, base_url: &str, items: &[PublicIncident]) -> S
     out.push_str(&format!(
         "<title>{}</title><link>{}</link><description>Operational status</description><lastBuildDate>{}</lastBuildDate>",
         xml_escape(&format!("{site_name} Status Incidents")),
-        xml_escape(base_url),
+        xml_escape(links.page.trim_end_matches('/')),
         now,
     ));
     for i in items {
@@ -555,9 +573,9 @@ impl PublicSource for NoopPublicSource {
     async fn incidents_rss(
         &self,
         _page: PageRef,
-        base_url: &str,
+        links: FeedLinks<'_>,
     ) -> Result<String, PublicAppError> {
-        Ok(build_rss(&self.site_name, base_url, &[]))
+        Ok(build_rss(&self.site_name, links, &[]))
     }
 }
 
@@ -565,13 +583,164 @@ impl PublicSource for NoopPublicSource {
 mod tests {
     use super::*;
 
+    /// A tenant host serves the page at its root, so both links share an origin.
+    fn links(origin: &str) -> FeedLinks<'_> {
+        FeedLinks {
+            page: origin,
+            origin,
+        }
+    }
+
     #[test]
     fn rss_skeleton_well_formed_with_no_items() {
-        let xml = build_rss("Site", "https://example.com", &[]);
+        let xml = build_rss("Site", links("https://example.com"), &[]);
         assert!(xml.starts_with("<?xml"));
         assert!(xml.contains("<rss version=\"2.0\""));
         assert!(xml.contains("<channel>"));
         assert!(xml.contains("</channel></rss>"));
         assert!(xml.contains("Site Status Incidents"));
+    }
+
+    fn sample_incident(id: u128, updates: Vec<PublicIncidentUpdate>) -> PublicIncident {
+        let started = DateTime::parse_from_rfc3339("2026-05-22T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        PublicIncident {
+            id: Uuid::from_u128(id),
+            component_id: Uuid::nil(),
+            component_name: "Edge".into(),
+            title: "Edge proxy 5xx".into(),
+            started_at: started,
+            ended_at: None,
+            severity: crate::domain::IncidentSeverity::Major,
+            status_phase: IncidentStatusPhase::Investigating,
+            updates,
+            postmortem: None,
+        }
+    }
+
+    fn update(minutes: i64, phase: IncidentStatusPhase, message: &str) -> PublicIncidentUpdate {
+        let posted = DateTime::parse_from_rfc3339("2026-05-22T10:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+            + chrono::Duration::minutes(minutes);
+        PublicIncidentUpdate {
+            posted_at: posted,
+            phase,
+            message: message.into(),
+        }
+    }
+
+    #[test]
+    fn item_link_is_the_incident_permalink() {
+        let inc = sample_incident(0xc01, vec![]);
+        let xml = build_rss(
+            "Site",
+            links("https://acme.example.com"),
+            std::slice::from_ref(&inc),
+        );
+        assert!(
+            xml.contains(&format!(
+                "<link>https://acme.example.com/status/incidents/{}</link>",
+                inc.id
+            )),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn a_trailing_slash_on_the_origin_does_not_double_up() {
+        let inc = sample_incident(0xc01, vec![]);
+        let xml = build_rss(
+            "Site",
+            links("https://acme.example.com/"),
+            std::slice::from_ref(&inc),
+        );
+        assert!(!xml.contains("com//status"), "{xml}");
+        assert!(
+            xml.contains("<link>https://acme.example.com</link>"),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn markup_in_customer_text_is_escaped() {
+        let mut inc = sample_incident(
+            0xc01,
+            vec![update(5, IncidentStatusPhase::Identified, "a < b & c")],
+        );
+        inc.title = "<script>alert(1)</script>".into();
+        let xml = build_rss(
+            "A & B",
+            links("https://acme.example.com"),
+            std::slice::from_ref(&inc),
+        );
+        assert!(!xml.contains("<script>"), "{xml}");
+        assert!(xml.contains("&lt;script&gt;"), "{xml}");
+        assert!(xml.contains("a &lt; b &amp; c"), "{xml}");
+        assert!(xml.contains("A &amp; B Status Incidents"), "{xml}");
+    }
+
+    #[test]
+    fn an_incident_with_no_updates_dates_from_its_start() {
+        let inc = sample_incident(0xc01, vec![]);
+        let xml = build_rss(
+            "Site",
+            links("https://acme.example.com"),
+            std::slice::from_ref(&inc),
+        );
+        assert!(xml.contains(&format!(
+            "<pubDate>{}</pubDate>",
+            inc.started_at.to_rfc2822()
+        )));
+        assert!(xml.contains("<description></description>"), "{xml}");
+    }
+
+    #[test]
+    fn the_channel_link_is_the_page_not_the_origin() {
+        // A path-based deploy serves the dashboard at the origin root, so a
+        // reader clicking the feed title there would land on the login screen.
+        let inc = sample_incident(0xc01, vec![]);
+        let xml = build_rss(
+            "Site",
+            FeedLinks {
+                page: "https://status.example.test/status",
+                origin: "https://status.example.test",
+            },
+            std::slice::from_ref(&inc),
+        );
+        assert!(
+            xml.contains("<link>https://status.example.test/status</link>"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(&format!(
+                "<link>https://status.example.test/status/incidents/{}</link>",
+                inc.id
+            )),
+            "{xml}"
+        );
+    }
+
+    #[test]
+    fn updates_are_labelled_by_phase_and_dated_from_the_last_one() {
+        let inc = sample_incident(
+            0xc01,
+            vec![
+                update(0, IncidentStatusPhase::Investigating, "looking"),
+                update(30, IncidentStatusPhase::Resolved, "fixed"),
+            ],
+        );
+        let xml = build_rss(
+            "Site",
+            links("https://acme.example.com"),
+            std::slice::from_ref(&inc),
+        );
+        assert!(xml.contains("[investigating] looking"), "{xml}");
+        assert!(xml.contains("[resolved] fixed"), "{xml}");
+        assert!(xml.contains(&format!(
+            "<pubDate>{}</pubDate>",
+            inc.updates.last().unwrap().posted_at.to_rfc2822()
+        )));
     }
 }

@@ -26,7 +26,7 @@ use uptimepage::domain::{
     PublicIncident, PublicIncidentUpdate, PublicMaintenance, PublicMaintenanceList,
     PublicStatusPage,
 };
-use uptimepage::public_status::{IncidentListQuery, PublicSource};
+use uptimepage::public_status::{IncidentListQuery, PublicSource, source::FeedLinks};
 
 use common::build_test_app_with_public_source;
 
@@ -187,14 +187,18 @@ impl PublicSource for FakePublicSource {
         })
     }
 
-    async fn incidents_rss(&self, page: PageRef, base_url: &str) -> Result<String, PublicAppError> {
+    async fn incidents_rss(
+        &self,
+        page: PageRef,
+        links: FeedLinks<'_>,
+    ) -> Result<String, PublicAppError> {
         let items = self
             .list_incidents(page, IncidentListQuery::default())
             .await?
             .items;
         Ok(uptimepage::public_status::source::build_rss(
             "uptimepage",
-            base_url,
+            links,
             &items,
         ))
     }
