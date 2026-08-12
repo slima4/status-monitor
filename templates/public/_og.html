@@ -3,7 +3,8 @@
 <meta property="og:description" content="{{ og.description }}">
 <meta property="og:type" content="{{ og.og_type }}">
 {% if !og.site_name.is_empty() %}<meta property="og:site_name" content="{{ og.site_name }}">{% endif %}
-{% if !og.url.is_empty() %}<meta property="og:url" content="{{ og.url }}">{% endif %}
+{% if !og.url.is_empty() %}<link rel="canonical" href="{{ og.url }}">
+<meta property="og:url" content="{{ og.url }}">{% endif %}
 {% if !og.image.is_empty() %}<meta property="og:image" content="{{ og.image }}">{% endif %}
 <meta name="twitter:card" content="{% if og.image.is_empty() %}summary{% else %}summary_large_image{% endif %}">
 <meta name="twitter:title" content="{{ og.title }}">

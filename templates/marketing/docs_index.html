@@ -30,7 +30,7 @@
                             {{ item.title }}
                             {% if let Some(b) = item.badge %}<span class="mk-doc-badge">{{ b }}</span>{% endif %}
                         </span>
-                        <span class="mk-doc-card__desc">{{ item.description }}</span>
+                        <span class="mk-doc-card__desc">{{ item.blurb }}</span>
                     </a>
                 </li>
                 {% endfor %}

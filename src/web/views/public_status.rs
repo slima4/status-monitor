@@ -138,7 +138,7 @@ pub async fn index(
             "/status",
             format!("{} Status", branding.display_name),
             format!(
-                "Live operational status for {}. Current uptime, recent incidents, scheduled maintenance.",
+                "Live and past status for {}: current uptime for every component, open and recent incidents, scheduled maintenance windows, and email or webhook updates.",
                 branding.display_name
             ),
             "website",
@@ -182,6 +182,19 @@ pub async fn logo(State(state): State<AppState>, headers: HeaderMap) -> Response
     }
 }
 
+/// The component name is a lookup that can come back empty, so the subject
+/// falls back to the page itself rather than rendering a dangling "for ".
+fn incident_description(component_name: &str, display_name: &str) -> String {
+    let subject = if component_name.is_empty() {
+        format!("Incident report on the {display_name} status page")
+    } else {
+        format!("Incident report for {component_name} on the {display_name} status page")
+    };
+    format!(
+        "{subject}: current phase, when it started and ended, which components were affected, and every public update posted."
+    )
+}
+
 pub async fn incident(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -210,7 +223,7 @@ pub async fn incident(
         &headers,
         &format!("/status/incidents/{id}"),
         format!("{} · {} Status", inc.title, branding.display_name),
-        format!("Incident report for {}: {}.", inc.component_name, inc.title),
+        incident_description(&inc.component_name, &branding.display_name),
         "article",
         &branding,
     );
@@ -266,12 +279,22 @@ pub async fn archive(
     let branding = resolve_branding(&state, page_ref.org, page_ref.page, &fallback_name).await;
     let now = Utc::now();
     let months = bucket_by_month(&listing.items, now);
+    // Each keyset page holds different incidents, so the cursor stays in the
+    // canonical: dropping it would declare every page past the first a
+    // duplicate of the first, and the archive is the only crawl path to them.
+    let path = match params.cursor.as_deref() {
+        Some(cursor) => format!("/status/incidents?cursor={cursor}"),
+        None => "/status/incidents".to_string(),
+    };
     let og = build_og_meta(
         &state,
         &headers,
-        "/status/incidents",
+        &path,
         format!("Incident history · {} Status", branding.display_name),
-        format!("Historical incidents for {}.", branding.display_name),
+        format!(
+            "Every incident published on the {} status page, grouped by month, with the components affected, when each one started and ended, and the updates posted.",
+            branding.display_name
+        ),
         "website",
         &branding,
     );
@@ -406,7 +429,6 @@ pub struct StatusView {
     pub has_maintenance: bool,
     pub has_components: bool,
     pub rss_url: &'static str,
-    pub meta_description: String,
     /// Inlined at `#day-strip-data`; consumed by day_popover.js.
     pub day_strip_json: String,
 }
@@ -684,10 +706,16 @@ fn build_og_meta(
         .unwrap_or("");
     let canonical = match parse_host_shape(host, &state.cfg.public_status.base_domain) {
         HostShape::Apex | HostShape::Subdomain(_) => {
-            // Strip port + trailing dot the same way `parse_host_shape` does
-            // so the URL canonicalises to RFC-1034 form.
+            // Strip port + trailing dot the same way `parse_host_shape` does,
+            // and lower-case what is left: it matches hosts case-insensitively,
+            // so every casing of one host would otherwise claim its own URL.
             let stripped = host.split(':').next().unwrap_or(host);
-            Some(stripped.strip_suffix('.').unwrap_or(stripped).to_string())
+            Some(
+                stripped
+                    .strip_suffix('.')
+                    .unwrap_or(stripped)
+                    .to_ascii_lowercase(),
+            )
         }
         HostShape::Other => None,
     };
@@ -785,7 +813,6 @@ fn build_view(
 
     let (overall_class, overall_icon, overall_aria) = overall_classes(page.overall.state);
     let site_title = format!("{} Status", page.site_name);
-    let meta_description = format!("Live operational status for {}", page.site_name);
 
     StatusView {
         site_name: page.site_name.clone(),
@@ -805,7 +832,6 @@ fn build_view(
         upcoming_maintenance: upcoming_m,
         has_components,
         rss_url: RSS_URL,
-        meta_description,
         day_strip_json,
     }
 }
@@ -1650,6 +1676,9 @@ mod tests {
         assert!(html.contains(r#"<meta property="og:title" content="Acme Status">"#));
         assert!(html.contains(r#"<meta property="og:site_name" content="Acme">"#));
         assert!(
+            html.contains(r#"<link rel="canonical" href="https://acme.uptimepage.dev/status">"#)
+        );
+        assert!(
             html.contains(
                 r#"<meta property="og:url" content="https://acme.uptimepage.dev/status">"#
             )
@@ -1661,6 +1690,12 @@ mod tests {
         assert!(html.contains(
             r#"<meta name="twitter:image" content="https://uptimepage.dev/static/marketing/og-status.png">"#
         ));
+    }
+
+    #[test]
+    fn incident_description_drops_the_subject_when_the_component_is_unnamed() {
+        assert!(incident_description("API", "Acme").starts_with("Incident report for API on the"));
+        assert!(incident_description("", "Acme").starts_with("Incident report on the Acme"));
     }
 
     #[test]
@@ -1698,6 +1733,7 @@ mod tests {
         assert!(!html.contains("og:image"));
         assert!(!html.contains("og:site_name"));
         assert!(!html.contains("og:url"));
+        assert!(!html.contains("rel=\"canonical\""));
         assert!(!html.contains("twitter:image"));
     }
 

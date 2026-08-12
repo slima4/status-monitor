@@ -108,6 +108,7 @@ pub struct DocPage {
     pub slug: &'static str,
     pub title: &'static str,
     pub description: &'static str,
+    pub blurb: &'static str,
     pub section: Section,
     pub scope: Scope,
     pub lastmod: &'static str,
@@ -134,7 +135,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "getting-started",
         title: "Getting started",
-        description: "Sign in, add a monitor, get alerted, and publish a status page in about ten minutes.",
+        description: "Sign in with GitHub or Google, add your first monitor, pick an interval and regions, route an alert to Slack or email, and publish a status page in ten minutes.",
+        blurb: "Sign in, add a monitor, get alerted, and publish a status page in about ten minutes.",
         section: Section::Start,
         scope: Scope::Everyone,
         lastmod: "2026-07-25",
@@ -144,7 +146,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "overview",
         title: "Overview",
-        description: "What uptimepage is, what it runs on, and where to start reading.",
+        description: "What uptimepage is: one Rust binary that runs uptime checks, keeps config in Postgres and results in ClickHouse, and serves the app, the API and status pages.",
+        blurb: "What uptimepage is, what it runs on, and where to start reading.",
         section: Section::Start,
         scope: Scope::Everyone,
         lastmod: "2026-07-22",
@@ -154,7 +157,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "architecture",
         title: "Architecture",
-        description: "How checks are scheduled, executed, batched, and stored across Postgres and ClickHouse.",
+        description: "How a check and a request move through uptimepage: scheduler, executor, ingest, the Postgres and ClickHouse stores, probe agents, and the invariants each keeps.",
+        blurb: "How checks are scheduled, executed, batched, and stored across Postgres and ClickHouse.",
         section: Section::Start,
         scope: Scope::Everyone,
         lastmod: "2026-07-29",
@@ -164,7 +168,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "ui",
         title: "Web UI",
-        description: "A tour of the app: dashboard, monitors, incidents, settings, and sharing a monitor.",
+        description: "A tour of the app: the dashboard cards and monitor table, the monitor detail view with its charts and timeline, incidents, settings, and sharing one monitor.",
+        blurb: "A tour of the app: dashboard, monitors, incidents, settings, and sharing a monitor.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-08-03",
@@ -174,7 +179,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "incidents",
         title: "Incident management",
-        description: "Acknowledgement, ownership, on-call, escalation, and the retrospective around a failing check.",
+        description: "How a run of failing checks becomes a tracked incident: acknowledgement, ownership, on-call, escalation, public updates, and the retrospective that closes it.",
+        blurb: "Acknowledgement, ownership, on-call, escalation, and the retrospective around a failing check.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-08-09",
@@ -184,7 +190,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "monitor-types",
         title: "Monitor types",
-        description: "The eight check kinds, what each one actually proves, and which to reach for.",
+        description: "The eight check kinds, HTTP, TCP, ping, heartbeat, DNS, TLS certificate, domain expiry and browser flow, what each one really proves, and which to reach for.",
+        blurb: "The eight check kinds, what each one actually proves, and which to reach for.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-08-04",
@@ -194,7 +201,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "notifications",
         title: "Notifications",
-        description: "Alert channels, how a monitor binds them, and what decides when an alert fires.",
+        description: "Alert channels for Slack, email, webhooks, PagerDuty, Telegram and more, how a monitor binds the ones that should hear about it, and what decides when it fires.",
+        blurb: "Alert channels, how a monitor binds them, and what decides when an alert fires.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-07-28",
@@ -204,7 +212,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "public-status",
         title: "Public status page",
-        description: "The customer-facing surface: components, incidents, maintenance, badges, JSON and RSS.",
+        description: "The customer-facing surface: components and their uptime, incident updates, scheduled maintenance, subscribers, badges, and the public JSON and RSS endpoints.",
+        blurb: "The customer-facing surface: components, incidents, maintenance, badges, JSON and RSS.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-07-25",
@@ -214,7 +223,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "per-org-status",
         title: "Per-org status pages",
-        description: "Running one or more branded status pages per organization, each on its own subdomain.",
+        description: "Running one or more branded status pages per organization, each on its own subdomain, showing only the monitors, incidents and maintenance you curate onto it.",
+        blurb: "Running one or more branded status pages per organization, each on its own subdomain.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-07-25",
@@ -224,7 +234,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "share-links",
         title: "Share links",
-        description: "Read-only capability URLs that open one monitor's full dashboard without an account.",
+        description: "Read-only capability URLs that open one monitor's full dashboard, with status, uptime, latency charts and incident history, for anyone you send the link to.",
+        blurb: "Read-only capability URLs that open one monitor's full dashboard without an account.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-07-25",
@@ -234,7 +245,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "team",
         title: "Team",
-        description: "Roles, inviting people, seats, and what a member can do that an owner cannot.",
+        description: "Organizations, the member and owner roles and what each can do, inviting people by email, seats, and what happens to their work when someone leaves the org.",
+        blurb: "Roles, inviting people, seats, and what a member can do that an owner cannot.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-07-22",
@@ -244,7 +256,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "variables",
         title: "Variables and secrets",
-        description: "Reusable org-scoped values and write-only secrets referenced from monitor request fields.",
+        description: "Reusable org-scoped values and write-only secrets, referenced in a monitor's HTTP request fields, so a credential lives in one place instead of every monitor.",
+        blurb: "Reusable org-scoped values and write-only secrets referenced from monitor request fields.",
         section: Section::Guide,
         scope: Scope::Everyone,
         lastmod: "2026-07-25",
@@ -254,7 +267,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "authentication",
         title: "Authentication",
-        description: "OAuth sign-in, magic links, API tokens, and the scopes that bound them.",
+        description: "GitHub and Google sign-in, magic links, org-bound API tokens and the scopes that bound them, and how a session or a token is checked on every request.",
+        blurb: "OAuth sign-in, magic links, API tokens, and the scopes that bound them.",
         section: Section::Reference,
         scope: Scope::Everyone,
         lastmod: "2026-08-03",
@@ -264,7 +278,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "api",
         title: "REST API",
-        description: "The /api/v1 surface: monitors, incidents, channels, status pages, and the public endpoints.",
+        description: "The /api/v1 surface: monitors, incidents, notification channels, status pages and the public endpoints, with the OpenAPI document and token authentication.",
+        blurb: "The /api/v1 surface: monitors, incidents, channels, status pages, and the public endpoints.",
         section: Section::Reference,
         scope: Scope::Everyone,
         lastmod: "2026-08-10",
@@ -274,7 +289,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "terraform",
         title: "Terraform",
-        description: "Managing monitors, channels, and status pages as code with the official provider.",
+        description: "Managing monitors, notification channels and status pages as code with the uptimepage Terraform provider, from install and credentials to a first apply.",
+        blurb: "Managing monitors, channels, and status pages as code with the official provider.",
         section: Section::Reference,
         scope: Scope::Everyone,
         lastmod: "2026-07-31",
@@ -284,7 +300,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "mcp",
         title: "MCP server",
-        description: "Letting an LLM client answer operational questions and take guarded actions on one org.",
+        description: "Let an LLM client answer questions about one organization and take guarded actions over the Model Context Protocol, with scopes, confirmations and audit.",
+        blurb: "Letting an LLM client answer operational questions and take guarded actions on one org.",
         section: Section::Reference,
         scope: Scope::Everyone,
         lastmod: "2026-08-11",
@@ -294,7 +311,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "quotas",
         title: "Quotas and rate limits",
-        description: "How plans bound resources and request budgets, and how each limit is enforced.",
+        description: "How a plan bounds resources and per-minute request budgets, where each limit is enforced, and what an API client sees when it reaches the ceiling on either one.",
+        blurb: "How plans bound resources and request budgets, and how each limit is enforced.",
         section: Section::Reference,
         scope: Scope::Everyone,
         lastmod: "2026-08-07",
@@ -304,7 +322,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "multi-tenancy",
         title: "Multi-tenancy",
-        description: "The org model, how the active org is resolved, and how tenant isolation is enforced.",
+        description: "The org model, how the active org is resolved from the authenticated session, and how tenant isolation is enforced in every query rather than by convention.",
+        blurb: "The org model, how the active org is resolved, and how tenant isolation is enforced.",
         section: Section::Reference,
         scope: Scope::Everyone,
         lastmod: "2026-07-25",
@@ -314,7 +333,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "hosted/plans-and-limits",
         title: "Plans and limits",
-        description: "The quotas and rate budgets each hosted plan carries, and what happens at the ceiling.",
+        description: "The quotas and rate budgets each hosted plan carries, how the Standard and Founding tiers differ, and what happens when an organization reaches a ceiling.",
+        blurb: "The quotas and rate budgets each hosted plan carries, and what happens at the ceiling.",
         section: Section::Hosted,
         scope: Scope::Hosted,
         lastmod: "2026-07-31",
@@ -324,7 +344,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "hosted/regions",
         title: "Probe regions",
-        description: "Where the hosted service checks from, how to pick regions for a monitor, and what our probes cannot reach.",
+        description: "Where the hosted service checks from, how to pick regions for a monitor, how agreement between regions confirms an outage, and what our probes cannot reach.",
+        blurb: "Where the hosted service checks from, how to pick regions for a monitor, and what our probes cannot reach.",
         section: Section::Hosted,
         scope: Scope::Hosted,
         lastmod: "2026-08-07",
@@ -334,7 +355,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "hosted/data-retention",
         title: "Data retention",
-        description: "How long raw checks, rollups, incidents, and audit records are kept on the hosted service.",
+        description: "How long raw check results, rollups, incidents and audit records are kept on the hosted service, and which layer a chart reads for the range you asked for.",
+        blurb: "How long raw checks, rollups, incidents, and audit records are kept on the hosted service.",
         section: Section::Hosted,
         scope: Scope::Hosted,
         lastmod: "2026-08-04",
@@ -344,7 +366,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "hosted/support",
         title: "Support",
-        description: "How to reach us, what to include, and where the hosted service stands on SLAs.",
+        description: "How to reach us about an account, a security report, a bug or a feature request, what to include so we can help, and where the hosted service stands on SLAs.",
+        blurb: "How to reach us, what to include, and where the hosted service stands on SLAs.",
         section: Section::Hosted,
         scope: Scope::Hosted,
         lastmod: "2026-08-07",
@@ -354,7 +377,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "configuration",
         title: "Configuration",
-        description: "Every configuration key, its default, and the environment variable that overrides it.",
+        description: "Every configuration key, its default, and the environment variable that overrides it, across the server, storage, scheduler, alerting and status page sections.",
+        blurb: "Every configuration key, its default, and the environment variable that overrides it.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-08-11",
@@ -364,7 +388,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "deployment",
         title: "Deployment",
-        description: "Running the production stack: Caddy, TLS, the public status surface, and email.",
+        description: "Running the production stack behind Caddy: automatic TLS, basic auth, the public status surface, outbound email, database backups, and the upgrade path.",
+        blurb: "Running the production stack: Caddy, TLS, the public status surface, and email.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-07-26",
@@ -374,7 +399,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "kubernetes",
         title: "Kubernetes",
-        description: "Installing the Helm charts: external databases, ingress timeouts, ICMP, and probe agents.",
+        description: "Installing the Helm charts for the control plane and for standalone probe agents: external databases, ingress timeouts, ICMP permissions and cluster versions.",
+        blurb: "Installing the Helm charts: external databases, ingress timeouts, ICMP, and probe agents.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-07-27",
@@ -384,7 +410,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "multi-region",
         title: "Multi-region probes",
-        description: "Running probe agents in more than one region, and the operator surface that manages them.",
+        description: "Running probe agents in more than one region, how an agent pulls its config and ships results back, and the operator surface that manages regions and keys.",
+        blurb: "Running probe agents in more than one region, and the operator surface that manages them.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-07-25",
@@ -394,7 +421,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "metrics",
         title: "Metrics and tracing",
-        description: "The Prometheus series the service exposes and how to ship traces off the box.",
+        description: "The Prometheus series the service exposes, what each one measures and the labels it carries, and how to ship traces off the box to an OpenTelemetry collector.",
+        blurb: "The Prometheus series the service exposes and how to ship traces off the box.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-08-04",
@@ -404,7 +432,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "troubleshooting",
         title: "Troubleshooting",
-        description: "Symptoms you are likely to hit while operating an instance, and what they mean.",
+        description: "Symptoms you are likely to hit while operating an instance, from a failing readiness probe to missing metrics and checks that never run, and what each means.",
+        blurb: "Symptoms you are likely to hit while operating an instance, and what they mean.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-07-31",
@@ -414,7 +443,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "development",
         title: "Development",
-        description: "Local setup for working on the service itself: toolchain, workflows, and the test gates.",
+        description: "Local setup for working on the service itself: the toolchain, Postgres and ClickHouse containers, everyday workflows, and the test gates a change has to pass.",
+        blurb: "Local setup for working on the service itself: toolchain, workflows, and the test gates.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-07-25",
@@ -424,7 +454,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "benchmarks",
         title: "Benchmarks",
-        description: "Criterion micro-benchmarks measuring the cost of a single check through the production path.",
+        description: "Criterion micro-benchmarks measuring the cost of a single check through the same production HTTP path, how to run them, and how to read the numbers they print.",
+        blurb: "Criterion micro-benchmarks measuring the cost of a single check through the production path.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-05-14",
@@ -434,7 +465,8 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "loadtest",
         title: "Load test",
-        description: "The end-to-end harness that drives the real check executor against in-process mock servers.",
+        description: "The end-to-end harness that drives the real check executor against in-process mock servers, how to run it, and what its throughput and latency output tells you.",
+        blurb: "The end-to-end harness that drives the real check executor against in-process mock servers.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
         lastmod: "2026-07-25",
@@ -447,8 +479,8 @@ pub fn find(slug: &str) -> Option<&'static DocPage> {
     DOCS.iter().find(|d| d.slug == slug)
 }
 
-/// The index lists every page's title and description, so it changes
-/// whenever any of them does. Dates are ISO, so lexical max is chronological.
+/// The index lists every page's title and blurb, so it changes whenever any
+/// of them does. Dates are ISO, so lexical max is chronological.
 pub fn index_lastmod() -> Option<&'static str> {
     DOCS.iter().map(|d| d.lastmod).max()
 }
@@ -485,7 +517,7 @@ pub struct NavItem {
     pub title: &'static str,
     pub slug: &'static str,
     pub badge: Option<&'static str>,
-    pub description: &'static str,
+    pub blurb: &'static str,
 }
 
 #[derive(Debug, Clone)]
@@ -512,7 +544,7 @@ fn nav() -> &'static [NavSection] {
                         title: d.title,
                         slug: d.slug,
                         badge: d.scope.badge(),
-                        description: d.description,
+                        blurb: d.blurb,
                     })
                     .collect(),
             })
@@ -608,6 +640,9 @@ fn render_all(cfg: &MarketingCfg) -> HashMap<&'static str, CachedRender> {
         .collect()
 }
 
+const INDEX_DESCRIPTION: &str = "Documentation for uptimepage: getting started, monitor types, incidents, status pages, \
+     the REST API, Terraform, MCP, self-hosting and the hosted service.";
+
 fn render_index(cfg: &MarketingCfg) -> CachedRender {
     let canonical_url = format!("{}{DOCS_INDEX_PATH}", cfg.canonical_origin);
     let mut og = OpenGraph::default_for(
@@ -615,10 +650,7 @@ fn render_index(cfg: &MarketingCfg) -> CachedRender {
         &canonical_url,
         &cfg.canonical_origin,
     );
-    og.description =
-        "Uptimepage documentation: monitors, incidents, status pages, the REST API, Terraform, \
-         MCP, self-hosting, and the hosted service."
-            .to_string();
+    og.description = INDEX_DESCRIPTION.to_string();
     let body = DocsIndex {
         breadcrumb_ld: json_ld_breadcrumb(&cfg.canonical_origin, "Docs", DOCS_INDEX_PATH),
         canonical_url,
@@ -731,12 +763,25 @@ mod tests {
 
     #[test]
     fn descriptions_fit_serp_limits() {
+        let width = |s: &str| s.chars().count();
+        for doc in DOCS
+            .iter()
+            .map(|d| (d.slug, d.description))
+            .chain([("docs index", INDEX_DESCRIPTION)])
+        {
+            let (slug, description) = doc;
+            assert!(
+                (150..=160).contains(&width(description)),
+                "{slug}: description is {} chars, want 150-160",
+                width(description)
+            );
+        }
         for doc in DOCS {
             assert!(
-                !doc.description.is_empty() && doc.description.len() <= 160,
-                "{}: description is {} chars",
+                !doc.blurb.is_empty() && width(doc.blurb) <= 110,
+                "{}: blurb is {} chars",
                 doc.slug,
-                doc.description.len()
+                width(doc.blurb)
             );
         }
     }
