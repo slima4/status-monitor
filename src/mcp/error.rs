@@ -13,6 +13,10 @@ use rmcp::handler::server::tool::IntoCallToolResult;
 use rmcp::model::CallToolResult;
 use serde_json::json;
 
+use crate::error::AppError;
+
+use super::audit::Outcome;
+
 /// Stable machine codes the model (and our tests) can branch on.
 pub mod codes {
     pub const INVALID_ARGUMENT: &str = "invalid_argument";
@@ -128,5 +132,36 @@ impl IntoCallToolResult for McpToolError {
                 "retryable": self.retryable,
             }
         })))
+    }
+}
+
+/// A validator rejection is a caller fault, so it must not come back retryable.
+pub(super) fn config_error(e: crate::error::AppError) -> McpToolError {
+    match e {
+        AppError::Internal { .. } | AppError::Other(_) => McpToolError::internal(e.to_string()),
+        other => McpToolError::invalid_argument(other.to_string()),
+    }
+}
+
+/// A refusal the target itself earns (a heartbeat has nothing to probe, a plan
+/// won't run this flow) never becomes true by waiting, so marking it retryable
+/// would loop the model against the check-now limiter.
+pub(super) fn probe_dispatch_error(e: crate::error::AppError) -> McpToolError {
+    match e {
+        AppError::ServiceUnavailable { .. } => {
+            McpToolError::new(codes::PROBE_UNAVAILABLE, e.to_string(), true)
+        }
+        AppError::Internal { .. } | AppError::Other(_) => McpToolError::internal(e.to_string()),
+        other => McpToolError::invalid_argument(other.to_string()),
+    }
+}
+
+/// Map a write-tool error to an audit outcome: server faults are `error`;
+/// everything else (scope, confirmation, bad input, not-found) is a caller-side
+/// `denied`.
+pub(super) fn outcome_for(e: &McpToolError) -> Outcome {
+    match e.code {
+        codes::INTERNAL | codes::PROBE_UNAVAILABLE => Outcome::Error,
+        _ => Outcome::Denied,
     }
 }

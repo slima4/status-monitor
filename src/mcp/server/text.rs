@@ -1,0 +1,155 @@
+use super::MAX_INCIDENT_MESSAGE_LEN;
+use super::view::{probe_line, region_policy_str, tag_list};
+use crate::storage::LifecycleOutcome;
+
+use rmcp::handler::server::wrapper::Json;
+
+use crate::domain::humanize_check_error;
+use crate::domain::target::NewTarget;
+use crate::domain::text::is_invisible;
+
+use crate::mcp::error::McpToolError;
+use crate::mcp::schema::{IncidentActionResult, ProbeOutcome};
+
+/// Prompt-facing names; `changes` reports the machine names.
+pub(super) fn field_label(field: &str) -> &str {
+    match field {
+        "interval_secs" => "check interval (seconds)",
+        "alert_confirmations" => "failing checks before alerting",
+        "notify_recovery" => "announce recovery",
+        "renotify_interval_secs" => "reminder interval (seconds)",
+        "group_name" => "group",
+        "alerts" => "notification channels",
+        "region_policy" => "opens an incident on",
+        other => other,
+    }
+}
+
+/// Every setting the monitor would be created with. What the prompt leaves out
+/// is approved unread, so nothing the caller chose is omitted here.
+pub(super) fn create_prompt_lines(
+    new: &NewTarget,
+    probe: Option<&ProbeOutcome>,
+    channel_summary: &str,
+) -> Vec<String> {
+    let mut lines = vec![format!("checked every {}s", new.interval.as_secs())];
+    lines.push(match probe {
+        Some(p) => format!("trial run: {}", sanitize_prompt(&probe_line(p))),
+        None => "nothing to probe: it waits for the job to report in".to_string(),
+    });
+    if !new.tags.is_empty() {
+        lines.push(format!("tags: {}", sanitize_prompt(&tag_list(&new.tags))));
+    }
+    if let Some(group) = &new.group_name {
+        lines.push(format!("group: {}", sanitize_prompt(group)));
+    }
+    lines.push(format!(
+        "alerts after {} failing checks",
+        new.alert_confirmations
+    ));
+    if !new.notify_recovery {
+        lines.push("recovery is not announced".to_string());
+    }
+    lines.push(match new.renotify_interval_secs {
+        0 => "no reminders while an outage is open".to_string(),
+        secs => format!("reminds every {secs}s while unacknowledged"),
+    });
+    if let Some(policy) = new.region_policy {
+        lines.push(format!(
+            "opens an incident on {}",
+            region_policy_str(policy)
+        ));
+    }
+    lines.push(if new.alerts.is_empty() {
+        "notification channels: none, so it alerts nobody until one is bound".to_string()
+    } else {
+        format!(
+            "notification channels: {}",
+            sanitize_prompt(channel_summary)
+        )
+    });
+    lines
+}
+
+/// Cap on any one untrusted value in a confirmation prompt.
+const PROMPT_CAP: usize = 200;
+
+/// Neutralise untrusted text (customer monitor names, operator messages)
+/// interpolated into a human confirmation prompt: drop what could spoof the
+/// approval dialog and cap the length. The prompt's own structure (quotes,
+/// newlines) is added around the sanitized value.
+pub(super) fn sanitize_prompt(s: &str) -> String {
+    let mut out: String = s
+        .chars()
+        .filter(|c| !c.is_control() && !is_invisible(*c))
+        .take(PROMPT_CAP + 1)
+        .collect();
+    // Silent truncation would hide, say, the tags a replacement is dropping.
+    if out.chars().count() > PROMPT_CAP {
+        out = out.chars().take(PROMPT_CAP).collect();
+        out.push_str("... (truncated)");
+    }
+    out
+}
+
+/// Neutralise customer-supplied text returned to the model: drop characters that
+/// could smuggle hidden instructions (tab and newline stay, they are legitimate
+/// in error text) and cap length. The server instructions already label this as
+/// data, not commands — this is belt-and-suspenders.
+pub(super) fn sanitize_data(s: &str) -> String {
+    s.chars()
+        .filter(|c| (!c.is_control() && !is_invisible(*c)) || *c == '\n' || *c == '\t')
+        .take(4000)
+        .collect()
+}
+
+/// Humanize, then scrub — order matters so the scrub can't mangle our own copy.
+pub(super) fn present_error(raw: &str) -> String {
+    sanitize_data(&humanize_check_error(raw))
+}
+
+pub(super) fn clean_public_text(
+    value: Option<&str>,
+    field: &'static str,
+    max: usize,
+) -> Result<Option<String>, McpToolError> {
+    match value.map(str::trim).filter(|v| !v.is_empty()) {
+        None => Ok(None),
+        Some(v) if v.chars().count() > max => Err(McpToolError::invalid_argument(format!(
+            "{field} must be at most {max} characters"
+        ))),
+        Some(v) => Ok(Some(v.to_string())),
+    }
+}
+
+/// Trim a blank incident note to `None`; reject one over the message cap.
+pub(super) fn clean_incident_note(note: Option<&str>) -> Result<Option<String>, McpToolError> {
+    match note.map(str::trim).filter(|n| !n.is_empty()) {
+        None => Ok(None),
+        Some(n) if n.chars().count() > MAX_INCIDENT_MESSAGE_LEN => {
+            Err(McpToolError::invalid_argument(format!(
+                "note must be at most {MAX_INCIDENT_MESSAGE_LEN} characters"
+            )))
+        }
+        Some(n) => Ok(Some(n.to_string())),
+    }
+}
+
+/// Map a lifecycle store outcome onto the MCP action result.
+pub(super) fn incident_action_result(
+    id: uuid::Uuid,
+    outcome: LifecycleOutcome,
+) -> Result<Json<IncidentActionResult>, McpToolError> {
+    match outcome {
+        LifecycleOutcome::Updated(inc) => Ok(Json(IncidentActionResult {
+            incident_id: id.to_string(),
+            state: inc.state.as_db_str().to_string(),
+            acknowledged_at: inc.acknowledged_at.map(|t| t.to_rfc3339()),
+            resolved_at: inc.ended_at.map(|t| t.to_rfc3339()),
+        })),
+        LifecycleOutcome::NotFound => Err(McpToolError::not_found("incident not found")),
+        LifecycleOutcome::IllegalTransition(err) => {
+            Err(McpToolError::invalid_argument(err.to_string()))
+        }
+    }
+}

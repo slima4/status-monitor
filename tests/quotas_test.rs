@@ -1605,7 +1605,7 @@ fn every_quota_create_path_is_gated() {
             "check_can_create_targets",
         ),
         (
-            "src/mcp/server.rs",
+            "src/mcp/server/mod.rs",
             "async fn create_monitor_inner(",
             "vet_new_target",
         ),
