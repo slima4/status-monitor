@@ -1595,12 +1595,12 @@ fn every_quota_create_path_is_gated() {
         // `vet_new_target`, so the gate is asserted where it now lives; the
         // handler is asserted to still go through it.
         (
-            "src/api/handlers/targets.rs",
+            "src/api/handlers/targets/mod.rs",
             "pub async fn create(",
             "vet_new_target",
         ),
         (
-            "src/api/handlers/targets.rs",
+            "src/api/handlers/targets/mod.rs",
             "pub(crate) async fn vet_new_target(",
             "check_can_create_targets",
         ),
@@ -1610,7 +1610,7 @@ fn every_quota_create_path_is_gated() {
             "vet_new_target",
         ),
         (
-            "src/api/handlers/targets.rs",
+            "src/api/handlers/targets/mod.rs",
             "pub async fn bulk_create(",
             "check_can_create_targets",
         ),
