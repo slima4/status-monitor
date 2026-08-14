@@ -101,6 +101,29 @@ async fn ensure_owner_org(
     Ok((user, org))
 }
 
+/// Resolves `quotas.default_plan` against the `plans` table.
+///
+/// Called before the seed writes anything: a run that dies partway leaves a
+/// user row behind, and the next boot then treats the instance as claimed and
+/// never issues a sign-in link again.
+async fn checked_default_plan<'a>(pool: &PgPool, cfg: &'a AppConfig) -> Result<Option<&'a str>> {
+    let plan = cfg.quotas.default_plan.trim();
+    if plan.is_empty() {
+        return Ok(None);
+    }
+    let (known,): (bool,) = sqlx::query_as("SELECT EXISTS (SELECT 1 FROM plans WHERE id = $1)")
+        .bind(plan)
+        .fetch_one(pool)
+        .await
+        .context("bootstrap: look up quotas.default_plan")?;
+    if !known {
+        return Err(AppError::Other(anyhow::anyhow!(
+            "quotas.default_plan {plan:?} is not a plan this instance has"
+        )));
+    }
+    Ok(Some(plan))
+}
+
 /// Idempotent, and never fatal: an instance with no channel is fixable, a
 /// bootstrap that aborts is not.
 async fn seed_owner_email_channel(
@@ -160,12 +183,27 @@ pub async fn seed_first_owner(pool: &PgPool, cfg: &AppConfig) -> Result<()> {
         )));
     }
 
+    let plan = checked_default_plan(pool, cfg).await?;
+
     // Whoever installed the app may not read the logs for hours.
     const FIRST_RUN_LINK_MINUTES: u32 = 24 * 60;
     // Link before account: failing here leaves no user row, so the next boot retries.
     let link = magic_link::create(pool, email, None, FIRST_RUN_LINK_MINUTES, None, None).await?;
 
     let (_, org) = ensure_owner_org(pool, cfg, email, &cfg.bootstrap.org_name).await?;
+    // Reached only when the instance had no users, so this org is always the one
+    // just created; an org the operator re-planned later is never touched.
+    if let Some(plan) = plan {
+        sqlx::query(
+            "UPDATE organizations /* SAFE: the tenant key of this table is its own id, bound here to the org seeding just created */ \
+             SET plan_id = $1 WHERE id = $2",
+        )
+        .bind(plan)
+        .bind(org.0)
+        .execute(pool)
+        .await
+        .context("bootstrap: apply quotas.default_plan")?;
+    }
     let slug = orgs::get_org(pool, org)
         .await?
         .map(|o| o.slug)

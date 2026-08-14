@@ -10,6 +10,8 @@ mod common;
 use sqlx::PgPool;
 use uptimepage::bootstrap::seed_first_owner;
 use uptimepage::config::AppConfig;
+use uptimepage::domain::OrgId;
+use uptimepage::quotas::QuotaService;
 use uptimepage::storage::{orgs as orgs_store, users};
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
@@ -40,6 +42,14 @@ async fn link_count(pool: &PgPool) -> i64 {
         .fetch_one(pool)
         .await
         .unwrap()
+}
+
+async fn org_id(pool: &PgPool) -> OrgId {
+    let id: uuid::Uuid = sqlx::query_scalar("SELECT id FROM organizations")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    OrgId(id)
 }
 
 #[tokio::test]
@@ -223,5 +233,196 @@ async fn magic_link_disabled_fails_boot() {
     assert!(err.to_string().contains("magic_link"), "{err}");
 
     assert_eq!(user_count(&pool).await, 0, "must fail before writing");
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn seeded_org_lands_on_pro_without_configuration() {
+    let Some((pool, name)) = fresh_pool().await else {
+        return;
+    };
+    let cfg = cfg_with("owner@example.test");
+
+    seed_first_owner(&pool, &cfg).await.expect("seed");
+
+    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        plan, "pro",
+        "self-hosted install stayed on the shared-platform plan"
+    );
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn opting_back_to_free_leaves_the_schema_default_alone() {
+    let Some((pool, name)) = fresh_pool().await else {
+        return;
+    };
+    let mut cfg = cfg_with("owner@example.test");
+    cfg.quotas.default_plan = "free".to_string();
+
+    seed_first_owner(&pool, &cfg).await.expect("seed");
+
+    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(plan, "free", "an explicit opt-out must be honoured");
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn unknown_default_plan_fails_boot_by_name() {
+    let Some((pool, name)) = fresh_pool().await else {
+        return;
+    };
+    let mut cfg = cfg_with("owner@example.test");
+    cfg.quotas.default_plan = "enterprise".to_string();
+
+    let err = seed_first_owner(&pool, &cfg)
+        .await
+        .expect_err("unknown plan must not boot");
+    assert!(err.to_string().contains("enterprise"), "{err}");
+
+    // Half-seeding is worse than not seeding: the next boot sees a user, skips
+    // seeding, and the instance can never hand back a sign-in link again.
+    assert_eq!(user_count(&pool).await, 0, "must fail before writing");
+    assert_eq!(link_count(&pool).await, 0, "must fail before writing");
+    common::drop_test_db(&name).await;
+}
+
+/// The scenario that upgrading to the roomier default actually creates: an
+/// install claimed under the old default restarts under the new one.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn an_already_claimed_org_is_never_moved_by_a_later_default() {
+    let Some((pool, name)) = fresh_pool().await else {
+        return;
+    };
+    let mut old = cfg_with("owner@example.test");
+    old.quotas.default_plan = "free".to_string();
+    seed_first_owner(&pool, &old).await.expect("first boot");
+
+    seed_first_owner(&pool, &cfg_with("owner@example.test"))
+        .await
+        .expect("restart on the new default");
+
+    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(plan, "free", "a claimed instance was re-planned on restart");
+    common::drop_test_db(&name).await;
+}
+
+/// Guards the join the app actually reads, not just the column the seed wrote.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn seeded_org_gets_pro_limits_through_the_quota_service() {
+    let Some((pool, name)) = fresh_pool().await else {
+        return;
+    };
+    let cfg = cfg_with("owner@example.test");
+    seed_first_owner(&pool, &cfg).await.expect("seed");
+    let org = org_id(&pool).await;
+
+    let plan = QuotaService::new(&cfg, Some(pool.clone()))
+        .limit_for_org(org)
+        .await
+        .expect("effective plan");
+
+    assert_eq!(plan.id, "pro");
+    assert_eq!(plan.max_targets, 150);
+    assert_eq!(plan.min_check_interval_secs, 30);
+    common::drop_test_db(&name).await;
+}
+
+/// The config default names a plan id no migration is obliged to keep. If the
+/// seed ever drops or renames it, every self-host boot fails; catch it here.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_default_plan_is_seeded_by_the_migrations() {
+    let Some((pool, name)) = fresh_pool().await else {
+        return;
+    };
+    let wanted = AppConfig::load().expect("config").quotas.default_plan;
+
+    let known: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM plans WHERE id = $1)")
+        .bind(&wanted)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    assert!(known, "quotas.default_plan {wanted:?} is not seeded");
+    common::drop_test_db(&name).await;
+}
+
+/// Hosted signups must be untouched by the self-host default.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn signup_orgs_ignore_the_boot_seeding_default() {
+    let Some((pool, name)) = fresh_pool().await else {
+        return;
+    };
+    let (user, _) = users::create_invited_user(&pool, "signup@example.test")
+        .await
+        .expect("user");
+
+    let mut tx = pool.begin().await.unwrap();
+    let org = orgs_store::create_signup_org_with_owner_in_tx(&mut tx, user, "signup-co", "Signup")
+        .await
+        .expect("signup org")
+        .expect("slug free");
+    tx.commit().await.unwrap();
+
+    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations WHERE id = $1")
+        .bind(org.0)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        plan == "founding" || plan == "free",
+        "signup landed on {plan}, so the self-host default leaked into hosted"
+    );
+    common::drop_test_db(&name).await;
+}
+
+/// The operator CLI shares the org-creation helper with boot seeding, but it is
+/// also how a hosted operator makes staff accounts — it must not hand out the
+/// self-host plan.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_operator_cli_does_not_apply_the_seeding_default() {
+    let Some((db, name)) = common::fresh_test_db("bootstrap_cli").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let mut cfg = cfg_with("");
+    cfg.storage.postgres.url = db.clone();
+    assert_eq!(cfg.quotas.default_plan, "pro", "guard the premise");
+
+    uptimepage::bootstrap::run_owner(
+        &cfg,
+        &uptimepage::bootstrap::BootstrapArgs {
+            email: "staff@example.test".to_string(),
+            org_name: "Staff".to_string(),
+        },
+    )
+    .await
+    .expect("cli bootstrap");
+
+    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(plan, "free", "the CLI inherited the boot-seeding default");
     common::drop_test_db(&name).await;
 }

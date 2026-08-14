@@ -815,7 +815,7 @@ impl Default for PublicStatusConfig {
     }
 }
 
-/// `[quotas]`. Cache TTLs for plan/usage lookups.
+/// `[quotas]`. Cache TTLs for plan/usage lookups, and the boot-seeded org's plan.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct QuotasConfig {
@@ -823,6 +823,12 @@ pub struct QuotasConfig {
     pub plan_cache_ttl_secs: u64,
     /// Usage counts move fast under bursty creates; short TTL only.
     pub usage_cache_ttl_secs: u64,
+    /// Plan the boot-seeded owner org lands on. Only the unattended first-run
+    /// path reads it, so hosted is untouched: its orgs come from signup and keep
+    /// the schema's `free`. Defaults to `pro` because `free`'s ceilings bound
+    /// what one tenant costs a shared platform, which nobody pays for on their
+    /// own hardware.
+    pub default_plan: String,
 }
 
 impl Default for QuotasConfig {
@@ -830,6 +836,7 @@ impl Default for QuotasConfig {
         Self {
             plan_cache_ttl_secs: 300,
             usage_cache_ttl_secs: 10,
+            default_plan: "pro".to_string(),
         }
     }
 }
@@ -1673,9 +1680,30 @@ mod tests {
     use super::*;
     use config::FileFormat;
 
-    /// The bot page tells site owners which User-Agent to allowlist, and it
-    /// spells the version out by hand. A stale sample teaches them to match a
-    /// string our probes stopped sending.
+    /// Self-hosters get the roomier plan without configuring anything, so the
+    /// default is the whole feature; a revert to `free` would be silent.
+    #[test]
+    fn boot_seeding_defaults_to_pro() {
+        // The `Default` impl, not the merged config: a stray
+        // UPTIMEPAGE_QUOTAS__DEFAULT_PLAN in the shell would answer for it.
+        assert_eq!(QuotasConfig::default().default_plan, "pro");
+    }
+
+    /// An override naming one quota key must not blank the others.
+    #[test]
+    fn a_partial_quotas_table_keeps_the_other_defaults() {
+        let partial: QuotasConfig = Config::builder()
+            .add_source(File::from_str("default_plan = 'free'", FileFormat::Toml))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+        assert_eq!(partial.default_plan, "free");
+        assert_eq!(partial.plan_cache_ttl_secs, 300);
+    }
+
+    /// The bot page spells the version out by hand, so a stale sample teaches
+    /// site owners to allowlist a string our probes no longer send.
     #[test]
     fn the_bot_page_quotes_the_user_agent_we_actually_send() {
         assert!(

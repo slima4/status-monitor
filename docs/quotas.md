@@ -189,17 +189,35 @@ malformed YAML at startup is a clean *config error*, never a crash loop.
 [quotas]
 plan_cache_ttl_secs  = 300   # org→plan cache; a plans-table edit takes
 usage_cache_ttl_secs = 10    #   effect within this window
+default_plan         = "pro"   # plan the boot-seeded owner org is placed on
 ```
 
 A plans-table change is invisible until the plan cache's TTL elapses (a
 cache hit is zero DB round-trips on the hot path), then the next lookup
 refetches.
 
-Single-tenant deploys raise limits the same way SaaS does: edit (or
-INSERT) the `plans` row the org is assigned to, or attach a
-`plan_overrides` row with the cap fields you want to raise. There is no
-config-side override knob — every quota lives in Postgres so the
-audit-trail covers both modes.
+`free` is priced for a shared platform: its ceilings bound what one tenant
+can cost the host. On your own hardware there is no such cost, so a
+self-hosted install needs no setup here — `default_plan` already defaults to
+`pro`, giving the seeded owner org 150 monitors, a 30s check floor and
+13-month retention.
+
+Only boot-time seeding reads it, so it applies to the owner org that first run
+creates and to nothing else. The operator CLI (`bootstrap-owner`) does not use
+it, and an org you re-plan later is never moved back on the next boot. Orgs
+created afterwards go through signup, which grants `founding` until that
+tier's cutoff and `free` after it — so a second org on a self-hosted box lands
+on `founding`, not on `pro`. Set `default_plan = "free"` to opt out entirely.
+
+The plan id is resolved against the `plans` table before the seed writes
+anything, so a typo fails the boot with the name quoted and leaves no
+half-seeded account behind.
+
+Quota *values* still live only in Postgres — `default_plan` chooses a plan,
+it does not override any number in one. Raise limits the way SaaS does: edit
+(or INSERT) the `plans` row the org is assigned to, or attach a
+`plan_overrides` row with the cap fields you want to raise, so the audit
+trail covers both modes.
 
 Every numeric quota / rate / interval is validated at config load —
 `< 1` is rejected with the offending field named, never a panic in

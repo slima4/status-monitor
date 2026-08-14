@@ -315,7 +315,7 @@ pub const DOCS: &[DocPage] = &[
         blurb: "How plans bound resources and request budgets, and how each limit is enforced.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-08-07",
+        lastmod: "2026-08-14",
         source: include_str!("../../docs/quotas.md"),
         dir: "",
     },
