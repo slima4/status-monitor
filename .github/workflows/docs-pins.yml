@@ -1,0 +1,80 @@
+name: docs-pins
+
+# Docs that pin an image tag make a claim about the registry, and nothing else
+# checks it: ci.yml's paths-ignore skips root `*.md` outright, so a README-only
+# commit runs no gate at all. A pin that never resolves sends self-hosters
+# looking for a release that appears not to exist.
+on:
+  push:
+    branches: [main]
+    paths: &pin_paths
+      - "README.md"
+      - "docs/**"
+      - "Cargo.toml"
+      - ".github/workflows/docs-pins.yml"
+  pull_request:
+    branches: [main]
+    paths: *pin_paths
+  workflow_dispatch:
+
+concurrency:
+  group: docs-pins-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image-pins-resolve:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Every image tag the docs pin must exist
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          # Chart pins (ghcr.io/uptimepage/charts/...) are deliberately out of
+          # scope: charts.yml already ties them to Chart.yaml's own version.
+          # `v?` deliberately matches the wrong shape too. release-image publishes
+          # {{version}}, which drops the prefix, so a `:v1.2.3` pin 404s — the
+          # regex has to catch it rather than skip past it.
+          pins=$(grep -rhoE 'ghcr\.io/uptimepage/uptimepage:v?[0-9]+\.[0-9]+(\.[0-9]+)?' \
+            README.md docs | sort -u || true)
+          if [ -z "$pins" ]; then
+            echo "no version-pinned image references in the docs"
+            exit 0
+          fi
+
+          # The version this commit carries has no image until its v* tag builds,
+          # and the bump always lands before the tag. Tolerate exactly that one
+          # tag; every other unresolvable pin is still a failure, so the `v`-
+          # prefixed form stays caught (v1.2.3 never equals 1.2.3).
+          pending=$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)
+
+          fail=0
+          # Read line by line: an unquoted $pins splits on whitespace in bash but
+          # not in zsh, so anyone running this by hand would get one mangled URL.
+          while IFS= read -r ref; do
+            image="${ref#ghcr.io/}"
+            tag="${image##*:}"
+            repo="${image%:*}"
+            token=$(curl -sS -u "$GHCR_USER:$GHCR_TOKEN" \
+              "https://ghcr.io/token?scope=repository:${repo}:pull&service=ghcr.io" | jq -r .token)
+            code=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json' \
+              -H 'Accept: application/vnd.docker.distribution.manifest.list.v2+json' \
+              "https://ghcr.io/v2/${repo}/manifests/${tag}")
+            if [ "$code" = "200" ]; then
+              echo "$ref ok"
+            elif [ "$tag" = "$pending" ]; then
+              echo "::notice::$ref is this commit's own version and returned $code; push the v${tag} git tag so release-image publishes it."
+            else
+              echo "::error::$ref returned $code. Published release tags carry no 'v' prefix; check the tag exists before documenting it."
+              fail=1
+            fi
+          done <<< "$pins"
+          exit $fail

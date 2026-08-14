@@ -15,6 +15,7 @@ on:
       - ".github/workflows/charts.yml"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/dco.yml"
+      - ".github/workflows/docs-pins.yml"
       - ".github/workflows/issue-template-guard.yml"
       - ".github/ISSUE_TEMPLATE/**"
   pull_request:
