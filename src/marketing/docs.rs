@@ -403,7 +403,7 @@ pub const DOCS: &[DocPage] = &[
         blurb: "Installing the Helm charts: external databases, ingress timeouts, ICMP, and probe agents.",
         section: Section::SelfHosting,
         scope: Scope::SelfHosting,
-        lastmod: "2026-07-27",
+        lastmod: "2026-08-14",
         source: include_str!("../../docs/kubernetes.md"),
         dir: "",
     },

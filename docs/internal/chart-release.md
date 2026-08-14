@@ -10,6 +10,8 @@ Update every reference to that version. The `cosign verify` examples in `docs/ku
 
 Push and wait for the `charts` workflow to go green. It lints, renders, and validates both charts against the oldest and newest Kubernetes releases they claim to support, then checks that the render-time guards still refuse a bad install.
 
+When the bump also moves `appVersion`, publish the application image first. The publish job asks the registry for the image the chart defaults to and refuses a chart whose tag does not resolve, so the `v<appVersion>` git tag has to be pushed and `release-image` finished before this next step. Release tags build arm64 as well as amd64, so allow for a longer run than a push to `main`.
+
 Run the workflow again from the Actions tab, this time with `publish` checked:
 
 ```bash

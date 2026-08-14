@@ -2,8 +2,8 @@ apiVersion: v2
 name: uptimepage
 description: Self-hosted uptime monitoring, incidents, and status pages
 type: application
-version: 0.1.1
-appVersion: "1.0.0"
+version: 0.2.0
+appVersion: "1.1.0"
 # `-0` so vendor builds (v1.31.1-gke.x) satisfy the constraint.
 kubeVersion: ">=1.29.0-0"
 home: https://uptimepage.dev
@@ -31,7 +31,7 @@ annotations:
   # Artifact Hub scans what it finds here, so it has to track appVersion.
   artifacthub.io/images: |
     - name: uptimepage
-      image: ghcr.io/uptimepage/uptimepage:1.0.0
+      image: ghcr.io/uptimepage/uptimepage:1.1.0
   artifacthub.io/screenshots: |
     - title: Monitor dashboard
       url: https://uptimepage.dev/static/marketing/uptime-monitoring-dashboard.webp
@@ -40,7 +40,5 @@ annotations:
     - title: Public status page
       url: https://uptimepage.dev/static/marketing/public-status-page.webp
   artifacthub.io/changes: |
-    - kind: security
-      description: ClickHouse credentials no longer reach the preflight process arguments
-    - kind: added
-      description: Probe entries take podAnnotations, podLabels, priorityClassName, and replicaCount
+    - kind: changed
+      description: Tracks application 1.1.0; the chart templates are unchanged
