@@ -61,7 +61,7 @@ services:
   # `uptimepage_green` — both are byte-identical.
   uptimepage_blue: &uptimepage_app
     # Build from repo root by default; override with a pre-built image by setting
-    # UPTIMEPAGE_IMAGE=ghcr.io/you/uptimepage:v1.2.3 in .env.
+    # UPTIMEPAGE_IMAGE=ghcr.io/you/uptimepage:1.2.3 in .env.
     build:
       context: ..
       dockerfile: Dockerfile

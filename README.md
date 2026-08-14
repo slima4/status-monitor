@@ -237,9 +237,9 @@ To stop: `docker compose down`, or `docker compose down -v` to delete the data t
 
 #### Options
 
-**Pin a version.** Set `UPTIMEPAGE_IMAGE=ghcr.io/uptimepage/uptimepage:v1.0.0` to stay on a release instead of `latest`.
+**Pin a version.** Set `UPTIMEPAGE_IMAGE=ghcr.io/uptimepage/uptimepage:1.1.0` to stay on a release instead of `latest`. Release tags carry no `v` prefix, though the git tag they are built from does.
 
-**On an ARM host?** Published images are `linux/amd64`. See [Build from source](#build-from-source).
+**On an ARM host?** Release tags are `linux/amd64` and `linux/arm64`. `latest`, which tracks the newest commit on `main`, is amd64 only, so pin a release on ARM.
 
 **Signing in later.** The bootstrap link works once. For repeat sign-in, and to invite a team, set up GitHub or Google OAuth, or an email provider for magic links (`[auth.github]`, `[auth.google]`, `[email]` in `config/default.toml`, or the matching env vars). See [docs/authentication.md](docs/authentication.md).
 
