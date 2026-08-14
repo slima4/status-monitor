@@ -15,7 +15,7 @@ Every request we make was configured by a person. We do not discover sites on ou
 Our probes send a `User-Agent` that starts with `uptimepage/` and links back to this page:
 
 ```
-uptimepage/1.0.0 (+https://uptimepage.dev/bot)
+uptimepage/1.1.0 (+https://uptimepage.dev/bot)
 ```
 
 The version number changes as we release. The `uptimepage/` prefix and the link do not.

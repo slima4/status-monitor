@@ -1673,6 +1673,18 @@ mod tests {
     use super::*;
     use config::FileFormat;
 
+    /// The bot page tells site owners which User-Agent to allowlist, and it
+    /// spells the version out by hand. A stale sample teaches them to match a
+    /// string our probes stopped sending.
+    #[test]
+    fn the_bot_page_quotes_the_user_agent_we_actually_send() {
+        assert!(
+            include_str!("../docs/legal/bot.md").contains(&default_user_agent()),
+            "docs/legal/bot.md does not quote {:?}",
+            default_user_agent()
+        );
+    }
+
     fn scheduler_from(toml: &str) -> SchedulerConfig {
         Config::builder()
             .add_source(File::from_str(toml, FileFormat::Toml))
