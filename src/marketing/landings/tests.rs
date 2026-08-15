@@ -160,6 +160,22 @@ fn our_check_type_cells_name_every_kind() {
         "flow",
     ];
     for l in LANDINGS {
+        // A feature row naming the kinds drifts the same way a matrix cell
+        // does, and no matrix covers a use-case page.
+        for f in l.features {
+            if !["Check types", "Checks", "What it checks"].contains(&f.label) {
+                continue;
+            }
+            for kind in KINDS {
+                assert!(
+                    f.value.contains(kind),
+                    "{} feature {:?} omits {kind}: {:?}",
+                    l.path,
+                    f.label,
+                    f.value
+                );
+            }
+        }
         let Some(m) = page_matrix(l.path) else {
             continue;
         };
@@ -248,17 +264,14 @@ fn every_landing_renders() {
     }
 }
 
+/// FAQs are keyed by path, so renaming a page drops its answers and its
+/// FAQPage JSON-LD without failing anything else.
 #[test]
-fn comparison_pages_carry_faqs() {
-    for l in LANDINGS
-        .iter()
-        .filter(|l| l.path.starts_with("/vs/") || l.path.starts_with("/compare/"))
-    {
-        assert!(
-            !page_faqs(l.path).is_empty(),
-            "{} missing comparison FAQ",
-            l.path
-        );
+fn faq_bearing_pages_carry_faqs() {
+    for l in LANDINGS.iter().filter(|l| {
+        l.path.starts_with("/vs/") || l.path.starts_with("/compare/") || l.path == "/why-uptimepage"
+    }) {
+        assert!(!page_faqs(l.path).is_empty(), "{} missing FAQ", l.path);
     }
 }
 

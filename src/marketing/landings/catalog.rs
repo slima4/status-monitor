@@ -2237,6 +2237,129 @@ resource "uptimepage_target" "api" {
         cta: "Start free",
     },
     Landing {
+        path: "/why-uptimepage",
+        created: "2026-08-15",
+        lastmod: "2026-08-15",
+        title: "Why Uptimepage",
+        eyebrow: "why this one",
+        h1: "Why people pick Uptimepage",
+        meta_description: "What you get with Uptimepage: failures confirmed across regions before anything wakes you, incidents and subscribers included, monitors an assistant sets up.",
+        lede: "Every monitoring tool will tell you a URL stopped answering. What decides whether you keep one is narrower: how sure it is before it wakes you, and how much of the rest of the job it does for you.",
+        features: &[
+            Feature {
+                label: "What it checks",
+                value: "HTTP, TCP, DNS, TLS, domain, ping, heartbeat, flow",
+            },
+            Feature {
+                label: "Where from",
+                value: "several regions, majority must agree",
+            },
+            Feature {
+                label: "Set it up with",
+                value: "the app, an AI assistant, the API or Terraform",
+            },
+            Feature {
+                label: "In the box",
+                value: "status page, incidents, subscribers, alerts",
+            },
+            Feature {
+                label: "Your team",
+                value: "invite people, owner or member",
+            },
+            Feature {
+                label: "Self-host",
+                value: "AGPL, one binary, docker compose",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "You hear it from us, not from a customer",
+                body: "The worst way to learn your checkout is broken is an email from someone who tried to pay. Checks run around the clock against the pages that carry your money: the site, the checkout, the signup form, the API behind them. When one stops behaving, the alert reaches Slack, Telegram, email, a webhook or your phone, and it carries the response that failed, which is usually enough to tell you where to look. How fast that lands is yours to set: it takes the check interval you chose, times the number of failures you want confirmed first.",
+            },
+            Section {
+                heading: "One tool instead of three",
+                body: "Most people end up paying for a checker, then a status page, then something to route the alerts. Here the checks, the public page your customers read, the incident timeline you narrate while you work, and the alerting are one product. A failing monitor opens an incident by itself; you decide whether it goes public. Visitors subscribe to the page by confirmed email or signed webhook and get told when it is fixed, which is roughly the whole support inbox you would have answered by hand.",
+            },
+            Section {
+                heading: "Set it up by asking, not by filling forms",
+                body: "Nobody minds watching monitors. What people put off is the first hour, when there are none yet and each one is a form. Connect an AI assistant and describe what matters instead: the site, the certificate, the domain renewal, the nightly job that should check in. It proposes the monitors and creates them, and before anything is saved it runs the check once and shows you the real result beside every setting it would apply. A check that asserts the wrong thing turns up right there, at the point where declining it costs you nothing. Later you can ask what broke last night, pause a monitor that is being noisy, or have it check something again right now.",
+            },
+            Section {
+                heading: "It does not cry wolf",
+                body: "One probe having a bad network minute is the most common false alarm in monitoring, and it is why people stop reading their alerts. Two gates sit in front of yours. A region has to fail several checks in a row before it counts as failing at all, two by default. Then the failing regions are counted against the monitor's policy, and the default is a majority, so a monitor watched from three places needs two to agree. Your pager and the public uptime bar read that same rule, so what your customers see matches what woke you.",
+            },
+            Section {
+                heading: "Bring in the person who fixes things",
+                body: "Invite your developer, your agency or your assistant instead of mailing them your password. A member operates the monitoring: they create and edit monitors, acknowledge incidents, and post customer-facing updates during an outage, which is what you want when the person awake at 3 a.m. is not the person who owns the account. An owner controls the org itself: who is in it, and the branded page customers see. Invitations go by email and carry the role you picked.",
+            },
+            Section {
+                heading: "What a check actually asserts",
+                body: "A monitor here asserts something, rather than only asking whether the host answers. An HTTP check pins the status code, matches body text, sets its own timeout, and decides whether redirects and self-signed certificates are acceptable. Timing comes back split into DNS, TCP connect, TLS handshake and time to first byte, so a slow check tells you which of the four is slow. Certificate and domain checks count days remaining and warn on thresholds you set, well ahead of the expiry date. Heartbeat monitors run the other way round: your cron job pings us, and silence past its period plus grace is the failure. A browser flow drives a real login and times every step, so a form that still renders while the login behind it is broken does not read as healthy.",
+            },
+            Section {
+                heading: "The AI can act, inside a fence",
+                body: "Twenty-five tools are exposed over MCP. Fifteen read anything your dashboard shows. The other ten can act, and they are offered only to a client that can stop and ask you to confirm; a client that cannot sees the read tools alone. Every action needs the right scope on an org-bound token and your approval in the moment, and each one writes an audit row. There is no remember-my-choice. What the assistant cannot do matters as much. It cannot set request headers, auth tokens or flow passwords on a monitor, so credentials never travel through a chat log, and a URL carrying a password is refused outright. It cannot create a notification channel, since that would mean handing it a webhook or a bot token, though it can bind a monitor to one you already made. Retuning a monitor changes how loudly it is watched, never what it watches, and a monitor managed by Terraform is refused so the next apply cannot quietly undo it.",
+            },
+            Section {
+                heading: "Or keep it in version control",
+                body: "The dashboard, the REST API, the Terraform provider and the MCP tools drive the same endpoints, so a monitor you made by clicking is the same object a script reads back. Scoped API tokens bind to one org and carry only the permissions you grant. The provider manages HTTP, TCP, DNS, TLS, domain and flow monitors along with your notification channels, so if your infrastructure already lives in Terraform those monitors go through the same review and the same rollback as the rest of it. Ping and heartbeat monitors are not in the provider yet; the API takes them today.",
+            },
+            Section {
+                heading: "Run it yourself, or let us run it",
+                body: "The whole product is AGPL and ships as one self-contained binary. One docker compose command starts it with Postgres and ClickHouse, both databases migrate themselves, and a second command creates your owner account and prints a sign-in link. That is the whole install. A Helm chart is there for Kubernetes, and the same binary started in agent mode runs checks from inside your own network. Nothing in the core is held back to make self-hosting hurt: the checks, the status pages, the subscribers, the API and every alert channel are the same code we run.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "The same monitor, in Terraform",
+            body: r#"resource "uptimepage_target" "checkout" {
+  name     = "checkout"
+  interval = 180
+  check = {
+    type = "http"
+    http = {
+      url             = "https://example.com/checkout"
+      expected_status = { kind = "exact", exact = 200 }
+    }
+  }
+}"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "Getting started",
+                href: "/docs/getting-started",
+            },
+            ResourceLink {
+                label: "Pricing",
+                href: "/pricing",
+            },
+            ResourceLink {
+                label: "The MCP server in full",
+                href: "/mcp-server",
+            },
+            ResourceLink {
+                label: "Why your monitor should be boring",
+                href: "/blog/boring-uptime",
+            },
+            ResourceLink {
+                label: "Monitoring a login, not a login page",
+                href: "/browser-login-monitoring",
+            },
+            ResourceLink {
+                label: "Open-source uptime monitoring",
+                href: "/open-source-uptime-monitoring",
+            },
+            ResourceLink {
+                label: "Versus UptimeRobot",
+                href: "/vs/uptimerobot",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
         path: "/about",
         created: "2026-07-21",
         lastmod: "2026-07-21",

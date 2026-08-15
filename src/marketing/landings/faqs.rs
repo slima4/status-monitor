@@ -624,6 +624,28 @@ pub(super) fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
                 "With a scoped API token: resource-and-action permissions bound to one org, with an enforced expiry. Mint a write-scoped token for Terraform rather than an all-or-nothing key.",
             ),
         ],
+        "/why-uptimepage" => &[
+            (
+                "Do I have to be technical to use it?",
+                "No. Paste a URL and save, and the defaults are already sensible. The parts that need an engineer, browser login flows and monitors declared in Terraform, are optional and sit behind the simple ones.",
+            ),
+            (
+                "What does the AI assistant actually do?",
+                "It reads your monitors and answers questions about them, and it can create monitors, retune them, and publish incident updates. Every action shows you what it would do and waits for your approval, and creating a monitor runs the check once first so you approve a real result. It cannot put credentials on a monitor at all, so nothing sensitive passes through the chat.",
+            ),
+            (
+                "Will it wake me up for nothing?",
+                "That is what the two confirmation gates are for. A region has to fail several checks in a row before it counts, and by default a majority of the regions watching a monitor have to agree before an incident opens.",
+            ),
+            (
+                "Do I need a separate status page tool?",
+                "No. Status pages, incident timelines and subscribers are part of the same product as the checks, so an incident opened by a failing monitor is the incident your customers read about.",
+            ),
+            (
+                "Can I run it on my own server?",
+                "Yes. It is AGPL and ships as one binary. Docker compose up starts it and both databases migrate themselves, then one more command creates your owner account and prints a sign-in link. The core is not held back: the checks, the status pages, the API and every alert channel are the same code the hosted service runs.",
+            ),
+        ],
         _ => &[],
     }
 }
