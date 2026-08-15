@@ -1,7 +1,7 @@
 # Terraform
 
-Manage your monitors and notification channels as code with the official
-Terraform provider,
+Manage your monitors, notification channels and public status pages as code
+with the official Terraform provider,
 **[`uptimepage/uptimepage`](https://registry.terraform.io/providers/uptimepage/uptimepage)**.
 
 The Terraform Registry page is the **full reference** — every resource,
@@ -44,9 +44,11 @@ resource "uptimepage_target" "api" {
   requires a verified email). Supply it via the `token` attribute or the
   `UPTIMEPAGE_TOKEN` environment variable. The full token is shown **once**.
   Grant the **least scope** the provider needs: `targets:write` +
-  `channels:write` covers both managed resources (`write` implies `read`, and
-  Terraform only deletes during `terraform destroy`). Add `targets:delete` +
-  `channels:delete` only if you run `destroy`. For defence in depth, **bind the
+  `channels:write` covers monitors and channels, and `status_page:write` covers
+  status pages and their components (`write` implies `read`, and Terraform only
+  deletes during `terraform destroy`). Add the matching `:delete` scopes only if
+  you run `destroy`. Status-page writes are **owner-only**, so that token has to
+  belong to an org owner; a member's token gets `403` on page changes. For defence in depth, **bind the
   token to the org** you manage so a leak can't reach your other orgs.
 - **Org** — API tokens are user-scoped, so every request must name an
   organization. Set `org` (the org **slug**) or `UPTIMEPAGE_ORG`; it is sent as
@@ -63,6 +65,8 @@ resource "uptimepage_target" "api" {
 |---|---|---|
 | `uptimepage_target` | resource | Monitors — `http`, `tcp`, `tls_cert`, `domain_expiry`, `dns`, `flow` checks. On a self-hosted install, applying a `flow` needs `max_flow_checks` raised on the plan first ([monitor types](monitor-types.md#flow)). Ping and heartbeat monitors are not yet manageable through the provider |
 | `uptimepage_notification_channel` | resource | Alert destinations — `webhook`, `slack`, `discord`, `msteams`, `google_chat`, `telegram`, `whatsapp`, `email`, `pagerduty`, `ntfy`, `pushover`, `sms`. The one-tap `telegram_app` and `whatsapp_app` kinds are not manageable: their configs are minted by the link flows and the API rejects them in request bodies (`CHANNEL_KIND_MANAGED`) |
+| `uptimepage_status_page` | resource | Public status pages — slug, operator and display names, enabled state, and the branding a visitor sees: about text, brand colour, style, logo, status URL, and whether the powered-by mark shows |
+| `uptimepage_status_page_component` | resource | What a page publishes — one monitor placed on one page, with its public name, description, group and sort order. The public name is separate from the monitor's internal one |
 | `uptimepage_target` | data source | Look up an existing target by id |
 
 For the full attribute reference and an example per check type, see the

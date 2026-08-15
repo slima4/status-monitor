@@ -2,7 +2,7 @@ use crate::marketing::config::{BRAND, MarketingCfg};
 use crate::marketing::seo::AUTHOR_PAGE;
 
 use super::catalog::LANDINGS;
-use super::faqs::page_faqs;
+use super::faqs::{FAQ_PATHS, page_faqs};
 use super::matrices::page_matrix;
 use super::model::is_comparison;
 use super::render::{ALIASES, render_all};
@@ -159,47 +159,42 @@ fn our_check_type_cells_name_every_kind() {
         "heartbeat",
         "flow",
     ];
+    // Any wording a label can take, matched loosely: a guard that only fires on
+    // the exact labels in the catalog today is bypassed by the next one added.
+    const PHRASES: &[&str] = &[
+        "check types",
+        "check kinds",
+        "what it checks",
+        "what we check",
+        "probe types",
+        "endpoint checks",
+        "check breadth",
+    ];
+    fn names_kinds(label: &str) -> bool {
+        let label = label.to_lowercase();
+        // Bare "checks" only as the whole label: as a substring it catches rows
+        // like "auto incidents from checks", which name no kinds.
+        label == "checks" || PHRASES.iter().any(|l| label.contains(l))
+    }
+    fn assert_every_kind(path: &str, label: &str, value: &str) {
+        for kind in KINDS {
+            assert!(
+                value.contains(kind),
+                "{path} {label:?} omits {kind}: {value:?}"
+            );
+        }
+    }
     for l in LANDINGS {
         // A feature row naming the kinds drifts the same way a matrix cell
         // does, and no matrix covers a use-case page.
-        for f in l.features {
-            if !["Check types", "Checks", "What it checks"].contains(&f.label) {
-                continue;
-            }
-            for kind in KINDS {
-                assert!(
-                    f.value.contains(kind),
-                    "{} feature {:?} omits {kind}: {:?}",
-                    l.path,
-                    f.label,
-                    f.value
-                );
-            }
+        for f in l.features.iter().filter(|f| names_kinds(f.label)) {
+            assert_every_kind(l.path, f.label, f.value);
         }
         let Some(m) = page_matrix(l.path) else {
             continue;
         };
-        for row in m.rows {
-            let names_types = [
-                "check types",
-                "probe types",
-                "endpoint checks",
-                "check breadth",
-            ]
-            .iter()
-            .any(|label| row.label.contains(label));
-            if !names_types {
-                continue;
-            }
-            let ours = row.cells[m.us_col()].0;
-            for kind in KINDS {
-                assert!(
-                    ours.contains(kind),
-                    "{} row {:?} omits {kind}: {ours:?}",
-                    l.path,
-                    row.label
-                );
-            }
+        for row in m.rows.iter().filter(|r| names_kinds(r.label)) {
+            assert_every_kind(l.path, row.label, row.cells[m.us_col()].0);
         }
     }
 }
@@ -267,10 +262,25 @@ fn every_landing_renders() {
 /// FAQs are keyed by path, so renaming a page drops its answers and its
 /// FAQPage JSON-LD without failing anything else.
 #[test]
-fn faq_bearing_pages_carry_faqs() {
-    for l in LANDINGS.iter().filter(|l| {
-        l.path.starts_with("/vs/") || l.path.starts_with("/compare/") || l.path == "/why-uptimepage"
-    }) {
+fn faq_keys_name_real_pages() {
+    let paths: std::collections::HashSet<_> = LANDINGS.iter().map(|l| l.path).collect();
+    for path in FAQ_PATHS {
+        assert!(paths.contains(path), "{path} has FAQs but is not a landing");
+        assert!(!page_faqs(path).is_empty(), "{path} is listed with no FAQs");
+    }
+    // Catches an arm added without listing it here, which would leave that
+    // page's FAQs outside the rename guard above.
+    let answered = LANDINGS
+        .iter()
+        .filter(|l| !page_faqs(l.path).is_empty())
+        .count();
+    assert_eq!(answered, FAQ_PATHS.len(), "FAQ_PATHS is out of date");
+}
+
+/// A head-to-head page with no FAQ loses the block the layout is built around.
+#[test]
+fn comparison_pages_carry_faqs() {
+    for l in LANDINGS.iter().filter(|l| is_comparison(l.path)) {
         assert!(!page_faqs(l.path).is_empty(), "{} missing FAQ", l.path);
     }
 }

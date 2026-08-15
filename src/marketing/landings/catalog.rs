@@ -2286,7 +2286,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "Set it up by asking, not by filling forms",
-                body: "Nobody minds watching monitors. What people put off is the first hour, when there are none yet and each one is a form. Connect an AI assistant and describe what matters instead: the site, the certificate, the domain renewal, the nightly job that should check in. It proposes the monitors and creates them, and before anything is saved it runs the check once and shows you the real result beside every setting it would apply. A check that asserts the wrong thing turns up right there, at the point where declining it costs you nothing. Later you can ask what broke last night, pause a monitor that is being noisy, or have it check something again right now.",
+                body: "Having monitors is not the annoying part. What people put off is the first hour, when there are none yet and each one is a form. Connect an AI assistant and describe what matters instead: the site, the certificate, the domain renewal, the nightly job that should check in. It proposes the monitors and creates them, and before anything is saved it runs the check once and shows you the real result beside every setting it would apply. A check that asserts the wrong thing turns up right there, at the point where declining it costs you nothing. Later you can ask what broke last night, pause a monitor that is being noisy, or have it check something again right now.",
             },
             Section {
                 heading: "It does not cry wolf",
@@ -2302,11 +2302,11 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "The AI can act, inside a fence",
-                body: "Twenty-five tools are exposed over MCP. Fifteen read anything your dashboard shows. The other ten can act, and they are offered only to a client that can stop and ask you to confirm; a client that cannot sees the read tools alone. Every action needs the right scope on an org-bound token and your approval in the moment, and each one writes an audit row. There is no remember-my-choice. What the assistant cannot do matters as much. It cannot set request headers, auth tokens or flow passwords on a monitor, so credentials never travel through a chat log, and a URL carrying a password is refused outright. It cannot create a notification channel, since that would mean handing it a webhook or a bot token, though it can bind a monitor to one you already made. Retuning a monitor changes how loudly it is watched, never what it watches, and a monitor managed by Terraform is refused so the next apply cannot quietly undo it.",
+                body: "Twenty-five tools are exposed over MCP. Fifteen read, as far as your token's scopes allow: monitors and their history region by region, incidents and their metrics, status pages, org health, usage against your plan. The other ten can act, and they are offered only to a client that can stop and ask you to confirm; a client that cannot sees the read tools alone. Every action needs the right scope on an org-bound token and your approval in the moment, and each one writes an audit row. There is no remember-my-choice. What the assistant cannot do matters as much. It cannot set request headers, auth tokens or flow passwords on a monitor, and a URL carrying a password is refused outright. Reading back, header values and request bodies come through masked, a heartbeat's ping token is withheld, and what a flow types is never returned. The address is the exception: it reports as configured, so a credential someone put in the URL itself is visible there, exactly as it is in the API. It cannot create a notification channel, since that would mean handing it a webhook or a bot token, though it can bind a monitor to one you already made. Retuning a monitor changes how loudly it is watched, never what it watches, and a monitor managed by Terraform is refused so the next apply cannot quietly undo it.",
             },
             Section {
                 heading: "Or keep it in version control",
-                body: "The dashboard, the REST API, the Terraform provider and the MCP tools drive the same endpoints, so a monitor you made by clicking is the same object a script reads back. Scoped API tokens bind to one org and carry only the permissions you grant. The provider manages HTTP, TCP, DNS, TLS, domain and flow monitors along with your notification channels, so if your infrastructure already lives in Terraform those monitors go through the same review and the same rollback as the rest of it. Ping and heartbeat monitors are not in the provider yet; the API takes them today.",
+                body: "The dashboard, the REST API, the Terraform provider and the MCP tools drive the same endpoints, so a monitor you made by clicking is the same object a script reads back. Scoped API tokens bind to one org and carry only the permissions you grant. The provider manages HTTP, TCP, DNS, TLS, domain and flow monitors, your notification channels, and the status pages and components they appear on, so if your infrastructure already lives in Terraform all of that goes through the same review and the same rollback as the rest of it. Ping and heartbeat monitors are not in the provider yet; the API takes them today.",
             },
             Section {
                 heading: "Run it yourself, or let us run it",
@@ -2314,7 +2314,7 @@ resource "uptimepage_target" "api" {
             },
         ],
         code: Some(CodeSample {
-            caption: "The same monitor, in Terraform",
+            caption: "A monitor declared in Terraform",
             body: r#"resource "uptimepage_target" "checkout" {
   name     = "checkout"
   interval = 180

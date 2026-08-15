@@ -1,3 +1,43 @@
+/// Every path [`page_faqs`] answers for. Match arms cannot be enumerated, so
+/// this is what lets a test prove each one still names a landing: a renamed
+/// page would otherwise drop its answers and its FAQPage JSON-LD in silence.
+#[cfg(test)]
+pub(super) const FAQ_PATHS: &[&str] = &[
+    "/compare/openstatus-vs-uptime-kuma",
+    "/compare/uptime-kuma-vs-upptime",
+    "/compare/uptime-kuma-vs-oneuptime",
+    "/compare/uptime-kuma-vs-kener",
+    "/compare/terraform-providers",
+    "/compare/terraform-uptime-kuma",
+    "/compare/terraform-uptimerobot",
+    "/compare/terraform-statuspage",
+    "/compare/mcp-servers",
+    "/compare/uptime-kuma-vs-zabbix",
+    "/compare/blackbox-exporter-vs-uptime-kuma",
+    "/compare/pingdom-vs-statuscake",
+    "/compare/uptime-kuma-vs-healthchecks",
+    "/compare/uptime-kuma-vs-cachet",
+    "/compare/openstatus-vs-gatus",
+    "/compare/uptime-kuma-vs-gatus",
+    "/open-source-status-page",
+    "/open-source-uptime-monitoring",
+    "/white-label-uptime-monitoring",
+    "/uptime-monitoring-for-developers",
+    "/vs/uptimerobot",
+    "/vs/statuspage",
+    "/vs/better-stack",
+    "/vs/oneuptime",
+    "/vs/uptime-kuma",
+    "/vs/self-hosted-status-pages",
+    "/vs/self-hosted-monitoring",
+    "/status-page-for-saas",
+    "/status-page-for-agencies",
+    "/mcp-server",
+    "/vs/pingdom",
+    "/terraform-uptime-monitoring",
+    "/why-uptimepage",
+];
+
 /// Per-page FAQ for the landings that have one; others render no FAQ. Most
 /// comparison answers describe Uptimepage only, matching the neutral-comparison
 /// rule above; the head-to-head page's answers also state verifiable, dated
