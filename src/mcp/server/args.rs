@@ -1,6 +1,5 @@
 use super::text::sanitize_data;
 use super::view::{channel_names, region_policy_str, sorted, tag_list};
-use super::{DEFAULT_INCIDENT_WINDOW_DAYS, MAX_INCIDENT_WINDOW_DAYS, bound_ids, resolve_bindings};
 use crate::mcp::error::config_error;
 
 use chrono::{DateTime, Duration, Utc};
@@ -9,13 +8,18 @@ use uuid::Uuid;
 use crate::domain::notification_channel::NotificationChannel;
 use crate::domain::public::IncidentStatusPhase;
 use crate::domain::target::{RegionIncidentPolicy, Target, TargetUpdate};
-use crate::domain::{CheckSpec, ExpectedStatus};
+use crate::domain::{AlertBinding, CheckSpec, ExpectedStatus, TargetAlerts};
 use crate::storage::TimeRange;
 
 use crate::mcp::error::McpToolError;
 use crate::mcp::schema::{
     FieldChange, NewCheck, RegionPolicyArg, RegionPolicyMode, UpdateMonitorArgs,
 };
+
+pub(super) const DEFAULT_INCIDENT_WINDOW_DAYS: i64 = 30;
+/// Widest window `list_incidents` will accept, so a far-past `from` can't turn
+/// one tool call into a full-table scan.
+pub(super) const MAX_INCIDENT_WINDOW_DAYS: i64 = 366;
 
 /// The patch to apply plus one [`FieldChange`] per field that moves. A field
 /// sent with the value it already has is dropped from both.
@@ -502,4 +506,34 @@ pub(super) fn parse_kind(s: &str) -> Result<&'static str, McpToolError> {
                 crate::domain::CheckSpec::ALL_KINDS.join(", ")
             ))
         })
+}
+
+fn bound_ids(alerts: &TargetAlerts) -> std::collections::BTreeSet<Uuid> {
+    alerts.iter().map(|b| b.channel_id).collect()
+}
+
+/// Channel ids to bindings, refusing anything the org does not own. A duplicate
+/// is an error rather than a silent collapse, matching the REST validator.
+pub(super) fn resolve_bindings(
+    ids: &[String],
+    channels: &[NotificationChannel],
+) -> Result<TargetAlerts, McpToolError> {
+    let mut bindings: Vec<AlertBinding> = Vec::with_capacity(ids.len());
+    for id in ids {
+        let channel_id = parse_uuid(id, "channel id")?;
+        // Absent from the org's own inventory covers both "does not exist" and
+        // "belongs to someone else".
+        if !channels.iter().any(|c| c.id == channel_id) {
+            return Err(McpToolError::invalid_argument(format!(
+                "no notification channel {channel_id} in this organization"
+            )));
+        }
+        if bindings.iter().any(|b| b.channel_id == channel_id) {
+            return Err(McpToolError::invalid_argument(format!(
+                "notification channel {channel_id} is listed twice"
+            )));
+        }
+        bindings.push(AlertBinding { channel_id });
+    }
+    Ok(TargetAlerts(bindings))
 }
