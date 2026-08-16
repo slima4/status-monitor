@@ -349,7 +349,7 @@ edit with no template touched. When adding UI, reuse or extend a semantic
 class rather than inlining `bg-*`/`rounded-*`/heading-scale clusters.
 
 The public status page is deliberately exempt — it is a flat, brand-themed
-surface with its own view-supplied palette (`public_status.rs`), not the
+surface with its own view-supplied palette (`public_status/view.rs`), not the
 sticker system.
 
 Tailwind 4 scans `templates/**/*.html` **and** `src/**/*.rs` for class names

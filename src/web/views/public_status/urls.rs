@@ -1,0 +1,54 @@
+//! Where a status page lives: the origin it is served from and the URLs the
+//! operator UI, the API and the templates all have to agree on.
+
+/// Single source of truth for the logo path — referenced by both the route
+/// registration and the URL the template emits so they cannot drift.
+pub const LOGO_ROUTE: &str = "/status/branding/logo";
+
+/// Origin a page is served from: an absolute host in subdomain mode, an empty
+/// string (same operator host) in path mode, or `None` when no public surface
+/// is mounted. Single source for both the API view and the settings editor so
+/// their URLs can't diverge.
+pub fn public_base(cfg: &crate::config::AppConfig, slug: &str) -> Option<String> {
+    use crate::api::routes::{path_based_public_routes_enabled, subdomain_public_routes_enabled};
+    if subdomain_public_routes_enabled(cfg) {
+        return Some(format!("https://{slug}.{}", cfg.public_status.base_domain));
+    }
+    if path_based_public_routes_enabled(cfg) {
+        return Some(String::new());
+    }
+    None
+}
+
+/// Public page URL from an origin: the apex in subdomain mode, `{origin}/status`
+/// in path mode.
+pub fn public_status_url(cfg: &crate::config::AppConfig, origin: &str) -> String {
+    status_url_for(
+        crate::api::routes::subdomain_public_routes_enabled(cfg),
+        origin,
+    )
+}
+
+/// Same rule for callers that carry the tenancy flag instead of the whole
+/// config. One predicate: a subdomain deploy gives the page a host of its own,
+/// a path deploy shares the operator host, whose root is the dashboard.
+pub fn status_url_for(subdomain_routes: bool, origin: &str) -> String {
+    if subdomain_routes {
+        origin.to_owned()
+    } else {
+        format!("{origin}/status")
+    }
+}
+
+/// Logo URL stamped with the asset's content hash (cache-buster), or `None`
+/// when no public surface is mounted.
+pub fn public_logo_url(base: Option<&str>, hash: &str) -> Option<String> {
+    base.map(|origin| format!("{origin}{LOGO_ROUTE}?v={hash}"))
+}
+
+/// `.{base_domain}` slug-preview suffix in subdomain mode; `None` in path mode.
+pub fn public_host_suffix(cfg: &crate::config::AppConfig) -> Option<String> {
+    use crate::api::routes::subdomain_public_routes_enabled;
+    subdomain_public_routes_enabled(cfg)
+        .then(|| format!(".{}", cfg.public_status.base_domain.trim_start_matches('.')))
+}

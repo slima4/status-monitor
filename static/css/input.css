@@ -2630,7 +2630,7 @@
 
     /* Small colour swatch used in the public status-page legend. Fills are
        intentionally the same set the history strip uses (rendered via
-       .day-cell--* from day_classes() in public_status.rs) — the legend
+       .day-cell--* from day_classes() in public_status/view.rs) — the legend
        names the same scale the bars paint. */
     .legend-dot         { @apply inline-block h-2.5 w-2.5 rounded-sm; }
     .legend-dot--op     { background-color: var(--sm-state-op-bar); }
@@ -2716,7 +2716,7 @@
     }
 
     /* Overall-status banner tint. Five variants tied to OverallState in
-       src/web/views/public_status.rs. State tokens carry theme-aware colour;
+       src/web/views/public_status/view.rs. State tokens carry theme-aware colour;
        a .theme-* override on <body> re-paints all five without template edits. */
     .public-overall--op {
         border-color: var(--theme-state-ok-line);
