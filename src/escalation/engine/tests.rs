@@ -1145,3 +1145,87 @@ async fn a_held_open_sends_no_recovery() {
     );
     assert_eq!(rows[0].reason, NotificationReason::Opened);
 }
+
+/// A failed delivery still wrote a row the retry sweep owns, so it is not an
+/// unreachable episode — recording a second marker for it would double-count
+/// and hide the retry.
+#[tokio::test]
+async fn a_failed_delivery_is_not_marked_unreachable() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let eng = engine(ops.clone(), policies, targets, channels);
+
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+
+    let rows = ops.notifications_for(org(), id).await.unwrap();
+    assert_eq!(rows.len(), 1, "one row for the one channel it tried");
+    assert_eq!(rows[0].channel_id, Some(cid));
+}
+
+/// A monitor whose bindings reach nothing records a marker, or the reconcile
+/// scan re-runs the episode every tick for the whole window.
+#[tokio::test]
+async fn an_episode_that_reaches_no_channel_is_marked() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let target = target_with_channel(Uuid::now_v7()); // bound channel does not exist
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let eng = engine(ops.clone(), policies, targets, channels);
+
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+
+    let rows = ops.notifications_for(org(), id).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].transport, "unreachable");
+    assert_eq!(rows[0].channel_id, None);
+}
+
+/// The operator declared this one deliberately; the damper must not hold it.
+#[tokio::test]
+async fn a_manually_declared_incident_is_never_held() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let cfg = EscalationConfig {
+        flap_max_opens: 1,
+        ..Default::default()
+    };
+    let eng = engine_cfg(ops.clone(), policies, targets, channels, cfg);
+
+    eng.page(
+        org(),
+        seed_incident(&ops, Some(tid)),
+        NotificationReason::Opened,
+    )
+    .await
+    .unwrap();
+    let manual = seed_incident(&ops, Some(tid));
+    ops.edit(manual, |i| i.origin = crate::domain::IncidentOrigin::Manual);
+    eng.page(org(), manual, NotificationReason::Opened)
+        .await
+        .unwrap();
+
+    let rows = ops.notifications_for(org(), manual).await.unwrap();
+    assert_eq!(
+        rows[0].channel_id,
+        Some(cid),
+        "a declared incident still pages"
+    );
+}

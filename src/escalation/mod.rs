@@ -6,4 +6,5 @@
 
 pub mod engine;
 
+pub use engine::rules::is_damper_marker;
 pub use engine::{EngineDeps, EscalationEngine, IncidentSignal};

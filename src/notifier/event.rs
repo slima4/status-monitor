@@ -23,6 +23,25 @@ pub struct IncidentNotice {
     pub regions_up: Vec<String>,
     /// Deep link to the incident detail page, when a base URL is configured.
     pub url: Option<String>,
+    /// Carries what the recipient needs to interpret the alert stream itself,
+    /// such as the fact that further alerts from a flapping monitor are being
+    /// held. Rides [`Self::plain_text`], which most transports render; Slack
+    /// and PagerDuty build their own bodies and carry it separately.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// The error is customer-controlled and unbounded in the database, so an
+/// endpoint returning a page of HTML would otherwise fill an SMS on its own and
+/// push everything after it — including the flapping note — past the
+/// transports' truncation.
+const MAX_ERROR_CHARS: usize = 200;
+
+fn clip(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max).collect::<String>() + "…"
 }
 
 impl IncidentNotice {
@@ -74,6 +93,13 @@ impl IncidentNotice {
     /// no markup, optional error sample, region breakdown and link on their
     /// own lines.
     pub fn plain_text(&self) -> String {
+        match &self.note {
+            Some(note) => format!("{}\n\n{note}", self.body()),
+            None => self.body(),
+        }
+    }
+
+    fn body(&self) -> String {
         let link = self
             .url
             .as_deref()
@@ -94,7 +120,7 @@ impl IncidentNotice {
                 err = self
                     .error_sample
                     .as_deref()
-                    .map(|e| format!(": {e}"))
+                    .map(|e| format!(": {}", clip(e, MAX_ERROR_CHARS)))
                     .unwrap_or_default(),
             ),
             NotificationReason::Resolved => {
@@ -138,6 +164,7 @@ mod tests {
             regions_down: Vec::new(),
             regions_up: Vec::new(),
             url: None,
+            note: None,
         }
     }
 
@@ -154,5 +181,37 @@ mod tests {
         let text = notice(NotificationReason::Opened).plain_text();
         assert!(text.contains("major incident OPEN"), "{text}");
         assert!(!text.contains("REOPENED"), "{text}");
+    }
+    /// The note rides `plain_text`, which every transport renders, so a
+    /// recipient on Slack or Telegram learns about the hold too — not just
+    /// whoever gets the email.
+    #[test]
+    fn a_note_is_appended_to_the_body_for_every_transport() {
+        let mut n = notice(NotificationReason::Opened);
+        let plain = n.plain_text();
+        n.note = Some("alerts are held while this settles".into());
+        let with_note = n.plain_text();
+
+        assert!(
+            with_note.starts_with(&plain),
+            "the alert itself is unchanged"
+        );
+        assert!(with_note.ends_with("alerts are held while this settles"));
+    }
+    /// A long error must not push the flapping note past an SMS's budget: the
+    /// note is the only in-band warning that alerts are about to go quiet.
+    #[test]
+    fn a_long_error_cannot_crowd_out_the_note() {
+        let mut n = notice(NotificationReason::Opened);
+        n.error_sample = Some("x".repeat(5_000));
+        n.note = Some("Flapping: alerts held".into());
+        let body = n.plain_text();
+
+        assert!(body.ends_with("Flapping: alerts held"));
+        assert!(
+            body.chars().count() < 480,
+            "fits an SMS: {}",
+            body.chars().count()
+        );
     }
 }

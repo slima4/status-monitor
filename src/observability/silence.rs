@@ -80,6 +80,7 @@ impl SilenceDelivery for SilenceNotifier {
             regions_down: Vec::new(),
             regions_up: Vec::new(),
             url: None,
+            note: None,
         };
         let central = self.central_bot.as_ref().map(|c| c.as_central());
         let mut delivered = false;

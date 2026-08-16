@@ -77,6 +77,10 @@ impl PagerDutyNotifier {
         if let Some(err) = &notice.error_sample {
             details.insert("error".into(), err.clone().into());
         }
+        // The summary is the first line only, so the note would be cut there.
+        if let Some(note) = &notice.note {
+            details.insert("note".into(), note.clone().into());
+        }
         Event {
             routing_key,
             event_action: "trigger",
@@ -182,6 +186,7 @@ mod tests {
             regions_down: vec!["eu-west".into()],
             regions_up: vec!["us-east".into()],
             url: Some("https://app.uptimepage.dev/i/7".into()),
+            note: None,
         }
     }
 

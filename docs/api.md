@@ -507,6 +507,7 @@ unsigned.
 | `error_sample` | string \| null | |
 | `regions_down` / `regions_up` | string[] | empty on both sides for a single-region monitor |
 | `url` | string \| null | deep link to the incident detail page, when a base URL is configured |
+| `note` | string | present only when there is something to say about the alert stream itself, such as a flapping monitor whose repeat alerts are being held |
 
 `reason` is one of: `opened`, `escalated`, `reopened`, `resolved`, `nodata` (the monitor's probes went silent, no incident, orthogonal to up/down), `dataresumed` (probing recovered after a `nodata` notice).
 

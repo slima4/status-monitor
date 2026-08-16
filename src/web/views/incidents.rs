@@ -813,6 +813,11 @@ pub async fn detail(
         .notifications_for(org, id)
         .await?
         .iter()
+        // The damper's bookkeeping rows reached no channel; listing them as
+        // deliveries invents channels named "damped" or "held". Keyed on the
+        // marker, not `channel_id`, which a deleted channel NULLs on rows that
+        // really were delivered.
+        .filter(|n| !crate::escalation::is_damper_marker(&n.transport))
         .map(|n| notification_row(n, &channel_names))
         .collect();
 

@@ -27,6 +27,16 @@ impl SlackNotifier {
     }
 
     fn render_incident(n: &IncidentNotice) -> String {
+        match &n.note {
+            Some(note) => format!("{}\n{}", Self::incident_line(n), mrkdwn_escape(note)),
+            None => Self::incident_line(n),
+        }
+    }
+
+    /// Slack builds its own text rather than using
+    /// [`IncidentNotice::plain_text`], so anything added to the shared renderer
+    /// has to be added here too.
+    fn incident_line(n: &IncidentNotice) -> String {
         let link = n
             .url
             .as_deref()
@@ -90,5 +100,40 @@ impl Notifier for SlackNotifier {
             &SlackPayload { text: &text },
         )
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{IncidentSeverity, IncidentUrgency};
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn notice(reason: NotificationReason) -> IncidentNotice {
+        IncidentNotice {
+            incident_id: Uuid::from_u128(7),
+            reason,
+            monitor_name: Some("api".into()),
+            title: None,
+            severity: IncidentSeverity::Major,
+            urgency: IncidentUrgency::High,
+            started_at: Utc::now(),
+            ended_at: None,
+            error_sample: None,
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
+            url: None,
+            note: None,
+        }
+    }
+
+    /// Slack does not use the shared body renderer, so a note added there
+    /// reaches it only because this transport appends it too.
+    #[test]
+    fn a_note_reaches_slack_even_though_it_renders_its_own_body() {
+        let mut n = notice(NotificationReason::Opened);
+        n.note = Some("Flapping: alerts held".into());
+        assert!(SlackNotifier::render_incident(&n).contains("Flapping: alerts held"));
     }
 }

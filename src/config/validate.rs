@@ -58,6 +58,23 @@ impl AppConfig {
                 self.escalation.tick_interval_secs
             )));
         }
+        // A zero hold would read as "held" and release on the very next tick,
+        // and the operator-facing copy would say "0 minutes".
+        if self.escalation.flap_max_opens > 0 {
+            ge1_u64(self.escalation.flap_hold_secs, "escalation.flap_hold_secs")?;
+            ge1_u64(
+                self.escalation.flap_window_secs,
+                "escalation.flap_window_secs",
+            )?;
+            if self.escalation.flap_hold_secs >= self.escalation.flap_window_secs {
+                return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                    "escalation.flap_hold_secs ({}) must be under flap_window_secs ({}) \
+                     or a held alert outlives the window that judged it flapping",
+                    self.escalation.flap_hold_secs,
+                    self.escalation.flap_window_secs
+                )));
+            }
+        }
         if self.escalation.enabled {
             ge1_u64(
                 self.escalation.tick_interval_secs,

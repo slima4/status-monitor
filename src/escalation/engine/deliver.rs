@@ -43,7 +43,7 @@ impl Worker {
         let Some(channel) = self.channels.get(org, channel_id).await? else {
             return Ok(None);
         };
-        let notice = self.notice(&incident, &target, reason);
+        let notice = self.notice(&incident, &target, reason, None);
         Ok(Some((notice, channel, incident.state)))
     }
 
@@ -111,6 +111,7 @@ impl Worker {
         inc: &OpsIncident,
         target: &Target,
         reason: NotificationReason,
+        note: Option<String>,
     ) -> IncidentNotice {
         IncidentNotice {
             incident_id: inc.id,
@@ -126,6 +127,7 @@ impl Worker {
             regions_down: inc.regions_down.clone(),
             regions_up: inc.regions_up.clone(),
             url: self.deep_link(inc.id),
+            note,
         }
     }
 

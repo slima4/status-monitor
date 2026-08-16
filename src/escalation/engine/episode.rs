@@ -12,8 +12,8 @@ use crate::notifier::pushover::PushoverReceipts;
 use crate::storage::{Actor, DueIncident, EmergencyAck};
 
 use super::rules::{
-    DAMPED_TRANSPORT, Damper, FlapState, RELEASED_TRANSPORT, binding_channels, channel_targets,
-    flap_state, open_episode_active, resolvable_channels,
+    DAMPED_TRANSPORT, Damper, FlapState, RELEASED_TRANSPORT, UNREACHABLE_TRANSPORT,
+    binding_channels, channel_targets, flap_state, open_episode_active, resolvable_channels,
 };
 use super::{SWEEP_CONCURRENCY, Worker};
 
@@ -78,8 +78,11 @@ impl Worker {
     /// closes well inside it, so anything left is a real outage. Runs with
     /// damping off too, or switching it off would strand existing holds.
     ///
-    /// Unleased, unlike [`escalate_due`](Self::escalate_due): a second replica
-    /// would release the same hold twice.
+    /// Unleased, unlike [`escalate_due`](Self::escalate_due): nothing is
+    /// claimed at scan time and the row that closes the predicate is only
+    /// written mid-page, so two replicas would each release the same hold.
+    /// BLOCKER for running more than one control plane — take a lease here
+    /// first, as `escalate_due` does.
     pub(super) async fn release_held(&self) {
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
         let hold = chrono::Duration::seconds(self.cfg.flap_hold_secs.max(1) as i64);
@@ -255,14 +258,21 @@ impl Worker {
         if damper == Damper::Skip && incident.state != crate::domain::IncidentState::Triggered {
             return Ok(());
         }
-        if damper == Damper::Apply {
+        let mut note = None;
+        // A hand-declared incident is the operator's own signal: the count
+        // already excludes them, and holding one would silence a real outage
+        // someone declared deliberately.
+        if damper == Damper::Apply && incident.origin != crate::domain::IncidentOrigin::Manual {
             match self.flap_state(org, target).await? {
                 FlapState::Steady => {}
-                FlapState::Crossing => self.note_flap_engaged(org, incident.id, target).await?,
+                FlapState::Crossing => {
+                    self.note_flap_engaged(org, incident.id, target).await?;
+                    note = Some(self.flap_notice());
+                }
                 FlapState::Damped => return self.hold(org, incident.id, reason).await,
             }
         }
-        let notice = self.notice(incident, target, reason);
+        let notice = self.notice(incident, target, reason, note);
         match self.policies.resolve_for_target(org, target.id).await? {
             Some(policy_id) => {
                 let Some(policy) = self.policies.get(org, policy_id).await? else {
@@ -286,7 +296,8 @@ impl Worker {
                         self.ops
                             .begin_escalation(org, incident.id, policy_id, level, next_at)
                             .await?;
-                        self.log_paged(org, incident.id, reason, paged).await?;
+                        self.log_paged(org, incident.id, reason, paged.delivered)
+                            .await?;
                     }
                     EscalationDecision::Exhausted => {
                         // Policy with no steps: record the binding so the
@@ -302,7 +313,14 @@ impl Worker {
                 let paged = self
                     .page_channels(org, incident.id, &notice, reason, 0, &targets)
                     .await?;
-                self.log_paged(org, incident.id, reason, paged).await?;
+                self.log_paged(org, incident.id, reason, paged.delivered)
+                    .await?;
+                if paged.recorded == 0 {
+                    // Nothing bound, or every bound channel gone: without a row
+                    // the reconcile scan re-runs this episode every tick for the
+                    // whole window, re-appending its timeline note each time.
+                    self.record_unreachable(org, incident.id, reason).await?;
+                }
             }
         }
         Ok(())
@@ -324,6 +342,17 @@ impl Worker {
             }
         };
         Ok(flap_state(opens, max))
+    }
+
+    /// What the crossing alert tells the recipient, so alerts going quiet is
+    /// never a surprise.
+    fn flap_notice(&self) -> String {
+        format!(
+            "Flapping: {} failures in {}m, further alerts held unless an outage lasts {}m.",
+            self.cfg.flap_max_opens,
+            self.cfg.flap_window_secs.div_ceil(60),
+            self.cfg.flap_hold_secs.div_ceil(60),
+        )
     }
 
     /// Without this the operator just sees alerts stop.
@@ -348,6 +377,32 @@ impl Worker {
                 )),
             )
             .await
+    }
+
+    /// Mark that an episode reached no channel, so the scans that key off
+    /// "has this been paged" stop re-running it.
+    async fn record_unreachable(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+        reason: NotificationReason,
+    ) -> Result<()> {
+        self.ops
+            .record_notification(crate::domain::NewIncidentNotification {
+                org,
+                incident_id,
+                escalation_level: None,
+                target_user_id: None,
+                channel_id: None,
+                transport: UNREACHABLE_TRANSPORT.to_string(),
+                reason,
+                status: crate::domain::NotificationStatus::Suppressed,
+                attempt: 0,
+                error: None,
+                sent_at: None,
+            })
+            .await
+            .map(|_| ())
     }
 
     /// Hold this open rather than deliver it. The row is what the release scan
@@ -405,7 +460,7 @@ impl Worker {
         if channels.is_empty() {
             return Ok(());
         }
-        let notice = self.notice(incident, target, NotificationReason::Resolved);
+        let notice = self.notice(incident, target, NotificationReason::Resolved, None);
         let paged = self
             .page_channels(
                 org,
@@ -416,8 +471,13 @@ impl Worker {
                 &channel_targets(channels),
             )
             .await?;
-        self.log_paged(org, incident.id, NotificationReason::Resolved, paged)
-            .await
+        self.log_paged(
+            org,
+            incident.id,
+            NotificationReason::Resolved,
+            paged.delivered,
+        )
+        .await
     }
 
     /// Build a Pushover receipt client from the channel's stored application

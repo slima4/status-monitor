@@ -11,7 +11,7 @@ use crate::error::Result;
 use crate::notifier::event::IncidentNotice;
 use crate::storage::{Actor, DueIncident, PendingNotification};
 
-use super::rules::{channel_targets, reason_is_stale, resolvable_channels};
+use super::rules::{Paged, channel_targets, reason_is_stale, resolvable_channels};
 use super::{PageTarget, SWEEP_CONCURRENCY, Worker};
 
 impl Worker {
@@ -115,7 +115,7 @@ impl Worker {
         if channels.is_empty() {
             return Ok(());
         }
-        let notice = self.notice(&incident, &target, NotificationReason::Opened);
+        let notice = self.notice(&incident, &target, NotificationReason::Opened, None);
         let paged = self
             .page_channels(
                 d.org,
@@ -126,7 +126,7 @@ impl Worker {
                 &channel_targets(channels),
             )
             .await?;
-        self.log_paged(d.org, d.id, NotificationReason::Opened, paged)
+        self.log_paged(d.org, d.id, NotificationReason::Opened, paged.delivered)
             .await
     }
 
@@ -165,7 +165,7 @@ impl Worker {
                 let Some(target) = self.targets.get(d.org, target_id).await? else {
                     return Ok(());
                 };
-                let notice = self.notice(&incident, &target, NotificationReason::Escalated);
+                let notice = self.notice(&incident, &target, NotificationReason::Escalated, None);
                 let targets = self
                     .resolve_targets(d.org, &policy, level, Utc::now())
                     .await?;
@@ -186,7 +186,7 @@ impl Worker {
                 self.ops
                     .record_escalation(d.org, d.id, level, round, next_at)
                     .await?;
-                self.log_paged(d.org, d.id, NotificationReason::Escalated, paged)
+                self.log_paged(d.org, d.id, NotificationReason::Escalated, paged.delivered)
                     .await?;
             }
             EscalationDecision::Exhausted => {
@@ -219,8 +219,8 @@ impl Worker {
         reason: NotificationReason,
         level: i32,
         targets: &[PageTarget],
-    ) -> Result<u32> {
-        let mut paged = 0u32;
+    ) -> Result<Paged> {
+        let mut paged = Paged::default();
         for t in targets {
             let cid = t.channel_id;
             let Some(channel) = self.channels.get(org, cid).await? else {
@@ -256,8 +256,9 @@ impl Worker {
             } else {
                 self.deliver(org, &channel, notice, id, 1).await
             };
+            paged.recorded += 1;
             if status == NotificationStatus::Sent {
-                paged += 1;
+                paged.delivered += 1;
             }
             // A first-attempt failure schedules the backoff so the retry sweep
             // waits instead of re-firing next tick.

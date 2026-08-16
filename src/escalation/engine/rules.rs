@@ -116,13 +116,26 @@ pub(super) fn binding_channels(target: &Target) -> Vec<Uuid> {
     target.alerts.iter().map(|b| b.channel_id).collect()
 }
 
-/// The damper's own bookkeeping rows. Neither is a delivery.
-pub(super) fn is_damper_marker(transport: &str) -> bool {
-    matches!(transport, DAMPED_TRANSPORT | RELEASED_TRANSPORT)
+/// What one round of paging produced. `recorded` counts rows written, which a
+/// failed delivery also produces and the retry sweep owns; `delivered` counts
+/// the ones that actually reached a channel.
+#[derive(Debug, Clone, Copy, Default)]
+pub(super) struct Paged {
+    pub(super) recorded: u32,
+    pub(super) delivered: u32,
 }
 
-pub(super) const DAMPED_TRANSPORT: &str = "damped";
-pub(super) const RELEASED_TRANSPORT: &str = "released";
+/// The damper's own bookkeeping rows. Neither is a delivery.
+pub fn is_damper_marker(transport: &str) -> bool {
+    matches!(
+        transport,
+        DAMPED_TRANSPORT | RELEASED_TRANSPORT | UNREACHABLE_TRANSPORT
+    )
+}
+
+pub const DAMPED_TRANSPORT: &str = "damped";
+pub const RELEASED_TRANSPORT: &str = "released";
+pub const UNREACHABLE_TRANSPORT: &str = "unreachable";
 
 /// Whether the damper runs on this path. A release already waited out the
 /// hold, so re-damping it would silence the outage the hold exists to surface.

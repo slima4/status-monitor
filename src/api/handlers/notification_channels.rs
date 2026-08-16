@@ -1059,6 +1059,7 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
         regions_down: Vec::new(),
         regions_up: Vec::new(),
         url: None,
+        note: None,
     };
     notifier.notify_incident(&notice).await.map_err(|e| {
         AppError::unprocessable(

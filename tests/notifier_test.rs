@@ -68,6 +68,7 @@ fn make_notice() -> IncidentNotice {
         regions_down: vec![],
         regions_up: vec![],
         url: None,
+        note: None,
     }
 }
 

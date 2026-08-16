@@ -1291,6 +1291,9 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             escalation_level: i32,
             escalation_round: i32,
         }
+        // Only rows that reached a channel count as attempts: the damper's
+        // bookkeeping rows have no `channel_id`, and counting them would pin
+        // this gate open forever on a held incident.
         // Cadence keys off the last page *attempt* (`max(created_at)`), not the
         // last success: gating on `sent_at` would leave a failing channel's
         // incident perpetually overdue and re-page it every tick. NULL (no page
@@ -1310,11 +1313,13 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                  AND ( \
                      SELECT max(n.created_at) FROM incident_notifications n \
                      WHERE n.incident_id = i.id AND n.org_id = i.org_id \
+                       AND n.channel_id IS NOT NULL \
                  ) <= $1 - make_interval(secs => t.renotify_interval_secs::double precision) \
              ORDER BY ( \
                  SELECT max(n.created_at) FROM incident_notifications n \
                  WHERE n.incident_id = i.id AND n.org_id = i.org_id \
-             ) ASC \
+                       AND n.channel_id IS NOT NULL \
+                 ) ASC \
              LIMIT $2",
         )
         .bind(now)
@@ -1389,6 +1394,30 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                 escalation_round: r.escalation_round,
             })
             .collect())
+    }
+
+    async fn flapping_targets(
+        &self,
+        org: OrgId,
+        since: DateTime<Utc>,
+        min_opens: u32,
+    ) -> Result<std::collections::HashSet<Uuid>> {
+        if min_opens == 0 {
+            return Ok(Default::default());
+        }
+        let ids: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT target_id FROM incidents \
+             WHERE org_id = $1 AND started_at >= $2 AND target_id IS NOT NULL \
+               AND origin <> 'manual' \
+             GROUP BY target_id HAVING count(*) >= $3",
+        )
+        .bind(org.0)
+        .bind(since)
+        .bind(i64::from(min_opens))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("flapping_targets: {e}"))?;
+        Ok(ids.into_iter().collect())
     }
 
     async fn opens_since(&self, org: OrgId, target_id: Uuid, since: DateTime<Utc>) -> Result<u32> {

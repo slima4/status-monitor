@@ -282,7 +282,7 @@ pub const DOCS: &[DocPage] = &[
         blurb: "The /api/v1 surface: monitors, incidents, channels, status pages, and the public endpoints.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-08-12",
+        lastmod: "2026-08-16",
         source: include_str!("../../docs/api.md"),
         dir: "",
     },
