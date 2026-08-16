@@ -4555,6 +4555,18 @@
         border: 1px solid var(--theme-line);
     }
 
+    /* Marks a monitor whose alerts are being held because it keeps failing and
+       recovering. Warn tone, not error: the monitor is reporting fine, it is
+       the alert volume that is being rationed. */
+    .flapping-chip {
+        @apply inline-flex items-center rounded font-mono text-[9.5px] font-medium uppercase;
+        padding: 1px 5px;
+        background: var(--theme-state-warn-bg);
+        color: var(--theme-state-warn-fg-strong);
+        letter-spacing: 0.05em;
+        border: 1px solid var(--theme-state-warn-line-soft);
+    }
+
     .monitors-tag {
         @apply inline-flex items-center gap-1 rounded font-mono text-[10.5px] font-medium;
         padding: 1px 6px;

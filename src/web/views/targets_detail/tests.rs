@@ -101,6 +101,8 @@ fn sample_page() -> DetailPage {
         tags: vec!["prod".into()],
         managed_by: None,
         share_count: 0,
+        flapping_opens: None,
+        flap_hold_minutes: 10,
         last_status: "up",
         last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
         uptime: Arc::new(UptimeStatsView {
@@ -1198,4 +1200,22 @@ fn incidents_page_subtab_active_is_incidents() {
     let anchor_end = html[pos..].find("</a>").expect("anchor terminator");
     let anchor = &html[pos..pos + anchor_end];
     assert!(anchor.contains("aria-current=\"page\""));
+}
+
+/// Alerts going quiet has to be explained where the operator lands, not only
+/// in the alert stream they stopped receiving.
+#[test]
+fn the_detail_banner_explains_a_held_alert() {
+    let mut page = sample_page();
+    assert!(!page.render().unwrap().contains("flapping"));
+
+    page.flapping_opens = Some(7);
+    page.flap_hold_minutes = 10;
+    let html = page.render().unwrap();
+    assert!(html.contains("This monitor is flapping"));
+    assert!(html.contains("failed and recovered 7 times"));
+    assert!(
+        html.contains("more than 10"),
+        "the banner must say a real outage still alerts"
+    );
 }

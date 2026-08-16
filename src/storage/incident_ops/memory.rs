@@ -830,6 +830,33 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             .collect())
     }
 
+    async fn flapping_targets(
+        &self,
+        _org: OrgId,
+        since: DateTime<Utc>,
+        min_opens: u32,
+    ) -> Result<std::collections::HashSet<Uuid>> {
+        if min_opens == 0 {
+            return Ok(Default::default());
+        }
+        let g = self.inner.lock();
+        let mut counts: std::collections::HashMap<Uuid, u32> = Default::default();
+        for i in g
+            .incidents
+            .iter()
+            .filter(|i| i.started_at >= since && i.origin != IncidentOrigin::Manual)
+        {
+            if let Some(t) = i.target_id {
+                *counts.entry(t).or_default() += 1;
+            }
+        }
+        Ok(counts
+            .into_iter()
+            .filter(|(_, n)| *n >= min_opens)
+            .map(|(t, _)| t)
+            .collect())
+    }
+
     async fn opens_since(&self, _org: OrgId, target_id: Uuid, since: DateTime<Utc>) -> Result<u32> {
         let g = self.inner.lock();
         let n = g

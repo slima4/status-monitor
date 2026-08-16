@@ -372,6 +372,15 @@ pub trait IncidentOpsStore: Send + Sync {
     /// fail/recover cycles are exactly what it has to see. Excludes manually
     /// declared incidents.
     async fn opens_since(&self, org: OrgId, target_id: Uuid, since: DateTime<Utc>) -> Result<u32>;
+    /// Monitors in `org` that opened at least `min_opens` incidents since
+    /// `since`. One aggregate for a whole page render, so the console can mark
+    /// a flapping monitor without a per-row query or any stored state.
+    async fn flapping_targets(
+        &self,
+        org: OrgId,
+        since: DateTime<Utc>,
+        min_opens: u32,
+    ) -> Result<std::collections::HashSet<Uuid>>;
     /// Held incidents still open past `hold` — a flap closes well before it,
     /// so anything left has to page despite the monitor's noise. Oldest first.
     async fn due_for_flap_release(

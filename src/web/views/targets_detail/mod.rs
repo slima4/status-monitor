@@ -125,6 +125,12 @@ pub struct DetailPage {
     pub managed_by: Option<&'static str>,
     /// Count of live (non-revoked) share links; drives the header "shared" chip.
     pub share_count: usize,
+    /// Opens counted in the flap window when the monitor is over the
+    /// threshold; `None` when it is not flapping. Drives the banner that
+    /// explains why repeat alerts have gone quiet.
+    pub flapping_opens: Option<u32>,
+    /// Minutes an outage must last before a held alert pages anyway.
+    pub flap_hold_minutes: u64,
     pub last_status: &'static str,
     /// ISO 8601 timestamp of the most recent check, "" when none. Drives
     /// the client-side "checked Ns ago · next in Ns" ticker.
@@ -273,6 +279,26 @@ pub async fn index(
         ),
         None => None,
     };
+    // Only counted when the damper is on, so the banner never promises a hold
+    // that is not happening.
+    let flap_cfg = &state.cfg.escalation;
+    let flapping_opens = match flap_cfg.flap_max_opens {
+        0 => None,
+        max => {
+            let since =
+                Utc::now() - chrono::Duration::seconds(flap_cfg.flap_window_secs.max(1) as i64);
+            match state
+                .incident_ops_store
+                .opens_since(org, target.id, since)
+                .await
+            {
+                // Above, not at: the crossing open still pages.
+                Ok(opens) if opens > max => Some(opens),
+                _ => None,
+            }
+        }
+    };
+
     // Passive kinds have no probe region, so no region selector.
     let regions = if target.check.is_passive() {
         Vec::new()
@@ -293,6 +319,8 @@ pub async fn index(
         tags: target.tags,
         managed_by: target.write_source.managed_label(),
         share_count,
+        flapping_opens,
+        flap_hold_minutes: state.cfg.escalation.flap_hold_secs.div_ceil(60),
         last_status: live.last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),

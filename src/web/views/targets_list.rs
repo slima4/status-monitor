@@ -85,6 +85,8 @@ pub struct MonitorRow {
     pub owner: Option<OwnerView>,
     /// `terraform`/`api` chip for externally-managed monitors; `None` (UI) hides it.
     pub managed_by: Option<&'static str>,
+    /// Failing and recovering often enough that its alerts are being held.
+    pub flapping: bool,
 }
 
 pub struct OwnerView {
@@ -332,11 +334,29 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         .collect();
 
     let now = Utc::now();
+    // One aggregate for the whole page: derived, so it is true the moment a
+    // monitor settles and there is no stored flag to clear.
+    let flap_cfg = &state.cfg.escalation;
+    let flapping = state
+        .incident_ops_store
+        .flapping_targets(
+            org,
+            now - chrono::Duration::seconds(flap_cfg.flap_window_secs.max(1) as i64),
+            // Above, not at: the crossing open still pages, so a monitor at
+            // exactly the threshold has had nothing held yet. `0` keeps the
+            // store's own "damping off" early-return reachable.
+            match flap_cfg.flap_max_opens {
+                0 => 0,
+                max => max.saturating_add(1),
+            },
+        )
+        .await
+        .unwrap_or_default();
     let mut rows: Vec<MonitorRow> = Vec::with_capacity(targets.len());
     let mut paused_total = 0usize;
     for t in targets {
         let metrics = metrics_by_target.get(&t.id);
-        let row = build_row(&t, metrics, &owner_lookup, now);
+        let row = build_row(&t, metrics, &owner_lookup, now, &flapping);
         if !row.enabled {
             paused_total += 1;
         }
@@ -489,6 +509,7 @@ fn build_row(
     metrics: Option<&DashboardMetrics>,
     owner_lookup: &HashMap<Uuid, MemberLite>,
     now: chrono::DateTime<Utc>,
+    flapping: &std::collections::HashSet<Uuid>,
 ) -> MonitorRow {
     let (kind, address) = describe_check(&t.check);
     let class = match metrics {
@@ -537,6 +558,7 @@ fn build_row(
         uptime_30d_label,
         owner,
         managed_by: t.write_source.managed_label(),
+        flapping: flapping.contains(&t.id),
     }
 }
 
@@ -703,6 +725,7 @@ mod tests {
             uptime_30d_label: "99.94%".into(),
             owner: None,
             managed_by: None,
+            flapping: false,
         }
     }
 
@@ -826,5 +849,46 @@ mod tests {
         assert!(html.contains("99.99%"));
         // Per-row uptime is also rendered.
         assert!(html.contains("99.94%"));
+    }
+    #[test]
+    fn a_flapping_row_carries_the_chip() {
+        let mut r = row("api", Some("API & Web"), "up", true);
+        r.flapping = true;
+        let g = GroupBlock {
+            name: "API & Web".into(),
+            has_name: true,
+            total: 1,
+            worst_status: "up",
+            avg_uptime_label: "99.99%".into(),
+            rows: vec![r],
+        };
+        let page = ListPage {
+            active_tab: "targets",
+            groups: vec![g],
+            total: 1,
+            paused_total: 0,
+            type_chips: vec![],
+            owner_options: vec![],
+            group_options: vec![],
+            page_sizes: vec![],
+            query_suffix: String::new(),
+            has_more: false,
+            limit: 50,
+            offset: 0,
+            pager_prev: None,
+            pager_next: None,
+            q: String::new(),
+
+            tag: String::new(),
+            enabled: None,
+            group: String::new(),
+            owner: None,
+            kind: String::new(),
+            sort: "recent",
+            onboarding: false,
+        };
+        let html = page.render().unwrap();
+        assert!(html.contains("flapping-chip"));
+        assert!(html.contains(">flapping<"));
     }
 }

@@ -14,6 +14,16 @@
 
   {% include "targets/partials/detail_tabs.html" %}
 
+  {% if let Some(opens) = flapping_opens %}
+  <div class="alert-card alert-card--warn" role="status">
+    <strong>This monitor is flapping.</strong>
+    It has failed and recovered {{ opens }} times recently, so repeat alerts for it
+    are held until it settles. An outage lasting more than {{ flap_hold_minutes }}
+    minutes still alerts you. Raising the failures-before-alerting count, or
+    lengthening the check interval, usually settles a monitor like this.
+  </div>
+  {% endif %}
+
   {% include "targets/partials/range_pills.html" %}
 
   {% if regions.len() > 1 %}
