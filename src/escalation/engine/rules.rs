@@ -116,6 +116,43 @@ pub(super) fn binding_channels(target: &Target) -> Vec<Uuid> {
     target.alerts.iter().map(|b| b.channel_id).collect()
 }
 
+/// The damper's own bookkeeping rows. Neither is a delivery.
+pub(super) fn is_damper_marker(transport: &str) -> bool {
+    matches!(transport, DAMPED_TRANSPORT | RELEASED_TRANSPORT)
+}
+
+pub(super) const DAMPED_TRANSPORT: &str = "damped";
+pub(super) const RELEASED_TRANSPORT: &str = "released";
+
+/// Whether the damper runs on this path. A release already waited out the
+/// hold, so re-damping it would silence the outage the hold exists to surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Damper {
+    Apply,
+    Skip,
+}
+
+/// What the flap damper does with one monitor's opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FlapState {
+    Steady,
+    /// Still pages: the operator learns of the flapping from the alert stream.
+    Crossing,
+    /// Recorded, not delivered.
+    Damped,
+}
+
+/// `opens` counts the monitor's incident opens inside the flap window,
+/// including the one being decided. `max` of 0 disables damping.
+pub(super) fn flap_state(opens: u32, max: u32) -> FlapState {
+    match max {
+        0 => FlapState::Steady,
+        _ if opens < max => FlapState::Steady,
+        _ if opens == max => FlapState::Crossing,
+        _ => FlapState::Damped,
+    }
+}
+
 /// Is an outage already being paged? True when the most recent open-side page
 /// (opened/reopened/escalated) is newer than the most recent resolution page —
 /// i.e. we are inside an unresolved paging episode. Used to absorb duplicate
@@ -124,6 +161,10 @@ pub(super) fn binding_channels(target: &Target) -> Vec<Uuid> {
 pub(super) fn open_episode_active(rows: &[crate::domain::IncidentNotification]) -> bool {
     let last_open = rows
         .iter()
+        // A held open is not an episode in progress: counting it would make
+        // the release look like a duplicate signal. Keyed on the marker, not
+        // `channel_id` — deleting a channel NULLs that on real delivered rows.
+        .filter(|n| !is_damper_marker(&n.transport))
         .filter(|n| {
             matches!(
                 n.reason,

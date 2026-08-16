@@ -11,7 +11,10 @@ use crate::error::Result;
 use crate::notifier::pushover::PushoverReceipts;
 use crate::storage::{Actor, DueIncident, EmergencyAck};
 
-use super::rules::{binding_channels, channel_targets, open_episode_active, resolvable_channels};
+use super::rules::{
+    DAMPED_TRANSPORT, Damper, FlapState, RELEASED_TRANSPORT, binding_channels, channel_targets,
+    flap_state, open_episode_active, resolvable_channels,
+};
 use super::{SWEEP_CONCURRENCY, Worker};
 
 impl Worker {
@@ -19,6 +22,7 @@ impl Worker {
     /// failed pages. Runs on a detached task off the rx loop.
     pub(super) async fn sweep(&self) {
         self.reconcile().await;
+        self.release_held().await;
         self.escalate_due().await;
         self.renotify_due().await;
         self.retry_pending().await;
@@ -70,6 +74,109 @@ impl Worker {
         }
     }
 
+    /// Page held alerts whose incident is still open past the hold — a flap
+    /// closes well inside it, so anything left is a real outage. Runs with
+    /// damping off too, or switching it off would strand existing holds.
+    ///
+    /// Unleased, unlike [`escalate_due`](Self::escalate_due): a second replica
+    /// would release the same hold twice.
+    pub(super) async fn release_held(&self) {
+        let limit = self.cfg.max_pages_per_tick.max(1) as usize;
+        let hold = chrono::Duration::seconds(self.cfg.flap_hold_secs.max(1) as i64);
+        let due = match self.ops.due_for_flap_release(Utc::now(), hold, limit).await {
+            Ok(d) => d,
+            Err(err) => {
+                tracing::warn!(error = %err, "flap release scan failed");
+                return;
+            }
+        };
+        if !due.is_empty() {
+            tracing::info!(
+                count = due.len(),
+                "paging held alerts whose incident is still open"
+            );
+        }
+        let budget = self.sweep_budget();
+        let start = Instant::now();
+        let mut it = due.into_iter();
+        let mut futs = FuturesUnordered::new();
+        for d in it.by_ref().take(SWEEP_CONCURRENCY) {
+            futs.push(self.release_one_logged(d));
+        }
+        while futs.next().await.is_some() {
+            if start.elapsed() < budget
+                && let Some(d) = it.next()
+            {
+                futs.push(self.release_one_logged(d));
+            }
+        }
+    }
+
+    async fn release_one_logged(&self, d: DueIncident) {
+        if let Err(err) = self.release_one(&d).await {
+            tracing::warn!(incident_id = %d.id, error = %err, "held alert release failed");
+        }
+    }
+
+    /// A release that reaches no channel records nothing, and the scan keys
+    /// off "nothing newer than the hold", so it would re-release every tick
+    /// forever. The marker closes that. Written after the attempt, so a crash
+    /// retries rather than swallowing the page.
+    async fn release_one(&self, d: &DueIncident) -> Result<()> {
+        let before: Vec<Uuid> = self
+            .ops
+            .notifications_for(d.org, d.id)
+            .await?
+            .iter()
+            .map(|n| n.id)
+            .collect();
+        let reason = self.held_reason(d.org, d.id).await;
+        self.page_with(d.org, d.id, reason, Damper::Skip).await?;
+        // By row id, not timestamp: `created_at` is the database's clock and
+        // ours is this process's, so skew would misreport a delivered release.
+        let paged = self
+            .ops
+            .notifications_for(d.org, d.id)
+            .await?
+            .iter()
+            .any(|n| !before.contains(&n.id));
+        if paged {
+            return Ok(());
+        }
+        self.ops
+            .record_notification(crate::domain::NewIncidentNotification {
+                org: d.org,
+                incident_id: d.id,
+                escalation_level: None,
+                target_user_id: None,
+                channel_id: None,
+                transport: RELEASED_TRANSPORT.to_string(),
+                reason,
+                status: crate::domain::NotificationStatus::Suppressed,
+                attempt: 0,
+                error: None,
+                sent_at: None,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// The reason the held row recorded, so a released hold pages as the
+    /// reopen it was rather than as a fresh outage.
+    async fn held_reason(&self, org: OrgId, incident_id: Uuid) -> NotificationReason {
+        self.ops
+            .notifications_for(org, incident_id)
+            .await
+            .ok()
+            .and_then(|rows| {
+                rows.iter()
+                    .filter(|n| n.transport == DAMPED_TRANSPORT)
+                    .max_by_key(|n| n.created_at)
+                    .map(|n| n.reason)
+            })
+            .unwrap_or(NotificationReason::Opened)
+    }
+
     async fn reconcile_one_logged(&self, d: DueIncident) {
         if let Err(err) = self.page(d.org, d.id, NotificationReason::Opened).await {
             tracing::warn!(incident_id = %d.id, error = %err, "incident reconcile page failed");
@@ -84,6 +191,19 @@ impl Worker {
         org: OrgId,
         incident_id: Uuid,
         reason: NotificationReason,
+    ) -> Result<()> {
+        self.page_with(org, incident_id, reason, Damper::Apply)
+            .await
+    }
+
+    /// `Damper::Skip` is the deferred-release path: the hold has already
+    /// served as the filter, so re-damping would silence it forever.
+    pub(super) async fn page_with(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+        reason: NotificationReason,
+        damper: Damper,
     ) -> Result<()> {
         // Serialise all paging for this incident: the dedup in open_episode /
         // notify_resolution is read-then-act, so without this a concurrent
@@ -101,7 +221,8 @@ impl Worker {
         };
         match reason {
             NotificationReason::Opened | NotificationReason::Reopened => {
-                self.open_episode(org, &incident, &target, reason).await
+                self.open_episode(org, &incident, &target, reason, damper)
+                    .await
             }
             NotificationReason::Resolved => self.notify_resolution(org, &incident, &target).await,
             // Escalation pages originate from the sweep, never an inbound signal.
@@ -121,10 +242,25 @@ impl Worker {
         incident: &OpsIncident,
         target: &Target,
         reason: NotificationReason,
+        damper: Damper,
     ) -> Result<()> {
         let already = self.ops.notifications_for(org, incident.id).await?;
         if open_episode_active(&already) {
             return Ok(());
+        }
+        // The scan read `triggered` a sweep ago and a flapping monitor
+        // recovers inside that gap. Its all-clear already ran and reached
+        // nobody, so paging now announces an outage no recovery would follow.
+        // Here because `page` holds the per-incident lock.
+        if damper == Damper::Skip && incident.state != crate::domain::IncidentState::Triggered {
+            return Ok(());
+        }
+        if damper == Damper::Apply {
+            match self.flap_state(org, target).await? {
+                FlapState::Steady => {}
+                FlapState::Crossing => self.note_flap_engaged(org, incident.id, target).await?,
+                FlapState::Damped => return self.hold(org, incident.id, reason).await,
+            }
         }
         let notice = self.notice(incident, target, reason);
         match self.policies.resolve_for_target(org, target.id).await? {
@@ -170,6 +306,83 @@ impl Worker {
             }
         }
         Ok(())
+    }
+
+    /// A lookup failure degrades to [`FlapState::Steady`]: failing to read the
+    /// history must not silence a real outage.
+    async fn flap_state(&self, org: OrgId, target: &Target) -> Result<FlapState> {
+        let max = self.cfg.flap_max_opens;
+        if max == 0 {
+            return Ok(FlapState::Steady);
+        }
+        let since = Utc::now() - chrono::Duration::seconds(self.cfg.flap_window_secs.max(1) as i64);
+        let opens = match self.ops.opens_since(org, target.id, since).await {
+            Ok(n) => n,
+            Err(err) => {
+                tracing::warn!(target_id = %target.id, error = %err, "flap lookup failed; paging normally");
+                return Ok(FlapState::Steady);
+            }
+        };
+        Ok(flap_state(opens, max))
+    }
+
+    /// Without this the operator just sees alerts stop.
+    async fn note_flap_engaged(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+        target: &Target,
+    ) -> Result<()> {
+        self.ops
+            .append_event(
+                org,
+                incident_id,
+                IncidentEventKind::Notified,
+                Actor::System,
+                Some(format!(
+                    "\"{}\" has opened {} incidents within {} minutes — alerts for further \
+                     opens are held until it settles",
+                    target.name,
+                    self.cfg.flap_max_opens,
+                    self.cfg.flap_window_secs.div_ceil(60)
+                )),
+            )
+            .await
+    }
+
+    /// Hold this open rather than deliver it. The row is what the release scan
+    /// keys off, so a hold is never a drop, and it also keeps the reconcile
+    /// scan from re-running the episode every tick.
+    async fn hold(&self, org: OrgId, incident_id: Uuid, reason: NotificationReason) -> Result<()> {
+        metrics::counter!(crate::observability::metrics::names::ALERTS_DAMPED).increment(1);
+        self.ops
+            .record_notification(crate::domain::NewIncidentNotification {
+                org,
+                incident_id,
+                escalation_level: None,
+                target_user_id: None,
+                channel_id: None,
+                transport: DAMPED_TRANSPORT.to_string(),
+                reason,
+                status: crate::domain::NotificationStatus::Suppressed,
+                attempt: 0,
+                error: None,
+                sent_at: None,
+            })
+            .await?;
+        self.ops
+            .append_event(
+                org,
+                incident_id,
+                IncidentEventKind::Note,
+                Actor::System,
+                Some(format!(
+                    "alert held: the monitor is flapping. It pages anyway if this \
+                     incident is still open in {} minutes",
+                    self.cfg.flap_hold_secs.div_ceil(60)
+                )),
+            )
+            .await
     }
 
     /// Send the all-clear to every channel paged this episode that has not

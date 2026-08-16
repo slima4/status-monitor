@@ -15,7 +15,9 @@ use crate::storage::{
     InMemoryTargetStore,
 };
 
-use super::rules::{log_error_snippet, redact_secrets, retry_after_hint, retry_delay_secs};
+use super::rules::{
+    FlapState, flap_state, log_error_snippet, redact_secrets, retry_after_hint, retry_delay_secs,
+};
 
 fn org() -> OrgId {
     OrgId(Uuid::nil())
@@ -147,6 +149,38 @@ fn engine(
         Arc::new(InMemoryContactStore::new()),
         targets,
         channels,
+    )
+}
+
+/// Same as [`engine`], with the escalation config under test.
+fn engine_cfg(
+    ops: Arc<dyn IncidentOpsStore>,
+    policies: Arc<dyn EscalationPolicyStore>,
+    targets: Arc<dyn TargetStore>,
+    channels: Arc<dyn NotificationChannelStore>,
+    cfg: EscalationConfig,
+) -> EscalationEngine {
+    let (_tx, rx) = mpsc::channel(4);
+    EscalationEngine::new(
+        rx,
+        EngineDeps {
+            ops,
+            policies,
+            on_call: Arc::new(InMemoryOnCallStore::new()),
+            contacts: Arc::new(InMemoryContactStore::new()),
+            targets,
+            channels,
+            orgs: Arc::new(crate::storage::orgs::InMemoryOrgDirectory::new()),
+            http: crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::relaxed_for_tests(),
+            ),
+            cfg,
+            base_url: String::new(),
+            alert_channel_stop_secret: String::new(),
+            central_bot: None,
+            central_whatsapp: None,
+            email: None,
+        },
     )
 }
 
@@ -837,4 +871,277 @@ async fn retry_drops_a_page_whose_reason_no_longer_matches_state() {
     let rows = ops.notifications_for(org(), id).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].status, NotificationStatus::Suppressed);
+}
+
+#[test]
+fn flap_damping_engages_on_the_crossing_open_and_holds_the_rest() {
+    assert_eq!(flap_state(1, 3), FlapState::Steady);
+    assert_eq!(flap_state(2, 3), FlapState::Steady);
+    // The open that crosses still pages, so the flapping is visible.
+    assert_eq!(flap_state(3, 3), FlapState::Crossing);
+    assert_eq!(flap_state(4, 3), FlapState::Damped);
+    assert_eq!(flap_state(900, 3), FlapState::Damped);
+}
+
+#[test]
+fn a_zero_threshold_delivers_every_open() {
+    assert_eq!(flap_state(1, 0), FlapState::Steady);
+    assert_eq!(flap_state(10_000, 0), FlapState::Steady);
+}
+
+/// The flood this exists to stop.
+#[tokio::test]
+async fn a_flapping_monitor_stops_paging_once_it_crosses_the_threshold() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let cfg = EscalationConfig {
+        flap_max_opens: 3,
+        ..Default::default()
+    };
+    let eng = engine_cfg(ops.clone(), policies, targets, channels, cfg);
+
+    let mut ids = Vec::new();
+    for _ in 0..5 {
+        let id = seed_incident(&ops, Some(tid));
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
+        ids.push(id);
+    }
+
+    // The first three reached the channel; the last two were held.
+    for id in &ids[..3] {
+        let rows = ops.notifications_for(org(), *id).await.unwrap();
+        assert_eq!(rows.len(), 1, "expected a delivery attempt");
+        assert_eq!(rows[0].channel_id, Some(cid));
+    }
+    for id in &ids[3..] {
+        let rows = ops.notifications_for(org(), *id).await.unwrap();
+        assert_eq!(rows.len(), 1, "the held open is still recorded");
+        assert_eq!(rows[0].status, NotificationStatus::Suppressed);
+        assert_eq!(rows[0].channel_id, None, "held opens reach no channel");
+        assert_eq!(rows[0].transport, "damped");
+    }
+}
+
+/// What makes holding safe: no further incident can open while the held one
+/// is, so a hold that never released would page nobody for a real outage.
+#[tokio::test]
+async fn a_held_alert_still_pages_when_the_incident_stays_open() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let cfg = EscalationConfig {
+        flap_max_opens: 1,
+        flap_hold_secs: 600,
+        ..Default::default()
+    };
+    let eng = engine_cfg(ops.clone(), policies, targets, channels, cfg);
+
+    let crossing = seed_incident(&ops, Some(tid));
+    eng.page(org(), crossing, NotificationReason::Opened)
+        .await
+        .unwrap();
+    let held = seed_incident(&ops, Some(tid));
+    eng.page(org(), held, NotificationReason::Opened)
+        .await
+        .unwrap();
+    assert_eq!(
+        ops.notifications_for(org(), held).await.unwrap()[0].channel_id,
+        None,
+        "the second open is held"
+    );
+
+    // Nothing is due while the hold is running.
+    eng.release_held().await;
+    assert_eq!(ops.notifications_for(org(), held).await.unwrap().len(), 1);
+
+    // The endpoint never recovered: age the hold past its window.
+    ops.age_held_rows(chrono::Duration::seconds(900));
+    eng.release_held().await;
+
+    let rows = ops.notifications_for(org(), held).await.unwrap();
+    assert!(
+        rows.iter().any(|n| n.channel_id == Some(cid)),
+        "a still-open incident must reach the channel once the hold expires"
+    );
+}
+
+/// A flapping monitor recovers between the release scan and the page, and its
+/// all-clear already reached nobody — so paging then announces a dead outage.
+#[tokio::test]
+async fn a_hold_that_recovered_before_release_pages_nobody() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let cfg = EscalationConfig {
+        flap_max_opens: 1,
+        ..Default::default()
+    };
+    let eng = engine_cfg(ops.clone(), policies, targets, channels, cfg);
+
+    eng.page(
+        org(),
+        seed_incident(&ops, Some(tid)),
+        NotificationReason::Opened,
+    )
+    .await
+    .unwrap();
+    let held = seed_incident(&ops, Some(tid));
+    eng.page(org(), held, NotificationReason::Opened)
+        .await
+        .unwrap();
+    ops.age_held_rows(chrono::Duration::seconds(900));
+
+    // The window the scan's own state filter cannot cover.
+    ops.resolve(org(), held, Actor::System, None).await.unwrap();
+    eng.release_page(org(), held).await.unwrap();
+
+    let rows = ops.notifications_for(org(), held).await.unwrap();
+    assert!(
+        rows.iter().all(|n| n.channel_id.is_none()),
+        "a resolved incident must not page an outage after the fact"
+    );
+}
+
+/// A release reaching no channel records nothing, so without its own marker
+/// the incident would match the scan again every tick, forever.
+#[tokio::test]
+async fn releasing_a_hold_that_reaches_no_channel_happens_once() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let target = target_with_channel(Uuid::now_v7()); // bound channel does not exist
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let cfg = EscalationConfig {
+        flap_max_opens: 1,
+        ..Default::default()
+    };
+    let eng = engine_cfg(ops.clone(), policies, targets, channels, cfg);
+
+    eng.page(
+        org(),
+        seed_incident(&ops, Some(tid)),
+        NotificationReason::Opened,
+    )
+    .await
+    .unwrap();
+    let held = seed_incident(&ops, Some(tid));
+    eng.page(org(), held, NotificationReason::Opened)
+        .await
+        .unwrap();
+    ops.age_held_rows(chrono::Duration::seconds(900));
+
+    eng.release_held().await;
+    let after_first = ops.notifications_for(org(), held).await.unwrap().len();
+    eng.release_held().await;
+    eng.release_held().await;
+    assert_eq!(
+        ops.notifications_for(org(), held).await.unwrap().len(),
+        after_first,
+        "a release that reaches no channel must not repeat every tick"
+    );
+}
+
+/// Turning damping off must not strand what is already held.
+#[tokio::test]
+async fn a_zero_threshold_still_releases_existing_holds() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let damping_on = EscalationConfig {
+        flap_max_opens: 1,
+        ..Default::default()
+    };
+    let eng = engine_cfg(
+        ops.clone(),
+        policies.clone(),
+        targets.clone(),
+        channels.clone(),
+        damping_on,
+    );
+    eng.page(
+        org(),
+        seed_incident(&ops, Some(tid)),
+        NotificationReason::Opened,
+    )
+    .await
+    .unwrap();
+    let held = seed_incident(&ops, Some(tid));
+    eng.page(org(), held, NotificationReason::Opened)
+        .await
+        .unwrap();
+    ops.age_held_rows(chrono::Duration::seconds(900));
+
+    // Operator switches damping off while an alert is still held.
+    let damping_off = EscalationConfig {
+        flap_max_opens: 0,
+        ..Default::default()
+    };
+    let eng = engine_cfg(ops.clone(), policies, targets, channels, damping_off);
+    eng.release_held().await;
+
+    let rows = ops.notifications_for(org(), held).await.unwrap();
+    assert!(
+        rows.iter().any(|n| n.channel_id == Some(cid)),
+        "an already-held alert must still be released"
+    );
+}
+
+/// A held open must not produce an all-clear, or damping would halve the
+/// flood rather than stop it.
+#[tokio::test]
+async fn a_held_open_sends_no_recovery() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let cfg = EscalationConfig {
+        flap_max_opens: 1,
+        ..Default::default()
+    };
+    let eng = engine_cfg(ops.clone(), policies, targets, channels, cfg);
+
+    let crossing = seed_incident(&ops, Some(tid));
+    eng.page(org(), crossing, NotificationReason::Opened)
+        .await
+        .unwrap();
+    let held = seed_incident(&ops, Some(tid));
+    eng.page(org(), held, NotificationReason::Opened)
+        .await
+        .unwrap();
+
+    ops.resolve(org(), held, Actor::System, None).await.unwrap();
+    eng.page(org(), held, NotificationReason::Resolved)
+        .await
+        .unwrap();
+
+    let rows = ops.notifications_for(org(), held).await.unwrap();
+    assert_eq!(
+        rows.len(),
+        1,
+        "no recovery page for an outage nobody heard about"
+    );
+    assert_eq!(rows[0].reason, NotificationReason::Opened);
 }

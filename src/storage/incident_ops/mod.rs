@@ -368,4 +368,16 @@ pub trait IncidentOpsStore: Send + Sync {
     /// The engine re-pages the channels already notified this episode. Oldest
     /// last-page first.
     async fn due_for_renotify(&self, now: DateTime<Utc>, limit: usize) -> Result<Vec<DueIncident>>;
+    /// The flap damper's input. Counts opens, not current state — repeated
+    /// fail/recover cycles are exactly what it has to see. Excludes manually
+    /// declared incidents.
+    async fn opens_since(&self, org: OrgId, target_id: Uuid, since: DateTime<Utc>) -> Result<u32>;
+    /// Held incidents still open past `hold` — a flap closes well before it,
+    /// so anything left has to page despite the monitor's noise. Oldest first.
+    async fn due_for_flap_release(
+        &self,
+        now: DateTime<Utc>,
+        hold: chrono::Duration,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>>;
 }

@@ -53,6 +53,10 @@ fn register_descriptions() {
         "Total checks completed, labelled by status"
     );
     describe_counter!(
+        "uptimepage_alerts_damped_total",
+        "Incident alerts held because the monitor is flapping"
+    );
+    describe_counter!(
         "uptimepage_checks_errors_total",
         "Total check errors, labelled by kind"
     );
@@ -274,6 +278,7 @@ pub mod names {
     pub const STORAGE_WRITES: &str = "uptimepage_storage_writes_total";
     pub const STORAGE_DROPPED: &str = "uptimepage_storage_dropped_results_total";
     pub const NOTIFICATIONS_DEAD_LETTERED: &str = "uptimepage_notifications_dead_lettered_total";
+    pub const ALERTS_DAMPED: &str = "uptimepage_alerts_damped_total";
     pub const MONITORS_UNMONITORED: &str = "uptimepage_monitors_unmonitored";
     pub const TELEGRAM_SEND_DEFERRED: &str = "uptimepage_telegram_send_deferred_total";
     pub const TELEGRAM_SEND_WAIT_MS: &str = "uptimepage_telegram_send_wait_ms";

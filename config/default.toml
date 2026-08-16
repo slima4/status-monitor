@@ -212,6 +212,7 @@ public_per_ip_rate_limit_per_min = 60
 provider = "log"
 from_name = "Uptimepage"
 from_address = "no-reply@example.invalid"
+
 # Where the in-app help form delivers. Empty hides it; set only if you staff
 # an inbox.
 support_address = ""
@@ -406,6 +407,15 @@ max_attempts = 5
 # signal shows up within a tick or two, so anything older is not a dropped
 # signal — it is an incident nobody can be paged about.
 reconcile_window_secs = 3600
+
+# Flap damping. A monitor opening more than flap_max_opens incidents inside
+# flap_window_secs is one unstable endpoint, not that many outages; the crossing
+# alert says so and later ones are held. Set flap_max_opens = 0 to deliver all.
+flap_window_secs = 3600
+flap_max_opens = 5
+# A hold is not a drop: an incident still open this many seconds after it was
+# held pages anyway, so a monitor that flaps and then stays down is reported.
+flap_hold_secs = 600
 
 # Regional probe mode. Off = this process is a normal dashboard. On = it runs
 # as a stateless agent: pulls its region's monitor config from control_plane_url

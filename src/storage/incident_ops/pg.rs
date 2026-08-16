@@ -1334,6 +1334,79 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             })
             .collect())
     }
+
+    async fn due_for_flap_release(
+        &self,
+        now: DateTime<Utc>,
+        hold: chrono::Duration,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        let cap = (limit as i64).clamp(1, 1000);
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            target_id: Option<Uuid>,
+            escalation_policy_id: Option<Uuid>,
+            escalation_level: i32,
+            escalation_round: i32,
+        }
+        // "Nothing newer than the hold" is what makes this fire once even when
+        // the release reaches no channel, and what lets a reopened incident be
+        // held and released again on its own merits.
+        let rows: Vec<Row> = sqlx::query_as(
+            "SELECT i.id, i.org_id, i.target_id, i.escalation_policy_id, i.escalation_level, \
+                    i.escalation_round \
+             FROM incidents i \
+             JOIN LATERAL ( \
+                 SELECT max(created_at) AS held_at FROM incident_notifications h \
+                 WHERE h.incident_id = i.id AND h.org_id = i.org_id \
+                   AND h.channel_id IS NULL AND h.transport = 'damped' \
+             ) held ON TRUE \
+             WHERE i.state = 'triggered' \
+               AND held.held_at IS NOT NULL \
+               AND held.held_at <= $1 \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM incident_notifications n \
+                   WHERE n.incident_id = i.id AND n.org_id = i.org_id \
+                     AND n.created_at > held.held_at \
+               ) \
+             ORDER BY held.held_at ASC LIMIT $2",
+        )
+        .bind(now - hold)
+        .bind(cap)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("due_for_flap_release: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| DueIncident {
+                id: r.id,
+                org: OrgId(r.org_id),
+                target_id: r.target_id,
+                escalation_policy_id: r.escalation_policy_id,
+                escalation_level: r.escalation_level,
+                escalation_round: r.escalation_round,
+            })
+            .collect())
+    }
+
+    async fn opens_since(&self, org: OrgId, target_id: Uuid, since: DateTime<Utc>) -> Result<u32> {
+        // A hand-declared incident (maintenance, a customer report) must not
+        // push a monitor over the threshold and silence its next real alert.
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM incidents \
+             WHERE org_id = $1 AND target_id = $2 AND started_at >= $3 \
+               AND origin <> 'manual'",
+        )
+        .bind(org.0)
+        .bind(target_id)
+        .bind(since)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("opens_since: {e}"))?;
+        Ok(u32::try_from(count).unwrap_or(u32::MAX))
+    }
 }
 
 // ── In-memory impl (tests) ──────────────────────────────────────────────

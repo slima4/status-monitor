@@ -50,6 +50,16 @@ impl InMemoryIncidentOpsStore {
         }
     }
 
+    /// Test helper: backdate every held row, simulating the flap hold elapsing.
+    #[cfg(test)]
+    pub fn age_held_rows(&self, by: chrono::Duration) {
+        for (_, n) in self.inner.lock().notifications.iter_mut() {
+            if n.channel_id.is_none() {
+                n.created_at -= by;
+            }
+        }
+    }
+
     /// Test helper: clear every notification's retry backoff so the next
     /// `retry_pending` treats them as due (simulates the backoff elapsing).
     #[cfg(test)]
@@ -775,5 +785,62 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         _limit: usize,
     ) -> Result<Vec<DueIncident>> {
         Ok(Vec::new())
+    }
+
+    async fn due_for_flap_release(
+        &self,
+        now: DateTime<Utc>,
+        hold: chrono::Duration,
+        limit: usize,
+    ) -> Result<Vec<DueIncident>> {
+        let cutoff = now - hold;
+        let g = self.inner.lock();
+        Ok(g.incidents
+            .iter()
+            .filter(|i| {
+                if i.state != IncidentState::Triggered {
+                    return false;
+                }
+                let Some(held_at) = g
+                    .notifications
+                    .iter()
+                    .filter(|(_, n)| {
+                        n.incident_id == i.id && n.channel_id.is_none() && n.transport == "damped"
+                    })
+                    .map(|(_, n)| n.created_at)
+                    .max()
+                else {
+                    return false;
+                };
+                held_at <= cutoff
+                    && !g
+                        .notifications
+                        .iter()
+                        .any(|(_, n)| n.incident_id == i.id && n.created_at > held_at)
+            })
+            .take(limit)
+            .map(|i| DueIncident {
+                id: i.id,
+                org: OrgId(Uuid::nil()),
+                target_id: i.target_id,
+                escalation_policy_id: i.escalation_policy_id,
+                escalation_level: i.escalation_level,
+                escalation_round: i.escalation_round,
+            })
+            .collect())
+    }
+
+    async fn opens_since(&self, _org: OrgId, target_id: Uuid, since: DateTime<Utc>) -> Result<u32> {
+        let g = self.inner.lock();
+        let n = g
+            .incidents
+            .iter()
+            .filter(|i| {
+                i.target_id == Some(target_id)
+                    && i.started_at >= since
+                    && i.origin != IncidentOrigin::Manual
+            })
+            .count();
+        Ok(u32::try_from(n).unwrap_or(u32::MAX))
     }
 }

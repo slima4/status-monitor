@@ -134,6 +134,17 @@ pub struct EscalationConfig {
     /// Floor on the reconcile scan: without it an incident nobody can be paged
     /// about is re-attempted every tick, forever.
     pub reconcile_window_secs: u64,
+    /// Window the flap damper counts a monitor's incident opens over.
+    pub flap_window_secs: u64,
+    /// Opens within `flap_window_secs` before a monitor counts as flapping.
+    /// An endpoint failing and recovering every few minutes is one unstable
+    /// service, not one outage per cycle, and paging each cycle trains the
+    /// recipient to ignore the channel. `0` disables damping.
+    pub flap_max_opens: u32,
+    /// How long a held open waits before it pages anyway. A flap closes well
+    /// inside this; anything still open is a real outage, and pages late
+    /// rather than never.
+    pub flap_hold_secs: u64,
 }
 
 impl Default for EscalationConfig {
@@ -146,6 +157,9 @@ impl Default for EscalationConfig {
             retry_backoff_base_secs: 30,
             retry_backoff_cap_secs: 3600,
             reconcile_window_secs: 3600,
+            flap_window_secs: 3600,
+            flap_max_opens: 5,
+            flap_hold_secs: 600,
         }
     }
 }

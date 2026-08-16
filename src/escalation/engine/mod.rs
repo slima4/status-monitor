@@ -239,6 +239,23 @@ impl EscalationEngine {
         self.w.retry_pending().await
     }
     #[cfg(test)]
+    async fn release_held(&self) {
+        self.w.release_held().await
+    }
+    /// The paging half of a release, so a test can drive the window between
+    /// the scan and the page that the scan's own state filter hides.
+    #[cfg(test)]
+    async fn release_page(&self, org: OrgId, incident_id: Uuid) -> crate::error::Result<()> {
+        self.w
+            .page_with(
+                org,
+                incident_id,
+                NotificationReason::Opened,
+                super::engine::rules::Damper::Skip,
+            )
+            .await
+    }
+    #[cfg(test)]
     async fn reconcile(&self) {
         self.w.reconcile().await
     }
