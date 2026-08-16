@@ -425,6 +425,17 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
         .id;
     let targets = PostgresTargetStore::from_pool(pool.clone(), None);
     let ops = PgIncidentOpsStore::new(pool.clone());
+    let channels = PgNotificationChannelStore::new(pool.clone(), None);
+    let channel = channels
+        .create(
+            org,
+            slack("Renotify", "T/B/renotify"),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .expect("create renotify channel");
 
     let mk_target = |name: &str, renotify: u32| {
         let url = url::Url::parse("https://example.com/").unwrap();
@@ -451,6 +462,7 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
         ops: &PgIncidentOpsStore,
         org: uptimepage::domain::OrgId,
         target_id: uuid::Uuid,
+        channel_id: uuid::Uuid,
         page_age: chrono::Duration,
     ) -> uuid::Uuid {
         let (inc,): (uuid::Uuid,) = sqlx::query_as(
@@ -470,7 +482,7 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
                 incident_id: inc,
                 escalation_level: Some(0),
                 target_user_id: None,
-                channel_id: None,
+                channel_id: Some(channel_id),
                 transport: "slack".into(),
                 reason: NotificationReason::Opened,
                 status: NotificationStatus::Sent,
@@ -523,11 +535,33 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
         .await
         .unwrap();
 
-    let overdue =
-        open_paged_incident(&pool, &ops, org, overdue_t.id, chrono::Duration::hours(2)).await;
-    let recent =
-        open_paged_incident(&pool, &ops, org, recent_t.id, chrono::Duration::minutes(1)).await;
-    let off = open_paged_incident(&pool, &ops, org, off_t.id, chrono::Duration::hours(2)).await;
+    let overdue = open_paged_incident(
+        &pool,
+        &ops,
+        org,
+        overdue_t.id,
+        channel.id,
+        chrono::Duration::hours(2),
+    )
+    .await;
+    let recent = open_paged_incident(
+        &pool,
+        &ops,
+        org,
+        recent_t.id,
+        channel.id,
+        chrono::Duration::minutes(1),
+    )
+    .await;
+    let off = open_paged_incident(
+        &pool,
+        &ops,
+        org,
+        off_t.id,
+        channel.id,
+        chrono::Duration::hours(2),
+    )
+    .await;
 
     let due: Vec<uuid::Uuid> = ops
         .due_for_renotify(Utc::now(), 100)
