@@ -77,6 +77,10 @@ pub enum ErrorClass {
     Timeout,
     ConnectTimeout,
     Connect,
+    ConnectionRefused,
+    ConnectionReset,
+    HostUnreachable,
+    NetworkUnreachable,
     NoResponse,
     Tls,
     Transport,
@@ -90,7 +94,14 @@ pub enum ErrorClass {
     BodyMatchFailed,
     BodyOverCap,
     DnsNoRecord,
+    AddressNotAllowed,
     CertChain,
+    CertExpired,
+    CertNotYetValid,
+    CertRevoked,
+    CertNotTrusted,
+    CertHostnameMismatch,
+    CertInvalid,
     CertExpiry,
     DomainExpiry,
     FlowStep,
@@ -112,6 +123,10 @@ impl ErrorClass {
         Self::Timeout,
         Self::ConnectTimeout,
         Self::Connect,
+        Self::ConnectionRefused,
+        Self::ConnectionReset,
+        Self::HostUnreachable,
+        Self::NetworkUnreachable,
         Self::NoResponse,
         Self::Tls,
         Self::Transport,
@@ -125,7 +140,14 @@ impl ErrorClass {
         Self::BodyMatchFailed,
         Self::BodyOverCap,
         Self::DnsNoRecord,
+        Self::AddressNotAllowed,
         Self::CertChain,
+        Self::CertExpired,
+        Self::CertNotYetValid,
+        Self::CertRevoked,
+        Self::CertNotTrusted,
+        Self::CertHostnameMismatch,
+        Self::CertInvalid,
         Self::CertExpiry,
         Self::DomainExpiry,
         Self::FlowStep,
@@ -145,6 +167,10 @@ impl ErrorClass {
             Self::Timeout => "timeout",
             Self::ConnectTimeout => "connect_timeout",
             Self::Connect => "connect",
+            Self::ConnectionRefused => "connection_refused",
+            Self::ConnectionReset => "connection_reset",
+            Self::HostUnreachable => "host_unreachable",
+            Self::NetworkUnreachable => "network_unreachable",
             Self::NoResponse => "no_response",
             Self::Tls => "tls",
             Self::Transport => "transport",
@@ -158,7 +184,14 @@ impl ErrorClass {
             Self::BodyMatchFailed => "body_match_failed",
             Self::BodyOverCap => "body_over_cap",
             Self::DnsNoRecord => "dns_no_record",
+            Self::AddressNotAllowed => "address_not_allowed",
             Self::CertChain => "cert_chain",
+            Self::CertExpired => "cert_expired",
+            Self::CertNotYetValid => "cert_not_yet_valid",
+            Self::CertRevoked => "cert_revoked",
+            Self::CertNotTrusted => "cert_not_trusted",
+            Self::CertHostnameMismatch => "cert_hostname_mismatch",
+            Self::CertInvalid => "cert_invalid",
             Self::CertExpiry => "cert_expiry",
             Self::DomainExpiry => "domain_expiry",
             Self::FlowStep => "flow_step",
@@ -176,6 +209,10 @@ impl ErrorClass {
             Self::Timeout
             | Self::ConnectTimeout
             | Self::Connect
+            | Self::ConnectionRefused
+            | Self::ConnectionReset
+            | Self::HostUnreachable
+            | Self::NetworkUnreachable
             | Self::NoResponse
             | Self::Tls
             | Self::Transport
@@ -199,7 +236,17 @@ impl ErrorClass {
             // the page, like a failed match.
             | Self::BodyOverCap
             | Self::DnsNoRecord
+            // The target resolved to an address policy forbids probing.
+            | Self::AddressNotAllowed
             | Self::CertChain
+            // A certificate the target presented and we refused. Persists until
+            // they reissue, so none of these can ever be `Internal`.
+            | Self::CertExpired
+            | Self::CertNotYetValid
+            | Self::CertRevoked
+            | Self::CertNotTrusted
+            | Self::CertHostnameMismatch
+            | Self::CertInvalid
             | Self::CertExpiry
             | Self::DomainExpiry
             | Self::FlowStep
@@ -234,12 +281,26 @@ pub fn classify_check_error(raw: &str) -> ErrorClass {
         "timeout" => return ErrorClass::Timeout,
         "connect timeout" => return ErrorClass::ConnectTimeout,
         "connect" => return ErrorClass::Connect,
+        // Mirrors `tcp_reason` in http_client::connector — keep the two in step.
+        "connection refused" => return ErrorClass::ConnectionRefused,
+        "connection reset" => return ErrorClass::ConnectionReset,
+        "host unreachable" => return ErrorClass::HostUnreachable,
+        "network unreachable" => return ErrorClass::NetworkUnreachable,
+        "address not allowed" => return ErrorClass::AddressNotAllowed,
+        // Mirrors `tls_reason` in the same module.
+        "certificate expired" => return ErrorClass::CertExpired,
+        "certificate not yet valid" => return ErrorClass::CertNotYetValid,
+        "certificate revoked" => return ErrorClass::CertRevoked,
+        "certificate not trusted" => return ErrorClass::CertNotTrusted,
+        "certificate hostname mismatch" => return ErrorClass::CertHostnameMismatch,
+        "certificate invalid" => return ErrorClass::CertInvalid,
+        "rdap throttled" => return ErrorClass::RdapLookup,
         "no response" => return ErrorClass::NoResponse,
         "tls" => return ErrorClass::Tls,
         "transport" => return ErrorClass::Transport,
         "body timeout" => return ErrorClass::BodyTimeout,
         "body match failed" => return ErrorClass::BodyMatchFailed,
-        "dns: domain not found" | "dns: no address records" | "no allowed addresses" => {
+        "dns: domain not found" | "dns: no address records" => {
             return ErrorClass::DnsNoRecord;
         }
         "server returned no certificate chain" | "empty certificate chain" => {
@@ -266,7 +327,14 @@ pub fn classify_check_error(raw: &str) -> ErrorClass {
     if raw.starts_with("parsing leaf certificate: ") {
         return ErrorClass::CertChain;
     }
-    if raw.starts_with("echo to ") {
+    // The non-HTTP kinds interpolate the host into the SSRF rejection, so this
+    // is the same condition HTTP reports as the exact `address not allowed`.
+    if raw.starts_with("no allowed addresses for ") {
+        return ErrorClass::AddressNotAllowed;
+    }
+    // `echo to <ip> failed: …` and `no echo reply from <ip> within <n>ms` both
+    // interpolate the address, so neither can be matched whole.
+    if raw.starts_with("echo to ") || raw.starts_with("no echo reply from ") {
         return ErrorClass::PingFailed;
     }
     if raw.starts_with("connecting to WHOIS server ")
@@ -392,8 +460,11 @@ mod tests {
     }
 
     /// One sample per error shape the executors emit, kept by hand. It pins the
-    /// shapes listed here against a reordered or broken match; it cannot notice
-    /// a new executor error, which lands in `Other` until someone adds it.
+    /// shapes listed here against a reordered or broken match. Two things it
+    /// cannot do: notice a new executor error, which lands in `Other` until
+    /// someone adds it; or notice that a sample here is not a string any
+    /// executor produces, which passes while the real path falls through.
+    /// Copy samples from a real emitter, never from the match arm.
     const EMITTED: &[(&str, ErrorClass)] = &[
         ("body", ErrorClass::Body),
         ("decode", ErrorClass::Decode),
@@ -413,6 +484,25 @@ mod tests {
         ("timeout", ErrorClass::Timeout),
         ("connect timeout", ErrorClass::ConnectTimeout),
         ("connect", ErrorClass::Connect),
+        ("connection refused", ErrorClass::ConnectionRefused),
+        ("connection reset", ErrorClass::ConnectionReset),
+        ("host unreachable", ErrorClass::HostUnreachable),
+        ("network unreachable", ErrorClass::NetworkUnreachable),
+        ("address not allowed", ErrorClass::AddressNotAllowed),
+        ("certificate expired", ErrorClass::CertExpired),
+        ("certificate not yet valid", ErrorClass::CertNotYetValid),
+        ("certificate revoked", ErrorClass::CertRevoked),
+        ("certificate not trusted", ErrorClass::CertNotTrusted),
+        (
+            "certificate hostname mismatch",
+            ErrorClass::CertHostnameMismatch,
+        ),
+        ("certificate invalid", ErrorClass::CertInvalid),
+        ("rdap throttled", ErrorClass::RdapLookup),
+        (
+            "no echo reply from 2a01:116f:4013:3c00::1 within 3000ms",
+            ErrorClass::PingFailed,
+        ),
         ("no response", ErrorClass::NoResponse),
         ("tls", ErrorClass::Tls),
         ("transport", ErrorClass::Transport),
@@ -428,7 +518,16 @@ mod tests {
         ("rate-limited 503", ErrorClass::RateLimited),
         ("dns: domain not found", ErrorClass::DnsNoRecord),
         ("dns: no address records", ErrorClass::DnsNoRecord),
-        ("no allowed addresses", ErrorClass::DnsNoRecord),
+        // Interpolated by `worker::mod`, and by the connector's Display with a
+        // literal `host`. Both must classify, so the sample carries a real host.
+        (
+            "no allowed addresses for 127.0.0.1",
+            ErrorClass::AddressNotAllowed,
+        ),
+        (
+            "no allowed addresses for host",
+            ErrorClass::AddressNotAllowed,
+        ),
         ("dns: lookup timed out", ErrorClass::DnsFailed),
         ("dns: lookup failed", ErrorClass::DnsFailed),
         (
