@@ -134,12 +134,12 @@ async fn drive(page: &Page, step: &FlowStep, step_timeout: Duration) -> Result<(
             }
         }
         FlowStep::Fill { selector, value } => {
-            match eval_string(page, &js_fill(selector, value)).await? {
+            match eval_action(page, &js_fill(selector, value)).await? {
                 s if s == "OK" => Ok(()),
                 _ => Err(StepError::Failed(format!("selector not found: {selector}"))),
             }
         }
-        FlowStep::Click { selector } => match eval_string(page, &js_click(selector)).await? {
+        FlowStep::Click { selector } => match eval_action(page, &js_click(selector)).await? {
             s if s == "OK" => Ok(()),
             _ => Err(StepError::Failed(format!("selector not found: {selector}"))),
         },
@@ -188,25 +188,83 @@ async fn drive(page: &Page, step: &FlowStep, step_timeout: Duration) -> Result<(
     }
 }
 
-/// Poll `check` every 100ms until it is true or `deadline` elapses.
+const POLL_PAUSE: Duration = Duration::from_millis(100);
+
+/// Poll `check` every 100ms until it is true or `deadline` elapses. A context
+/// loss is not an answer: it neither ends the poll nor counts as `false`. If the
+/// window closes while the page is still losing its context, that is what gets
+/// reported — a probe that lost its footing is an error, not a down verdict.
 async fn poll<F, Fut>(deadline: Duration, mut check: F) -> Result<bool, StepError>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<bool, StepError>>,
 {
     let start = Instant::now();
+    // Held only until the page answers again, so a recovered navigation leaves
+    // nothing behind and a page still churning at the deadline surfaces it.
+    let mut lost: Option<String>;
     loop {
-        if check().await? {
-            return Ok(true);
-        }
+        lost = match check().await {
+            Ok(true) => return Ok(true),
+            Ok(false) => None,
+            Err(StepError::Engine(e)) if is_context_loss(&e) => Some(e),
+            Err(e) => return Err(e),
+        };
         if start.elapsed() >= deadline {
-            return Ok(false);
+            return match lost {
+                Some(e) => Err(StepError::Engine(e)),
+                None => Ok(false),
+            };
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(POLL_PAUSE).await;
     }
 }
 
+/// CDP failures that mean the context the JS was about to run in went away,
+/// which a navigation does routinely and which says nothing about the target.
+/// Deliberately excludes "Inspected target navigated or closed": that one also
+/// fires for a closed target, and retrying a dead page just burns the budget.
+fn is_context_loss(msg: &str) -> bool {
+    const MARKERS: [&str; 2] = [
+        "Cannot find context with specified id",
+        "Execution context was destroyed",
+    ];
+    MARKERS.iter().any(|m| msg.contains(m))
+}
+
+/// One retry, because a read firing right after a navigation can reach the page
+/// mid-swap. Only ever wraps reads: a mutating step is not safe to repeat, and
+/// re-running its JS against the document the mutation just produced would
+/// report the selector as missing when the step in fact worked.
+async fn retrying_context_loss<T, F, Fut>(mut run: F) -> Result<T, StepError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<T, StepError>>,
+{
+    match run().await {
+        Err(StepError::Engine(e)) if is_context_loss(&e) => {
+            tokio::time::sleep(POLL_PAUSE).await;
+            run().await
+        }
+        other => other,
+    }
+}
+
+/// Runs a mutating step's JS exactly once. A lost context stays an engine
+/// error: the click may well have landed and taken the page with it.
+async fn eval_action(page: &Page, js: &str) -> Result<String, StepError> {
+    eval_string_once(page, js).await
+}
+
 async fn eval_string(page: &Page, js: &str) -> Result<String, StepError> {
+    retrying_context_loss(|| eval_string_once(page, js)).await
+}
+
+async fn eval_bool(page: &Page, js: &str) -> Result<bool, StepError> {
+    retrying_context_loss(|| eval_bool_once(page, js)).await
+}
+
+async fn eval_string_once(page: &Page, js: &str) -> Result<String, StepError> {
     let v = page
         .evaluate(js)
         .await
@@ -216,7 +274,7 @@ async fn eval_string(page: &Page, js: &str) -> Result<String, StepError> {
         .unwrap_or_default())
 }
 
-async fn eval_bool(page: &Page, js: &str) -> Result<bool, StepError> {
+async fn eval_bool_once(page: &Page, js: &str) -> Result<bool, StepError> {
     let v = page
         .evaluate(js)
         .await
@@ -277,6 +335,156 @@ fn enc(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ctx_lost() -> StepError {
+        StepError::Engine("evaluate: Error -32000: Cannot find context with specified id".into())
+    }
+
+    #[tokio::test]
+    async fn poll_rides_out_a_context_loss_and_still_passes() {
+        let mut calls = 0;
+        let got = poll(Duration::from_secs(5), || {
+            calls += 1;
+            async move {
+                match calls {
+                    1 | 2 => Err(ctx_lost()),
+                    _ => Ok(true),
+                }
+            }
+        })
+        .await;
+        assert!(
+            matches!(got, Ok(true)),
+            "a navigation mid-poll is not a verdict"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_reports_not_present_when_the_page_kept_answering() {
+        let got = poll(Duration::from_millis(150), || async { Ok(false) }).await;
+        assert!(
+            matches!(got, Ok(false)),
+            "a page that answers cleanly gets a verdict"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_surfaces_a_context_loss_the_page_never_recovered_from() {
+        let got = poll(Duration::from_millis(150), || async { Err(ctx_lost()) }).await;
+        assert!(
+            matches!(got, Err(StepError::Engine(_))),
+            "never answering is an engine error, not a down verdict"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_does_not_call_a_dying_page_absent() {
+        // Answered once, then the context goes and never comes back. Reporting
+        // Down here would alert on the probe's own footing, not the target.
+        let mut calls = 0;
+        let got = poll(Duration::from_millis(150), || {
+            calls += 1;
+            async move {
+                if calls == 1 {
+                    Ok(false)
+                } else {
+                    Err(ctx_lost())
+                }
+            }
+        })
+        .await;
+        assert!(
+            matches!(got, Err(StepError::Engine(_))),
+            "a loss still standing at the deadline outranks an earlier absence"
+        );
+    }
+
+    #[tokio::test]
+    async fn poll_forgets_a_loss_the_page_recovered_from() {
+        let mut calls = 0;
+        let got = poll(Duration::from_millis(250), || {
+            calls += 1;
+            async move {
+                if calls == 1 {
+                    Err(ctx_lost())
+                } else {
+                    Ok(false)
+                }
+            }
+        })
+        .await;
+        assert!(
+            matches!(got, Ok(false)),
+            "a recovered navigation must not colour the verdict"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_closed_target_is_not_treated_as_transient() {
+        // Chromium uses this wording for a closed target too, so it must fail
+        // fast rather than spin out the whole step budget.
+        let got = poll(Duration::from_secs(30), || async {
+            Err(StepError::Engine(
+                "evaluate: Inspected target navigated or closed".into(),
+            ))
+        })
+        .await;
+        assert!(matches!(got, Err(StepError::Engine(_))));
+    }
+
+    #[tokio::test]
+    async fn poll_still_fails_fast_on_an_unrelated_engine_error() {
+        let got = poll(Duration::from_secs(5), || async {
+            Err(StepError::Engine("url: transport closed".into()))
+        })
+        .await;
+        assert!(matches!(got, Err(StepError::Engine(_))));
+    }
+
+    #[tokio::test]
+    async fn a_read_retries_one_context_loss() {
+        let mut calls = 0;
+        let got: Result<u8, StepError> = retrying_context_loss(|| {
+            calls += 1;
+            async move { if calls == 1 { Err(ctx_lost()) } else { Ok(7) } }
+        })
+        .await;
+        assert!(matches!(got, Ok(7)));
+    }
+
+    #[test]
+    fn mutating_steps_are_driven_by_the_no_retry_eval() {
+        // Guards the fix, not the wiring: repeating a click after the context it
+        // navigated away from reads as a missing selector, which the engine maps
+        // to Down. Only reads may be retried. Whitespace is collapsed so
+        // rustfmt cannot break the check by wrapping a call site, and the
+        // needles are built at run time so this test cannot satisfy itself.
+        let src: String = include_str!("executor.rs")
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        for builder in ["js_fill(", "js_click("] {
+            let wanted = format!("{}(page,&{builder}", "eval_action");
+            let forbidden = format!("{}(page,&{builder}", "eval_string");
+            assert!(src.contains(&wanted), "{builder} must use eval_action");
+            assert!(
+                !src.contains(&forbidden),
+                "{builder} must not use the retrying eval"
+            );
+        }
+    }
+
+    #[test]
+    fn context_loss_is_matched_narrowly() {
+        assert!(is_context_loss(
+            "evaluate: Error -32000: Cannot find context with specified id"
+        ));
+        assert!(is_context_loss("Execution context was destroyed"));
+        assert!(!is_context_loss(
+            "evaluate: Error -32000: Object reference chain is too long"
+        ));
+        assert!(!is_context_loss("goto nav: timeout"));
+    }
 
     #[test]
     fn fill_encodes_selector_and_value_safely() {
