@@ -31,6 +31,7 @@ fn http_ok(target: Uuid, org: Uuid, ts: chrono::DateTime<Utc>, dur: u32) -> Chec
         ttfb_ms: Some(40),
         response_code: Some(200),
         response_size: Some(1024),
+        diagnostic: None,
         error: None,
     }
 }
@@ -48,6 +49,7 @@ fn tcp_ok(target: Uuid, org: Uuid, ts: chrono::DateTime<Utc>, dur: u32) -> Check
         ttfb_ms: None,
         response_code: None,
         response_size: None,
+        diagnostic: None,
         error: None,
     }
 }

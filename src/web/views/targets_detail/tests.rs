@@ -1,9 +1,11 @@
 use super::charts::{KpiInputs, build_kpi_trend, status_segments};
 use super::*;
 use crate::api::types::AvailabilityBucket;
-use crate::domain::CheckResult;
-use crate::domain::CheckStatus;
 use crate::domain::agent_wire::StepOutcome;
+use crate::domain::{
+    CheckDiagnostic, CheckResult, CheckStatus, DiagnosticConfidence, DiagnosticEvidence,
+    EdgeProvider,
+};
 use crate::storage::{ClampedRange, UptimeStats};
 
 #[test]
@@ -230,13 +232,19 @@ fn drawer_check_rows_render_region_column_and_expand() {
         ttfb_ms: None,
         response_code: Some(503),
         response_size: None,
+        diagnostic: Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::High,
+            Some(EdgeProvider::Akamai),
+            vec![DiagnosticEvidence::BlockPage],
+        )),
         error: Some("connection refused".into()),
     };
     let rows: Arc<[ResultRow]> =
         Arc::from(vec![ResultRow::with_region("apac-sg".into(), r.clone())]);
     let html = DetailCheckRows {
-        results: rows,
+        results: Arc::clone(&rows),
         show_region: true,
+        show_guidance: true,
     }
     .render()
     .unwrap();
@@ -244,6 +252,22 @@ fn drawer_check_rows_render_region_column_and_expand() {
     assert!(html.contains("apac-sg"));
     assert!(html.contains("data-result-row"));
     assert!(html.contains("data-result-detail"));
+    assert!(html.contains("access-policy block detected at the Akamai edge"));
+    assert!(html.contains("recommended:"));
+    assert!(html.contains("use an authenticated health endpoint"));
+
+    // The anonymous share surface names the cause but withholds advice aimed
+    // at whoever administers the blocked origin.
+    let shared = DetailCheckRows {
+        results: rows,
+        show_region: false,
+        show_guidance: false,
+    }
+    .render()
+    .unwrap();
+    assert!(shared.contains("access-policy block detected at the Akamai edge"));
+    assert!(!shared.contains("recommended:"));
+    assert!(!shared.contains("use an authenticated health endpoint"));
 
     // Region-agnostic table (recent results) hides the column.
     r.error = None;
@@ -251,6 +275,7 @@ fn drawer_check_rows_render_region_column_and_expand() {
     let plain_html = DetailCheckRows {
         results: plain,
         show_region: false,
+        show_guidance: true,
     }
     .render()
     .unwrap();

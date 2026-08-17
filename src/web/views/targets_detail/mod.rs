@@ -416,6 +416,7 @@ pub async fn check_rows(
     let rendered = DetailCheckRows {
         results,
         show_region: true,
+        show_guidance: true,
     }
     .render()
     .map_err(|e| AppError::Other(anyhow::anyhow!(e)))?;

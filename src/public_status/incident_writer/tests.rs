@@ -3,7 +3,10 @@ use std::time::Duration as StdDuration;
 
 use chrono::TimeZone;
 
-use crate::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, Target, TargetAlerts};
+use crate::domain::{
+    CheckDiagnostic, CheckSpec, DiagnosticConfidence, DiagnosticEvidence, EdgeProvider,
+    ExpectedStatus, HttpCheck, HttpMethod, Target, TargetAlerts,
+};
 use crate::storage::admin::EnabledTargetStream;
 use crate::storage::{InMemorySink, InMemoryTargetStore, ResultSink};
 
@@ -26,8 +29,20 @@ fn result(target_id: Uuid, when: DateTime<Utc>, status: CheckStatus) -> CheckRes
         ttfb_ms: None,
         response_code: None,
         response_size: None,
+        diagnostic: None,
         error: None,
     }
+}
+
+fn akamai_blocked(target_id: Uuid, when: DateTime<Utc>) -> CheckResult {
+    let mut blocked = result(target_id, when, CheckStatus::Down);
+    blocked.error = Some("unexpected status 403".into());
+    blocked.diagnostic = Some(CheckDiagnostic::access_interference(
+        DiagnosticConfidence::High,
+        Some(EdgeProvider::Akamai),
+        vec![DiagnosticEvidence::BlockPage],
+    ));
+    blocked
 }
 
 // ── pure decide() ──────────────────────────────────────────────────────
@@ -65,6 +80,92 @@ fn decide_two_consecutive_bad_opens_incident() {
             assert_eq!(new.started_at, ts(base, 30));
             assert_eq!(new.status_at_start, CheckStatus::Down);
             assert_eq!(new.check_count, 2);
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+#[test]
+fn decide_carries_access_diagnosis_into_incident_sample() {
+    let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+    let target = Uuid::now_v7();
+    let blocked = akamai_blocked(target, base);
+
+    match decide(None, &[blocked], 1) {
+        Action::Open(new) => assert_eq!(
+            new.error_sample.as_deref(),
+            Some(
+                "unexpected status 403 · access-policy block detected at the Akamai edge · use an authenticated health endpoint or exempt this monitor from browser challenges"
+            )
+        ),
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+#[test]
+fn decide_requires_cross_region_cause_consensus_and_reports_it() {
+    let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+    let target = Uuid::now_v7();
+    let by_region = ["eu", "us", "ap"].map(|region| {
+        (
+            region.to_string(),
+            vec![
+                akamai_blocked(target, base),
+                akamai_blocked(target, ts(base, 30)),
+            ],
+        )
+    });
+
+    match decide_multi(target, &[], &by_region, 2, 2)
+        .into_iter()
+        .next()
+    {
+        Some(Action::Open(new)) => {
+            let sample = new.error_sample.expect("diagnostic sample");
+            assert!(sample.contains("3/3 reporting regions agree"), "{sample}");
+            assert!(sample.contains("authenticated health endpoint"), "{sample}");
+            assert!(
+                sample.chars().count() <= 200,
+                "cause and remediation must survive notifier clipping: {sample}"
+            );
+            assert!(
+                sample.find("authenticated health endpoint") < sample.find("regions agree"),
+                "the fix outranks the tally when a long error text forces a clip: {sample}"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+#[test]
+fn decide_does_not_promote_one_regions_guess_to_majority_cause() {
+    let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+    let target = Uuid::now_v7();
+    let mut ordinary = result(target, base, CheckStatus::Down);
+    ordinary.error = Some("connection refused".into());
+    let by_region = [
+        (
+            "eu".to_string(),
+            vec![
+                akamai_blocked(target, base),
+                akamai_blocked(target, ts(base, 30)),
+            ],
+        ),
+        ("us".to_string(), vec![ordinary.clone(), ordinary.clone()]),
+        (
+            "ap".to_string(),
+            vec![result(target, base, CheckStatus::Up)],
+        ),
+    ];
+
+    match decide_multi(target, &[], &by_region, 2, 2)
+        .into_iter()
+        .next()
+    {
+        Some(Action::Open(new)) => {
+            let sample = new.error_sample.expect("protocol sample");
+            assert!(!sample.contains("Akamai"), "{sample}");
+            assert!(!sample.contains("reporting regions agree"), "{sample}");
         }
         other => panic!("expected Open, got {other:?}"),
     }

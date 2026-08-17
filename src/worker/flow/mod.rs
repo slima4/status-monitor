@@ -96,6 +96,7 @@ pub async fn execute_flow_check_probe(
         ttfb_ms: None,
         response_code: None,
         response_size: None,
+        diagnostic: None,
         error,
     };
     (result, FlowProbe { evidence, steps })

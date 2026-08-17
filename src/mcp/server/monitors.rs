@@ -29,7 +29,7 @@ use super::args::{
 use super::text::{
     create_prompt_lines, field_label, present_error, sanitize_data, sanitize_prompt,
 };
-use super::view::{channel_names, check_timing};
+use super::view::{channel_names, check_diagnostic, check_timing};
 
 impl McpServer {
     /// `run_check_now` body (no audit — the wrapper's `finish` records it).
@@ -70,6 +70,7 @@ impl McpServer {
             timing: check_timing(&result),
             response_size: result.response_size,
             error: result.error.as_deref().map(present_error),
+            diagnostic: check_diagnostic(&result),
         }))
     }
 
@@ -312,6 +313,7 @@ impl McpServer {
             duration_ms: r.duration_ms,
             http_status: r.response_code,
             error: r.error.as_deref().map(present_error),
+            diagnostic: check_diagnostic(&r),
         })
     }
 

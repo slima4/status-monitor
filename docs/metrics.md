@@ -39,6 +39,7 @@ these names verbatim.
 | `uptimepage_check_connect_ms` | histogram | TCP connect latency (every HTTP check connects fresh) |
 | `uptimepage_check_tls_ms` | histogram | TLS handshake latency (per HTTPS check) |
 | `uptimepage_check_ttfb_ms` | histogram | time-to-first-byte: request sent to response headers |
+| `uptimepage_http_access_diagnostics_total{outcome,provider,confidence}` | counter | failed HTTP checks classified as CDN/WAF access interference. `matched` uses bounded provider/confidence enums; `unmatched` is emitted only for unexpected 403 responses. Track the unmatched ratio to catch provider-template drift without putting customer hosts in metric labels |
 | `uptimepage_flow_step_duration_ms{op}` | histogram | wall time of one flow step, by `op` (`goto`/`fill`/`click`/`wait_for`/`assert_text`/`assert_url`). Steps the run never reached are excluded, so the distribution only covers work that happened. A `wait_for` p95 climbing toward the monitor's `step_timeout` is the early warning before the journey starts failing |
 | `uptimepage_storage_batch_size` | histogram | flush batch sizes |
 | `uptimepage_storage_write_duration_ms` | histogram | flush durations |

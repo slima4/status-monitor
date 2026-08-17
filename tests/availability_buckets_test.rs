@@ -28,6 +28,7 @@ fn check(target: Uuid, org: Uuid, ts: chrono::DateTime<Utc>, status: CheckStatus
         ttfb_ms: Some(40),
         response_code: Some(200),
         response_size: Some(1024),
+        diagnostic: None,
         error: None,
     }
 }

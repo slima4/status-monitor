@@ -58,6 +58,7 @@ fn ok_result(target_id: Uuid, org_id: Uuid) -> CheckResult {
         ttfb_ms: None,
         response_code: Some(200),
         response_size: None,
+        diagnostic: None,
         error: None,
     }
 }

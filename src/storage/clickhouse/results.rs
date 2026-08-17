@@ -14,7 +14,8 @@ use crate::api::types::{
 };
 use crate::domain::agent_wire::{ConsoleLine, FlowEvidence, StepOutcome, StepTrace};
 use crate::domain::{
-    CheckResult, CheckStatus, Incident, ObservedCadence, OrgId, coalesce_incidents,
+    CheckDiagnostic, CheckDiagnosticKind, CheckResult, CheckStatus, DiagnosticConfidence,
+    DiagnosticEvidence, EdgeProvider, Incident, ObservedCadence, OrgId, coalesce_incidents,
 };
 use crate::error::Result;
 use crate::storage::traits::{
@@ -156,6 +157,10 @@ struct OwnedResultRow {
     response_code: Option<u16>,
     response_size: Option<u32>,
     error: Option<String>,
+    diagnostic_kind: Option<String>,
+    diagnostic_confidence: Option<String>,
+    diagnostic_provider: Option<String>,
+    diagnostic_evidence: Vec<String>,
 }
 
 #[derive(Debug, Row, Deserialize)]
@@ -173,6 +178,10 @@ struct RegionResultRow {
     response_code: Option<u16>,
     response_size: Option<u32>,
     error: Option<String>,
+    diagnostic_kind: Option<String>,
+    diagnostic_confidence: Option<String>,
+    diagnostic_provider: Option<String>,
+    diagnostic_evidence: Vec<String>,
 }
 
 impl RegionResultRow {
@@ -189,6 +198,10 @@ impl RegionResultRow {
             response_code: self.response_code,
             response_size: self.response_size,
             error: self.error,
+            diagnostic_kind: self.diagnostic_kind,
+            diagnostic_confidence: self.diagnostic_confidence,
+            diagnostic_provider: self.diagnostic_provider,
+            diagnostic_evidence: self.diagnostic_evidence,
         };
         (self.region, row_to_result(inner, org_id))
     }
@@ -211,6 +224,10 @@ struct MultiResultRow {
     response_code: Option<u16>,
     response_size: Option<u32>,
     error: Option<String>,
+    diagnostic_kind: Option<String>,
+    diagnostic_confidence: Option<String>,
+    diagnostic_provider: Option<String>,
+    diagnostic_evidence: Vec<String>,
 }
 
 impl MultiResultRow {
@@ -228,12 +245,39 @@ impl MultiResultRow {
             response_code: self.response_code,
             response_size: self.response_size,
             error: self.error,
+            diagnostic_kind: self.diagnostic_kind,
+            diagnostic_confidence: self.diagnostic_confidence,
+            diagnostic_provider: self.diagnostic_provider,
+            diagnostic_evidence: self.diagnostic_evidence,
         };
         (self.region, row_to_result(inner, org_id))
     }
 }
 
 fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
+    let diagnostic = row
+        .diagnostic_kind
+        .as_deref()
+        .and_then(CheckDiagnosticKind::parse)
+        .map(|kind| CheckDiagnostic {
+            kind,
+            confidence: row
+                .diagnostic_confidence
+                .as_deref()
+                .and_then(DiagnosticConfidence::parse)
+                .unwrap_or(DiagnosticConfidence::Medium),
+            provider: row
+                .diagnostic_provider
+                .as_deref()
+                .and_then(EdgeProvider::parse),
+            evidence: row
+                .diagnostic_evidence
+                .iter()
+                .filter_map(|item| DiagnosticEvidence::parse(item))
+                .collect(),
+            // Derived so an old row cannot keep advice the product dropped.
+            remediations: kind.remediations(),
+        });
     CheckResult {
         target_id: row.target_id,
         org_id,
@@ -246,6 +290,7 @@ fn row_to_result(row: OwnedResultRow, org_id: Uuid) -> CheckResult {
         ttfb_ms: row.ttfb_ms,
         response_code: row.response_code,
         response_size: row.response_size,
+        diagnostic,
         error: row.error,
     }
 }
@@ -487,7 +532,9 @@ impl ResultsStore for ClickhouseResultsStore {
             .client
             .query(&format!(
                 "SELECT target_id, timestamp, status, duration_ms, dns_ms, connect_ms, tls_ms, \
-                 ttfb_ms, response_code, response_size, error FROM {TABLE} \
+                 ttfb_ms, response_code, response_size, error, diagnostic_kind, \
+                 diagnostic_confidence, diagnostic_provider, diagnostic_evidence \
+                 FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? {region_pred} \
                  AND timestamp >= fromUnixTimestamp(?) \
                  AND timestamp < fromUnixTimestamp(?) \
@@ -523,7 +570,9 @@ impl ResultsStore for ClickhouseResultsStore {
             .client
             .query(&format!(
                 "SELECT region, target_id, timestamp, status, duration_ms, dns_ms, connect_ms, \
-                 tls_ms, ttfb_ms, response_code, response_size, error FROM {TABLE} \
+                 tls_ms, ttfb_ms, response_code, response_size, error, diagnostic_kind, \
+                 diagnostic_confidence, diagnostic_provider, diagnostic_evidence \
+                 FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? \
                  AND timestamp >= fromUnixTimestamp(?) \
                  AND timestamp < fromUnixTimestamp(?) \
@@ -557,7 +606,9 @@ impl ResultsStore for ClickhouseResultsStore {
             .client
             .query(&format!(
                 "SELECT region, target_id, timestamp, status, duration_ms, dns_ms, connect_ms, \
-                 tls_ms, ttfb_ms, response_code, response_size, error FROM {TABLE} \
+                 tls_ms, ttfb_ms, response_code, response_size, error, diagnostic_kind, \
+                 diagnostic_confidence, diagnostic_provider, diagnostic_evidence \
+                 FROM {TABLE} \
                  WHERE org_id = ? AND target_id = ? AND status != {up} {region_pred} \
                  AND timestamp >= fromUnixTimestamp(?) \
                  AND timestamp < fromUnixTimestamp(?) \
@@ -602,7 +653,9 @@ impl ResultsStore for ClickhouseResultsStore {
             .client
             .query(&format!(
                 "SELECT org_id, region, target_id, timestamp, status, duration_ms, dns_ms, \
-                 connect_ms, tls_ms, ttfb_ms, response_code, response_size, error FROM {TABLE} \
+                 connect_ms, tls_ms, ttfb_ms, response_code, response_size, error, \
+                 diagnostic_kind, diagnostic_confidence, diagnostic_provider, \
+                 diagnostic_evidence FROM {TABLE} \
                  WHERE (org_id, target_id) IN ({pair_list}) \
                  AND timestamp >= fromUnixTimestamp(?) \
                  AND timestamp < fromUnixTimestamp(?) \

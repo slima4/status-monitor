@@ -346,6 +346,7 @@ fn emit_fresh(
         ttfb_ms: None,
         response_code: None,
         response_size: Some(verdict.details_json.len() as u32),
+        diagnostic: None,
         error: match verdict.status {
             CheckStatus::Up => None,
             _ => Some(verdict.details_json),
@@ -388,6 +389,7 @@ fn emit_stale(
         ttfb_ms: None,
         response_code: None,
         response_size: error.as_ref().map(|e| e.len() as u32),
+        diagnostic: None,
         error,
     }
 }

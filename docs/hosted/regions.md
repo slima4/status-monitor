@@ -43,15 +43,16 @@ The same thing shows up in smaller ways elsewhere: geo-fenced APIs, aggressive b
 
 How to tell this apart from real downtime:
 
+- For an HTTP response that matches a supported CDN/WAF signature, the result names the access-policy diagnosis separately from the authoritative status error. An incident names a provider only when the same diagnosis meets the monitor's region quorum, and reports the agreeing/total reporting-region count.
 - Run **check now** and compare regions. A block from our side usually fails in every region at once, where a real outage often starts in one region and spreads.
 - Look at connect time on the checks that did succeed. If they connect in a couple of hundred milliseconds and the failures are hard timeouts, the path is being dropped rather than being slow.
 - Open the URL yourself, from a connection that is not a datacentre. If it answers there and times out from every region you assigned, the difference is who is asking, not whether the service is up.
 
-If a monitor is in this state, the useful moves are to assign it to fewer regions, to point it at an endpoint that will answer us, or to switch to a heartbeat monitor and have the system itself ping us, which works from anywhere and needs no reachability at all.
+For an HTTP policy block, the durable fix is a small health endpoint that is exempt from browser challenges and authenticated with a secret request header. UptimePage can source that header from an [org secret](../variables.md), so the endpoint does not need to be open to everyone. A narrowly scoped WAF rule matching both the health path and the header is safer than weakening protection for the public site. For a network that refuses datacentre traffic before HTTP, point the monitor at an endpoint that will answer us or switch to a heartbeat monitor and have the system itself ping us.
 
 ## Practical notes
 
-Checks from different regions leave from different addresses, so an allowlist on your side needs every region you assign. If you allowlist by IP, write to <hello@uptimepage.dev> before you rely on it, because the egress addresses are not guaranteed stable on every region yet.
+Checks from different regions leave from different addresses, so an IP allowlist needs every assigned region. Hosted egress addresses are not guaranteed stable in every region: do not build a production rule from addresses you observe. Write to <hello@uptimepage.dev> before relying on IP-based access. Prefer the authenticated health-path pattern above when your edge supports it.
 
 Browser flow monitors run only in regions that ship a browser engine. A flow monitor's region set is narrowed to those when you save it, so it never silently sits unassigned.
 

@@ -153,6 +153,7 @@ pub fn execute_heartbeat_check(
         ttfb_ms: None,
         response_code: None,
         response_size: None,
+        diagnostic: None,
         error,
     }
 }

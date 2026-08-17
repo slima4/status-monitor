@@ -19,6 +19,12 @@ pub enum Action {
     },
 }
 
+struct Verdict<'a> {
+    region: &'a str,
+    bad: &'a [CheckResult],
+    good: &'a [CheckResult],
+}
+
 /// Single-region convenience over [`decide_multi`]: one region, combined
 /// any-down policy. Kept for call sites and tests that reason about a flat
 /// result stream. Returns at most one [`Action`].
@@ -53,11 +59,6 @@ pub fn decide_multi(
 ) -> Vec<Action> {
     let threshold = (confirmations as usize).max(1);
 
-    struct Verdict<'a> {
-        region: &'a str,
-        bad: &'a [CheckResult],
-        good: &'a [CheckResult],
-    }
     let verdicts: Vec<Verdict> = by_region
         .iter()
         .map(|(region, results)| Verdict {
@@ -94,9 +95,7 @@ pub fn decide_multi(
                     started_at: trigger.bad[0].timestamp,
                     status_at_start,
                     check_count: origin.bad.len() as u32,
-                    error_sample: bad
-                        .iter()
-                        .find_map(|v| v.bad.iter().find_map(|r| r.error.clone())),
+                    error_sample: incident_error_sample(&bad, verdicts.len(), quorum),
                     region: None,
                     regions_down: bad
                         .iter()
@@ -135,6 +134,70 @@ pub fn decide_multi(
             vec![]
         }
     }
+}
+
+/// Cause as stated to notifications and incident views. The per-result error
+/// is left untouched for API consumers.
+fn incident_error_sample(
+    bad: &[&Verdict<'_>],
+    reporting_regions: usize,
+    quorum: usize,
+) -> Option<String> {
+    // Newest failure per region only: an earlier page must not outlive a
+    // change in how the edge is failing.
+    let diagnosed: Vec<_> = bad
+        .iter()
+        .filter_map(|verdict| {
+            let result = verdict.bad.last()?;
+            result
+                .diagnostic
+                .as_ref()
+                .map(|diagnostic| (result, diagnostic))
+        })
+        .collect();
+    let best = diagnosed.iter().copied().max_by_key(|(_, candidate)| {
+        diagnosed
+            .iter()
+            .filter(|(_, other)| {
+                other.kind == candidate.kind
+                    && other.confidence == candidate.confidence
+                    && other.provider == candidate.provider
+            })
+            .count()
+    });
+
+    if let Some((sample, diagnostic)) = best {
+        let matching_regions = diagnosed
+            .iter()
+            .filter(|(_, other)| {
+                other.kind == diagnostic.kind
+                    && other.confidence == diagnostic.confidence
+                    && other.provider == diagnostic.provider
+            })
+            .count();
+        // Same bar the incident itself cleared, so one vendor page cannot
+        // label a multi-region outage.
+        if matching_regions >= quorum {
+            let mut parts = Vec::with_capacity(4);
+            if let Some(error) = sample.error.as_deref() {
+                parts.push(error.to_owned());
+            }
+            parts.push(diagnostic.summary());
+            // Ahead of the tally: notifications clip this sample, and the fix
+            // is worth more to the reader than the vote count.
+            parts.push(diagnostic.guidance().to_string());
+            if reporting_regions > 1 {
+                parts.push(format!(
+                    "{matching_regions}/{reporting_regions} reporting regions agree"
+                ));
+            }
+            return Some(parts.join(" · "));
+        }
+    }
+
+    // Nothing cleared the bar: report the protocol failure rather than guess.
+    bad.iter()
+        .find_map(|verdict| verdict.bad.iter().find_map(|result| result.error.clone()))
 }
 
 /// Anything that is not a clean `Up` is unhealthy: `Down`/`Error` are outages

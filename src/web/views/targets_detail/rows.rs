@@ -23,6 +23,8 @@ pub struct ResultRow {
     pub duration_ms: u32,
     pub response_code: String,
     pub error: String,
+    /// Kept apart from the error so the drawer reads cause, then fix.
+    pub diagnostic_guidance: String,
     pub dns_ms: Option<u16>,
     pub connect_ms: Option<u16>,
     pub tls_ms: Option<u16>,
@@ -102,6 +104,9 @@ pub struct DetailLive {
 pub struct DetailCheckRows {
     pub results: Arc<[ResultRow]>,
     pub show_region: bool,
+    /// Remediation is advice for whoever owns the monitor, so the anonymous
+    /// share surface renders the cause without it.
+    pub show_guidance: bool,
 }
 
 /// Enough to see a pattern across a day at the interval floor, without paging.
@@ -357,19 +362,34 @@ impl WindowLabels {
 
 impl From<CheckResult> for ResultRow {
     fn from(r: CheckResult) -> Self {
-        let (flow_step, error) = match r.error.as_deref() {
+        let diagnostic = r.diagnostic.as_ref().map(|item| item.summary());
+        let diagnostic_guidance = r
+            .diagnostic
+            .as_ref()
+            .map(|item| item.guidance().to_string())
+            .unwrap_or_default();
+        let (flow_step, mut error) = match r.error.as_deref() {
             Some(raw) => match parse_flow_step(raw) {
                 Some((label, reason)) => (Some(label), fmt_error_display(&reason)),
                 None => (None, fmt_error_display(raw)),
             },
             None => (None, String::new()),
         };
+        if let Some(summary) = diagnostic {
+            if error.is_empty() {
+                error = summary;
+            } else {
+                error.push_str(" · ");
+                error.push_str(&summary);
+            }
+        }
         Self {
             timestamp: r.timestamp,
             status: r.status.as_str(),
             duration_ms: r.duration_ms,
             response_code: r.response_code.map(|c| c.to_string()).unwrap_or_default(),
             error,
+            diagnostic_guidance,
             dns_ms: r.dns_ms,
             connect_ms: r.connect_ms,
             tls_ms: r.tls_ms,

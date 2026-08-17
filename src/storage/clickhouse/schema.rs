@@ -64,6 +64,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "004_heartbeat_pings.sql",
         include_str!("../../../migrations/clickhouse/004_heartbeat_pings.sql"),
     ),
+    // Raw rows only: a diagnosis explains one response, so it is deliberately
+    // absent from the rollups.
+    (
+        "005_check_diagnostics.sql",
+        include_str!("../../../migrations/clickhouse/005_check_diagnostics.sql"),
+    ),
 ];
 
 pub async fn migrate(client: &Client) -> Result<()> {

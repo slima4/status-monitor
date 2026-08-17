@@ -40,6 +40,7 @@ pub async fn execute_tls_cert_check(
             ttfb_ms: None,
             response_code: None,
             response_size: Some(probe.verdict.details_json.len() as u32),
+            diagnostic: None,
             // `error` doubles as the structured details payload for cert
             // checks. Up results stay None (matching every other check
             // type's convention); Degraded/Down carries the JSON document
@@ -61,6 +62,7 @@ pub async fn execute_tls_cert_check(
             ttfb_ms: None,
             response_code: None,
             response_size: None,
+            diagnostic: None,
             error: Some(err.to_string()),
         },
         Err(_) => {

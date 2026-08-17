@@ -39,6 +39,7 @@ pub async fn execute_tcp_check(
             ttfb_ms: None,
             response_code: None,
             response_size: None,
+            diagnostic: None,
             error: None,
         },
         Ok(Err(err)) => CheckResult {
@@ -53,6 +54,7 @@ pub async fn execute_tcp_check(
             ttfb_ms: None,
             response_code: None,
             response_size: None,
+            diagnostic: None,
             error: Some(err.to_string()),
         },
         Err(_) => {

@@ -9,7 +9,8 @@
 {% let warn = r.status == "degraded" %}
 {% let has_timing = r.dns_ms.is_some() || r.connect_ms.is_some() || r.tls_ms.is_some() || r.ttfb_ms.is_some() %}
 {% let has_error = r.error != "" %}
-{% let expandable = (bad || warn) && (has_timing || has_error) %}
+{% let has_guidance = show_guidance && r.diagnostic_guidance != "" %}
+{% let expandable = (bad || warn) && (has_timing || has_error || has_guidance) %}
 <tr class="{% if loop.index0 % 2 == 0 %}result-row--even{% else %}result-row--odd{% endif %}{% if bad %} result-row--bad{% else if warn %} result-row--warn{% endif %}{% if expandable %} cursor-pointer{% endif %}"
     {% if expandable %}data-result-row aria-expanded="false"{% endif %}>
   <td class="px-3 py-2 font-mono text-xs text-muted">{% if expandable %}<span class="result-row__chev" aria-hidden="true">▸</span>{% endif %}<time datetime="{{ r.timestamp|iso_ts }}" data-tz="exact">{{ r.timestamp|human_ts }}</time></td>
@@ -39,6 +40,11 @@
     {% if has_error %}
     <div class="{% if has_timing %}mt-2 {% endif %}result-row-detail__error">
       {% if let Some(step) = r.flow_step %}<span class="mr-2 inline-block rounded-sm border border-[color:var(--theme-line)] px-1.5 py-0.5 font-mono text-[0.7rem] tabular-nums text-muted">{{ step }}</span>{% endif %}<span class="text-muted mr-2">error:</span>{{ r.error }}
+    </div>
+    {% endif %}
+    {% if has_guidance %}
+    <div class="{% if has_timing || has_error %}mt-2 {% endif %}text-pretty text-body">
+      <span class="text-muted mr-2">recommended:</span>{{ r.diagnostic_guidance }}
     </div>
     {% endif %}
   </td>

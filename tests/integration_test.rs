@@ -1,12 +1,16 @@
 mod common;
 
+use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::http::StatusCode;
+use axum::http::{StatusCode, header};
 use axum::routing::get;
-use uptimepage::domain::{CheckStatus, ExpectedStatus, HttpMethod};
+use uptimepage::domain::{
+    CheckDiagnosticKind, CheckStatus, DiagnosticConfidence, DiagnosticEvidence,
+    DiagnosticRemediation, EdgeProvider, ExpectedStatus, HttpMethod,
+};
 use uptimepage::storage::{InMemorySink, ResultSink};
 use uptimepage::worker::execute_http_check;
 use url::Url;
@@ -36,6 +40,129 @@ async fn http_check_returns_up_on_200() {
     assert!(result.ttfb_ms.is_some(), "ttfb must be timed");
 }
 
+/// Echoes request headers, joining repeats with `|` so a duplicated name is
+/// visible to a body assertion.
+fn header_echo_router() -> Router {
+    Router::new().route(
+        "/",
+        get(|headers: header::HeaderMap| async move {
+            let joined = |name: header::HeaderName| {
+                headers
+                    .get_all(name)
+                    .iter()
+                    .map(|v| v.to_str().unwrap_or("<non-ascii>"))
+                    .collect::<Vec<_>>()
+                    .join("|")
+            };
+            format!(
+                "ua=[{}] accept=[{}] encoding=[{}]",
+                joined(header::USER_AGENT),
+                joined(header::ACCEPT),
+                joined(header::ACCEPT_ENCODING),
+            )
+        }),
+    )
+}
+
+#[tokio::test]
+async fn http_check_sends_one_identity_and_accept_header() {
+    let addr = spawn_router(header_echo_router()).await;
+    let mut check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+    check.expected_body_contains =
+        Some("ua=[Uptimepage/test] accept=[*/*] encoding=[gzip, br]".into());
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Up, "{:?}", result.error);
+}
+
+#[tokio::test]
+async fn configured_headers_replace_probe_defaults_instead_of_joining_them() {
+    let addr = spawn_router(header_echo_router()).await;
+    let mut check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+    check
+        .headers
+        .insert("User-Agent".into(), "acme-monitor/9".into());
+    check
+        .headers
+        .insert("accept".into(), "application/json".into());
+    // Accept-Encoding is not theirs to set: only gzip and br can be decoded,
+    // so a configured codec would hand every assertion undecodable bytes.
+    check
+        .headers
+        .insert("Accept-Encoding".into(), "zstd".into());
+    check.expected_body_contains =
+        Some("ua=[acme-monitor/9] accept=[application/json] encoding=[gzip, br]".into());
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Up, "{:?}", result.error);
+}
+
+#[tokio::test]
+async fn a_rejected_header_value_leaves_the_probe_default_in_place() {
+    let addr = spawn_router(header_echo_router()).await;
+    let mut check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+    // A newline can never reach the wire; the probe must not end up nameless.
+    check
+        .headers
+        .insert("user-agent".into(), "bad\nvalue".into());
+    check.expected_body_contains = Some("ua=[Uptimepage/test]".into());
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Up, "{:?}", result.error);
+}
+
+/// More than the probe buffers, uncompressed, like a large marketing page.
+fn oversize_body_router() -> Router {
+    Router::new().route("/", get(|| async { "x".repeat(2 << 20) }))
+}
+
+#[tokio::test]
+async fn a_page_larger_than_the_read_cap_still_passes_a_status_only_check() {
+    let addr = spawn_router(oversize_body_router()).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Up, "{:?}", result.error);
+    assert_eq!(result.response_code, Some(200));
+    // Abandoned read: length unknown, not the cap.
+    assert_eq!(result.response_size, None);
+}
+
+#[tokio::test]
+async fn a_body_assertion_over_the_read_cap_fails_and_says_why() {
+    let addr = spawn_router(oversize_body_router()).await;
+    let mut check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+    check.expected_body_contains = Some("needle".into());
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Error);
+    assert_eq!(result.response_code, Some(200));
+    assert_eq!(
+        result.error.as_deref(),
+        Some("body over the 1 MiB read cap")
+    );
+}
+
 #[tokio::test]
 async fn http_check_returns_down_on_unexpected_status() {
     let app = Router::new().route(
@@ -53,6 +180,271 @@ async fn http_check_returns_down_on_unexpected_status() {
     assert_eq!(result.status, CheckStatus::Down);
     assert_eq!(result.response_code, Some(500));
     assert!(result.error.is_some());
+}
+
+#[tokio::test]
+async fn http_check_diagnoses_akamai_access_denial_without_changing_verdict() {
+    let body = r#"<HTML><HEAD><TITLE>Access Denied</TITLE></HEAD><BODY>
+        <H1>Access Denied</H1>
+        You don't have permission to access this server.
+        <P>Reference&#32;#18.5c1f1602</P>
+        <P>https&#58;&#47;&#47;errors&#46;edgesuite&#46;net&#47;18.5c1f1602</P>
+        </BODY></HTML>"#;
+    let app = Router::new().route(
+        "/",
+        get(move || async move {
+            (
+                StatusCode::FORBIDDEN,
+                [(header::SERVER, "AkamaiGHost")],
+                body,
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert_eq!(result.response_code, Some(403));
+    assert_eq!(result.error.as_deref(), Some("unexpected status 403"));
+    let diagnostic = result.diagnostic.expect("Akamai denial diagnosis");
+    assert_eq!(diagnostic.kind, CheckDiagnosticKind::AccessInterference);
+    assert_eq!(diagnostic.confidence, DiagnosticConfidence::High);
+    assert_eq!(diagnostic.provider, Some(EdgeProvider::Akamai));
+    assert_eq!(
+        diagnostic.evidence,
+        vec![
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::BlockPage,
+            DiagnosticEvidence::ReferenceId,
+        ]
+    );
+    assert_eq!(
+        diagnostic.remediations,
+        vec![
+            DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
+            DiagnosticRemediation::BypassBrowserChallengeForMonitor,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn http_check_uses_cloudflare_documented_challenge_header() {
+    let challenge_page = r#"<!DOCTYPE html><html lang="en-US"><head>
+        <title>Just a moment...</title>
+        <meta http-equiv="content-security-policy"
+              content="default-src 'none'; script-src https://challenges.cloudflare.com">
+        </head><body>Performing security verification</body></html>"#;
+    let mut compressed = Vec::new();
+    {
+        let mut encoder = brotli::CompressorWriter::new(&mut compressed, 4096, 5, 22);
+        encoder.write_all(challenge_page.as_bytes()).unwrap();
+    }
+    let app = Router::new().route(
+        "/",
+        get(move || {
+            let compressed = compressed.clone();
+            async move {
+                (
+                    StatusCode::FORBIDDEN,
+                    [
+                        (header::CONTENT_TYPE, "text/html; charset=UTF-8"),
+                        (header::CONTENT_ENCODING, "br"),
+                        (header::SERVER, "cloudflare"),
+                        (header::HeaderName::from_static("cf-mitigated"), "challenge"),
+                    ],
+                    compressed,
+                )
+            }
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert_eq!(result.response_size, Some(challenge_page.len() as u32));
+    let diagnostic = result.diagnostic.expect("Cloudflare challenge diagnosis");
+    assert_eq!(diagnostic.confidence, DiagnosticConfidence::High);
+    assert_eq!(diagnostic.provider, Some(EdgeProvider::Cloudflare));
+    assert_eq!(
+        diagnostic.evidence,
+        vec![DiagnosticEvidence::ChallengeHeader]
+    );
+}
+
+#[tokio::test]
+async fn http_check_uses_aws_waf_documented_challenge_header() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                StatusCode::ACCEPTED,
+                [(
+                    header::HeaderName::from_static("x-amzn-waf-action"),
+                    "challenge",
+                )],
+                "<!doctype html><script>run browser challenge</script>",
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert_eq!(result.response_code, Some(202));
+    assert_eq!(result.error.as_deref(), Some("unexpected status 202"));
+    let diagnostic = result.diagnostic.expect("AWS WAF challenge diagnosis");
+    assert_eq!(diagnostic.confidence, DiagnosticConfidence::High);
+    assert_eq!(diagnostic.provider, Some(EdgeProvider::AwsWaf));
+    assert_eq!(
+        diagnostic.evidence,
+        vec![DiagnosticEvidence::ChallengeHeader]
+    );
+}
+
+#[tokio::test]
+async fn http_check_requires_corroboration_for_vercel_challenge() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                StatusCode::FORBIDDEN,
+                [
+                    (header::SERVER, "Vercel"),
+                    (
+                        header::HeaderName::from_static("x-vercel-mitigated"),
+                        "challenge",
+                    ),
+                    (
+                        header::HeaderName::from_static("x-vercel-challenge-token"),
+                        "opaque-test-token",
+                    ),
+                ],
+                "<!doctype html><title>Vercel Security Checkpoint</title>",
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert_eq!(result.response_code, Some(403));
+    let diagnostic = result.diagnostic.expect("corroborated Vercel challenge");
+    assert_eq!(diagnostic.confidence, DiagnosticConfidence::Medium);
+    assert_eq!(diagnostic.provider, Some(EdgeProvider::Vercel));
+    assert_eq!(
+        diagnostic.evidence,
+        vec![
+            DiagnosticEvidence::ChallengeHeader,
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::BlockPage,
+        ]
+    );
+}
+
+#[tokio::test]
+async fn http_check_does_not_infer_block_from_google_frontend_headers() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                StatusCode::FORBIDDEN,
+                [
+                    (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                    (header::SERVER, "ESF"),
+                    (header::CACHE_CONTROL, "no-cache, no-store, max-age=0"),
+                    (
+                        header::HeaderName::from_static("x-ua-compatible"),
+                        "IE=edge",
+                    ),
+                    (
+                        header::HeaderName::from_static("x-frame-options"),
+                        "SAMEORIGIN",
+                    ),
+                ],
+                "<!doctype html><html><head><title>Google Cloud</title></head></html>",
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert_eq!(result.response_code, Some(403));
+    assert!(result.diagnostic.is_none());
+}
+
+#[tokio::test]
+async fn http_check_does_not_guess_provider_from_server_header_alone() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                StatusCode::FORBIDDEN,
+                [(header::SERVER, "AkamaiGHost")],
+                r#"{"error":"account is disabled"}"#,
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert!(result.diagnostic.is_none());
+}
+
+#[tokio::test]
+async fn http_check_does_not_diagnose_a_configured_success_status() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                StatusCode::FORBIDDEN,
+                [("cf-mitigated", "challenge")],
+                "browser verification required",
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(403),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Up);
+    assert!(result.error.is_none());
+    assert!(result.diagnostic.is_none());
 }
 
 #[tokio::test]
@@ -202,6 +594,43 @@ async fn http_check_body_decode_error_preserves_response_code() {
     assert_eq!(result.error.as_deref(), Some("decode"));
     assert_eq!(result.response_code, Some(200));
     assert!(result.ttfb_ms.is_some());
+}
+
+#[tokio::test]
+async fn http_check_body_decode_error_preserves_header_only_diagnostic() {
+    let app = Router::new().route(
+        "/challenge",
+        get(|| async {
+            (
+                StatusCode::FORBIDDEN,
+                [
+                    (header::CONTENT_ENCODING, "gzip"),
+                    (header::HeaderName::from_static("cf-mitigated"), "challenge"),
+                ],
+                axum::body::Body::from(b"not actually gzipped".to_vec()),
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/challenge")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Error);
+    assert_eq!(result.error.as_deref(), Some("decode"));
+    assert_eq!(result.response_code, Some(403));
+    let diagnostic = result
+        .diagnostic
+        .expect("header-only diagnosis survives body failure");
+    assert_eq!(diagnostic.confidence, DiagnosticConfidence::High);
+    assert_eq!(diagnostic.provider, Some(EdgeProvider::Cloudflare));
+    assert_eq!(
+        diagnostic.evidence,
+        vec![DiagnosticEvidence::ChallengeHeader]
+    );
 }
 
 #[tokio::test]

@@ -5,17 +5,20 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use bytes::Bytes;
 use chrono::Utc;
 use flate2::read::GzDecoder;
-use http_body_util::{BodyExt, Full, Limited};
+use http_body_util::{BodyExt, Full, LengthLimitError, Limited};
 use hyper::body::Bytes as HBytes;
 use hyper::header::{
-    ACCEPT_ENCODING, AUTHORIZATION, HOST, HeaderName, HeaderValue, LOCATION, RETRY_AFTER,
+    ACCEPT, ACCEPT_ENCODING, AUTHORIZATION, HOST, HeaderName, HeaderValue, LOCATION, RETRY_AFTER,
     USER_AGENT,
 };
 use hyper::{Method, Request, Uri};
 use metrics::counter;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, ExpectedStatus, HttpCheck, HttpMethod};
+use crate::domain::{
+    CheckDiagnostic, CheckResult, CheckStatus, DiagnosticConfidence, DiagnosticEvidence,
+    EdgeProvider, ExpectedStatus, HttpCheck, HttpMethod,
+};
 use crate::http_client::HttpClients;
 use crate::http_client::connector::{
     ConnGuard, PhaseTimings, TimedConnection, handshake, timed_connect,
@@ -27,9 +30,13 @@ const MAX_REDIRECT_HOPS: u8 = HttpCheck::MAX_REDIRECTS;
 
 /// Cap on the raw HTTP response body the check will collect. Status pages —
 /// the dominant target shape — are usually well under 100 KiB; 1 MiB is the
-/// "huge response, but worth keeping the bytes" knee. Anything bigger is
-/// recorded as a `body` failure rather than allowed to allocate freely.
+/// "huge response, but worth keeping the bytes" knee. Past it the read is
+/// abandoned rather than allowed to allocate freely.
 const MAX_RAW_BODY_BYTES: usize = 1 << 20;
+
+/// Names the cap so the fix — assert on something smaller — is readable from
+/// the result row alone.
+const OVER_CAP_ERROR: &str = "body over the 1 MiB read cap";
 
 /// Cap on decompressed body size. Bounds the gzip / brotli expansion ratio
 /// against a hostile target that returns a tiny compressed body that explodes
@@ -39,6 +46,9 @@ const MAX_DECODED_BODY_BYTES: usize = 8 << 20;
 
 /// Body snippet cap for the verbose test-check response.
 const PROBE_BODY_SNIPPET_BYTES: usize = 1024;
+/// Bounds the diagnostic scan, which would otherwise re-allocate the decoded
+/// body to lowercase it.
+const DIAGNOSTIC_BODY_BYTES: usize = 16 << 10;
 /// Header-pair cap (after dedup-by-name) for the verbose test-check response.
 const PROBE_HEADERS_MAX: usize = 20;
 /// Header names whose values must not appear in the verbose response.
@@ -338,12 +348,17 @@ async fn finalize(
     // hyper bodies are streams and the headers handle becomes unavailable
     // once we move the response into Limited.
     let headers_preview = capture.then(|| snapshot_headers(response.headers()));
+    let response_fingerprint = ResponseFingerprint::from_headers(response.headers());
     let retry_after_raw = response
         .headers()
         .get(RETRY_AFTER)
         .and_then(|h| h.to_str().ok())
         .filter(|s| sanitised_retry_after(s))
         .map(|s| s.to_string());
+    let status_ok = match_status(status_code, &check.expected_status);
+    // Taken before the body is consumed, so a decode or timeout failure still
+    // reports evidence that already arrived.
+    let header_diagnostic = detect_access_interference(&response_fingerprint, b"");
 
     let err_with_ttfb = |reason: &'static str| -> (CheckResult, Option<HttpProbe>) {
         let mut r = CheckResult::error_with_elapsed(
@@ -360,6 +375,10 @@ async fn finalize(
         // Status line came back (TTFB recorded) — preserve the code so a body
         // failure still distinguishes 200-then-truncated from 503-broken-body.
         r.response_code = Some(status_code);
+        if let Some(diagnostic) = header_diagnostic.as_ref() {
+            record_matched_access_diagnostic(diagnostic);
+        }
+        r.diagnostic = header_diagnostic.clone();
         let probe = headers_preview.clone().map(|h| HttpProbe {
             response_headers_preview: h,
             response_body_snippet: None,
@@ -369,6 +388,7 @@ async fn finalize(
 
     // HEAD body is empty; the origin still sets Content-Encoding from the
     // GET variant, so any decode attempt fails on the empty stream.
+    let mut over_cap = false;
     let decoded = if check.method == HttpMethod::Head {
         Bytes::new()
     } else {
@@ -384,20 +404,34 @@ async fn finalize(
         let body_fut = Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect();
         let collected = match tokio::time::timeout(body_remaining, body_fut).await {
             Err(_) => return err_with_ttfb("body timeout"),
-            Ok(Ok(c)) => c,
+            Ok(Ok(c)) => Some(c),
+            // Only a body assertion needs these bytes. Without one the status
+            // assertion has already decided, so an unbuffered page is no fault.
+            Ok(Err(e)) if e.downcast_ref::<LengthLimitError>().is_some() => {
+                if check.expected_body_contains.is_some() {
+                    return err_with_ttfb(OVER_CAP_ERROR);
+                }
+                over_cap = true;
+                None
+            }
             Ok(Err(_)) => return err_with_ttfb("body"),
         };
-        let raw = collected.to_bytes();
-        match decode_body(&raw, content_encoding.as_deref()) {
-            Ok(b) => b,
-            Err(_) => return err_with_ttfb("decode"),
+        match collected {
+            None => Bytes::new(),
+            Some(c) => {
+                let raw = c.to_bytes();
+                match decode_body(&raw, content_encoding.as_deref()) {
+                    Ok(b) => b,
+                    Err(_) => return err_with_ttfb("decode"),
+                }
+            }
         }
     };
 
-    let size = decoded.len() as u32;
+    // An abandoned read never learned the length; the cap is not a measurement.
+    let size = (!over_cap).then(|| decoded.len() as u32);
     let duration_ms = start.elapsed().as_millis() as u32;
 
-    let status_ok = match_status(status_code, &check.expected_status);
     let body_ok = match &check.expected_body_contains {
         Some(needle) => std::str::from_utf8(&decoded)
             .map(|s| s.contains(needle))
@@ -407,10 +441,26 @@ async fn finalize(
 
     let (status, error) =
         classify_outcome(status_code, status_ok, body_ok, retry_after_raw.as_deref());
+    // Explains a failed verdict, never creates or clears one.
+    let diagnostic = (status != CheckStatus::Up)
+        .then(|| detect_access_interference(&response_fingerprint, &decoded))
+        .flatten();
+    if let Some(diagnostic) = diagnostic.as_ref() {
+        record_matched_access_diagnostic(diagnostic);
+    } else if !over_cap && is_unmatched_unexpected_403(status_code, status_ok) {
+        counter!(
+            names::HTTP_ACCESS_DIAGNOSTICS,
+            "outcome" => "unmatched",
+            "provider" => "unknown",
+            "confidence" => "unknown",
+        )
+        .increment(1);
+    }
 
     let probe = capture.then(|| HttpProbe {
         response_headers_preview: headers_preview.unwrap_or_default(),
-        response_body_snippet: Some(snapshot_body(&decoded)),
+        // Nothing was kept; a blank snippet would read as an empty response.
+        response_body_snippet: (!over_cap).then(|| snapshot_body(&decoded)),
     });
 
     (
@@ -425,11 +475,168 @@ async fn finalize(
             tls_ms: timings.tls_ms,
             ttfb_ms: Some(ttfb_ms),
             response_code: Some(status_code),
-            response_size: Some(size),
+            response_size: size,
+            diagnostic,
             error,
         },
         probe,
     )
+}
+
+/// Non-sensitive header signals, held only until the result is classified.
+/// Presence of a provider is never enough on its own: every detector below
+/// pairs it with a vendor challenge signal or a recognizable denial page.
+///
+/// Fields are decisions rather than copied values — this runs on every
+/// response, and the passing majority must not pay an allocation.
+#[derive(Debug, Default)]
+struct ResponseFingerprint {
+    akamai_edge: bool,
+    vercel_edge: bool,
+    aws_waf_challenge: bool,
+    cloudflare_challenge: bool,
+    azure_reference: bool,
+    datadome_signal: bool,
+    vercel_challenge: bool,
+    vercel_challenge_token: bool,
+}
+
+impl ResponseFingerprint {
+    fn from_headers(headers: &hyper::HeaderMap) -> Self {
+        let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+        let server_is = |want: &str| header("server").is_some_and(|v| v.eq_ignore_ascii_case(want));
+        Self {
+            akamai_edge: server_is("AkamaiGHost"),
+            vercel_edge: server_is("Vercel"),
+            aws_waf_challenge: header("x-amzn-waf-action").is_some_and(|v| {
+                v.eq_ignore_ascii_case("challenge") || v.eq_ignore_ascii_case("captcha")
+            }),
+            cloudflare_challenge: header("cf-mitigated")
+                .is_some_and(|v| v.eq_ignore_ascii_case("challenge")),
+            azure_reference: headers.contains_key("x-azure-ref"),
+            datadome_signal: headers
+                .keys()
+                .any(|name| name.as_str().starts_with("x-datadome")),
+            vercel_challenge: header("x-vercel-mitigated")
+                .is_some_and(|v| v.eq_ignore_ascii_case("challenge")),
+            vercel_challenge_token: headers.contains_key("x-vercel-challenge-token"),
+        }
+    }
+}
+
+fn detect_access_interference(
+    fingerprint: &ResponseFingerprint,
+    decoded_body: &[u8],
+) -> Option<CheckDiagnostic> {
+    // AWS documents this header for its Challenge and CAPTCHA actions. A plain
+    // CloudFront 403 does not carry it and stays unattributed.
+    if fingerprint.aws_waf_challenge {
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::High,
+            Some(EdgeProvider::AwsWaf),
+            vec![DiagnosticEvidence::ChallengeHeader],
+        ));
+    }
+
+    if fingerprint.cloudflare_challenge {
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::High,
+            Some(EdgeProvider::Cloudflare),
+            vec![DiagnosticEvidence::ChallengeHeader],
+        ));
+    }
+
+    let prefix = &decoded_body[..decoded_body.len().min(DIAGNOSTIC_BODY_BYTES)];
+    let body = String::from_utf8_lossy(prefix).to_ascii_lowercase();
+    let access_denied = body.contains("access denied");
+    let akamai_reference =
+        body.contains("errors.edgesuite.net") || body.contains("errors&#46;edgesuite&#46;net");
+    if fingerprint.akamai_edge && access_denied && akamai_reference {
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::High,
+            Some(EdgeProvider::Akamai),
+            vec![
+                DiagnosticEvidence::EdgeServer,
+                DiagnosticEvidence::BlockPage,
+                DiagnosticEvidence::ReferenceId,
+            ],
+        ));
+    }
+
+    if fingerprint.azure_reference && body.contains("the request is blocked") {
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::High,
+            Some(EdgeProvider::AzureFrontDoor),
+            vec![
+                DiagnosticEvidence::BlockPage,
+                DiagnosticEvidence::ReferenceId,
+            ],
+        ));
+    }
+
+    let datadome_page = body.contains("captcha-delivery.com")
+        || (body.contains("datadome")
+            && (body.contains("captcha") || body.contains("device check")));
+    if fingerprint.datadome_signal && datadome_page {
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::High,
+            Some(EdgeProvider::DataDome),
+            vec![
+                DiagnosticEvidence::ChallengeHeader,
+                DiagnosticEvidence::BlockPage,
+            ],
+        ));
+    }
+
+    // Vercel documents the behaviour but not a stable detector contract, so
+    // three signals and medium confidence: a copied header must not name it.
+    let vercel_page = body.contains("vercel security checkpoint");
+    if fingerprint.vercel_challenge
+        && fingerprint.vercel_edge
+        && (fingerprint.vercel_challenge_token || vercel_page)
+    {
+        let mut evidence = vec![
+            DiagnosticEvidence::ChallengeHeader,
+            DiagnosticEvidence::EdgeServer,
+        ];
+        if vercel_page {
+            evidence.push(DiagnosticEvidence::BlockPage);
+        }
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::Medium,
+            Some(EdgeProvider::Vercel),
+            evidence,
+        ));
+    }
+
+    // Several appliances ship this same configurable page: enough to call it a
+    // policy block, not enough to name a vendor.
+    if body.contains("the requested url was rejected") && body.contains("support id") {
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::Medium,
+            None,
+            vec![
+                DiagnosticEvidence::BlockPage,
+                DiagnosticEvidence::ReferenceId,
+            ],
+        ));
+    }
+
+    None
+}
+
+fn record_matched_access_diagnostic(diagnostic: &CheckDiagnostic) {
+    counter!(
+        names::HTTP_ACCESS_DIAGNOSTICS,
+        "outcome" => "matched",
+        "provider" => diagnostic.provider.map(EdgeProvider::as_str).unwrap_or("unknown"),
+        "confidence" => diagnostic.confidence.as_str(),
+    )
+    .increment(1);
+}
+
+fn is_unmatched_unexpected_403(status_code: u16, status_ok: bool) -> bool {
+    status_code == 403 && !status_ok
 }
 
 /// First N unique-by-name response headers, sensitive values redacted.
@@ -486,11 +693,24 @@ fn build_request(
 
     let (target, host_header) = request_target(uri, alpn_h2)?;
 
-    let mut builder = Request::builder()
-        .method(map_method(method))
-        .uri(target)
-        .header(USER_AGENT, clients.user_agent())
-        .header(ACCEPT_ENCODING, "gzip, br");
+    let mut builder = Request::builder().method(map_method(method)).uri(target);
+
+    // A configured header replaces the default instead of joining it: two
+    // User-Agent lines are malformed, and overriding ours is the documented
+    // way past an edge that blocks it.
+    for (name, default) in [
+        (USER_AGENT, clients.user_agent()),
+        // Sending none reads as a scripted client; `*/*` avoids steering
+        // content negotiation, so a JSON endpoint keeps answering JSON.
+        (ACCEPT, "*/*"),
+    ] {
+        if !overrides_header(check, name.as_str()) {
+            builder = builder.header(name, default);
+        }
+    }
+    // Not overridable: this advertises what `decode_body` can actually read, so
+    // a configured `zstd` would return bytes no assertion could match.
+    builder = builder.header(ACCEPT_ENCODING, "gzip, br");
 
     let bodyless = body.is_none();
     let user_set_host = check.headers.keys().any(|k| k.eq_ignore_ascii_case("host"));
@@ -534,6 +754,9 @@ fn build_request(
         // exists — a malformed request strict origins/WAFs reject (a
         // spurious Down on exactly the canonical-redirect targets this
         // feature exists for). Hyper sets its own `content-length: 0`.
+        if k.eq_ignore_ascii_case("accept-encoding") {
+            continue;
+        }
         if bodyless
             && (k.eq_ignore_ascii_case("content-type")
                 || k.eq_ignore_ascii_case("content-length")
@@ -550,6 +773,16 @@ fn build_request(
     }
 
     builder.body(Full::new(body_bytes))
+}
+
+/// Whether a configured header really reaches the wire under this name. A
+/// value hyper rejects is no replacement — the loop below drops it, and the
+/// request would carry neither.
+fn overrides_header(check: &HttpCheck, name: &str) -> bool {
+    check
+        .headers
+        .iter()
+        .any(|(k, v)| k.eq_ignore_ascii_case(name) && HeaderValue::try_from(v).is_ok())
 }
 
 /// Request-target and Host for the negotiated protocol. hyper's low-level
@@ -761,6 +994,168 @@ mod tests {
         assert!(!sanitised_retry_after("*bold*"));
         assert!(!sanitised_retry_after(""));
         assert!(!sanitised_retry_after(&"a".repeat(65)));
+    }
+
+    #[test]
+    fn access_detector_matches_only_documented_aws_waf_actions() {
+        for action in ["challenge", "captcha", "ChAlLeNgE"] {
+            let mut headers = hyper::HeaderMap::new();
+            headers.insert(
+                "x-amzn-waf-action",
+                hyper::header::HeaderValue::from_str(action).unwrap(),
+            );
+            let fingerprint = ResponseFingerprint::from_headers(&headers);
+            let hit =
+                detect_access_interference(&fingerprint, b"").expect("documented AWS WAF action");
+            assert_eq!(hit.provider, Some(EdgeProvider::AwsWaf));
+            assert_eq!(hit.confidence, DiagnosticConfidence::High);
+            assert_eq!(hit.evidence, vec![DiagnosticEvidence::ChallengeHeader]);
+        }
+
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            "x-amzn-waf-action",
+            hyper::header::HeaderValue::from_static("block"),
+        );
+        assert!(
+            detect_access_interference(&ResponseFingerprint::from_headers(&headers), b"").is_none()
+        );
+    }
+
+    #[test]
+    fn access_detector_requires_three_vercel_challenge_signals() {
+        let fingerprint = |mitigated: bool, server: bool, token: bool| {
+            let mut headers = hyper::HeaderMap::new();
+            if mitigated {
+                headers.insert(
+                    "x-vercel-mitigated",
+                    hyper::header::HeaderValue::from_static("challenge"),
+                );
+            }
+            if server {
+                headers.insert(
+                    hyper::header::SERVER,
+                    hyper::header::HeaderValue::from_static("Vercel"),
+                );
+            }
+            if token {
+                headers.insert(
+                    "x-vercel-challenge-token",
+                    hyper::header::HeaderValue::from_static("opaque"),
+                );
+            }
+            ResponseFingerprint::from_headers(&headers)
+        };
+
+        let hit = detect_access_interference(&fingerprint(true, true, true), b"")
+            .expect("three Vercel response signals");
+        assert_eq!(hit.provider, Some(EdgeProvider::Vercel));
+        assert_eq!(hit.confidence, DiagnosticConfidence::Medium);
+
+        for incomplete in [
+            fingerprint(true, false, true),
+            fingerprint(true, true, false),
+            fingerprint(false, true, true),
+        ] {
+            assert!(
+                detect_access_interference(&incomplete, b"ordinary application page").is_none()
+            );
+        }
+
+        let page_hit = detect_access_interference(
+            &fingerprint(true, true, false),
+            b"<title>Vercel Security Checkpoint</title>",
+        )
+        .expect("checkpoint page is the third signal");
+        assert_eq!(page_hit.provider, Some(EdgeProvider::Vercel));
+        assert!(page_hit.evidence.contains(&DiagnosticEvidence::BlockPage));
+    }
+
+    #[test]
+    fn access_detector_matches_azure_only_with_reference_and_block_page() {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            "x-azure-ref",
+            hyper::header::HeaderValue::from_static("ref"),
+        );
+        let fingerprint = ResponseFingerprint::from_headers(&headers);
+
+        let hit = detect_access_interference(&fingerprint, b"The request is blocked.")
+            .expect("Azure block signature");
+        assert_eq!(hit.provider, Some(EdgeProvider::AzureFrontDoor));
+        assert_eq!(hit.confidence, DiagnosticConfidence::High);
+
+        assert!(detect_access_interference(&fingerprint, b"application says forbidden").is_none());
+    }
+
+    #[test]
+    fn access_detector_matches_datadome_only_with_header_and_page() {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            "x-datadome",
+            hyper::header::HeaderValue::from_static("protected"),
+        );
+        let fingerprint = ResponseFingerprint::from_headers(&headers);
+
+        let hit = detect_access_interference(
+            &fingerprint,
+            b"Complete the device check at captcha-delivery.com",
+        )
+        .expect("DataDome block signature");
+        assert_eq!(hit.provider, Some(EdgeProvider::DataDome));
+        assert_eq!(hit.confidence, DiagnosticConfidence::High);
+
+        assert!(
+            detect_access_interference(
+                &ResponseFingerprint::default(),
+                b"Complete the device check at captcha-delivery.com",
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn access_detector_keeps_shared_appliance_page_generic() {
+        let hit = detect_access_interference(
+            &ResponseFingerprint::default(),
+            b"The requested URL was rejected. Please consult your administrator. Support ID: 42",
+        )
+        .expect("generic policy block");
+        assert_eq!(hit.provider, None);
+        assert_eq!(hit.confidence, DiagnosticConfidence::Medium);
+    }
+
+    #[test]
+    fn access_detector_does_not_scan_past_its_body_budget() {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            hyper::header::SERVER,
+            hyper::header::HeaderValue::from_static("AkamaiGHost"),
+        );
+        let fingerprint = ResponseFingerprint::from_headers(&headers);
+        let mut body = vec![b'x'; DIAGNOSTIC_BODY_BYTES];
+        body.extend_from_slice(b"Access Denied errors.edgesuite.net");
+
+        assert!(detect_access_interference(&fingerprint, &body).is_none());
+    }
+
+    #[test]
+    fn the_over_cap_error_names_the_cap_it_hit() {
+        assert!(
+            OVER_CAP_ERROR.contains(&format!("{} MiB", MAX_RAW_BODY_BYTES >> 20)),
+            "{OVER_CAP_ERROR} must name the real cap"
+        );
+    }
+
+    #[test]
+    fn unmatched_metric_requires_a_status_mismatched_403() {
+        assert!(is_unmatched_unexpected_403(403, false));
+        assert!(
+            !is_unmatched_unexpected_403(403, true),
+            "an accepted 403 with a failed body assertion is not signature drift"
+        );
+        assert!(!is_unmatched_unexpected_403(401, false));
+        assert!(!is_unmatched_unexpected_403(500, false));
     }
 
     #[test]

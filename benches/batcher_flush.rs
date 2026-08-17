@@ -23,6 +23,7 @@ fn sample_results(n: usize) -> Vec<CheckResult> {
             ttfb_ms: Some(10),
             response_code: Some(200),
             response_size: Some(512),
+            diagnostic: None,
             error: None,
         })
         .collect()

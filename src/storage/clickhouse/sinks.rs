@@ -124,6 +124,10 @@ struct CheckResultRow<'a> {
     response_code: Option<u16>,
     response_size: Option<u32>,
     error: Option<&'a str>,
+    diagnostic_kind: Option<&'a str>,
+    diagnostic_confidence: Option<&'a str>,
+    diagnostic_provider: Option<&'a str>,
+    diagnostic_evidence: Vec<&'a str>,
     ttl_days: u16,
 }
 
@@ -144,6 +148,17 @@ impl<'a> CheckResultRow<'a> {
             response_code: r.response_code,
             response_size: r.response_size,
             error: r.error.as_deref(),
+            diagnostic_kind: r.diagnostic.as_ref().map(|d| d.kind.as_str()),
+            diagnostic_confidence: r.diagnostic.as_ref().map(|d| d.confidence.as_str()),
+            diagnostic_provider: r
+                .diagnostic
+                .as_ref()
+                .and_then(|d| d.provider.map(|provider| provider.as_str())),
+            diagnostic_evidence: r
+                .diagnostic
+                .as_ref()
+                .map(|d| d.evidence.iter().map(|item| item.as_str()).collect())
+                .unwrap_or_default(),
             ttl_days,
         }
     }

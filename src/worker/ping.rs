@@ -38,6 +38,7 @@ pub async fn execute_ping_check(
             ttfb_ms: None,
             response_code: None,
             response_size: None,
+            diagnostic: None,
             error: None,
         },
         Err(EchoError::Unreachable(err)) => CheckResult {

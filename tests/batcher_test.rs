@@ -26,6 +26,7 @@ fn sample_result() -> CheckResult {
         ttfb_ms: None,
         response_code: Some(200),
         response_size: Some(4),
+        diagnostic: None,
         error: None,
     }
 }

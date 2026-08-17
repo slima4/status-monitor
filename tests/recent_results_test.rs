@@ -11,7 +11,10 @@
 mod common;
 
 use chrono::{Duration, Utc};
-use uptimepage::domain::{CheckResult, CheckStatus, OrgId};
+use uptimepage::domain::{
+    CheckDiagnostic, CheckResult, CheckStatus, DiagnosticConfidence, DiagnosticEvidence,
+    DiagnosticRemediation, EdgeProvider, OrgId,
+};
 use uptimepage::storage::{
     ClampedRange, ClickhouseResultSink, ClickhouseResultsStore, OrgTtlDays, ResultSink,
     ResultsStore, TimeRange,
@@ -31,6 +34,7 @@ fn result(target: Uuid, org: Uuid, ts: chrono::DateTime<Utc>) -> CheckResult {
         ttfb_ms: None,
         response_code: Some(200),
         response_size: None,
+        diagnostic: None,
         error: None,
     }
 }
@@ -62,6 +66,20 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
     let t2 = Uuid::now_v7();
     let now = Utc::now();
     let ago = |s: i64| now - Duration::seconds(s);
+    let diagnosed_at = ago(10);
+    let mut diagnosed = result(t1, org, diagnosed_at);
+    diagnosed.status = CheckStatus::Down;
+    diagnosed.response_code = Some(403);
+    diagnosed.error = Some("unexpected status 403".into());
+    diagnosed.diagnostic = Some(CheckDiagnostic::access_interference(
+        DiagnosticConfidence::High,
+        Some(EdgeProvider::Akamai),
+        vec![
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::BlockPage,
+            DiagnosticEvidence::ReferenceId,
+        ],
+    ));
 
     // t1: 4 eu results + 1 us result. t2: 2 eu results.
     sink_eu
@@ -69,7 +87,7 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
             result(t1, org, ago(90)),
             result(t1, org, ago(60)),
             result(t1, org, ago(30)),
-            result(t1, org, ago(10)),
+            diagnosed,
             result(t2, org, ago(40)),
             result(t2, org, ago(20)),
         ])
@@ -94,6 +112,19 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
     let t2_rows: Vec<_> = all.iter().filter(|(_, r)| r.target_id == t2).collect();
     assert_eq!(t1_rows.len(), 5, "t1: 4 eu + 1 us");
     assert_eq!(t2_rows.len(), 2, "t2: 2 eu");
+    let stored_diagnostic = t1_rows
+        .iter()
+        .find(|(_, result)| result.timestamp.timestamp() == diagnosed_at.timestamp())
+        .and_then(|(_, result)| result.diagnostic.as_ref())
+        .expect("diagnosis round-trips through ClickHouse");
+    assert_eq!(stored_diagnostic.provider, Some(EdgeProvider::Akamai));
+    assert_eq!(
+        stored_diagnostic.remediations,
+        vec![
+            DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
+            DiagnosticRemediation::BypassBrowserChallengeForMonitor,
+        ]
+    );
     assert!(
         t1_rows.iter().any(|(region, _)| region == "eu")
             && t1_rows.iter().any(|(region, _)| region == "us"),

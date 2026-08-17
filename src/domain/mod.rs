@@ -81,7 +81,11 @@ pub use public::{
 };
 pub use quota::{Plan, PlanLimits, QuotaEvent};
 pub use reserved_slugs::is_reserved;
-pub use result::{CheckResult, CheckStatus, SERVED_STALE_PREFIX, strip_served_stale};
+pub use result::{
+    CheckDiagnostic, CheckDiagnosticKind, CheckResult, CheckStatus, DiagnosticConfidence,
+    DiagnosticEvidence, DiagnosticRemediation, EdgeProvider, SERVED_STALE_PREFIX,
+    strip_served_stale,
+};
 pub use status_page::{
     NewStatusPage, NewStatusPageComponent, PageRef, StatusPage, StatusPageComponent,
     StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,

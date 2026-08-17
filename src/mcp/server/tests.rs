@@ -53,6 +53,7 @@ fn check_result(dns: Option<u16>, ttfb: Option<u16>, size: Option<u32>) -> Check
         ttfb_ms: ttfb,
         response_code: Some(200),
         response_size: size,
+        diagnostic: None,
         error: None,
     }
 }
@@ -1110,6 +1111,7 @@ fn a_trial_run_reads_as_one_line() {
         duration_ms: 143,
         http_status: http,
         error: err.map(str::to_string),
+        diagnostic: None,
     };
     assert_eq!(
         probe_line(&outcome("up", Some(200), None)),

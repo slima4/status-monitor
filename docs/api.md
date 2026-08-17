@@ -625,6 +625,7 @@ Pass the previous page's `next_cursor` as `?cursor=...` to fetch the next page; 
 
 - `from` / `to` default to the last 24 h; `to` must be strictly greater than `from` (400 `BAD_TIME_RANGE` otherwise).
 - Returns a `PageEnvelope` of `CheckResult` ordered by `timestamp DESC`.
+- A failed HTTP result can include a machine-readable `diagnostic` such as `{"kind":"access_interference","confidence":"high","provider":"akamai","evidence":["edge_server","block_page","reference_id"],"remediations":["use_authenticated_health_endpoint","bypass_browser_challenge_for_monitor"]}`. This explains likely CDN/WAF interference but never replaces `status`, `response_code`, or `error`, which remain authoritative. Bounded provider values are `akamai`, `aws_waf`, `cloudflare`, `azure_front_door`, `data_dome`, and `vercel`; `provider` is omitted when the evidence identifies a generic policy block but not a vendor. The whole field is omitted when no supported signature matches. Remediation values are stable action codes suitable for API clients; they do not imply that hosted probe IPs are static.
 
 ## Latency series
 

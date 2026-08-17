@@ -299,6 +299,8 @@ pub struct MonitorDetail {
     pub last_checked_at: Option<String>,
     /// Most recent error text, when the last check failed. Untrusted data.
     pub last_error: Option<String>,
+    /// Structured edge-access diagnosis for the last failed HTTP check.
+    pub last_diagnostic: Option<CheckDiagnosticView>,
     /// HTTP status code of the last check, for `http` monitors. `null` for
     /// non-HTTP checks or when the last probe never got a response.
     pub last_http_status: Option<u16>,
@@ -339,6 +341,18 @@ pub struct CheckTiming {
     pub tls_ms: Option<u16>,
     /// Time to first byte.
     pub ttfb_ms: Option<u16>,
+}
+
+/// Bounded, machine-readable explanation for a failed HTTP observation.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct CheckDiagnosticView {
+    pub kind: String,
+    pub confidence: String,
+    pub provider: Option<String>,
+    pub evidence: Vec<String>,
+    pub remediations: Vec<String>,
+    pub summary: String,
+    pub guidance: String,
 }
 
 /// One latency sample bucket.
@@ -583,6 +597,8 @@ pub struct ProbeOutcome {
     pub http_status: Option<u16>,
     /// Error text when the probe failed. Untrusted data.
     pub error: Option<String>,
+    /// Structured edge-access diagnosis, when a supported signature matched.
+    pub diagnostic: Option<CheckDiagnosticView>,
 }
 
 /// `create_monitor` result.
@@ -952,6 +968,8 @@ pub struct CheckRunResult {
     pub response_size: Option<u32>,
     /// Error text when the probe failed. Untrusted data.
     pub error: Option<String>,
+    /// Structured edge-access diagnosis, when a supported signature matched.
+    pub diagnostic: Option<CheckDiagnosticView>,
 }
 
 /// `pause_monitor` / `resume_monitor` result.

@@ -66,6 +66,10 @@ fn register_descriptions() {
          (followed | limit_exceeded | invalid_location | blocked_scheme)"
     );
     describe_counter!(
+        "uptimepage_http_access_diagnostics_total",
+        "Failed HTTP checks evaluated for edge access interference. Matched rows are labelled by bounded provider/confidence enums; unmatched is emitted only for unexpected 403 responses so signature drift is observable without target labels"
+    );
+    describe_counter!(
         "uptimepage_circuit_breaker_state_changes_total",
         "Circuit breaker state transitions"
     );
@@ -274,6 +278,7 @@ pub mod names {
     pub const CHECKS_TOTAL: &str = "uptimepage_checks_total";
     pub const CHECK_ERRORS: &str = "uptimepage_checks_errors_total";
     pub const CHECK_REDIRECTS: &str = "uptimepage_check_redirects_total";
+    pub const HTTP_ACCESS_DIAGNOSTICS: &str = "uptimepage_http_access_diagnostics_total";
     pub const BREAKER_STATE_CHANGES: &str = "uptimepage_circuit_breaker_state_changes_total";
     pub const STORAGE_WRITES: &str = "uptimepage_storage_writes_total";
     pub const STORAGE_DROPPED: &str = "uptimepage_storage_dropped_results_total";

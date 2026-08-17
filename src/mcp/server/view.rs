@@ -15,12 +15,37 @@ use crate::domain::{CheckSpec, ExpectedStatus, FlowStep};
 use crate::storage::incidents::IncidentBrief;
 
 use crate::mcp::schema::{
-    CheckConfig, CheckTiming, DnsCheckConfig, DomainExpiryCheckConfig, FlowCheckConfig,
-    FlowRunEvidence, FlowRunItem, FlowStepConfig, FlowStepRun, FlowStepTrendItem,
+    CheckConfig, CheckDiagnosticView, CheckTiming, DnsCheckConfig, DomainExpiryCheckConfig,
+    FlowCheckConfig, FlowRunEvidence, FlowRunItem, FlowStepConfig, FlowStepRun, FlowStepTrendItem,
     HeartbeatCheckConfig, HttpCheckConfig, IncidentDetail, IncidentSummary, IncidentUpdateItem,
     IncidentVisibilityResult, PingCheckConfig, ProbeOutcome, RegionHealth, RegionPolicyArg,
     RegionPolicyMode, TcpCheckConfig, TlsCertCheckConfig,
 };
+
+pub(super) fn check_diagnostic(result: &CheckResult) -> Option<CheckDiagnosticView> {
+    result
+        .diagnostic
+        .as_ref()
+        .map(|diagnostic| CheckDiagnosticView {
+            kind: diagnostic.kind.as_str().to_string(),
+            confidence: diagnostic.confidence.as_str().to_string(),
+            provider: diagnostic
+                .provider
+                .map(|provider| provider.as_str().to_string()),
+            evidence: diagnostic
+                .evidence
+                .iter()
+                .map(|item| item.as_str().to_string())
+                .collect(),
+            remediations: diagnostic
+                .remediations
+                .iter()
+                .map(|item| item.as_str().to_string())
+                .collect(),
+            summary: diagnostic.summary(),
+            guidance: diagnostic.guidance().to_string(),
+        })
+}
 
 /// Bindings as the names a human approves, flagging any that deliver nothing.
 /// A binding whose channel is gone is named as deleted rather than dropped from
@@ -108,9 +133,13 @@ pub(super) fn probe_line(p: &ProbeOutcome) -> String {
         (state, Some(code)) => format!("{state}, HTTP {code}"),
         (state, None) => state.to_string(),
     };
-    match &p.error {
+    let result = match &p.error {
         Some(err) => format!("{head} in {}ms — {err}", p.duration_ms),
         None => format!("{head} in {}ms", p.duration_ms),
+    };
+    match &p.diagnostic {
+        Some(diagnostic) => format!("{result}; {}", diagnostic.summary),
+        None => result,
     }
 }
 

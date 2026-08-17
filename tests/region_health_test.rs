@@ -29,6 +29,7 @@ fn result(target_id: Uuid, org_id: Uuid, status: CheckStatus, duration_ms: u32) 
         ttfb_ms: None,
         response_code: Some(200),
         response_size: None,
+        diagnostic: None,
         error: None,
     }
 }

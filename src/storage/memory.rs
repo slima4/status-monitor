@@ -1245,6 +1245,7 @@ mod tests {
             ttfb_ms: Some(20),
             response_code: Some(200),
             response_size: None,
+            diagnostic: None,
             error: None,
         }
     }
