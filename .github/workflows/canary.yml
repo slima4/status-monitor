@@ -1,0 +1,44 @@
+name: canary
+
+# Real public URLs, on a schedule. Deliberately not a PR gate: these depend on
+# third parties who redesign pages and change policies without telling us, so a
+# failure is a signal to look, never a blocked merge. GitHub emails the repo
+# owner when a scheduled run fails on the default branch, which is the whole
+# notification mechanism — there is nothing else watching this.
+#
+# Scheduled workflows are disabled automatically after 60 days without repo
+# activity, so a silent canary on a quiet repo may simply not be running.
+on:
+  schedule:
+    # Off the hour: GitHub queues cron runs and on-the-hour slots are the
+    # congested ones.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: canary
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: short
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.95"
+      - uses: rui314/setup-mold@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: rust-1.95
+          cache-targets: "false"
+      - name: fetch tailwind cli
+        run: scripts/fetch-tailwind.sh
+      # Single-threaded so the control case reports before the others and a
+      # runner with no egress reads as one obvious failure, not three.
+      - name: probe real origins
+        run: cargo test --test canary_test -- --ignored --test-threads=1

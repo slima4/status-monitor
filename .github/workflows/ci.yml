@@ -13,6 +13,8 @@ on:
       # Helm charts compile into nothing; charts.yml lints and validates them.
       - "charts/**"
       - ".github/workflows/charts.yml"
+      # canary.yml only runs on a schedule and gates nothing.
+      - ".github/workflows/canary.yml"
       - ".github/workflows/deploy.yml"
       - ".github/workflows/dco.yml"
       - ".github/workflows/docs-pins.yml"
