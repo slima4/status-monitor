@@ -3,6 +3,12 @@
 
 use crate::web::views::exact_duration;
 
+/// Starting budget for the kinds that open a connection and wait on a third
+/// party's response: http, tls_cert, domain_expiry. Matches what the MCP
+/// surface already defaults to, so a monitor means the same thing whichever
+/// surface created it. The protocol-level kinds stay tighter.
+const ROUND_TRIP_TIMEOUT_MS: u64 = 10_000;
+
 /// One HTTP header in the form's key/value row repeater.
 pub struct HeaderPair {
     pub name: String,
@@ -29,7 +35,10 @@ impl Default for HttpFields {
         Self {
             url: String::new(),
             method: "GET",
-            timeout_ms: 5_000,
+            // A probe crossing continents to a proxied origin has a fat tail:
+            // legitimate responses land past 5s often enough that a tighter
+            // budget reports the probe's impatience as the target being down.
+            timeout_ms: ROUND_TRIP_TIMEOUT_MS,
             // Follow by default: most real targets (apex domains, http→https)
             // 301 to a canonical host, and a fresh monitor pointed at them
             // should report Up, not Down on the redirect.
@@ -192,7 +201,7 @@ impl Default for TlsCertFields {
             server_name: String::new(),
             warn_days: 30,
             critical_days: 7,
-            timeout_ms: 5_000,
+            timeout_ms: ROUND_TRIP_TIMEOUT_MS,
         }
     }
 }
@@ -210,7 +219,7 @@ impl Default for DomainExpiryFields {
             domain: String::new(),
             warn_days: 30,
             critical_days: 7,
-            timeout_ms: 5_000,
+            timeout_ms: ROUND_TRIP_TIMEOUT_MS,
         }
     }
 }

@@ -165,7 +165,7 @@ pub struct HttpCheck {
     pub method: HttpMethod,
     /// Request timeout in milliseconds.
     #[serde(with = "duration_ms")]
-    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 5000)]
+    #[schema(value_type = u64, minimum = 100, maximum = 60000, example = 10000)]
     pub timeout: Duration,
     pub follow_redirects: bool,
     #[schema(maximum = 10)]

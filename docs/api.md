@@ -166,7 +166,7 @@ Tagged enum, `type` discriminator.
   "type": "http",
   "url": "https://example.com/healthz",
   "method": "GET",
-  "timeout": 5000,                              // ms, total request budget
+  "timeout": 10000,                             // ms, total request budget
   "follow_redirects": false,
   "max_redirects": 0,
   "expected_status": { "kind": "exact", "value": 200 },
@@ -282,7 +282,7 @@ Provisioning: a single create mints the ping URL immediately; bulk-created heart
   "server_name": null,         // optional SNI override; defaults to `host`
   "warn_days": 14,
   "critical_days": 7,
-  "timeout": 5000
+  "timeout": 10000
 }
 ```
 

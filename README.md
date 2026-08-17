@@ -261,7 +261,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/targets \
       "type": "http",
       "url": "https://example.com/",
       "method": "GET",
-      "timeout": 5000,
+      "timeout": 10000,
       "follow_redirects": false,
       "max_redirects": 0,
       "expected_status": { "kind": "exact", "value": 200 },
