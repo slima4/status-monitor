@@ -181,8 +181,11 @@ impl ErrorClass {
             | Self::Transport
             // A slow origin starves the body read like any other phase.
             | Self::BodyTimeout
-            // A mid-stream read failure is the connection dying, not us.
+            // A mid-stream read failure is the connection dying, not us, and a
+            // body that will not decode is bytes the origin mangled. Refusing an
+            // oversized one is our decision, so that is `BodyOverCap` below.
             | Self::Body
+            | Self::Decode
             // An open breaker on a target that keeps failing is honest.
             | Self::CircuitOpen
             | Self::DnsFailed
@@ -192,11 +195,9 @@ impl ErrorClass {
             Self::UnexpectedStatus
             | Self::RateLimited
             | Self::BodyMatchFailed
-            // Both caps are settled facts about the page, like a failed match:
-            // a body assertion past the raw cap, or one that inflates past the
-            // decoded cap.
+            // Either cap with a body assertion on it is a settled fact about
+            // the page, like a failed match.
             | Self::BodyOverCap
-            | Self::Decode
             | Self::DnsNoRecord
             | Self::CertChain
             | Self::CertExpiry
@@ -246,8 +247,11 @@ pub fn classify_check_error(raw: &str) -> ErrorClass {
         }
         _ => {}
     }
-    // Matched by stem: the worker interpolates the cap it compiled with.
-    if raw.starts_with("body over the ") && raw.ends_with(" read cap") {
+    // Matched by stem: the worker interpolates the cap it compiled with, and
+    // there are two of them, raw and decoded.
+    if raw.starts_with("body over the ")
+        && (raw.ends_with(" read cap") || raw.ends_with(" decoded cap"))
+    {
         return ErrorClass::BodyOverCap;
     }
     if raw.starts_with("unexpected status ") {
@@ -415,6 +419,7 @@ mod tests {
         ("body timeout", ErrorClass::BodyTimeout),
         ("body match failed", ErrorClass::BodyMatchFailed),
         ("body over the 1 MiB read cap", ErrorClass::BodyOverCap),
+        ("body over the 8 MiB decoded cap", ErrorClass::BodyOverCap),
         ("unexpected status 403", ErrorClass::UnexpectedStatus),
         (
             "rate-limited 429 (Retry-After: 30)",

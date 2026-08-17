@@ -41,8 +41,12 @@ const OVER_CAP_ERROR: &str = "body over the 1 MiB read cap";
 /// Cap on decompressed body size. Bounds the gzip / brotli expansion ratio
 /// against a hostile target that returns a tiny compressed body that explodes
 /// on decode (a "zip bomb"). 8 MiB tolerates the ~8× expansion that real
-/// HTML/JSON pages hit; anything past that is a `decode` failure.
+/// HTML/JSON pages hit.
 const MAX_DECODED_BODY_BYTES: usize = 8 << 20;
+
+/// The decoded twin of `OVER_CAP_ERROR`. A page that compresses well clears the
+/// raw cap and is only refused here, so the two caps need separate wording.
+const OVER_DECODED_CAP_ERROR: &str = "body over the 8 MiB decoded cap";
 
 /// Body snippet cap for the verbose test-check response.
 const PROBE_BODY_SNIPPET_BYTES: usize = 1024;
@@ -422,7 +426,17 @@ async fn finalize(
                 let raw = c.to_bytes();
                 match decode_body(&raw, content_encoding.as_deref()) {
                     Ok(b) => b,
-                    Err(_) => return err_with_ttfb("decode"),
+                    // Same rule as the raw cap: a body nobody asserts on is not
+                    // needed, so refusing to hold it is no fault. A page that
+                    // compresses well can clear the raw cap and still land here.
+                    Err(DecodeError::OverCap) => {
+                        if check.expected_body_contains.is_some() {
+                            return err_with_ttfb(OVER_DECODED_CAP_ERROR);
+                        }
+                        over_cap = true;
+                        Bytes::new()
+                    }
+                    Err(DecodeError::Malformed) => return err_with_ttfb("decode"),
                 }
             }
         }
@@ -830,7 +844,16 @@ fn is_redirect(code: u16) -> bool {
     matches!(code, 301 | 302 | 303 | 307 | 308)
 }
 
-fn decode_body(raw: &HBytes, encoding: Option<&str>) -> std::io::Result<Bytes> {
+/// Why a body could not be decoded. The two are not interchangeable: our own
+/// cap is a decision, malformed bytes are a fault, and only the caller knows
+/// whether the body was needed at all.
+#[derive(Debug, PartialEq, Eq)]
+enum DecodeError {
+    OverCap,
+    Malformed,
+}
+
+fn decode_body(raw: &HBytes, encoding: Option<&str>) -> std::result::Result<Bytes, DecodeError> {
     match encoding {
         // Typical gzip/brotli ratios on text are 3-5×; pre-size larger to
         // avoid re-allocation in the decoder loop. Read +1 past the cap so a
@@ -842,18 +865,20 @@ fn decode_body(raw: &HBytes, encoding: Option<&str>) -> std::io::Result<Bytes> {
     }
 }
 
-fn decode_capped<R: std::io::Read>(reader: R, raw_len: usize) -> std::io::Result<Bytes> {
+fn decode_capped<R: std::io::Read>(
+    reader: R,
+    raw_len: usize,
+) -> std::result::Result<Bytes, DecodeError> {
     use std::io::Read;
     // Pre-size for the typical 4× expansion ratio without exceeding the cap.
     let capacity = raw_len.saturating_mul(4).min(MAX_DECODED_BODY_BYTES);
     let mut out = Vec::with_capacity(capacity);
     reader
         .take((MAX_DECODED_BODY_BYTES as u64) + 1)
-        .read_to_end(&mut out)?;
+        .read_to_end(&mut out)
+        .map_err(|_| DecodeError::Malformed)?;
     if out.len() > MAX_DECODED_BODY_BYTES {
-        return Err(std::io::Error::other(format!(
-            "decoded body exceeded {MAX_DECODED_BODY_BYTES} bytes"
-        )));
+        return Err(DecodeError::OverCap);
     }
     Ok(Bytes::from(out))
 }
@@ -1267,10 +1292,10 @@ mod tests {
         }
         let compressed = encoder.finish().unwrap();
         let raw = HBytes::from(compressed);
-        let err = decode_body(&raw, Some("gzip")).expect_err("bomb must be rejected");
-        assert!(
-            err.to_string().contains("exceeded"),
-            "expected exceeded error, got: {err}"
+        assert_eq!(
+            decode_body(&raw, Some("gzip")),
+            Err(DecodeError::OverCap),
+            "a bomb is refused by our cap, not mistaken for mangled bytes"
         );
     }
 
@@ -1358,5 +1383,43 @@ mod tests {
         let raw = HBytes::from(compressed);
         let out = decode_body(&raw, Some("gzip")).expect("small gzip must succeed");
         assert!(out.starts_with(b"compressible"));
+    }
+
+    /// A page that compresses well clears the raw cap and is only refused on
+    /// decode. Telling that decision apart from mangled bytes is what lets the
+    /// caller leave a status-only check alone.
+    #[test]
+    fn a_well_compressing_oversized_body_is_over_cap_not_malformed() {
+        use std::io::Write;
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder
+            .write_all(&vec![b'a'; MAX_DECODED_BODY_BYTES + 1])
+            .unwrap();
+        let compressed = encoder.finish().unwrap();
+        assert!(
+            compressed.len() < MAX_RAW_BODY_BYTES,
+            "the raw cap must not be what rejects this body"
+        );
+        assert_eq!(
+            decode_body(&HBytes::from(compressed), Some("gzip")),
+            Err(DecodeError::OverCap)
+        );
+    }
+
+    #[test]
+    fn mangled_encoding_stays_a_fault() {
+        let raw = HBytes::from_static(b"this is not gzip");
+        assert_eq!(decode_body(&raw, Some("gzip")), Err(DecodeError::Malformed));
+    }
+
+    #[test]
+    fn both_read_caps_name_their_real_size() {
+        assert!(OVER_CAP_ERROR.contains(&format!("{} MiB", MAX_RAW_BODY_BYTES >> 20)));
+        assert!(OVER_DECODED_CAP_ERROR.contains(&format!("{} MiB", MAX_DECODED_BODY_BYTES >> 20)));
+        assert_eq!(
+            crate::domain::classify_check_error(OVER_DECODED_CAP_ERROR),
+            crate::domain::ErrorClass::BodyOverCap,
+            "the decoded cap must classify like the raw one"
+        );
     }
 }
