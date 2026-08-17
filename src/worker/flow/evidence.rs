@@ -7,6 +7,7 @@ use chromiumoxide::Page;
 use chromiumoxide::cdp::js_protocol::runtime::EventConsoleApiCalled;
 use futures::StreamExt;
 
+use crate::api::redaction::scrub_url;
 use crate::domain::agent_wire::{ConsoleLine, FlowEvidence};
 
 /// Caps, so a page looping console errors can't return an unbounded payload.
@@ -117,7 +118,11 @@ impl EvidenceCollector {
         let mut buffer = self.buffer.lock().unwrap();
 
         FlowEvidence {
-            final_url: final_url.map(|u| truncate(&u, MAX_URL_CHARS)),
+            // Only the URL is scrubbed by key here. `title`, `text_snippet` and
+            // the console are free text with no such structure: they carry
+            // whatever the page said, and lose only the org's own secrets, in
+            // `scrub_flow_evidence` on the way to storage.
+            final_url: final_url.map(|u| truncate(&scrub_url(&u), MAX_URL_CHARS)),
             title: title
                 .map(|t| truncate(&t, MAX_LINE_CHARS))
                 .filter(|t| !t.is_empty()),

@@ -28,10 +28,162 @@ pub fn redact_secrets(s: &mut String, secrets: &[String]) {
     }
 }
 
+/// Words that make a key a credential when they stand alone as one of its
+/// segments, so `auth_code`, `verification-code` and `oauth_state` are caught
+/// while `codeword` stays the locator it is. Too short to match as substrings.
+const SECRET_KEY_SEGMENTS: [&str; 9] = [
+    "code", "state", "sid", "jwt", "pw", "otp", "ticket", "key", "sig",
+];
+
+/// Substrings that make a key a credential wherever they appear, matched against
+/// the key with punctuation removed, so the endless spellings (`client_secret`,
+/// `oauth_token`, `X-Api-Key`, `SAMLResponse`) need no enumerating.
+const SECRET_PARAMS_CONTAINING: [&str; 11] = [
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "signature",
+    "assertion",
+    "session",
+    "apikey",
+    "samlresponse",
+    "credential",
+    "bearer",
+];
+
+pub(crate) fn is_secret_param(key: &str) -> bool {
+    let compact: String = key
+        .chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    SECRET_PARAMS_CONTAINING.iter().any(|s| compact.contains(s))
+        || key_words(key)
+            .iter()
+            .any(|w| SECRET_KEY_SEGMENTS.contains(&w.as_str()))
+}
+
+/// Splits a key into its words, on punctuation and on camelCase humps alike, so
+/// `oobCode` and `auth_code` both read as carrying the word `code` while
+/// `codeword` stays one word. Firebase, Auth0 and SAML all spell their callback
+/// parameters in camelCase, so ignoring humps leaves live credentials in place.
+fn key_words(key: &str) -> Vec<String> {
+    let chars: Vec<char> = key.chars().collect();
+    let mut words = Vec::new();
+    let mut word = String::new();
+    for (i, &c) in chars.iter().enumerate() {
+        if !c.is_ascii_alphanumeric() {
+            if !word.is_empty() {
+                words.push(std::mem::take(&mut word));
+            }
+            continue;
+        }
+        let prev = i.checked_sub(1).map(|j| chars[j]);
+        let next = chars.get(i + 1).copied();
+        // A hump is `oobCode` (lower/digit then upper) or `SAMLResponse` (a run
+        // of uppercase whose last letter starts the next word).
+        let hump = c.is_ascii_uppercase()
+            && (prev.is_some_and(|p| p.is_ascii_lowercase() || p.is_ascii_digit())
+                || (prev.is_some_and(|p| p.is_ascii_uppercase())
+                    && next.is_some_and(|n| n.is_ascii_lowercase())));
+        if hump && !word.is_empty() {
+            words.push(std::mem::take(&mut word));
+        }
+        word.push(c.to_ascii_lowercase());
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+/// Replaces the value of every credential-keyed pair in one `&`-joined pair
+/// list, leaving every other byte exactly as the page produced it. Byte fidelity
+/// is the point, and the reason this works on the raw string rather than through
+/// `Url`: org secrets are stripped by literal match in
+/// [`redact_secrets`], and `Url`'s own serialization
+/// re-encodes characters like `'`, which would hide a secret from that pass and
+/// persist it.
+fn scrub_pairs(pairs: &str) -> String {
+    pairs
+        .split('&')
+        .map(|pair| match pair.split_once('=') {
+            Some((k, _)) if is_secret_param(k) => format!("{k}={REDACTED}"),
+            _ => pair.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+/// A hash route carries its own query (`#/callback?code=…`), so the pair list
+/// starts after the route's `?` rather than at the start of the fragment. A
+/// fragment with no pairs anywhere is a route, and stays whole.
+fn scrub_fragment(fragment: &str) -> String {
+    match fragment.split_once('?') {
+        Some((route, params)) => format!("{route}?{}", scrub_pairs(params)),
+        None if fragment.contains('=') => scrub_pairs(fragment),
+        None => fragment.to_owned(),
+    }
+}
+
+/// Drops any `user:password@` from the authority of a URL's head.
+fn strip_userinfo(head: &str) -> String {
+    let Some((scheme, rest)) = head.split_once("://") else {
+        return head.to_owned();
+    };
+    let (authority, path) = match rest.find('/') {
+        Some(i) => rest.split_at(i),
+        None => (rest, ""),
+    };
+    match authority.rsplit_once('@') {
+        Some((_, host)) => format!("{scheme}://{host}{path}"),
+        None => head.to_owned(),
+    }
+}
+
+/// Rewrites credentials out of a URL, keeping the parts that say where the flow
+/// ended up. Splits the raw string rather than round-tripping through `Url`, so
+/// that every byte it does not redact reaches storage unchanged; `Url::parse` is
+/// the validity gate only. Something unparseable keeps just its path-ish head,
+/// since nothing can be reasoned about the rest.
+pub(crate) fn scrub_url(raw: &str) -> String {
+    let (before_fragment, fragment) = match raw.split_once('#') {
+        Some((b, f)) => (b, Some(f)),
+        None => (raw, None),
+    };
+    let (head, query) = match before_fragment.split_once('?') {
+        Some((h, q)) => (h, Some(q)),
+        None => (before_fragment, None),
+    };
+    // Userinfo goes even here: a URL the browser reported but `url` rejects
+    // (an out-of-range port, say) must not keep the one thing this removes.
+    if url::Url::parse(raw).is_err() {
+        return strip_userinfo(head);
+    }
+
+    let mut out = strip_userinfo(head);
+    if let Some(query) = query {
+        out.push('?');
+        out.push_str(&scrub_pairs(query));
+    }
+    if let Some(fragment) = fragment {
+        out.push('#');
+        out.push_str(&scrub_fragment(fragment));
+    }
+    out
+}
+
 /// Strip resolved secrets from what a failed flow left on the page. The single
 /// place both probe paths scrub evidence: a test run before it is shown back,
 /// and a scheduled run before it is stored.
 pub fn scrub_flow_evidence(ev: &mut FlowEvidence, secrets: &[String]) {
+    // Runs whatever the org's variables hold, and wherever the evidence came
+    // from: a probe still on an older build reports the raw URL, and this is the
+    // boundary that writes the row.
+    if let Some(url) = ev.final_url.as_mut() {
+        *url = scrub_url(url);
+    }
     if secrets.is_empty() {
         return;
     }
@@ -163,12 +315,145 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn scrub_url_drops_an_oauth_code_and_keeps_the_location() {
+        let got = scrub_url("https://myapps.example.com/oauth/?code=c1786972104789&tenant=acme");
+        assert!(
+            got.starts_with("https://myapps.example.com/oauth/?"),
+            "{got}"
+        );
+        assert!(
+            !got.contains("c1786972104789"),
+            "code must not survive: {got}"
+        );
+        assert!(got.contains("tenant=acme"), "locators stay: {got}");
+    }
+
+    #[test]
+    fn scrub_url_matches_keys_case_insensitively_and_leaves_others() {
+        let got = scrub_url("https://x.test/cb?Code=abc&State=xyz&page=2&codeword=keep");
+        assert!(!got.contains("abc") && !got.contains("xyz"), "{got}");
+        assert!(got.contains("page=2"), "{got}");
+        // Substring matches would eat a legitimate parameter.
+        assert!(got.contains("codeword=keep"), "{got}");
+    }
+
+    #[test]
+    fn scrub_url_redacts_an_implicit_grant_fragment() {
+        let got = scrub_url("https://x.test/cb#access_token=abc&expires_in=3600");
+        assert!(!got.contains("abc"), "{got}");
+        assert!(got.contains("expires_in=3600"), "keeps the rest: {got}");
+        // A plain anchor is a locator, not a credential.
+        assert_eq!(
+            scrub_url("https://x.test/docs#install"),
+            "https://x.test/docs#install"
+        );
+        // Nor is a hash route that merely carries parameters.
+        assert_eq!(
+            scrub_url("https://x.test/app#/dashboard?tab=alerts"),
+            "https://x.test/app#/dashboard?tab=alerts"
+        );
+    }
+
+    #[test]
+    fn scrub_url_keeps_only_the_head_of_something_unparseable() {
+        assert_eq!(scrub_url("not a url?code=secret"), "not a url");
+    }
+
+    #[test]
+    fn scrub_url_leaves_a_surviving_value_byte_identical() {
+        // Org secrets are stripped downstream by literal match, so re-encoding
+        // a value it has yet to see would hide the secret and persist it.
+        let raw = "https://app.example.com/login?pw=pa55w/rd!&next=/home%20page";
+        let got = scrub_url(raw);
+        assert!(
+            !got.contains("pa55w/rd!"),
+            "a credential-shaped key is redacted: {got}"
+        );
+        let kept = scrub_url("https://app.example.com/login?next=/a+b/c!~d*e'f(g)&q=x:y@z");
+        assert_eq!(
+            kept, "https://app.example.com/login?next=/a+b/c!~d*e'f(g)&q=x:y@z",
+            "every non-secret byte must survive untouched"
+        );
+    }
+
+    #[test]
+    fn scrub_url_covers_the_spellings_a_name_list_would_miss() {
+        for raw in [
+            "https://x.test/cb?client_secret=abc",
+            "https://x.test/cb?oauth_token=abc",
+            "https://x.test/acs?SAMLResponse=abc",
+            "https://x.test/cb?X-Api-Key=abc",
+            "https://x.test/cb?session_id=abc",
+            "https://x.test/cb?passwd=abc",
+            // Compound names: the credential word is one segment of the key,
+            // which is how magic-link and OTP callbacks spell it.
+            "https://x.test/cb?auth_code=abc",
+            // camelCase, which is how Firebase email-link sign-in, Auth0 and
+            // SAML actually spell theirs. `oobCode` is account takeover.
+            "https://x.test/__/auth/action?mode=signIn&oobCode=abc",
+            "https://x.test/cb?authCode=abc",
+            "https://x.test/cb?oauthState=abc",
+            "https://x.test/cb?loginTicket=abc",
+            "https://x.test/cb?magicCode=abc",
+            "https://x.test/cb?apiKey=abc",
+            "https://x.test/cb?verification-code=abc",
+            "https://x.test/cb?otp=abc",
+            "https://x.test/cb?oauth_state=abc",
+            "https://x.test/cb?x_sig=abc",
+        ] {
+            let got = scrub_url(raw);
+            assert!(!got.contains("abc"), "{raw} -> {got}");
+        }
+    }
+
+    #[test]
+    fn scrub_url_redacts_a_code_inside_a_hash_route() {
+        // A hash-routed SPA callback puts the query after the route, so the
+        // pair list does not start at the fragment's first character.
+        let got = scrub_url("https://app.example.com/#/callback?code=AUTH_CODE&state=xyz");
+        assert!(!got.contains("AUTH_CODE"), "{got}");
+        assert!(!got.contains("xyz"), "{got}");
+        assert!(got.contains("#/callback?"), "the route survives: {got}");
+    }
+
+    #[test]
+    fn scrub_url_strips_userinfo_even_when_the_url_will_not_parse() {
+        let got = scrub_url("https://u:pw@host:99999/x");
+        assert!(!got.contains("pw@") && !got.contains("u:"), "{got}");
+    }
+
+    #[test]
+    fn key_words_splits_humps_without_inventing_them() {
+        assert_eq!(key_words("oobCode"), vec!["oob", "code"]);
+        assert_eq!(key_words("SAMLResponse"), vec!["saml", "response"]);
+        assert_eq!(key_words("auth_code"), vec!["auth", "code"]);
+        assert_eq!(key_words("X-Api-Key"), vec!["x", "api", "key"]);
+        // One word stays one word, so a locator keeps its value.
+        assert_eq!(key_words("codeword"), vec!["codeword"]);
+    }
+
+    #[test]
+    fn scrub_url_keeps_locators_that_merely_read_like_credentials() {
+        let got = scrub_url("https://x.test/p?codeword=keep&zipcode=12345&mode=signIn&page=2");
+        for kept in ["codeword=keep", "zipcode=12345", "mode=signIn", "page=2"] {
+            assert!(got.contains(kept), "{kept} must survive: {got}");
+        }
+    }
+
+    #[test]
+    fn scrub_url_strips_userinfo() {
+        let got = scrub_url("https://user:pa55word@app.example.com/login");
+        assert!(!got.contains("pa55word") && !got.contains("user@"), "{got}");
+        assert!(got.contains("app.example.com/login"), "{got}");
+    }
+
     use std::collections::HashMap;
     use std::time::Duration;
 
     use crate::domain::{CheckSpec, ExpectedStatus, HttpCheck, HttpMethod};
 
-    use super::{REDACTED, redact_check, redact_check_for_public};
+    use super::{REDACTED, key_words, redact_check, redact_check_for_public, scrub_url};
 
     fn http_with_secrets() -> CheckSpec {
         CheckSpec::Http(HttpCheck {
