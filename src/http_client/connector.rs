@@ -131,7 +131,9 @@ fn dns_reason(e: &anyhow::Error) -> &'static str {
     }
 }
 
-fn tcp_reason(io: &io::Error) -> &'static str {
+/// Shared with the TCP and TLS-cert kinds through `worker::connect_via_guard`.
+/// Ping builds its own message and is not normalised through here.
+pub(crate) fn tcp_reason(io: &io::Error) -> &'static str {
     match io.kind() {
         io::ErrorKind::ConnectionRefused => "connection refused",
         io::ErrorKind::HostUnreachable => "host unreachable",
@@ -142,7 +144,7 @@ fn tcp_reason(io: &io::Error) -> &'static str {
     }
 }
 
-fn tls_reason(io: &io::Error) -> &'static str {
+pub(crate) fn tls_reason(io: &io::Error) -> &'static str {
     use rustls::CertificateError;
     let Some(rustls::Error::InvalidCertificate(cert)) =
         io.get_ref().and_then(|e| e.downcast_ref::<rustls::Error>())

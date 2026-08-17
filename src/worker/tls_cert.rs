@@ -13,6 +13,7 @@ use x509_parser::prelude::*;
 use crate::domain::{CheckResult, CheckStatus, TlsCertCheck};
 use crate::http_client::HttpClients;
 use crate::http_client::client::NoVerify;
+use crate::http_client::connector::tls_reason;
 use crate::worker::connect_via_guard;
 
 pub async fn execute_tls_cert_check(
@@ -94,7 +95,13 @@ async fn run_check(check: &TlsCertCheck, clients: &HttpClients) -> anyhow::Resul
     let connector = TlsConnector::from(Arc::new(tls_config));
 
     let handshake_start = Instant::now();
-    let tls = connector.connect(dns_name, stream).await?;
+    // Same reason the connect above is normalised: a reset mid-handshake would
+    // otherwise reach the customer as a raw errno.
+    let tls = connector.connect(dns_name, stream).await.map_err(|e| {
+        tracing::debug!(host = %check.host, error = %e, "tls handshake failed");
+        let reason = tls_reason(&e);
+        anyhow::Error::new(e).context(reason)
+    })?;
     let handshake_ms = handshake_start.elapsed().as_millis() as u32;
 
     let (_io, session) = tls.get_ref();

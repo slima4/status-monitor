@@ -29,6 +29,7 @@ use uuid::Uuid;
 
 use crate::domain::{CheckResult, CheckSpec};
 use crate::http_client::HttpClients;
+use crate::http_client::connector::tcp_reason;
 use crate::worker::domain_expiry::DomainExpiryRuntime;
 
 /// Off-hot-path eviction over a `DashMap<K, Arc<T>>`. Drops entries whose
@@ -128,9 +129,14 @@ pub(crate) async fn connect_via_guard(
             Err(e) => last_err = Some(e),
         }
     }
-    Err(last_err
-        .expect("allowed_addrs yields at least one address")
-        .into())
+    // The raw `io::Error` Display carries a platform-specific errno, which no
+    // error class can name and the customer should never read. Kept as the
+    // source so an operator can still tell a refused port from a blocked one:
+    // `context` is what `to_string` yields, the errno survives in `{:?}`.
+    let err = last_err.expect("allowed_addrs yields at least one address");
+    tracing::debug!(host, port, error = %err, "connect failed");
+    let reason = tcp_reason(&err);
+    Err(anyhow::Error::new(err).context(reason))
 }
 
 pub async fn execute(
