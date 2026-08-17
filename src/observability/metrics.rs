@@ -165,6 +165,22 @@ fn register_descriptions() {
         "Checks that returned up in a region over the recent sampling window, labelled by region. Divide by uptimepage_region_checks_window for the success ratio"
     );
     describe_gauge!(
+        "uptimepage_check_error_class_checks",
+        "Failed checks over the recent sampling window, labelled by error class and by the family the class belongs to (internal/transport/verdict/other). Brain-side count from ClickHouse across every org. Every known class is reported each sweep, zero included, so a series never freezes at a stale value"
+    );
+    describe_gauge!(
+        "uptimepage_check_error_class_top_monitor_share",
+        "Fraction of an error class's checks contributed by its single largest monitor over the recent sampling window, 0..1, labelled by class and family. A lower bound where one class spans several raw error strings. Near 1 on a family=internal class means one monitor owns a probe-side failure, which is the stuck-monitor signal; the monitor's id goes to the log, never to a label"
+    );
+    describe_gauge!(
+        "uptimepage_check_error_class_sweep_age_seconds",
+        "Seconds since the error-class sweep last completed. Every class gauge holds its last value when a sweep fails, so an alert built on them must gate on this to tell a quiet fleet from a sweep that stopped running"
+    );
+    describe_gauge!(
+        "uptimepage_check_error_class_truncated",
+        "1 when the error-class sweep hit its row cap, else 0. Raw error strings interpolate hostnames and IPs, so their count grows with the fleet; past the cap a low-volume class publishes as 0 and its alert becomes unfireable"
+    );
+    describe_gauge!(
         "uptimepage_region_check_latency_p95_ms",
         "Approximate p95 check latency in a region over the recent sampling window, in milliseconds, labelled by region. Goes stale for a dark region (no new rows), so gate dashboard panels on uptimepage_region_agents_up"
     );
@@ -318,6 +334,11 @@ pub mod names {
     pub const REGION_CHECKS_WINDOW: &str = "uptimepage_region_checks_window";
     pub const REGION_CHECKS_UP_WINDOW: &str = "uptimepage_region_checks_up_window";
     pub const REGION_CHECK_LATENCY_P95_MS: &str = "uptimepage_region_check_latency_p95_ms";
+    pub const CHECK_ERROR_CLASS_CHECKS: &str = "uptimepage_check_error_class_checks";
+    pub const CHECK_ERROR_CLASS_TOP_MONITOR_SHARE: &str =
+        "uptimepage_check_error_class_top_monitor_share";
+    pub const CHECK_ERROR_CLASS_SWEEP_AGE: &str = "uptimepage_check_error_class_sweep_age_seconds";
+    pub const CHECK_ERROR_CLASS_TRUNCATED: &str = "uptimepage_check_error_class_truncated";
     pub const SCHEDULER_REFRESH_FAILED: &str = "uptimepage_scheduler_refresh_failed_total";
     pub const SCHEDULER_CONSECUTIVE_REFRESH_FAILURES: &str =
         "uptimepage_scheduler_consecutive_refresh_failures";

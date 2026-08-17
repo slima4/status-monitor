@@ -205,6 +205,101 @@ resource "grafana_rule_group" "pipeline" {
     }
   }
 
+  # One monitor owning a class the node could not run at all. family=internal
+  # is exactly that — no dependence on what the target did, so unlike
+  # transport and verdict errors it has no honest steady state. Pairing it
+  # with a near-total share separates a defect concentrated in one monitor
+  # from an outage spread across the fleet. Warning: monitoring is lying
+  # about one monitor, nothing is lost.
+  #
+  # The floor is 10, not a fraction of the fleet: internal classes are rare
+  # by construction, and a monitor on the 60s heartbeat floor in one region
+  # only produces ~15 checks per 15m window. The freshness gate is load
+  # bearing — every class gauge holds its last value when a sweep fails, so
+  # without it a stalled sweep keeps this rule firing on stale data forever.
+  # Confirm the numbers against real class volumes once there is history.
+  rule {
+    name           = "UptimepageProbeErrorConcentrated"
+    condition      = "C"
+    for            = "2h"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: one monitor owns a probe-side error class"
+      description = "a single monitor accounts for ~all checks in a family=internal error class for 2h — the probe is failing on its own account, not because the target is down. Search the app log for the class to get the monitor id. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "uptimepage_check_error_class_top_monitor_share{family=\"internal\"} >= 0.9 and uptimepage_check_error_class_checks{family=\"internal\"} >= 10 and on() (uptimepage_check_error_class_sweep_age_seconds < 300)"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # The error-class sweep is stuck at its row cap. Raw error strings carry
+  # hostnames and IPs, so their count grows with the fleet; past the cap a
+  # low-volume class publishes as 0 and ProbeErrorConcentrated above simply
+  # stops being able to fire. Without this the coverage loss is invisible,
+  # because a blind alert and a quiet fleet look identical. for = 1h so a
+  # transient burst of distinct errors does not page.
+  rule {
+    name           = "UptimepageErrorClassSweepTruncated"
+    condition      = "C"
+    for            = "1h"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: error-class sweep is hitting its row cap"
+      description = "the sweep has been truncating for 1h, so low-volume error classes report 0 and the concentration alert cannot fire. Raise the cap or scope the query. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "uptimepage_check_error_class_truncated > 0"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
   # Result queue backing up. Brief depth is normal; sustained high
   # depth is backpressure that precedes dropped results (which
   # ResultsLost catches only once data is already lost). Warning,

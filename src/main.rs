@@ -240,6 +240,7 @@ async fn main() -> Result<()> {
     let ch_client_for_purge = clickhouse_client.clone();
     let ch_client_for_sampler = clickhouse_client.clone();
     let ch_client_for_region = clickhouse_client.clone();
+    let ch_client_for_error_classes = clickhouse_client.clone();
     let results_store: Arc<dyn ResultsStore> =
         Arc::new(ClickhouseResultsStore::from_client(clickhouse_client));
 
@@ -434,6 +435,12 @@ async fn main() -> Result<()> {
         let ch = ch_client_for_region;
         let token = root.clone();
         tokio::spawn(async move { uptimepage::observability::region_health::run(ch, token).await })
+    };
+
+    let error_class_handle: JoinHandle<()> = {
+        let ch = ch_client_for_error_classes;
+        let token = root.clone();
+        tokio::spawn(async move { uptimepage::observability::error_classes::run(ch, token).await })
     };
 
     // Incident paging worker: the single notification path. Always running — it
@@ -829,6 +836,7 @@ async fn main() -> Result<()> {
             agent_health_handle,
             inventory_handle,
             region_health_handle,
+            error_class_handle,
             silence_sweep_handle,
             escalation_engine_handle,
             purge_handle,

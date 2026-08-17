@@ -88,8 +88,10 @@ sampled in `src/observability/sampler.rs`. After any edit run the gate
 dashboards/grafana/check-metric-names.sh
 ```
 
-It fails (non-zero) if a panel references a name absent from the binary,
-**or** if a registered metric name has silently drifted out of
-`docs/metrics.md` — closing both directions of the drift the metric
-table is prone to. Wire it into pre-commit / CI to keep the doc table
-from rotting.
+It fails (non-zero) if a panel **or an alert rule in `terraform/alerts.tf`**
+references a name absent from the binary, **or** if a registered metric
+name has silently drifted out of `docs/metrics.md` — closing both
+directions of the drift the metric table is prone to. The alert check
+matters most: a misspelled name there returns no series, which the rules
+read as `no_data = OK`, so the rule looks healthy and can never fire.
+Wire it into pre-commit / CI to keep the doc table from rotting.

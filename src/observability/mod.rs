@@ -1,4 +1,5 @@
 pub mod agent_health;
+pub mod error_classes;
 pub mod http_metrics;
 pub mod inventory;
 pub mod metrics;

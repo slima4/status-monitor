@@ -4,6 +4,9 @@
 #   2. a uptimepage_* name in docs/metrics.md is absent from the binary
 #   3. a metric name registered in src/observability/metrics.rs is missing
 #      from the docs/metrics.md series table
+#   4. an alert rule queries a uptimepage_* name absent from the binary. A
+#      misspelled name returns no series, which the rules read as no_data =
+#      OK — a rule that looks healthy and can never fire.
 # Run from anywhere; paths resolve relative to the repo root.
 set -euo pipefail
 
@@ -11,6 +14,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 
 dash_dir="$root/terraform/dashboards"
+alerts_tf="$root/terraform/alerts.tf"
 metrics_rs="$root/src/observability/metrics.rs"
 metrics_md="$root/docs/metrics.md"
 
@@ -48,7 +52,13 @@ for n in "${code_names[@]}"; do
   grep -q "$n" "$metrics_md" || emit "metric '$n' registered in code but missing from docs/metrics.md"
 done
 
+# 4. alert rules -> binary. Non-uptimepage series (node_exporter and friends)
+# are out of scope: the grep only matches our own prefix.
+while read -r n; do
+  contains "$n" "${code_names[@]}" || emit "alert rule queries '$n' — not registered in src/observability/metrics.rs"
+done < <(grep -ohE 'uptimepage_[a-z0-9_]+' "$alerts_tf" | sed -E -e "$strip_suffix" -e "$drop_globs" | sort -u)
+
 if [[ $fail -eq 0 ]]; then
-  echo "metric names: dashboard <-> code <-> docs all consistent"
+  echo "metric names: dashboard <-> alerts <-> code <-> docs all consistent"
 fi
 exit $fail
