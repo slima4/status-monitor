@@ -1,4 +1,5 @@
 use crate::email::templates::html_escape;
+use crate::email::templates::layout::{self, ButtonStyle, Page};
 use crate::email::trait_def::RenderedEmail;
 
 pub fn render(
@@ -29,32 +30,36 @@ pub fn render(
     let by_org_html = org_name
         .map(|o| format!(" by <strong>{}</strong>", html_escape(o)))
         .unwrap_or_default();
-    let decline_html = decline_url
-        .map(|u| {
-            format!(
-                " Didn't expect this? <a href=\"{}\">Block this address</a>.",
-                html_escape(u)
-            )
-        })
-        .unwrap_or_default();
 
-    let html_body = format!(
-        "<!doctype html>\n\
-         <html><head><meta charset=\"utf-8\"><title>{subject_esc}</title></head>\n\
-         <body style=\"font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;color:#222;\">\n\
-         <h2 style=\"margin-top:0;\">Verify this address for {site_esc} alerts</h2>\n\
-         <p>This address was added as the alert channel <strong>{channel_esc}</strong>{by_org_html}.</p>\n\
-         <p style=\"margin:1.5rem 0;\">\n\
-           <a href=\"{url_attr}\" style=\"background:#0b66e4;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;\">Verify address</a>\n\
-         </p>\n\
-         <p style=\"font-size:0.9em;color:#555;\">This link expires in <strong>{expires_hours}</strong> hours and can only be used once.</p>\n\
-         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">No alerts are sent until this address is confirmed.{decline_html}</p>\n\
-         </body></html>\n",
-        subject_esc = html_escape(&subject),
-        site_esc = html_escape(site_name),
-        channel_esc = html_escape(channel_name),
-        url_attr = html_escape(verify_url),
-    );
+    let mut body = layout::paragraph(&format!(
+        "This address was added as the alert channel <strong>{channel}</strong>{by_org_html}. \
+         Confirm it to start receiving alerts.",
+        channel = html_escape(channel_name),
+    ));
+    body.push_str(&layout::button(
+        verify_url,
+        "Verify address",
+        ButtonStyle::Solid,
+    ));
+    body.push_str(&layout::fine_print(&format!(
+        "This link expires in <strong>{expires_hours}</strong> hours and can only be used once."
+    )));
+
+    let mut footnote = "No alerts are sent until this address is confirmed.".to_string();
+    if let Some(url) = decline_url {
+        footnote.push_str(" Didn't expect this? ");
+        footnote.push_str(&layout::quiet_link(url, "Block this address"));
+        footnote.push('.');
+    }
+
+    let html_body = layout::render(Page {
+        title: &subject,
+        preheader: "Confirm this address before any alert is delivered to it.",
+        site_name,
+        header: layout::wordmark(site_name, "Verify this address for alerts"),
+        body,
+        footnote: Some(layout::fine_print(&footnote)),
+    });
 
     RenderedEmail {
         subject,
@@ -96,5 +101,6 @@ mod tests {
         );
         assert!(r.text_body.contains("alert channel \"Ops\" on Uptimepage"));
         assert!(!r.text_body.contains(" by "));
+        assert!(!r.html_body.contains("Block this address"));
     }
 }

@@ -3,6 +3,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::domain::{IncidentSeverity, IncidentUrgency, NotificationReason};
+use crate::text::{single_line, truncate_chars};
 
 /// The incident-shaped payload handed to a transport. Serialized as-is for the
 /// generic webhook channel.
@@ -36,13 +37,6 @@ pub struct IncidentNotice {
 /// push everything after it — including the flapping note — past the
 /// transports' truncation.
 const MAX_ERROR_CHARS: usize = 200;
-
-fn clip(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    s.chars().take(max).collect::<String>() + "…"
-}
 
 impl IncidentNotice {
     /// Human label: monitor name, else title, else a generic fallback.
@@ -99,28 +93,27 @@ impl IncidentNotice {
         }
     }
 
-    fn body(&self) -> String {
-        let link = self
-            .url
-            .as_deref()
-            .map(|u| format!("\n{u}"))
-            .unwrap_or_default();
-        let regions = self
-            .region_summary(|r| r.to_string(), " · ")
-            .map(|s| format!("\n{s}"))
-            .unwrap_or_default();
+    /// The state in one line: what, how bad, and why. Single owner of that
+    /// wording, so a subject line and a chat title never disagree. Flattened,
+    /// because a customer's error text reaches a mail header and a paging
+    /// summary through here.
+    pub fn summary(&self) -> String {
+        single_line(&self.summary_text())
+    }
+
+    fn summary_text(&self) -> String {
         match self.reason {
             NotificationReason::Opened
             | NotificationReason::Escalated
             | NotificationReason::Reopened => format!(
-                "{label} — {sev} incident {state}{err}{regions}{link}",
+                "{label} — {sev} incident {state}{err}",
                 label = self.label(),
                 sev = self.severity.as_db_str(),
                 state = self.open_state(),
                 err = self
                     .error_sample
                     .as_deref()
-                    .map(|e| format!(": {}", clip(e, MAX_ERROR_CHARS)))
+                    .map(|e| format!(": {}", truncate_chars(e, MAX_ERROR_CHARS)))
                     .unwrap_or_default(),
             ),
             NotificationReason::Resolved => {
@@ -128,20 +121,37 @@ impl IncidentNotice {
                     .duration_minutes()
                     .map(|m| format!(" after {m}m"))
                     .unwrap_or_default();
-                format!(
-                    "{label} — incident RESOLVED{dur}{link}",
-                    label = self.label()
-                )
+                format!("{label} — incident RESOLVED{dur}", label = self.label())
             }
             NotificationReason::NoData => format!(
-                "{label} — NO DATA: monitoring interrupted, no check results received{link}",
+                "{label} — NO DATA: monitoring interrupted, no check results received",
                 label = self.label()
             ),
             NotificationReason::DataResumed => format!(
-                "{label} — monitoring RESUMED, receiving check results again{link}",
+                "{label} — monitoring RESUMED, receiving check results again",
                 label = self.label()
             ),
         }
+    }
+
+    fn body(&self) -> String {
+        let mut out = self.summary();
+        // Only an open incident names its regions; a resolved one is up everywhere.
+        if matches!(
+            self.reason,
+            NotificationReason::Opened
+                | NotificationReason::Escalated
+                | NotificationReason::Reopened
+        ) && let Some(regions) = self.region_summary(|r| r.to_string(), " · ")
+        {
+            out.push('\n');
+            out.push_str(&regions);
+        }
+        if let Some(url) = self.url.as_deref() {
+            out.push('\n');
+            out.push_str(url);
+        }
+        out
     }
 }
 
@@ -198,6 +208,21 @@ mod tests {
         );
         assert!(with_note.ends_with("alerts are held while this settles"));
     }
+    /// The summary lands in a mail header and a PagerDuty `payload.summary`,
+    /// and the error text it interpolates is customer-controlled.
+    #[test]
+    fn a_multiline_error_cannot_break_the_summary_into_two_lines() {
+        let mut n = notice(NotificationReason::Opened);
+        n.error_sample = Some("HTTP 500\r\n<html><body>oops".into());
+        let summary = n.summary();
+
+        assert!(
+            !summary.contains('\n') && !summary.contains('\r'),
+            "{summary}"
+        );
+        assert!(summary.contains("HTTP 500 <html>"), "text kept: {summary}");
+    }
+
     /// A long error must not push the flapping note past an SMS's budget: the
     /// note is the only in-band warning that alerts are about to go quiet.
     #[test]

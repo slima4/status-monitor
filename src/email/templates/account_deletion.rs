@@ -2,18 +2,15 @@
 //! `DELETE /api/v1/me`. Tells the user the account is deactivated and when it
 //! is permanently erased. No link to carry: restoring runs through a
 //! signed-in confirmation, not this mail.
-//!
-//! Inline HTML, positional + escaped substitution — same self-contained shape
-//! as the invitation / magic-link templates (no askama dep for transactional
-//! mail). The only interpolated free-text is a formatted date.
 
 use chrono::{DateTime, Utc};
 
-use crate::email::templates::html_escape;
+use crate::email::templates::layout::{self, Page, Tone};
+use crate::email::templates::utc_stamp;
 use crate::email::trait_def::RenderedEmail;
 
 pub fn render(site_name: &str, scheduled_purge_at: DateTime<Utc>) -> RenderedEmail {
-    let purge_human = scheduled_purge_at.format("%Y-%m-%d %H:%M UTC").to_string();
+    let purge_human = utc_stamp(scheduled_purge_at);
     let subject = format!("Your {site_name} account is scheduled for deletion");
 
     let text_body = format!(
@@ -31,24 +28,55 @@ pub fn render(site_name: &str, scheduled_purge_at: DateTime<Utc>) -> RenderedEma
          If you requested this deletion, no further action is needed.\n"
     );
 
-    let html_body = format!(
-        "<!doctype html>\n\
-         <html><head><meta charset=\"utf-8\"><title>{subject_esc}</title></head>\n\
-         <body style=\"font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;color:#222;\">\n\
-         <h2 style=\"margin-top:0;\">Account scheduled for deletion</h2>\n\
-         <p>Your {site_esc} account has been deactivated and is scheduled for permanent deletion on <strong>{purge_esc}</strong>. Monitoring has stopped: your checks are no longer running and no alerts will be sent.</p>\n\
-         <p style=\"margin:1.5rem 0;\">Changed your mind? <strong>Sign in before {purge_esc}</strong> and confirm the restore on the page that appears — signing in on its own will not cancel the deletion.</p>\n\
-         <p style=\"font-size:0.9em;color:#555;\">After that the account and all associated data are permanently erased and cannot be recovered.</p>\n\
-         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">If you requested this deletion, no further action is needed.</p>\n\
-         </body></html>\n",
-        subject_esc = html_escape(&subject),
-        site_esc = html_escape(site_name),
-        purge_esc = html_escape(&purge_human),
-    );
+    let mut body = layout::facts(&[("Erased on", purge_human.clone())]);
+    body.push_str(&layout::paragraph(
+        "Monitoring has stopped: your checks are no longer running and no alerts will be sent.",
+    ));
+    body.push_str(&layout::callout(&format!(
+        "Changed your mind? Sign in before {purge_human} and confirm the restore on the page \
+         that appears — signing in on its own will not cancel the deletion."
+    )));
+    body.push_str(&layout::fine_print(
+        "After that the account and all associated data are permanently erased and cannot be \
+         recovered.",
+    ));
+
+    let html_body = layout::render(Page {
+        title: &subject,
+        preheader: &format!("All data is erased on {purge_human} unless you restore it."),
+        site_name,
+        header: layout::band(
+            Tone::Warn,
+            "ACCOUNT DEACTIVATED",
+            &format!("Permanently erased on {purge_human}"),
+            Some(&format!("{site_name} monitoring has stopped")),
+        ),
+        body,
+        footnote: Some(layout::fine_print(
+            "If you requested this deletion, no further action is needed.",
+        )),
+    });
 
     RenderedEmail {
         subject,
         text_body,
         html_body,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+    use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn the_purge_date_reaches_both_bodies() {
+        let r = render(
+            "Uptimepage",
+            Utc.with_ymd_and_hms(2026, 9, 1, 8, 30, 0).unwrap(),
+        );
+        for body in [&r.text_body, &r.html_body] {
+            assert!(body.contains("1 Sep 2026 08:30 UTC"), "purge date: {body}");
+        }
     }
 }

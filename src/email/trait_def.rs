@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use super::templates;
+pub use super::templates::incident_alert::IncidentAlert;
 
 pub type EmailResult<T> = Result<T, EmailError>;
 
@@ -76,14 +77,9 @@ pub enum EmailTemplate {
         org_name: Option<String>,
         decline_url: Option<String>,
     },
-    /// An incident page delivered over email; `body` is the same plain text
-    /// the chat transports send. `org_name` attributes the sending org and
-    /// `stop_url` is the recipient's one-click opt-out.
-    IncidentAlert {
-        body: String,
-        org_name: Option<String>,
-        stop_url: Option<String>,
-    },
+    /// An incident page delivered over email. Carries the incident's fields, not
+    /// a rendered line: an inbox has room to lay out state, timing and regions.
+    IncidentAlert(IncidentAlert),
     /// Confirms a public status-page subscription (double opt-in) before any
     /// update is delivered to the address.
     SubscriberConfirm {
@@ -131,6 +127,15 @@ pub enum EmailTemplate {
 
 impl EmailTemplate {
     pub fn render(&self, site_name: &str) -> RenderedEmail {
+        let mut rendered = self.render_template(site_name);
+        // Every subject carries operator- or customer-authored text, and a
+        // control character in a mail header starts a new header. One owner,
+        // so no template can forget it.
+        rendered.subject = templates::single_line(&rendered.subject);
+        rendered
+    }
+
+    fn render_template(&self, site_name: &str) -> RenderedEmail {
         match self {
             EmailTemplate::Invitation {
                 org_name,
@@ -174,16 +179,9 @@ impl EmailTemplate {
                 org_name.as_deref(),
                 decline_url.as_deref(),
             ),
-            EmailTemplate::IncidentAlert {
-                body,
-                org_name,
-                stop_url,
-            } => templates::incident_alert::render(
-                site_name,
-                body,
-                org_name.as_deref(),
-                stop_url.as_deref(),
-            ),
+            EmailTemplate::IncidentAlert(alert) => {
+                templates::incident_alert::render(site_name, alert)
+            }
             EmailTemplate::SubscriberConfirm {
                 page_name,
                 confirm_url,
@@ -221,17 +219,20 @@ impl EmailTemplate {
                 plan,
                 page_url,
                 app_version,
-            } => templates::support_request::render(&templates::support_request::SupportContext {
-                request_id,
-                topic,
-                message,
-                from_email,
-                org_slug,
-                org_id,
-                plan,
-                page_url: page_url.as_deref(),
-                app_version,
-            }),
+            } => templates::support_request::render(
+                site_name,
+                &templates::support_request::SupportContext {
+                    request_id,
+                    topic,
+                    message,
+                    from_email,
+                    org_slug,
+                    org_id,
+                    plan,
+                    page_url: page_url.as_deref(),
+                    app_version,
+                },
+            ),
             EmailTemplate::SubscriberMaintenance {
                 page_name,
                 title,
@@ -261,7 +262,7 @@ impl EmailTemplate {
             EmailTemplate::MagicLink { url, .. } => Some(url),
             EmailTemplate::AccountDeletion { .. } | EmailTemplate::AccountRestored => None,
             EmailTemplate::ChannelVerification { verify_url, .. } => Some(verify_url),
-            EmailTemplate::IncidentAlert { .. } => None,
+            EmailTemplate::IncidentAlert(_) => None,
             EmailTemplate::SubscriberConfirm { confirm_url, .. } => Some(confirm_url),
             EmailTemplate::SubscriberIncident { incident_url, .. } => Some(incident_url),
             EmailTemplate::SubscriberMaintenance { page_url, .. } => Some(page_url),
@@ -359,13 +360,28 @@ mod tests {
         assert_eq!(sample_support().reply_to(), Some("jane@acme.test"));
     }
 
+    fn sample_alert(stop_url: Option<&str>) -> EmailTemplate {
+        EmailTemplate::IncidentAlert(IncidentAlert {
+            summary: "api — major incident OPEN".into(),
+            label: "api".into(),
+            reason: crate::domain::NotificationReason::Opened,
+            severity: crate::domain::IncidentSeverity::Major,
+            urgency: crate::domain::IncidentUrgency::High,
+            started_at: Utc::now(),
+            ended_at: None,
+            error_sample: None,
+            regions_down: Vec::new(),
+            regions_up: Vec::new(),
+            url: None,
+            note: None,
+            org_name: Some("Acme".into()),
+            stop_url: stop_url.map(str::to_string),
+        })
+    }
+
     #[test]
     fn only_the_support_relay_sets_a_reply_to() {
-        let alert = EmailTemplate::IncidentAlert {
-            body: "x".into(),
-            org_name: None,
-            stop_url: None,
-        };
+        let alert = sample_alert(None);
         assert_eq!(alert.reply_to(), None);
         assert_eq!(EmailTemplate::AccountRestored.reply_to(), None);
     }
@@ -403,11 +419,7 @@ mod tests {
 
     #[test]
     fn incident_alert_withholds_one_click_but_verification_offers_it() {
-        let alert = EmailTemplate::IncidentAlert {
-            body: "x".into(),
-            org_name: Some("Acme".into()),
-            stop_url: Some("https://app/alert-channel/stop?c=1&t=2".into()),
-        };
+        let alert = sample_alert(Some("https://app/alert-channel/stop?c=1&t=2"));
         assert_eq!(alert.list_unsubscribe_url(), None);
 
         let verify = EmailTemplate::ChannelVerification {

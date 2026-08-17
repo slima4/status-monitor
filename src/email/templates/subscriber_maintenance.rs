@@ -1,11 +1,8 @@
 use chrono::{DateTime, Utc};
 
-use crate::email::templates::html_escape;
+use crate::email::templates::layout::{self, ButtonStyle, Page, Tone};
+use crate::email::templates::{html_escape, utc_stamp};
 use crate::email::trait_def::RenderedEmail;
-
-fn fmt(ts: DateTime<Utc>) -> String {
-    ts.format("%Y-%m-%d %H:%M UTC").to_string()
-}
 
 #[allow(clippy::too_many_arguments)]
 pub fn render(
@@ -25,7 +22,7 @@ pub fn render(
         "Scheduled maintenance"
     };
     let subject = format!("[{page_name}] {heading}: {title}");
-    let window = format!("{} — {}", fmt(starts_at), fmt(ends_at));
+    let window = format!("{} — {}", utc_stamp(starts_at), utc_stamp(ends_at));
     let desc_text = description.map(|d| format!("\n{d}\n")).unwrap_or_default();
 
     let text_body = format!(
@@ -38,32 +35,78 @@ pub fn render(
          Unsubscribe:\n  {unsubscribe_url}\n"
     );
 
-    let desc_html = description
-        .map(|d| format!("<p style=\"white-space:pre-wrap;\">{}</p>", html_escape(d)))
-        .unwrap_or_default();
-    let html_body = format!(
-        "<!doctype html>\n\
-         <html><head><meta charset=\"utf-8\"><title>{subject_esc}</title></head>\n\
-         <body style=\"font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;color:#222;\">\n\
-         <h2 style=\"margin-top:0;\">{title_esc}</h2>\n\
-         <p style=\"color:#555;\">{heading} · <strong>{window_esc}</strong></p>\n\
-         {desc_html}\n\
-         <p style=\"margin:1.5rem 0;\">\n\
-           <a href=\"{url_attr}\" style=\"background:#0b66e4;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;\">View status page</a>\n\
-         </p>\n\
-         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">You're receiving this because you subscribed to {page_esc}. <a href=\"{unsub_attr}\">Unsubscribe</a>.</p>\n\
-         </body></html>\n",
-        subject_esc = html_escape(&subject),
-        title_esc = html_escape(title),
-        window_esc = html_escape(&window),
-        url_attr = html_escape(page_url),
-        page_esc = html_escape(page_name),
-        unsub_attr = html_escape(unsubscribe_url),
-    );
+    let mut body = layout::facts(&[(if completed { "Ran" } else { "Window" }, window.clone())]);
+    if let Some(description) = description {
+        body.push_str(&layout::prose(description));
+    }
+    body.push_str(&layout::button(
+        page_url,
+        "View status page",
+        ButtonStyle::Solid,
+    ));
+
+    let footnote = layout::fine_print(&format!(
+        "You're receiving this because you subscribed to {page}. {unsub}.",
+        page = html_escape(page_name),
+        unsub = layout::quiet_link(unsubscribe_url, "Unsubscribe"),
+    ));
+
+    let html_body = layout::render(Page {
+        title: &subject,
+        preheader: &window,
+        site_name: page_name,
+        header: layout::band(
+            if completed { Tone::Good } else { Tone::Info },
+            &heading.to_uppercase(),
+            title,
+            Some(&window),
+        ),
+        body,
+        footnote: Some(footnote),
+    });
 
     RenderedEmail {
         subject,
         text_body,
         html_body,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+    use chrono::{TimeZone, Utc};
+
+    fn rendered(phase: &str) -> crate::email::trait_def::RenderedEmail {
+        render(
+            "Acme status",
+            "Database upgrade",
+            Some("Writes pause for a few minutes."),
+            phase,
+            Utc.with_ymd_and_hms(2026, 8, 20, 1, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 8, 20, 3, 0, 0).unwrap(),
+            "https://acme.test/",
+            "https://acme.test/subscribe/unsubscribe?s=1&t=2",
+        )
+    }
+
+    #[test]
+    fn the_window_reaches_both_bodies_in_utc() {
+        let r = rendered("scheduled");
+        for body in [&r.text_body, &r.html_body] {
+            assert!(
+                body.contains("20 Aug 2026 01:00 UTC — 20 Aug 2026 03:00 UTC"),
+                "window: {body}"
+            );
+        }
+        assert!(r.html_body.contains("SCHEDULED MAINTENANCE"));
+    }
+
+    #[test]
+    fn a_completed_window_is_reported_in_the_past() {
+        let r = rendered("completed");
+        assert!(r.subject.contains("Maintenance completed"));
+        assert!(r.html_body.contains("MAINTENANCE COMPLETED"));
+        assert!(r.html_body.contains("Ran"));
     }
 }

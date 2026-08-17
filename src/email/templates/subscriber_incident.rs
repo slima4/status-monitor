@@ -1,4 +1,6 @@
-use crate::email::templates::html_escape;
+use crate::domain::IncidentStatusPhase;
+use crate::email::templates::layout::{self, ButtonStyle, Page, Tone};
+use crate::email::templates::{html_escape, single_line};
 use crate::email::trait_def::RenderedEmail;
 
 /// Capitalised phase label ("investigating" -> "Investigating").
@@ -32,30 +34,95 @@ pub fn render(
          Unsubscribe:\n  {unsubscribe_url}\n"
     );
 
-    let html_body = format!(
-        "<!doctype html>\n\
-         <html><head><meta charset=\"utf-8\"><title>{subject_esc}</title></head>\n\
-         <body style=\"font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;color:#222;\">\n\
-         <h2 style=\"margin-top:0;\">{title_esc}</h2>\n\
-         <p style=\"color:#555;\">Status: <strong>{label_esc}</strong></p>\n\
-         <p style=\"white-space:pre-wrap;\">{message_esc}</p>\n\
-         <p style=\"margin:1.5rem 0;\">\n\
-           <a href=\"{url_attr}\" style=\"background:#0b66e4;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;\">View status page</a>\n\
-         </p>\n\
-         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">You're receiving this because you subscribed to {page_esc}. <a href=\"{unsub_attr}\">Unsubscribe</a>.</p>\n\
-         </body></html>\n",
-        subject_esc = html_escape(&subject),
-        title_esc = html_escape(incident_title),
-        label_esc = html_escape(&label),
-        message_esc = html_escape(message),
-        url_attr = html_escape(incident_url),
-        page_esc = html_escape(page_name),
-        unsub_attr = html_escape(unsubscribe_url),
-    );
+    // Parsed back to the enum so a new phase has to be classified here rather
+    // than falling into "still going wrong" by default.
+    let tone = match IncidentStatusPhase::from_db_str(phase) {
+        IncidentStatusPhase::Resolved | IncidentStatusPhase::Postmortem => Tone::Good,
+        IncidentStatusPhase::Investigating
+        | IncidentStatusPhase::Identified
+        | IncidentStatusPhase::Monitoring => Tone::Warn,
+    };
+
+    let mut body = layout::prose(message);
+    body.push_str(&layout::button(
+        incident_url,
+        "View status page",
+        ButtonStyle::Solid,
+    ));
+
+    let footnote = layout::fine_print(&format!(
+        "You're receiving this because you subscribed to {page}. {unsub}.",
+        page = html_escape(page_name),
+        unsub = layout::quiet_link(unsubscribe_url, "Unsubscribe"),
+    ));
+
+    let html_body = layout::render(Page {
+        title: &subject,
+        preheader: &single_line(message),
+        site_name: page_name,
+        header: layout::band(tone, &label.to_uppercase(), incident_title, None),
+        body,
+        footnote: Some(footnote),
+    });
 
     RenderedEmail {
         subject,
         text_body,
         html_body,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+
+    #[test]
+    fn phase_drives_the_status_band_and_the_subject() {
+        let r = render(
+            "Acme status",
+            "Checkout is failing",
+            "investigating",
+            "We are looking into elevated errors.",
+            "https://acme.test/incidents/1",
+            "https://acme.test/subscribe/unsubscribe?s=1&t=2",
+        );
+        assert_eq!(
+            r.subject,
+            "[Acme status] Checkout is failing — Investigating"
+        );
+        assert!(r.html_body.contains("INVESTIGATING"));
+        assert!(r.html_body.contains("We are looking into elevated errors."));
+        assert!(r.html_body.contains("Unsubscribe"));
+    }
+
+    #[test]
+    fn a_postmortem_does_not_read_as_an_open_problem() {
+        let r = render(
+            "Acme status",
+            "Checkout is failing",
+            "postmortem",
+            "What happened and what we changed.",
+            "https://acme.test/incidents/1",
+            "https://acme.test/subscribe/unsubscribe?s=1&t=2",
+        );
+        // Tone::Good's signal colour; the warn amber would say "still broken".
+        assert!(r.html_body.contains("#43d58f"), "{}", r.html_body);
+        assert!(!r.html_body.contains("#f3b94c"));
+    }
+
+    #[test]
+    fn an_update_written_in_paragraphs_keeps_its_line_breaks() {
+        let r = render(
+            "Acme status",
+            "Checkout is failing",
+            "resolved",
+            "Root cause found.\nA fix is deployed.",
+            "https://acme.test/incidents/1",
+            "https://acme.test/subscribe/unsubscribe?s=1&t=2",
+        );
+        assert!(
+            r.html_body
+                .contains("Root cause found.<br>A fix is deployed.")
+        );
     }
 }

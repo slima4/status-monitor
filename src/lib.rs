@@ -27,6 +27,7 @@ pub mod scheduler;
 pub mod security;
 pub mod storage;
 pub mod telegram;
+pub(crate) mod text;
 pub mod web;
 pub mod whatsapp;
 pub mod worker;

@@ -3,11 +3,16 @@ pub mod account_restored;
 pub mod channel_verification;
 pub mod incident_alert;
 pub mod invitation;
+pub mod layout;
 pub mod magic_link;
 pub mod subscriber_confirm;
 pub mod subscriber_incident;
 pub mod subscriber_maintenance;
 pub mod support_request;
+
+/// Header safety for subjects; the same rule every other channel applies to a
+/// one-line value.
+pub(crate) use crate::text::single_line;
 
 /// HTML-escape the five entities that matter in element text and double- or
 /// single-quoted attribute values. Single owner for every transactional
@@ -34,30 +39,8 @@ pub(crate) fn attr_escape(input: &str) -> String {
     html_escape(input)
 }
 
-/// Flattens a value destined for a mail header, subject included: a control
-/// character there would start a new header. Single owner for the same reason
-/// as [`html_escape`] — a template and its transport must not disagree.
-pub(crate) fn single_line(input: &str) -> String {
-    input
-        .chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect::<String>()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::single_line;
-
-    #[test]
-    fn folding_sequences_collapse_into_one_line() {
-        assert_eq!(
-            single_line("bug\r\nBcc: evil@example.test"),
-            "bug Bcc: evil@example.test"
-        );
-        assert_eq!(single_line("a\tb\u{0}c"), "a b c");
-        assert_eq!(single_line("  padded  "), "padded");
-    }
+/// Wall-clock stamp for mail. Always UTC and always says so — unlike the app,
+/// an inbox carries no viewer timezone to render in.
+pub(crate) fn utc_stamp(ts: chrono::DateTime<chrono::Utc>) -> String {
+    ts.format("%-d %b %Y %H:%M UTC").to_string()
 }

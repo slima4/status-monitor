@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use crate::email::templates::incident_alert::IncidentAlert;
 use crate::email::{EmailAddress, EmailSender, EmailTemplate, TransactionalEmail};
 use crate::error::Result;
 use crate::notifier::Notifier;
@@ -65,6 +66,11 @@ impl EmailNotifier {
     }
 }
 
+/// An inbox wraps and scrolls, so it takes far more of a failure than the
+/// 200 chars a chat line gets — but a page of HTML from a broken endpoint still
+/// has no business in a card.
+const MAX_EMAIL_ERROR_CHARS: usize = 800;
+
 #[async_trait]
 impl Notifier for EmailNotifier {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
@@ -74,11 +80,25 @@ impl Notifier for EmailNotifier {
                 self.delivery.from_name.clone(),
             ),
             to: EmailAddress::new(self.to.clone(), self.to.clone()),
-            template: EmailTemplate::IncidentAlert {
-                body: notice.plain_text(),
+            template: EmailTemplate::IncidentAlert(IncidentAlert {
+                summary: notice.summary(),
+                label: notice.label().to_string(),
+                reason: notice.reason,
+                severity: notice.severity,
+                urgency: notice.urgency,
+                started_at: notice.started_at,
+                ended_at: notice.ended_at,
+                error_sample: notice
+                    .error_sample
+                    .as_deref()
+                    .map(|e| crate::text::truncate_chars(e, MAX_EMAIL_ERROR_CHARS)),
+                regions_down: notice.regions_down.clone(),
+                regions_up: notice.regions_up.clone(),
+                url: notice.url.clone(),
+                note: notice.note.clone(),
                 org_name: self.alert.org_name.clone(),
                 stop_url: self.alert.stop_url.clone(),
-            },
+            }),
         };
         self.delivery
             .sender

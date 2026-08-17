@@ -5,6 +5,7 @@
 //! change required at that point.
 
 use crate::email::templates::html_escape;
+use crate::email::templates::layout::{self, ButtonStyle, Page};
 use crate::email::trait_def::RenderedEmail;
 
 pub fn render(
@@ -17,9 +18,6 @@ pub fn render(
     let ip_line_text = ip_hint
         .map(|ip| format!("\nSign-in requested from {ip}.\n"))
         .unwrap_or_default();
-    let ip_line_html = ip_hint
-        .map(|ip| format!("<p style=\"font-size:0.85em;color:#555;\">Sign-in requested from <code>{}</code>.</p>", html_escape(ip)))
-        .unwrap_or_default();
 
     let text_body = format!(
         "Click the link below to sign in to {site_name}:\n\
@@ -30,23 +28,28 @@ pub fn render(
          If you didn't request this, you can ignore the message.\n"
     );
 
-    let html_body = format!(
-        "<!doctype html>\n\
-         <html><head><meta charset=\"utf-8\"><title>{subject_esc}</title></head>\n\
-         <body style=\"font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;color:#222;\">\n\
-         <h2 style=\"margin-top:0;\">Sign in to {site_esc}</h2>\n\
-         <p style=\"margin:1.5rem 0;\">\n\
-           <a href=\"{url_attr}\" style=\"background:#0b66e4;color:#fff;padding:10px 16px;border-radius:6px;text-decoration:none;\">Sign in</a>\n\
-         </p>\n\
-         <p style=\"font-size:0.9em;color:#555;\">This link expires in <strong>{expires}</strong> minutes and can only be used once.</p>\n\
-         {ip_line_html}\
-         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">If you didn't request this, you can ignore the message.</p>\n\
-         </body></html>\n",
-        subject_esc = html_escape(&subject),
-        site_esc = html_escape(site_name),
-        url_attr = html_escape(url),
-        expires = expires_in_minutes,
-    );
+    let mut body = layout::button(url, "Sign in", ButtonStyle::Solid);
+    body.push_str(&layout::fine_print(&format!(
+        "This link expires in <strong>{expires_in_minutes}</strong> minutes and can only be \
+         used once."
+    )));
+    if let Some(ip) = ip_hint {
+        body.push_str(&layout::fine_print(&format!(
+            "Sign-in requested from {}.",
+            html_escape(ip)
+        )));
+    }
+
+    let html_body = layout::render(Page {
+        title: &subject,
+        preheader: &format!("One-time sign-in link, good for {expires_in_minutes} minutes."),
+        site_name,
+        header: layout::wordmark(site_name, "Sign in"),
+        body,
+        footnote: Some(layout::fine_print(
+            "If you didn't request this, you can ignore the message.",
+        )),
+    });
 
     RenderedEmail {
         subject,

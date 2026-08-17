@@ -1,4 +1,5 @@
-use crate::email::templates::{html_escape, single_line};
+use crate::email::templates::layout::{self, Page};
+use crate::email::templates::single_line;
 use crate::email::trait_def::RenderedEmail;
 
 /// What the operator needs to answer without a round-trip. Only `message` and
@@ -21,7 +22,7 @@ pub fn short_ref(request_id: &str) -> &str {
     request_id.rsplit('-').next().unwrap_or(request_id)
 }
 
-pub fn render(ctx: &SupportContext<'_>) -> RenderedEmail {
+pub fn render(site_name: &str, ctx: &SupportContext<'_>) -> RenderedEmail {
     // ASCII-only: one non-ASCII byte forces the subject into an RFC 2047
     // encoded word, hiding the topic and reference from filters and grep.
     let subject = format!(
@@ -32,45 +33,52 @@ pub fn render(ctx: &SupportContext<'_>) -> RenderedEmail {
         single_line(ctx.from_email),
     );
 
-    let mut facts = vec![
-        format!(
-            "ref:     {} ({})",
-            short_ref(ctx.request_id),
-            ctx.request_id
+    let mut rows: Vec<(&str, String)> = vec![
+        (
+            "Ref",
+            format!("{} ({})", short_ref(ctx.request_id), ctx.request_id),
         ),
-        format!("from:    {}", ctx.from_email),
-        format!("org:     {} ({})", ctx.org_slug, ctx.org_id),
-        format!("plan:    {}", ctx.plan),
-        format!("topic:   {}", ctx.topic),
-        format!("version: {}", ctx.app_version),
+        ("From", ctx.from_email.to_string()),
+        ("Org", format!("{} ({})", ctx.org_slug, ctx.org_id)),
+        ("Plan", ctx.plan.to_string()),
+        ("Topic", ctx.topic.to_string()),
+        ("Version", ctx.app_version.to_string()),
     ];
     if let Some(url) = ctx.page_url {
-        facts.push(format!("page:    {url}"));
+        rows.push(("Page", url.to_string()));
     }
-    let facts_text = facts.join("\n");
+
+    let facts_text = rows
+        .iter()
+        .map(|(label, value)| format!("{label}: {value}"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let text_body = format!(
         "{facts_text}\n\n{}\n\nReply to this mail to answer them directly.\n",
         ctx.message
     );
 
-    let facts_html = facts
-        .iter()
-        .map(|line| html_escape(line))
-        .collect::<Vec<_>>()
-        .join("<br>");
+    let mut body = layout::facts(&rows);
+    body.push_str(&layout::code_block(ctx.message));
 
-    let html_body = format!(
-        "<!doctype html>\n\
-         <html><head><meta charset=\"utf-8\"><title>{subject_esc}</title></head>\n\
-         <body style=\"font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;color:#222;\">\n\
-         <p style=\"font-family:ui-monospace,monospace;font-size:0.85em;color:#555;\">{facts_html}</p>\n\
-         <pre style=\"font-family:ui-monospace,monospace;white-space:pre-wrap;border-left:3px solid #eee;padding-left:1rem;\">{message_esc}</pre>\n\
-         <p style=\"font-size:0.8em;color:#888;border-top:1px solid #eee;padding-top:1rem;\">Reply to this mail to answer them directly.</p>\n\
-         </body></html>\n",
-        subject_esc = html_escape(&subject),
-        message_esc = html_escape(ctx.message),
-    );
+    let html_body = layout::render(Page {
+        title: &subject,
+        preheader: &single_line(ctx.message),
+        site_name,
+        header: layout::wordmark(
+            site_name,
+            &format!(
+                "help / {topic} · {org}",
+                topic = single_line(ctx.topic),
+                org = single_line(ctx.org_slug),
+            ),
+        ),
+        body,
+        footnote: Some(layout::fine_print(
+            "Reply to this mail to answer them directly.",
+        )),
+    });
 
     RenderedEmail {
         subject,
@@ -101,7 +109,7 @@ mod tests {
 
     #[test]
     fn subject_carries_topic_reference_org_and_sender() {
-        let r = render(&ctx("bug", "checks are flapping"));
+        let r = render("Uptimepage", &ctx("bug", "checks are flapping"));
         assert_eq!(
             r.subject, "[help/bug #a1b2c3d4e5f6] acme - jane@acme.test",
             "prefix sorts by topic, the reference is quotable"
@@ -112,7 +120,7 @@ mod tests {
     fn subject_stays_ascii_so_filters_and_grep_see_it_unencoded() {
         // A non-ASCII byte forces RFC 2047 encoded-word wrapping, after which
         // neither a mail filter nor grep matches the topic or the reference.
-        let r = render(&ctx("bug", "body"));
+        let r = render("Uptimepage", &ctx("bug", "body"));
         assert!(r.subject.is_ascii(), "subject: {}", r.subject);
     }
 
@@ -131,7 +139,7 @@ mod tests {
 
     #[test]
     fn both_the_short_and_canonical_reference_reach_the_body() {
-        let r = render(&ctx("bug", "body"));
+        let r = render("Uptimepage", &ctx("bug", "body"));
         for body in [&r.text_body, &r.html_body] {
             assert!(body.contains("a1b2c3d4e5f6"), "quotable form");
             assert!(body.contains(REQUEST_ID), "exact-lookup form");
@@ -140,7 +148,7 @@ mod tests {
 
     #[test]
     fn subject_never_spans_multiple_lines() {
-        let r = render(&ctx("bug\r\nBcc: evil@example.test", "body"));
+        let r = render("Uptimepage", &ctx("bug\r\nBcc: evil@example.test", "body"));
         assert!(!r.subject.contains('\n'));
         assert!(!r.subject.contains('\r'));
         assert!(
@@ -151,7 +159,7 @@ mod tests {
 
     #[test]
     fn context_and_message_reach_both_bodies() {
-        let r = render(&ctx("question", "how do I add a region?"));
+        let r = render("Uptimepage", &ctx("question", "how do I add a region?"));
         for body in [&r.text_body, &r.html_body] {
             assert!(body.contains("acme"));
             assert!(body.contains("founding"));
@@ -162,7 +170,7 @@ mod tests {
 
     #[test]
     fn message_markup_is_escaped_in_html() {
-        let r = render(&ctx("bug", "<img src=x onerror=alert(1)>"));
+        let r = render("Uptimepage", &ctx("bug", "<img src=x onerror=alert(1)>"));
         assert!(!r.html_body.contains("<img src=x"));
         assert!(r.html_body.contains("&lt;img src=x"));
     }

@@ -86,10 +86,7 @@ impl PagerDutyNotifier {
             event_action: "trigger",
             dedup_key,
             payload: Some(Payload {
-                summary: truncate_chars(
-                    notice.plain_text().lines().next().unwrap_or("incident"),
-                    MAX_SUMMARY_CHARS,
-                ),
+                summary: truncate_chars(&notice.summary(), MAX_SUMMARY_CHARS),
                 source: notice.label(),
                 severity,
                 timestamp: notice.started_at.to_rfc3339(),

@@ -1,9 +1,7 @@
 //! Account-restored notification. The deletion mail promised a date; this one
 //! retracts it.
-//!
-//! Inline HTML, same self-contained shape as the sibling templates.
 
-use crate::email::templates::html_escape;
+use crate::email::templates::layout::{self, Page, Tone};
 use crate::email::trait_def::RenderedEmail;
 
 pub fn render(site_name: &str) -> RenderedEmail {
@@ -19,18 +17,27 @@ pub fn render(site_name: &str) -> RenderedEmail {
          touch — someone else can reach your sign-in method.\n"
     );
 
-    let html_body = format!(
-        "<!doctype html>\n\
-         <html><head><meta charset=\"utf-8\"><title>{subject_esc}</title></head>\n\
-         <body style=\"font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;color:#222;\">\n\
-         <h2 style=\"margin-top:0;\">Account restored</h2>\n\
-         <p>The deletion of your {site_esc} account has been cancelled.</p>\n\
-         <p>Your account, your organisations, and their monitors and status pages are active again, and monitoring has resumed.</p>\n\
-         <p style=\"font-size:0.9em;color:#555;border-top:1px solid #eee;padding-top:1rem;\">If this was not you, sign in and delete the account again, then get in touch — someone else can reach your sign-in method.</p>\n\
-         </body></html>\n",
-        subject_esc = html_escape(&subject),
-        site_esc = html_escape(site_name),
+    let body = layout::paragraph(
+        "Your account, your organisations, and their monitors and status pages are active \
+         again, and monitoring has resumed.",
     );
+
+    let html_body = layout::render(Page {
+        title: &subject,
+        preheader: "The scheduled deletion is cancelled and monitoring has resumed.",
+        site_name,
+        header: layout::band(
+            Tone::Good,
+            "ACCOUNT RESTORED",
+            "The scheduled deletion is cancelled",
+            Some("Monitoring has resumed"),
+        ),
+        body,
+        footnote: Some(layout::fine_print(
+            "If this was not you, sign in and delete the account again, then get in touch — \
+             someone else can reach your sign-in method.",
+        )),
+    });
 
     RenderedEmail {
         subject,
