@@ -22,6 +22,14 @@ The version number changes as we release. The `uptimepage/` token and the link d
 
 The `Mozilla/5.0 (compatible; …)` prefix is the long-standing convention for well-behaved automated clients, and it is what many CDNs read before deciding whether to compress a response. It claims no browser engine: match on `uptimepage/` and you will always find us.
 
+### If you allowlisted us before 2026-08-17, check your rule
+
+Until that date this page said our `User-Agent` **starts with** `uptimepage/`, and it did. It now begins with the `Mozilla/5.0 (compatible; …)` prefix, so the `uptimepage/` token sits in the middle of the string rather than at the front.
+
+A rule written as "starts with" or `^uptimepage/` no longer matches, which means an exemption you set up for us has quietly stopped applying. Change it to a **contains** match on `uptimepage/`. Everything below already assumes that form.
+
+We are sorry for the churn. If your monitor started failing around that date for no reason you could find on your side, this is the first thing to check.
+
 ## What It Does and Does Not Do
 
 We request the exact URL that was configured. Nothing else.
