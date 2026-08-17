@@ -54,7 +54,8 @@ pub fn render(
     let html_body = layout::render(Page {
         title: &subject,
         preheader: &window,
-        site_name: page_name,
+        // A customer's subscribers hear from the page, not from us.
+        signature: None,
         header: layout::band(
             if completed { Tone::Good } else { Tone::Info },
             &heading.to_uppercase(),
@@ -107,6 +108,6 @@ mod tests {
         let r = rendered("completed");
         assert!(r.subject.contains("Maintenance completed"));
         assert!(r.html_body.contains("MAINTENANCE COMPLETED"));
-        assert!(r.html_body.contains("Ran"));
+        assert!(r.html_body.contains("RAN"), "fact labels ship upper-cased");
     }
 }

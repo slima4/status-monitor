@@ -65,7 +65,7 @@ pub fn render(site_name: &str, ctx: &SupportContext<'_>) -> RenderedEmail {
     let html_body = layout::render(Page {
         title: &subject,
         preheader: &single_line(ctx.message),
-        site_name,
+        signature: Some(site_name),
         header: layout::wordmark(
             site_name,
             &format!(

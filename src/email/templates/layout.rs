@@ -10,12 +10,16 @@ use crate::email::templates::{attr_escape, html_escape};
 const INK: &str = "#0c1318";
 const INK_MUTED: &str = "#33393e";
 const INK_QUIET: &str = "#50565b";
-const INK_FAINT: &str = "#b5b8ba";
+/// Quietest tone that still clears 4.5:1 on the card. The app's faint grey is
+/// 2:1 here, which a screen in daylight loses outright.
+const INK_SOFT: &str = "#6b7479";
 const LINE: &str = "#ccd2d6";
 const LINE_SOFT: &str = "#e8edf0";
 const SURFACE: &str = "#f8fafc";
 const CARD: &str = "#ffffff";
-const BRAND: &str = "#009554";
+/// Two steps darker than the app's action green: on a screen the button label
+/// and the eyebrow are the only things carrying it, with no hover to confirm.
+const BRAND: &str = "#007a45";
 const BAND_BG: &str = "#13161c";
 const BAND_INK: &str = "#e8ecee";
 const BAND_MUTED: &str = "#a1a5ab";
@@ -57,7 +61,10 @@ pub struct Page<'a> {
     /// Inbox preview line. Clients show it next to the subject, so it carries
     /// the detail the subject had to drop rather than repeating it.
     pub preheader: &'a str,
-    pub site_name: &'a str,
+    /// Signs the card off with the sender. `None` for mail sent on a customer's
+    /// behalf, where naming us under their status page would attribute our
+    /// product to them.
+    pub signature: Option<&'a str>,
     /// Output of [`band`] or [`wordmark`].
     pub header: String,
     pub body: String,
@@ -77,13 +84,16 @@ pub fn band(tone: Tone, kicker: &str, headline: &str, sub: Option<&str>) -> Stri
         })
         .unwrap_or_default();
 
+    // The band's own top corners, or its fill squares off the card's.
     format!(
-        "<tr><td style=\"background-color:{BAND_BG};padding:20px 24px;\">\n\
+        "<tr><td style=\"background-color:{BAND_BG};padding:20px 24px;\
+         border-radius:9px 9px 0 0;\">\n\
          <div style=\"font-family:{MONO};font-size:11px;font-weight:600;line-height:1.4;\
          letter-spacing:0.12em;text-transform:uppercase;color:{signal};\">\
          &#9679;&nbsp; {kicker}</div>\n\
          <div style=\"margin-top:10px;font-family:{SANS};font-size:19px;font-weight:600;\
-         line-height:1.35;color:{BAND_INK};word-break:break-word;\">{headline}</div>\
+         line-height:1.35;color:{BAND_INK};word-break:break-word;text-wrap:balance;\">\
+         {headline}</div>\
          {sub_html}\n\
          </td></tr>\n",
         signal = tone.signal(),
@@ -99,7 +109,7 @@ pub fn wordmark(site_name: &str, heading: &str) -> String {
          <div style=\"font-family:{MONO};font-size:11px;font-weight:600;line-height:1.4;\
          letter-spacing:0.12em;color:{BRAND};\">{site}</div>\n\
          <div style=\"margin-top:10px;font-family:{SANS};font-size:21px;font-weight:600;\
-         line-height:1.3;color:{INK};\">{heading}</div>\n\
+         line-height:1.3;color:{INK};text-wrap:balance;\">{heading}</div>\n\
          </td></tr>\n",
         site = html_escape(site_name),
         heading = html_escape(heading),
@@ -110,7 +120,7 @@ pub fn wordmark(site_name: &str, heading: &str) -> String {
 pub fn paragraph(html: &str) -> String {
     format!(
         "<p style=\"margin:0 0 14px;font-family:{SANS};font-size:15px;line-height:1.6;\
-         color:{INK_MUTED};\">{html}</p>\n"
+         color:{INK_MUTED};text-wrap:pretty;\">{html}</p>\n"
     )
 }
 
@@ -120,6 +130,8 @@ pub fn prose(text: &str) -> String {
 }
 
 /// Label/value rows. Values are escaped here, so no row can carry markup.
+/// Labels are upper-cased in Rust, not by CSS: Outlook's Word engine ignores
+/// `text-transform`, and they would then disagree with the band above them.
 pub fn facts(rows: &[(&str, String)]) -> String {
     if rows.is_empty() {
         return String::new();
@@ -131,13 +143,14 @@ pub fn facts(rows: &[(&str, String)]) -> String {
                 "<tr>\
                  <td style=\"padding:9px 12px 9px 0;border-bottom:1px solid {LINE_SOFT};\
                  font-family:{MONO};font-size:11px;line-height:1.5;letter-spacing:0.06em;\
-                 text-transform:uppercase;color:{INK_QUIET};vertical-align:top;width:104px;\">\
+                 color:{INK_QUIET};vertical-align:top;width:104px;\">\
                  {label}</td>\
                  <td style=\"padding:9px 0;border-bottom:1px solid {LINE_SOFT};\
                  font-family:{SANS};font-size:14px;line-height:1.5;color:{INK};\
-                 vertical-align:top;word-break:break-word;\">{value}</td>\
+                 vertical-align:top;word-break:break-word;\
+                 font-variant-numeric:tabular-nums;\">{value}</td>\
                  </tr>",
-                label = html_escape(label),
+                label = html_escape(&label.to_uppercase()),
                 value = html_escape(value),
             )
         })
@@ -176,7 +189,8 @@ pub fn callout(text: &str) -> String {
     )
 }
 
-/// Table-wrapped so Outlook honours the padding.
+/// Table-wrapped so Outlook honours the padding. Padding and line height are
+/// sized to a 44px tap target, since most alerts are read on a phone.
 pub fn button(url: &str, label: &str, style: ButtonStyle) -> String {
     let (cell, text) = match style {
         ButtonStyle::Solid => (
@@ -189,8 +203,8 @@ pub fn button(url: &str, label: &str, style: ButtonStyle) -> String {
         "<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" \
          style=\"margin:0 0 20px;\">\n\
          <tr><td style=\"{cell}border-radius:8px;\">\
-         <a href=\"{url}\" style=\"display:inline-block;padding:11px 20px;font-family:{SANS};\
-         font-size:14px;font-weight:600;line-height:1;color:{text};text-decoration:none;\">\
+         <a href=\"{url}\" style=\"display:inline-block;padding:12px 22px;font-family:{SANS};\
+         font-size:14px;font-weight:600;line-height:20px;color:{text};text-decoration:none;\">\
          {label}</a></td></tr>\n</table>\n",
         url = attr_escape(url),
         label = html_escape(label),
@@ -201,7 +215,7 @@ pub fn button(url: &str, label: &str, style: ButtonStyle) -> String {
 pub fn fine_print(html: &str) -> String {
     format!(
         "<p style=\"margin:0 0 14px;font-family:{SANS};font-size:13px;line-height:1.6;\
-         color:{INK_QUIET};\">{html}</p>\n"
+         color:{INK_QUIET};text-wrap:pretty;\">{html}</p>\n"
     )
 }
 
@@ -224,12 +238,25 @@ pub fn quiet_link(url: &str, label: &str) -> String {
 }
 
 pub fn render(page: Page<'_>) -> String {
+    // The hairline separates the footnote from the signature, so it only earns
+    // its place when both are there.
+    let rule = match page.signature {
+        Some(_) => format!(
+            "<div style=\"height:1px;background-color:{LINE_SOFT};margin:0 0 10px;\"></div>\n"
+        ),
+        None => String::new(),
+    };
     let footnote = page
         .footnote
-        .map(|html| {
+        .map(|html| format!("<div style=\"margin:0 0 10px;\">{html}</div>\n{rule}"))
+        .unwrap_or_default();
+
+    let signature = page
+        .signature
+        .map(|site| {
             format!(
-                "<div style=\"margin:0 0 10px;\">{html}</div>\n\
-                 <div style=\"height:1px;background-color:{LINE_SOFT};margin:0 0 10px;\"></div>\n"
+                "<div style=\"color:{INK_SOFT};\">{site} &middot; uptime monitoring</div>\n",
+                site = html_escape(site),
             )
         })
         .unwrap_or_default();
@@ -243,7 +270,8 @@ pub fn render(page: Page<'_>) -> String {
          <meta name=\"supported-color-schemes\" content=\"only light\">\n\
          <title>{title}</title>\n\
          </head>\n\
-         <body style=\"margin:0;padding:0;background-color:{SURFACE};\">\n\
+         <body style=\"margin:0;padding:0;background-color:{SURFACE};\
+         -webkit-font-smoothing:antialiased;\">\n\
          <div style=\"display:none;max-height:0;overflow:hidden;font-size:1px;\
          line-height:1px;color:{SURFACE};\">{preheader}</div>\n\
          <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" \
@@ -257,7 +285,7 @@ pub fn render(page: Page<'_>) -> String {
          <tr><td style=\"padding:16px 24px 20px;border-top:1px solid {LINE_SOFT};\
          font-family:{SANS};font-size:12px;line-height:1.55;color:{INK_QUIET};\">\n\
          {footnote}\
-         <div style=\"color:{INK_FAINT};\">{site} &middot; uptime monitoring</div>\n\
+         {signature}\
          </td></tr>\n\
          </table>\n\
          </td></tr>\n</table>\n</body></html>\n",
@@ -265,7 +293,6 @@ pub fn render(page: Page<'_>) -> String {
         preheader = html_escape(page.preheader),
         header = page.header,
         body = page.body,
-        site = html_escape(page.site_name),
     )
 }
 
@@ -273,12 +300,56 @@ pub fn render(page: Page<'_>) -> String {
 mod tests {
     use super::*;
 
+    /// WCAG relative luminance of a `#rrggbb` literal.
+    fn luminance(hex: &str) -> f64 {
+        let channel = |i: usize| {
+            let v = u8::from_str_radix(&hex[i..i + 2], 16).expect("hex pair") as f64 / 255.0;
+            if v <= 0.04045 {
+                v / 12.92
+            } else {
+                ((v + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+    }
+
+    fn contrast(a: &str, b: &str) -> f64 {
+        let (x, y) = (luminance(a), luminance(b));
+        (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    /// Mail has no theme toggle and no hover to fall back on, so every pair the
+    /// shell paints has to clear AA on its own.
+    #[test]
+    fn every_text_colour_clears_aa_on_the_surface_behind_it() {
+        let pairs = [
+            (CARD, BRAND, "button label on brand fill"),
+            (BRAND, CARD, "eyebrow and links on the card"),
+            (INK, CARD, "fact values on the card"),
+            (INK_MUTED, CARD, "body copy on the card"),
+            (INK_QUIET, CARD, "footer copy on the card"),
+            (INK_SOFT, CARD, "signature on the card"),
+            (INK_MUTED, SURFACE, "code block on its own fill"),
+            (INK_MUTED, WARN_SOFT, "callout on its own fill"),
+            (BAND_INK, BAND_BG, "headline on the band"),
+            (BAND_MUTED, BAND_BG, "strapline on the band"),
+        ];
+        for (fg, bg, what) in pairs {
+            let ratio = contrast(fg, bg);
+            assert!(ratio >= 4.5, "{what}: {fg} on {bg} is {ratio:.2}:1");
+        }
+        for tone in [Tone::Bad, Tone::Warn, Tone::Good, Tone::Info] {
+            let ratio = contrast(tone.signal(), BAND_BG);
+            assert!(ratio >= 4.5, "{tone:?} signal is {ratio:.2}:1 on the band");
+        }
+    }
+
     #[test]
     fn shell_keeps_client_hostile_constructs_out() {
         let html = render(Page {
             title: "t",
             preheader: "p",
-            site_name: "Uptimepage",
+            signature: Some("Uptimepage"),
             header: wordmark("Uptimepage", "Heading"),
             body: paragraph("copy") + &facts(&[("Started", "now".into())]),
             footnote: Some(fine_print("why")),
@@ -326,7 +397,7 @@ mod tests {
         let html = render(Page {
             title: "t",
             preheader: "down in 3 regions",
-            site_name: "Uptimepage",
+            signature: Some("Uptimepage"),
             header: String::new(),
             body: String::new(),
             footnote: None,

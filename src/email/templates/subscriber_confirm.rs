@@ -44,7 +44,7 @@ pub fn render(
     let html_body = layout::render(Page {
         title: &subject,
         preheader: "One click and status updates start arriving here.",
-        site_name,
+        signature: Some(site_name),
         header: layout::wordmark(site_name, "Confirm your subscription"),
         body,
         footnote: Some(footnote),

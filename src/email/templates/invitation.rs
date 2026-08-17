@@ -49,7 +49,7 @@ pub fn render(
     let html_body = layout::render(Page {
         title: &subject,
         preheader: &format!("Join {org_name} on {site_name}."),
-        site_name,
+        signature: Some(site_name),
         header: layout::wordmark(site_name, &format!("You're invited to {org_name}")),
         body,
         footnote: Some(layout::fine_print(

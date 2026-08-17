@@ -74,6 +74,11 @@ impl IncidentAlert {
         }
     }
 
+    /// An incident is in play right now, so its severity, urgency, failure text
+    /// and region breakdown still describe the present. Deliberately excludes
+    /// `NoData` and `DataResumed`: monitoring stopping or restarting is not an
+    /// incident, carries no severity of its own, and would otherwise show the
+    /// last incident's numbers as if they were current.
     fn is_open(&self) -> bool {
         matches!(
             self.reason,
@@ -189,14 +194,21 @@ pub fn render(site_name: &str, alert: &IncidentAlert) -> RenderedEmail {
     if let Some(note) = &alert.note {
         text.push_str(&format!("\n{note}\n"));
     }
+    let mut footer_text = String::new();
     if let Some(org) = &alert.org_name {
-        text.push_str(&format!(
-            "\nYou're receiving this because {org} added this address as an alert \
+        footer_text.push_str(&format!(
+            "You're receiving this because {org} added this address as an alert \
              channel on {site_name}.\n"
         ));
     }
     if let Some(url) = &alert.stop_url {
-        text.push_str(&format!("Stop delivery to this address: {url}\n"));
+        footer_text.push_str(&format!("Stop delivery to this address: {url}\n"));
+    }
+    // One blank line before whichever footer line comes first, so the footer
+    // never runs into the last fact row.
+    if !footer_text.is_empty() {
+        text.push('\n');
+        text.push_str(&footer_text);
     }
     text.push_str(&format!("\n— {site_name} alerts\n"));
 
@@ -233,7 +245,7 @@ pub fn render(site_name: &str, alert: &IncidentAlert) -> RenderedEmail {
     let html_body = layout::render(Page {
         title: &subject,
         preheader: &alert.preheader(),
-        site_name,
+        signature: Some(site_name),
         header: layout::band(
             alert.tone(),
             &alert.kicker(),
@@ -320,7 +332,7 @@ mod tests {
         }
         assert!(r.html_body.contains("INCIDENT RESOLVED"));
         assert!(
-            !r.html_body.contains("Urgency"),
+            !r.html_body.to_lowercase().contains("urgency"),
             "a closed incident has nothing left to page about"
         );
     }
@@ -334,8 +346,10 @@ mod tests {
         a.ended_at = Some(a.started_at + chrono::Duration::minutes(82));
         let r = render("Uptimepage", &a);
         for body in [&r.text_body, &r.html_body] {
-            assert!(!body.contains("Down in"), "stale breakdown: {body}");
-            assert!(!body.contains("Still up"), "stale breakdown: {body}");
+            // Case-insensitive: the HTML labels ship upper-cased, the text ones do not.
+            let body = body.to_lowercase();
+            assert!(!body.contains("down in"), "stale breakdown: {body}");
+            assert!(!body.contains("still up"), "stale breakdown: {body}");
             assert!(!body.contains("no response"), "stale failure: {body}");
         }
     }
@@ -346,7 +360,7 @@ mod tests {
         a.regions_down = vec!["eu-helsinki".into()];
         a.regions_up = Vec::new();
         let r = render("Uptimepage", &a);
-        assert!(!r.html_body.contains("Still up"));
+        assert!(!r.html_body.to_lowercase().contains("still up"));
         assert!(r.html_body.contains("Failing since 17 Aug 2026 12:41 UTC"));
     }
 
@@ -357,7 +371,10 @@ mod tests {
         let r = render("Uptimepage", &a);
         assert!(r.html_body.contains("What the check reported"));
         assert!(r.html_body.contains(&"x".repeat(INLINE_REASON_CHARS + 1)));
-        assert!(!r.html_body.contains("Reason"), "not also a fact row");
+        assert!(
+            !r.html_body.to_lowercase().contains(">reason<"),
+            "not also a fact row"
+        );
     }
 
     #[test]

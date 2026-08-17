@@ -44,7 +44,7 @@ pub fn render(site_name: &str, scheduled_purge_at: DateTime<Utc>) -> RenderedEma
     let html_body = layout::render(Page {
         title: &subject,
         preheader: &format!("All data is erased on {purge_human} unless you restore it."),
-        site_name,
+        signature: Some(site_name),
         header: layout::band(
             Tone::Warn,
             "ACCOUNT DEACTIVATED",

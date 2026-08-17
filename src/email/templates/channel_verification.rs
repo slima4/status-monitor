@@ -55,7 +55,7 @@ pub fn render(
     let html_body = layout::render(Page {
         title: &subject,
         preheader: "Confirm this address before any alert is delivered to it.",
-        site_name,
+        signature: Some(site_name),
         header: layout::wordmark(site_name, "Verify this address for alerts"),
         body,
         footnote: Some(layout::fine_print(&footnote)),

@@ -59,7 +59,8 @@ pub fn render(
     let html_body = layout::render(Page {
         title: &subject,
         preheader: &single_line(message),
-        site_name: page_name,
+        // A customer's subscribers hear from the page, not from us.
+        signature: None,
         header: layout::band(tone, &label.to_uppercase(), incident_title, None),
         body,
         footnote: Some(footnote),

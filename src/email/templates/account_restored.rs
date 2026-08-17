@@ -25,7 +25,7 @@ pub fn render(site_name: &str) -> RenderedEmail {
     let html_body = layout::render(Page {
         title: &subject,
         preheader: "The scheduled deletion is cancelled and monitoring has resumed.",
-        site_name,
+        signature: Some(site_name),
         header: layout::band(
             Tone::Good,
             "ACCOUNT RESTORED",

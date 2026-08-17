@@ -43,7 +43,7 @@ pub fn render(
     let html_body = layout::render(Page {
         title: &subject,
         preheader: &format!("One-time sign-in link, good for {expires_in_minutes} minutes."),
-        site_name,
+        signature: Some(site_name),
         header: layout::wordmark(site_name, "Sign in"),
         body,
         footnote: Some(layout::fine_print(
