@@ -624,8 +624,12 @@ fn detect_access_interference(
     }
 
     // Several appliances ship this same configurable page: enough to call it a
-    // policy block, not enough to name a vendor.
-    if body.contains("the requested url was rejected") && body.contains("support id") {
+    // policy block, not enough to name a vendor. The id must be presented, not
+    // merely mentioned — a bare "support id" is ordinary English, and a
+    // customer's own error-help page must not be read as a block. Both
+    // renderings of the page put a colon after the label.
+    let quotes_support_id = body.contains("support id:") || body.contains("support id is:");
+    if body.contains("the requested url was rejected") && quotes_support_id {
         return Some(CheckDiagnostic::access_interference(
             DiagnosticConfidence::Medium,
             None,
@@ -763,14 +767,16 @@ fn build_request(
         {
             continue;
         }
+        // Fixed by the checker: a caller-set value could advertise a codec we
+        // cannot decode, and the body would then fail every assertion.
+        if k.eq_ignore_ascii_case("accept-encoding") {
+            continue;
+        }
         // After a 301/302/303 degrades to a bodyless GET, a caller-set
         // content-framing header would describe a body that no longer
         // exists — a malformed request strict origins/WAFs reject (a
         // spurious Down on exactly the canonical-redirect targets this
         // feature exists for). Hyper sets its own `content-length: 0`.
-        if k.eq_ignore_ascii_case("accept-encoding") {
-            continue;
-        }
         if bodyless
             && (k.eq_ignore_ascii_case("content-type")
                 || k.eq_ignore_ascii_case("content-length")
@@ -1111,6 +1117,36 @@ mod tests {
         assert_eq!(hit.confidence, DiagnosticConfidence::High);
 
         assert!(detect_access_interference(&fingerprint, b"application says forbidden").is_none());
+    }
+
+    /// The generic appliance branch has no header to corroborate it and every
+    /// region fetches the same body, so a loose match trips everywhere at once
+    /// and reaches the customer's incident notification as the cause.
+    #[test]
+    fn access_detector_needs_a_quoted_support_id_not_the_bare_words() {
+        let bare = ResponseFingerprint::default();
+
+        // The other rendering of the same page; `..._keeps_shared_appliance_page_generic`
+        // covers the bare `Support ID:` form.
+        assert!(
+            detect_access_interference(
+                &bare,
+                b"the requested url was rejected. please consult with your administrator. \
+                  your support id is: 1234567890",
+            )
+            .is_some(),
+            "an appliance page that spells out the label still matches"
+        );
+
+        assert!(
+            detect_access_interference(
+                &bare,
+                b"if the requested url was rejected, quote the support id from the error \
+                  page when you open a ticket",
+            )
+            .is_none(),
+            "a customer's own error-help page mentions the id without presenting one"
+        );
     }
 
     #[test]
