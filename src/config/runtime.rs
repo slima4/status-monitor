@@ -51,11 +51,16 @@ pub struct HttpClientConfig {
     pub user_agent: String,
 }
 
+/// The crawler convention (`Googlebot` and friends use the same shape). The
+/// `Mozilla/5.0 (compatible; …)` prefix is what CDNs parse before deciding
+/// whether to compress a response — without it some origins answer a probe with
+/// megabytes of uncompressed HTML — while `compatible` and the product token
+/// keep the claim honest: no browser engine is named.
 pub(super) fn default_user_agent() -> String {
     concat!(
-        "uptimepage/",
+        "Mozilla/5.0 (compatible; uptimepage/",
         env!("CARGO_PKG_VERSION"),
-        " (+https://uptimepage.dev/bot)"
+        "; +https://uptimepage.dev/bot)"
     )
     .to_string()
 }

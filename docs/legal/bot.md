@@ -1,6 +1,6 @@
 # Uptimepage Bot
 
-**Last updated:** 2026-07-25
+**Last updated:** 2026-08-17
 
 If you found this page in your server logs, our bot requested a page on your site. This page explains what it is, why it happened, and how to stop it.
 
@@ -12,13 +12,15 @@ Every request we make was configured by a person. We do not discover sites on ou
 
 ## How to Identify It
 
-Our probes send a `User-Agent` that starts with `uptimepage/` and links back to this page:
+Our probes send a `User-Agent` that names us and links back to this page:
 
 ```
-uptimepage/1.1.0 (+https://uptimepage.dev/bot)
+Mozilla/5.0 (compatible; uptimepage/1.1.0; +https://uptimepage.dev/bot)
 ```
 
-The version number changes as we release. The `uptimepage/` prefix and the link do not.
+The version number changes as we release. The `uptimepage/` token and the link do not.
+
+The `Mozilla/5.0 (compatible; …)` prefix is the long-standing convention for well-behaved automated clients, and it is what many CDNs read before deciding whether to compress a response. It claims no browser engine: match on `uptimepage/` and you will always find us.
 
 ## What It Does and Does Not Do
 
