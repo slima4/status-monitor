@@ -74,7 +74,9 @@ impl McpServer {
         }))
     }
 
-    /// Shared pause/resume body (no audit — the wrapper's `finish` records it).
+    /// Shared pause/resume body. The wrapper's `finish` records the tool call;
+    /// the store writes the org's own `target.paused`/`target.resumed` row, so
+    /// the trail reads the same whichever surface stopped the monitor.
     pub(super) async fn set_enabled_inner(
         &self,
         ctx: &RequestContext<RoleServer>,
@@ -113,6 +115,7 @@ impl McpServer {
                     ..Default::default()
                 },
                 None,
+                Some(auth.user_id),
             )
             .await
             .map_err(|e| McpToolError::internal(format!("set enabled: {e}")))?
@@ -400,7 +403,7 @@ impl McpServer {
         // `None`: not restamping `write_source` is what keeps a terraform marker.
         self.state
             .target_store
-            .update(auth.org, id, update, None)
+            .update(auth.org, id, update, None, Some(auth.user_id))
             .await
             .map_err(|e| McpToolError::internal(format!("update monitor: {e}")))?
             .ok_or_else(|| McpToolError::not_found("monitor not found"))?;

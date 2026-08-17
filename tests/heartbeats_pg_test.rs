@@ -158,7 +158,10 @@ async fn enable_rearms_only_disabled_heartbeats_live_pg() {
     let running_before = armed_at(org_a, running).await;
 
     // A foreign org's enable can't re-arm across the tenant boundary.
-    targets.set_enabled(org_b, &[paused], true).await.unwrap();
+    targets
+        .set_enabled(org_b, &[paused], true, None)
+        .await
+        .unwrap();
     assert_eq!(
         armed_at(org_a, paused).await.armed_at,
         paused_before.armed_at
@@ -167,7 +170,7 @@ async fn enable_rearms_only_disabled_heartbeats_live_pg() {
     // set_enabled re-arms the disabled→enabled flip only, and the re-arm is
     // NOT a fabricated ping.
     targets
-        .set_enabled(org_a, &[paused, running], true)
+        .set_enabled(org_a, &[paused, running], true, None)
         .await
         .unwrap();
     let paused_after = armed_at(org_a, paused).await;
@@ -180,7 +183,10 @@ async fn enable_rearms_only_disabled_heartbeats_live_pg() {
     );
 
     // The PATCH-style update path shares the same contract.
-    targets.set_enabled(org_a, &[paused], false).await.unwrap();
+    targets
+        .set_enabled(org_a, &[paused], false, None)
+        .await
+        .unwrap();
     let re_paused = armed_at(org_a, paused).await;
     targets
         .update(
@@ -191,6 +197,7 @@ async fn enable_rearms_only_disabled_heartbeats_live_pg() {
                 ..Default::default()
             },
             Some(WriteSource::Ui),
+            None,
         )
         .await
         .unwrap();
@@ -249,6 +256,7 @@ async fn dead_tokens_stop_recording_and_sync_heals_rows_live_pg() {
                 ..Default::default()
             },
             Some(WriteSource::Ui),
+            None,
         )
         .await
         .unwrap();

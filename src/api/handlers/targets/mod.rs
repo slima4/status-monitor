@@ -245,6 +245,7 @@ pub async fn create(
 pub async fn update(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<TargetsWrite>,
+    CurrentUser(user): CurrentUser,
     RequestSource(source): RequestSource,
     Path(id): Path<Uuid>,
     Json(mut update): Json<TargetUpdate>,
@@ -322,7 +323,7 @@ pub async fn update(
     let check_rewritten = update.check.is_some();
     match state
         .target_store
-        .update(org, id, update, Some(source))
+        .update(org, id, update, Some(source), Some(user))
         .await?
     {
         Some(t) => {
@@ -825,6 +826,7 @@ pub async fn bulk_create(
                         ..Default::default()
                     },
                     Some(source),
+                    None,
                 )
                 .await?;
         }
@@ -877,8 +879,18 @@ pub async fn bulk_action(
 
     let mut over_cap: Vec<Uuid> = Vec::new();
     let succeeded = match &req.action {
-        BulkAction::Enable => state.target_store.set_enabled(org, &req.ids, true).await?,
-        BulkAction::Disable => state.target_store.set_enabled(org, &req.ids, false).await?,
+        BulkAction::Enable => {
+            state
+                .target_store
+                .set_enabled(org, &req.ids, true, Some(user))
+                .await?
+        }
+        BulkAction::Disable => {
+            state
+                .target_store
+                .set_enabled(org, &req.ids, false, Some(user))
+                .await?
+        }
         BulkAction::Delete => {
             // Capture curated pages before the cascade drops the join rows.
             let pages = state

@@ -156,13 +156,17 @@ pub trait TargetStore: Send + Sync {
         max_flow_checks: i64,
     ) -> Result<Target>;
     /// A `source` of `None` leaves `write_source` as it was, for a writer that
-    /// must not claim authorship and erase another tool's marker.
+    /// must not claim authorship and erase another tool's marker. An update that
+    /// flips `enabled` writes a `target.paused`/`target.resumed` audit row in the
+    /// same transaction, since a paused monitor simply stops reporting and
+    /// nothing else records who stopped it.
     async fn update(
         &self,
         org: OrgId,
         id: Uuid,
         update: TargetUpdate,
         source: Option<WriteSource>,
+        actor: Option<UserId>,
     ) -> Result<Option<Target>>;
     /// A monitor is a hard delete, so the `target.deleted` audit row written in
     /// the same transaction is the only surviving record that it existed.
@@ -193,8 +197,16 @@ pub trait TargetStore: Send + Sync {
     ) -> Result<Vec<TagCount>>;
     /// Totals + enabled/disabled split for the dashboard.
     async fn summary(&self, org: OrgId) -> Result<TargetsSummary>;
-    /// Atomically enable or disable each id; returns the set that existed.
-    async fn set_enabled(&self, org: OrgId, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>>;
+    /// Atomically enable or disable each id; returns the set that existed. Ids
+    /// whose state actually changed are named in one `target.paused`/
+    /// `target.resumed` audit row written in the same transaction.
+    async fn set_enabled(
+        &self,
+        org: OrgId,
+        ids: &[Uuid],
+        enabled: bool,
+        actor: Option<UserId>,
+    ) -> Result<Vec<Uuid>>;
     /// Atomically delete each id; returns the set that existed. One
     /// `target.bulk_deleted` audit row, not one per id: a 10 000-id call must
     /// not flood the log it is meant to be recorded in.

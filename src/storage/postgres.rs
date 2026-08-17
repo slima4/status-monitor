@@ -181,6 +181,34 @@ pub(crate) struct TargetRow {
     pub(crate) updated_at: DateTime<Utc>,
 }
 
+/// Cap on named monitors in one audit row's metadata: past this the count
+/// answers "what did they stop watching" as well as a full list would.
+const AUDIT_SAMPLE: usize = 100;
+
+fn pause_action(enabled: bool) -> &'static str {
+    if enabled {
+        "target.resumed"
+    } else {
+        "target.paused"
+    }
+}
+
+/// Shared shape for a pause/resume audit row, so a bulk flip and a single one
+/// read the same way to whoever is asking who stopped watching a monitor.
+fn pause_metadata<'a>(flipped: impl Iterator<Item = (&'a Uuid, &'a String)>) -> serde_json::Value {
+    let named: Vec<(&Uuid, &String)> = flipped.collect();
+    let sample: Vec<serde_json::Value> = named
+        .iter()
+        .take(AUDIT_SAMPLE)
+        .map(|(id, name)| serde_json::json!({ "id": id, "name": name }))
+        .collect();
+    serde_json::json!({
+        "count": named.len(),
+        "targets": sample,
+        "truncated": named.len() > AUDIT_SAMPLE,
+    })
+}
+
 /// Build a `Target` from a row, decrypting `check_spec` if a cipher is
 /// configured. Shared between [`PostgresTargetStore`] (org-scoped reads) and
 /// [`crate::storage::AdminRepo`] (cross-tenant scheduler enumeration).
@@ -492,6 +520,7 @@ impl TargetStore for PostgresTargetStore {
         id: Uuid,
         update: TargetUpdate,
         source: Option<WriteSource>,
+        actor: Option<UserId>,
     ) -> Result<Option<Target>> {
         let check_json = update
             .check
@@ -522,7 +551,32 @@ impl TargetStore for PostgresTargetStore {
         } else {
             ""
         };
-        let row: Option<TargetRow> = sqlx::query_as::<_, TargetRow>(&format!(
+        // Only a flip of `enabled` has an audit row to bundle, so only that path
+        // pays for a transaction. Every other edit stays the single statement it
+        // was, which matters for the per-target writes a bulk create fans out.
+        let mut tx = match update.enabled {
+            Some(_) => Some(self.pool.begin().await.context("update target: begin")?),
+            None => None,
+        };
+        // Read under a row lock, so a concurrent flip can't land between the
+        // state this compares against and the write that follows.
+        //
+        // LOCK ORDER: this takes the `targets` row before the statement below
+        // touches `heartbeat_monitors`, matching `set_enabled`. Hoisting the
+        // rearm ahead of this read would invert the pair and deadlock a resume
+        // racing a bulk resume of the same monitor.
+        let was_enabled: Option<bool> = match tx.as_mut() {
+            Some(tx) => sqlx::query_scalar(
+                "SELECT enabled FROM targets WHERE id = $1 AND org_id = $2 FOR UPDATE",
+            )
+            .bind(id)
+            .bind(org.0)
+            .fetch_optional(&mut **tx)
+            .await
+            .context("update target: read enabled")?,
+            None => None,
+        };
+        let sql = format!(
             r#"{rearm_cte}UPDATE targets SET
                  name = COALESCE($2, name),
                  check_spec = COALESCE($3, check_spec),
@@ -544,27 +598,48 @@ impl TargetStore for PostgresTargetStore {
                       group_name, owner_user_id,
                       write_source,
                       created_at, updated_at"#,
-        ))
-        .bind(id)
-        .bind(update.name)
-        .bind(check_json)
-        .bind(interval_secs)
-        .bind(update.enabled)
-        .bind(update.tags)
-        .bind(alerts_json)
-        .bind(update.group_name.is_some())
-        .bind(update.group_name.clone().flatten())
-        .bind(update.owner_user_id.is_some())
-        .bind(update.owner_user_id.flatten())
-        .bind(org.0)
-        .bind(source.map(WriteSource::as_str))
-        .bind(region_policy_json)
-        .bind(update.alert_confirmations.map(|n| n.max(1) as i32))
-        .bind(update.notify_recovery)
-        .bind(update.renotify_interval_secs.map(|n| n as i32))
-        .fetch_optional(&self.pool)
-        .await
+        );
+        let query = sqlx::query_as::<_, TargetRow>(&sql)
+            .bind(id)
+            .bind(update.name)
+            .bind(check_json)
+            .bind(interval_secs)
+            .bind(update.enabled)
+            .bind(update.tags)
+            .bind(alerts_json)
+            .bind(update.group_name.is_some())
+            .bind(update.group_name.clone().flatten())
+            .bind(update.owner_user_id.is_some())
+            .bind(update.owner_user_id.flatten())
+            .bind(org.0)
+            .bind(source.map(WriteSource::as_str))
+            .bind(region_policy_json)
+            .bind(update.alert_confirmations.map(|n| n.max(1) as i32))
+            .bind(update.notify_recovery)
+            .bind(update.renotify_interval_secs.map(|n| n as i32));
+        let row: Option<TargetRow> = match tx.as_mut() {
+            Some(tx) => query.fetch_optional(&mut **tx).await,
+            None => query.fetch_optional(&self.pool).await,
+        }
         .context("update target")?;
+        if let Some(mut tx) = tx {
+            // Only the enabled flip is audited here. The rest of an edit is
+            // recoverable from the row itself; a paused monitor stops answering,
+            // and nothing else records who stopped it.
+            if let (Some(r), Some(was)) = (row.as_ref(), was_enabled)
+                && r.enabled != was
+            {
+                crate::storage::orgs::record_audit_tx(
+                    &mut tx,
+                    org,
+                    actor,
+                    pause_action(r.enabled),
+                    pause_metadata(std::iter::once((&r.id, &r.name))),
+                )
+                .await?;
+            }
+            tx.commit().await.context("update target: commit")?;
+        }
         match row {
             Some(r) => Ok(Some(self.decode_row(r)?)),
             None => Ok(None),
@@ -856,34 +931,75 @@ impl TargetStore for PostgresTargetStore {
         })
     }
 
-    async fn set_enabled(&self, org: OrgId, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
+    async fn set_enabled(
+        &self,
+        org: OrgId,
+        ids: &[Uuid],
+        enabled: bool,
+        actor: Option<UserId>,
+    ) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        // Enabling re-arms heartbeat monitors in the same statement; the CTE
-        // reads the pre-update `enabled`, so only real disabled→enabled flips
-        // touch and every enable surface inherits it.
+        // `prev` is the pre-update snapshot, and it does three jobs: enabling
+        // re-arms heartbeat monitors off it, so only real disabled→enabled flips
+        // touch; it tells the audit row which ids actually changed state; and its
+        // `FOR UPDATE` serialises two concurrent flips of the same monitor, which
+        // would otherwise both read the same `was` and both write an audit row
+        // for one state change.
+        //
+        // LOCK ORDER: targets first, then `heartbeat_monitors` — `prev` is what
+        // `rearmed` reads, so the dependency pins that order. `update()` takes
+        // the same two locks in the same order. Reversing either invites a
+        // deadlock between a single resume and a bulk one.
         let sql = if enabled {
-            r#"WITH rearmed AS (
+            r#"WITH prev AS (
+                   SELECT id, name, enabled FROM targets
+                   WHERE id = ANY($1) AND org_id = $3
+                   FOR UPDATE
+               ), rearmed AS (
                    UPDATE heartbeat_monitors hm SET armed_at = now()
-                   FROM targets t
-                   WHERE hm.org_id = $3 AND hm.target_id = ANY($1)
-                     AND t.id = hm.target_id AND t.enabled = false
+                   FROM prev
+                   WHERE hm.org_id = $3 AND hm.target_id = prev.id
+                     AND prev.enabled = false
                )
-               UPDATE targets SET enabled = $2, updated_at = now()
-               WHERE id = ANY($1) AND org_id = $3 RETURNING id"#
+               UPDATE targets t SET enabled = $2, updated_at = now()
+               FROM prev WHERE t.id = prev.id AND t.org_id = $3
+               RETURNING t.id, t.name, prev.enabled AS was"#
         } else {
-            r#"UPDATE targets SET enabled = $2, updated_at = now()
-               WHERE id = ANY($1) AND org_id = $3 RETURNING id"#
+            r#"WITH prev AS (
+                   SELECT id, name, enabled FROM targets
+                   WHERE id = ANY($1) AND org_id = $3
+                   FOR UPDATE
+               )
+               UPDATE targets t SET enabled = $2, updated_at = now()
+               FROM prev WHERE t.id = prev.id AND t.org_id = $3
+               RETURNING t.id, t.name, prev.enabled AS was"#
         };
-        let rows: Vec<(Uuid,)> = sqlx::query_as(sql)
+        let mut tx = self.pool.begin().await.context("bulk set_enabled: begin")?;
+        let rows: Vec<(Uuid, String, bool)> = sqlx::query_as(sql)
             .bind(ids)
             .bind(enabled)
             .bind(org.0)
-            .fetch_all(&self.pool)
+            .fetch_all(&mut *tx)
             .await
             .context("bulk set_enabled")?;
-        Ok(rows.into_iter().map(|(id,)| id).collect())
+        // Re-pausing an already-paused monitor changed nothing, so it leaves no
+        // row: an audit trail of non-events is one nobody can read.
+        let flipped: Vec<&(Uuid, String, bool)> =
+            rows.iter().filter(|(_, _, was)| *was != enabled).collect();
+        if !flipped.is_empty() {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                pause_action(enabled),
+                pause_metadata(flipped.iter().map(|(id, name, _)| (id, name))),
+            )
+            .await?;
+        }
+        tx.commit().await.context("bulk set_enabled: commit")?;
+        Ok(rows.into_iter().map(|(id, _, _)| id).collect())
     }
 
     async fn delete_bulk(

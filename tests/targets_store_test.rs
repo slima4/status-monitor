@@ -297,6 +297,7 @@ async fn an_update_can_decline_to_claim_authorship() {
                 ..Default::default()
             },
             None,
+            None,
         )
         .await
         .unwrap()
@@ -317,6 +318,7 @@ async fn an_update_can_decline_to_claim_authorship() {
                 ..Default::default()
             },
             Some(WriteSource::Api),
+            None,
         )
         .await
         .unwrap()

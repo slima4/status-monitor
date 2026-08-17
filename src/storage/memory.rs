@@ -830,6 +830,7 @@ impl TargetStore for InMemoryTargetStore {
         id: Uuid,
         update: TargetUpdate,
         source: Option<WriteSource>,
+        _actor: Option<UserId>,
     ) -> Result<Option<Target>> {
         let mut guard = self.targets.lock();
         let Some(t) = guard.iter_mut().find(|t| t.id == id) else {
@@ -990,7 +991,13 @@ impl TargetStore for InMemoryTargetStore {
         })
     }
 
-    async fn set_enabled(&self, _org: OrgId, ids: &[Uuid], enabled: bool) -> Result<Vec<Uuid>> {
+    async fn set_enabled(
+        &self,
+        _org: OrgId,
+        ids: &[Uuid],
+        enabled: bool,
+        _actor: Option<UserId>,
+    ) -> Result<Vec<Uuid>> {
         let mut guard = self.targets.lock();
         let now = Utc::now();
         let mut hit = Vec::new();
