@@ -616,27 +616,59 @@ fn host_canonicalization_is_pinned_to_a_fixed_corpus() {
         ("xn--bhn-qla.de", "xn--bhn-qla.de"),
         ("приклад.укр", "xn--80aikifvh.xn--j1amh"),
         ("1.2.3.4", "1.2.3.4"),
+        ("1.2.3.4.", "1.2.3.4"),
         ("2001:db8::1", "2001:db8::1"),
+        ("2001:DB8::1", "2001:DB8::1"),
         ("[2001:db8::1]", "2001:db8::1"),
+        ("[example.com]", "example.com"),
+        ("[oops", ""),
+        ("1abc.com", "1abc.com"),
         ("--invalid-leading.com", ""),
         ("under_score.com", ""),
+        ("ab--cd.com", ""),
+        ("-lead.com", ""),
+        ("trail-.com", ""),
+        ("a..b.com", ""),
+        ("exa mple.com", ""),
+        ("example.com:8080", ""),
+        ("-", ""),
+        ("xn--dh0dc.com", "xn--dh0dc.com"),
         ("", ""),
     ];
 
-    for (input, want) in CORPUS {
+    let canon = |input: &str| {
         let mut spec = CheckSpec::Ping(PingCheck {
-            host: (*input).into(),
+            host: input.into(),
             timeout: Duration::from_secs(3),
         });
-        let got = canonicalize_check(&mut spec);
-        if want.is_empty() {
-            assert!(got.is_err(), "{input:?} should be rejected, was accepted");
-            continue;
-        }
-        got.unwrap_or_else(|e| panic!("{input:?} rejected: {e}"));
-        match spec {
-            CheckSpec::Ping(p) => assert_eq!(&p.host, want, "canonicalising {input:?}"),
+        canonicalize_check(&mut spec).map(|()| match spec {
+            CheckSpec::Ping(p) => p.host,
             _ => panic!("variant changed"),
+        })
+    };
+
+    for (input, want) in CORPUS {
+        match canon(input) {
+            Ok(got) => {
+                assert!(
+                    !want.is_empty(),
+                    "{input:?} should be rejected, was accepted"
+                );
+                assert_eq!(&got, want, "canonicalising {input:?}");
+            }
+            Err(e) => assert!(want.is_empty(), "{input:?} rejected: {e}"),
         }
     }
+
+    // The DNS length limits, pinned separately because they are the part a
+    // client has to hard-code to predict what gets stored.
+    let label = "a".repeat(63);
+    let at_63 = format!("{label}.example.com");
+    let over_63 = format!("a{label}.example.com");
+    let at_253 = format!("{label}.{label}.{label}.{}", "a".repeat(61));
+    let over_253 = format!("{at_253}a");
+    assert_eq!(canon(&at_63).unwrap(), at_63);
+    assert!(canon(&over_63).is_err(), "64-character label accepted");
+    assert_eq!(canon(&at_253).unwrap(), at_253);
+    assert!(canon(&over_253).is_err(), "254-character host accepted");
 }
