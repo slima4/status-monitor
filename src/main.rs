@@ -766,7 +766,10 @@ async fn main() -> Result<()> {
         // module free of `crate::observability` imports — its hard-isolation
         // contract (see marketing/mod.rs) limits which crate paths it may
         // depend on, and a future service extraction stays a clean cut.
+        // Assistant crawlers only ever fetch this surface, and they run no
+        // JavaScript, so the browser tracker cannot see them.
         let marketing_router = marketing::router(marketing_cfg)
+            .layer(middleware::from_fn(observability::ai_traffic::middleware))
             .layer(middleware::from_fn(observability::http_metrics::middleware));
         let dispatch = marketing::RouteByHost {
             scheme,

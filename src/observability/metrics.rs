@@ -285,6 +285,10 @@ fn register_descriptions() {
         "Self-service account deletions requested. Churn signal, not a health signal: every increment is a customer leaving inside a grace window that is still reversible, and nothing else in the stack observes it"
     );
     describe_counter!(
+        "uptimepage_ai_crawler_requests_total",
+        "Assistant crawler fetches of the marketing surface, labelled by `bot`, `section`, and `kind`. `kind=user-fetch` is an agent dispatched because a person asked a question seconds earlier, so it tracks live citation; `kind=crawler` is corpus building for answers weeks away. The browser tracker sees assistant referrals but never these fetches, because crawlers run no JavaScript"
+    );
+    describe_counter!(
         "uptimepage_orgs_emptied_total",
         "Deletes that took an organisation from having monitors to having none. The shape a customer walking out leaves behind when they clear the account by hand instead of deleting it"
     );
@@ -357,4 +361,5 @@ pub mod names {
     pub const RATELIMIT_DROPS: &str = "uptimepage_ratelimit_drops_total";
     pub const FLOW_RUNS: &str = "uptimepage_flow_runs_total";
     pub const FLOW_STEP_DURATION_MS: &str = "uptimepage_flow_step_duration_ms";
+    pub const AI_CRAWLER_REQUESTS: &str = "uptimepage_ai_crawler_requests_total";
 }
