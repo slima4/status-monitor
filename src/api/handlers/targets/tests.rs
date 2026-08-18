@@ -588,3 +588,55 @@ fn canonicalize_check_lowercases_domain_expiry() {
         _ => panic!("variant changed"),
     }
 }
+
+/// Hosts are rewritten on write, so what a client sends is not what it reads
+/// back, and the breaker and throttle key on the rewritten form. Nothing
+/// recorded which input maps to which output, so a change to the IDN handling
+/// showed up as a client breaking rather than as a test failing here.
+///
+/// Empty expectation means the input is not a usable host and must be rejected.
+#[test]
+fn host_canonicalization_is_pinned_to_a_fixed_corpus() {
+    use crate::domain::{CheckSpec, PingCheck};
+    use std::time::Duration;
+
+    const CORPUS: &[(&str, &str)] = &[
+        ("example.com", "example.com"),
+        ("sub.example.co.uk", "sub.example.co.uk"),
+        ("db", "db"),
+        ("localhost", "localhost"),
+        ("my-svc", "my-svc"),
+        ("EXAMPLE.com", "example.com"),
+        ("Example.COM.", "example.com"),
+        ("example.com.", "example.com"),
+        ("example.com..", "example.com"),
+        ("Bähn.de", "xn--bhn-qla.de"),
+        ("BÄHN.de", "xn--bhn-qla.de"),
+        ("bähn.de.", "xn--bhn-qla.de"),
+        ("xn--bhn-qla.de", "xn--bhn-qla.de"),
+        ("приклад.укр", "xn--80aikifvh.xn--j1amh"),
+        ("1.2.3.4", "1.2.3.4"),
+        ("2001:db8::1", "2001:db8::1"),
+        ("[2001:db8::1]", "2001:db8::1"),
+        ("--invalid-leading.com", ""),
+        ("under_score.com", ""),
+        ("", ""),
+    ];
+
+    for (input, want) in CORPUS {
+        let mut spec = CheckSpec::Ping(PingCheck {
+            host: (*input).into(),
+            timeout: Duration::from_secs(3),
+        });
+        let got = canonicalize_check(&mut spec);
+        if want.is_empty() {
+            assert!(got.is_err(), "{input:?} should be rejected, was accepted");
+            continue;
+        }
+        got.unwrap_or_else(|e| panic!("{input:?} rejected: {e}"));
+        match spec {
+            CheckSpec::Ping(p) => assert_eq!(&p.host, want, "canonicalising {input:?}"),
+            _ => panic!("variant changed"),
+        }
+    }
+}
