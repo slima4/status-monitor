@@ -161,9 +161,12 @@ fn check_type_copy_matches_the_surface_it_describes() {
         "heartbeat",
         "flow",
     ];
-    // Declarable through the REST API but not through Terraform. Named once so
-    // the provider list stays derived from KINDS instead of drifting from it.
-    const NOT_IN_PROVIDER: &[&str] = &["ping", "heartbeat"];
+    // Declarable through the REST API but not through Terraform. Empty since
+    // provider v0.5.2 shipped ping and heartbeat, so the provider now covers
+    // every kind: a page may name all of KINDS. Kept rather than deleted
+    // because the next kind lands in the API first, and this is where it is
+    // held back from the page until the provider catches up.
+    const NOT_IN_PROVIDER: &[&str] = &[];
     // Keyed on the path, not on the label: prose is edited freely, so a rule
     // that reads the label can be switched off by renaming a row.
     const PROVIDER_SCOPED: &[&str] = &["/terraform-uptime-monitoring"];

@@ -1997,11 +1997,11 @@ resource "uptimepage_status_page_component" "web" {
     Landing {
         path: "/terraform-uptime-monitoring",
         created: "2026-06-25",
-        lastmod: "2026-08-18",
+        lastmod: "2026-08-19",
         title: "Terraform Uptime Monitoring",
         eyebrow: "infrastructure as code",
         h1: "Uptime monitoring you declare in Terraform",
-        meta_description: "Declare uptime monitors and alert channels in Terraform with the Uptimepage provider. Six check types, HTTP to browser flows. Free to start, no card.",
+        meta_description: "Declare uptime monitors and alert channels in Terraform with the Uptimepage provider. Eight check types, HTTP to browser flows. Free to start, no card.",
         lede: "Provision a monitor the same way you provision the service it watches. The Uptimepage provider manages monitors, status pages, components and notification channels in HCL, so every new service ships with monitoring instead of a follow-up ticket.",
         features: &[
             Feature {
@@ -2013,8 +2013,8 @@ resource "uptimepage_status_page_component" "web" {
                 value: "monitors, pages, components, channels",
             },
             Feature {
-                label: "Provider check types",
-                value: "HTTP, TCP, DNS, TLS, domain, flow",
+                label: "Check types",
+                value: "HTTP, TCP, ping, heartbeat, DNS, TLS, domain, flow",
             },
             Feature {
                 label: "Check interval",
@@ -2040,7 +2040,7 @@ resource "uptimepage_status_page_component" "web" {
             },
             Section {
                 heading: "A schema that refuses nonsense",
-                body: "The provider’s check block is nested on purpose: you set the type to \"http\" and then fill in an http block. A flat resource with url, port, host and cert_days all at the top level would let you write a TCP check with an HTTP status matcher and only tell you at apply time. The nested shape makes those invalid states impossible to write. A little more verbose, and a whole category of mistake is gone.",
+                body: "The provider’s check block is nested on purpose: you set the type to \"http\" and then fill in an http block. A flat resource with url, port, host and cert_days all at the top level would let you write a TCP check with an HTTP status matcher and only tell you at apply time. The nested shape makes those invalid states impossible to write. A little more verbose, and a whole category of mistake is gone. The heartbeat kind is the exception worth knowing: nothing is sent to it, so the URL your cron job reports to is not an argument you set but a value you read back, through the uptimepage_heartbeat data source.",
             },
             Section {
                 heading: "Once it is in code, the code wins",
