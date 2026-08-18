@@ -34,8 +34,11 @@ pub fn render(
          Unsubscribe:\n  {unsubscribe_url}\n"
     );
 
-    // Parsed back to the enum so a new phase has to be classified here rather
-    // than falling into "still going wrong" by default.
+    // Parsed back to the enum so a new variant has to be classified here
+    // rather than defaulting to "still going wrong". That guard is the
+    // compiler's, and covers variants only: from_db_str reads an unrecognised
+    // phase string as Investigating, and the column's CHECK is what stops one
+    // arriving.
     let tone = match IncidentStatusPhase::from_db_str(phase) {
         IncidentStatusPhase::Resolved | IncidentStatusPhase::Postmortem => Tone::Good,
         IncidentStatusPhase::Investigating
