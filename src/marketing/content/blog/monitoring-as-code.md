@@ -1,7 +1,7 @@
 +++
-title = "Your monitoring config belongs in a pull request"
+title = "Monitoring as code: put your uptime checks in a pull request"
 date = "2026-06-16"
-updated = "2026-08-03"
+updated = "2026-08-18"
 slug = "monitoring-as-code"
 excerpt = "Click-created monitors rot: nobody recalls why a threshold is set, and the reasoning leaves with its author. Terraform fixes that, and bites back in places."
 tags = ["terraform", "infrastructure-as-code", "monitoring", "devops"]
