@@ -146,9 +146,11 @@ fn per_page_extras_name_real_pages() {
 
 /// Shipping a check kind and forgetting the tables is the drift that let
 /// heartbeats and browser flows go unmentioned for weeks while rival
-/// columns counted theirs. A row that says "check types" says all of them.
+/// columns counted theirs. A row that says "check types" says every kind the
+/// surface it describes can actually do, which is fewer for Terraform than for
+/// the API.
 #[test]
-fn our_check_type_cells_name_every_kind() {
+fn check_type_copy_matches_the_surface_it_describes() {
     const KINDS: &[&str] = &[
         "HTTP",
         "TCP",
@@ -159,6 +161,12 @@ fn our_check_type_cells_name_every_kind() {
         "heartbeat",
         "flow",
     ];
+    // Declarable through the REST API but not through Terraform. Named once so
+    // the provider list stays derived from KINDS instead of drifting from it.
+    const NOT_IN_PROVIDER: &[&str] = &["ping", "heartbeat"];
+    // Keyed on the path, not on the label: prose is edited freely, so a rule
+    // that reads the label can be switched off by renaming a row.
+    const PROVIDER_SCOPED: &[&str] = &["/terraform-uptime-monitoring"];
     // Any wording a label can take, matched loosely: a guard that only fires on
     // the exact labels in the catalog today is bypassed by the next one added.
     const PHRASES: &[&str] = &[
@@ -176,25 +184,60 @@ fn our_check_type_cells_name_every_kind() {
         // like "auto incidents from checks", which name no kinds.
         label == "checks" || PHRASES.iter().any(|l| label.contains(l))
     }
-    fn assert_every_kind(path: &str, label: &str, value: &str) {
+    // Whole words only. Substring matching reads "ping" out of "shipping" and
+    // out of a rival named Pingdom, and fails copy that claims neither.
+    fn words(value: &str) -> Vec<String> {
+        value
+            .to_lowercase()
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+    fn assert_kinds(path: &str, label: &str, value: &str) {
+        let provider = PROVIDER_SCOPED.contains(&path);
+        let said = words(value);
         for kind in KINDS {
-            assert!(
-                value.contains(kind),
-                "{path} {label:?} omits {kind}: {value:?}"
-            );
+            let absent_here = provider && NOT_IN_PROVIDER.contains(kind);
+            let named = said.iter().any(|w| w == &kind.to_lowercase());
+            if absent_here {
+                assert!(
+                    !named,
+                    "{path} {label:?} claims {kind}, which Terraform cannot declare: {value:?}"
+                );
+            } else {
+                assert!(named, "{path} {label:?} omits {kind}: {value:?}");
+            }
         }
     }
     for l in LANDINGS {
         // A feature row naming the kinds drifts the same way a matrix cell
         // does, and no matrix covers a use-case page.
         for f in l.features.iter().filter(|f| names_kinds(f.label)) {
-            assert_every_kind(l.path, f.label, f.value);
+            assert_kinds(l.path, f.label, f.value);
         }
         let Some(m) = page_matrix(l.path) else {
             continue;
         };
         for row in m.rows.iter().filter(|r| names_kinds(r.label)) {
-            assert_every_kind(l.path, row.label, row.cells[m.us_col()].0);
+            assert_kinds(l.path, row.label, row.cells[m.us_col()].0);
+        }
+    }
+    // The claim that reached Google was in the description, not a row: prose on
+    // a provider-scoped page must not promise a kind Terraform cannot declare.
+    for l in LANDINGS
+        .iter()
+        .filter(|l| PROVIDER_SCOPED.contains(&l.path))
+    {
+        for (field, text) in [("meta_description", l.meta_description), ("lede", l.lede)] {
+            let said = words(text);
+            for kind in NOT_IN_PROVIDER {
+                assert!(
+                    !said.iter().any(|w| w == &kind.to_lowercase()),
+                    "{} {field} promises {kind}, which Terraform cannot declare: {text:?}",
+                    l.path
+                );
+            }
         }
     }
 }

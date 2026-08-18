@@ -1997,11 +1997,11 @@ resource "uptimepage_status_page_component" "web" {
     Landing {
         path: "/terraform-uptime-monitoring",
         created: "2026-06-25",
-        lastmod: "2026-08-11",
+        lastmod: "2026-08-18",
         title: "Terraform Uptime Monitoring",
         eyebrow: "infrastructure as code",
         h1: "Uptime monitoring you declare in Terraform",
-        meta_description: "Declare uptime monitors and alert channels in Terraform with the Uptimepage provider. 8 check types, HTTP to browser flows. Free to start, no card.",
+        meta_description: "Declare uptime monitors and alert channels in Terraform with the Uptimepage provider. Six check types, HTTP to browser flows. Free to start, no card.",
         lede: "Provision a monitor the same way you provision the service it watches. The Uptimepage provider manages monitors, status pages, components and notification channels in HCL, so every new service ships with monitoring instead of a follow-up ticket.",
         features: &[
             Feature {
@@ -2010,15 +2010,15 @@ resource "uptimepage_status_page_component" "web" {
             },
             Feature {
                 label: "Resources",
-                value: "monitors, pages, channels",
+                value: "monitors, pages, components, channels",
             },
             Feature {
-                label: "Check types",
-                value: "HTTP, TCP, DNS, TLS, domain, ping, heartbeat, flow",
+                label: "Provider check types",
+                value: "HTTP, TCP, DNS, TLS, domain, flow",
             },
             Feature {
                 label: "Check interval",
-                value: "every 60s",
+                value: "from 60s, higher floors on expiry checks",
             },
             Feature {
                 label: "Auth",
