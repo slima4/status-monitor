@@ -88,6 +88,18 @@ impl IncidentAlert {
         )
     }
 
+    /// Whether `started_at` is a moment something began. For `NoData` and
+    /// `DataResumed` the notifier stamps it at send time, so printing it under
+    /// "Started" reads as when the gap opened rather than when the mail went
+    /// out. Resolved is excluded from `is_open` but does have a real start, so
+    /// this cannot borrow that predicate.
+    fn has_incident_window(&self) -> bool {
+        !matches!(
+            self.reason,
+            NotificationReason::NoData | NotificationReason::DataResumed
+        )
+    }
+
     /// `(down, total)`, only for a monitor watched from more than one region.
     /// The breakdown is the incident's open-time snapshot, so it describes the
     /// present only while the incident is open.
@@ -143,7 +155,9 @@ impl IncidentAlert {
             rows.push(("Severity", self.severity.as_db_str().to_string()));
             rows.push(("Urgency", self.urgency.as_db_str().to_string()));
         }
-        rows.push(("Started", utc_stamp(self.started_at)));
+        if self.has_incident_window() {
+            rows.push(("Started", utc_stamp(self.started_at)));
+        }
         if let Some(end) = self.ended_at {
             rows.push(("Ended", utc_stamp(end)));
             if let Some(duration) = self.duration() {
@@ -422,5 +436,44 @@ mod tests {
         let r = render("Uptimepage", &a);
         assert!(!r.html_body.contains("<img src=x"));
         assert!(r.html_body.contains("&lt;img src=x"));
+    }
+
+    /// The notifier stamps `started_at` at send time for these two, so a
+    /// "Started" row would date the interruption to the moment the mail went
+    /// out. The plain-text body it replaced carried no timestamp at all, so
+    /// this would be new misinformation rather than an inherited one.
+    #[test]
+    fn monitoring_gaps_do_not_claim_a_start_time() {
+        for reason in [NotificationReason::NoData, NotificationReason::DataResumed] {
+            let r = render("Uptimepage", &alert(reason));
+            for body in [&r.text_body, &r.html_body] {
+                // The card uppercases its labels, so a case-sensitive check
+                // would pass against the HTML without reading it.
+                assert!(
+                    !body.to_lowercase().contains("started"),
+                    "{reason:?} dates the gap to send time"
+                );
+                assert!(
+                    !body.contains("17 Aug 2026 12:41 UTC"),
+                    "{reason:?} prints the send stamp as a fact"
+                );
+            }
+        }
+    }
+
+    /// A resolved incident is not open, but it did start, so suppressing the
+    /// row cannot key on `is_open`.
+    #[test]
+    fn a_closed_incident_still_reports_when_it_began() {
+        let mut a = alert(NotificationReason::Resolved);
+        a.ended_at = Some(Utc.with_ymd_and_hms(2026, 8, 17, 13, 5, 0).unwrap());
+        let r = render("Uptimepage", &a);
+        for body in [&r.text_body, &r.html_body] {
+            assert!(
+                body.to_lowercase().contains("started"),
+                "a resolved incident lost its start"
+            );
+            assert!(body.contains("17 Aug 2026 12:41 UTC"));
+        }
     }
 }
