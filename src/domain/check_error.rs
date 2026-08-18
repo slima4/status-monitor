@@ -29,6 +29,11 @@ pub fn humanize_check_error(raw: &str) -> String {
         "no response" => "connected, but no response (timed out)".into(),
         "body timeout" => "response body timed out".into(),
         "tls" => "TLS handshake failed".into(),
+        "tls handshake rejected" => "server rejected the TLS handshake".into(),
+        "tls version or cipher mismatch" => "no TLS version or cipher in common".into(),
+        "malformed tls response" => "malformed TLS response".into(),
+        "tls handshake reset" => "TLS handshake reset".into(),
+        "tls handshake closed early" => "server closed the TLS handshake early".into(),
         "connect" => "connection failed".into(),
         "transport" => "transport error".into(),
         "dns: domain not found" => "domain not found (DNS)".into(),
@@ -297,6 +302,14 @@ pub fn classify_check_error(raw: &str) -> ErrorClass {
         "rdap throttled" => return ErrorClass::RdapLookup,
         "no response" => return ErrorClass::NoResponse,
         "tls" => return ErrorClass::Tls,
+        // The TLS-phase reasons share `Tls`: the class is what dashboards
+        // aggregate on and the phase has not changed, only how precisely the
+        // customer is told about it.
+        "tls handshake rejected"
+        | "tls version or cipher mismatch"
+        | "malformed tls response"
+        | "tls handshake reset"
+        | "tls handshake closed early" => return ErrorClass::Tls,
         "transport" => return ErrorClass::Transport,
         "body timeout" => return ErrorClass::BodyTimeout,
         "body match failed" => return ErrorClass::BodyMatchFailed,
@@ -505,6 +518,11 @@ mod tests {
         ),
         ("no response", ErrorClass::NoResponse),
         ("tls", ErrorClass::Tls),
+        ("tls handshake rejected", ErrorClass::Tls),
+        ("tls version or cipher mismatch", ErrorClass::Tls),
+        ("malformed tls response", ErrorClass::Tls),
+        ("tls handshake reset", ErrorClass::Tls),
+        ("tls handshake closed early", ErrorClass::Tls),
         ("transport", ErrorClass::Transport),
         ("body timeout", ErrorClass::BodyTimeout),
         ("body match failed", ErrorClass::BodyMatchFailed),

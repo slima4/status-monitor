@@ -144,26 +144,58 @@ pub(crate) fn tcp_reason(io: &io::Error) -> &'static str {
     }
 }
 
+/// The cert arms below are unreachable on the tls_cert monitor path, which
+/// installs `NoVerify` and so never raises a certificate error. Its handshake
+/// failures are protocol ones instead, which is why the non-certificate arms
+/// carry the weight there. Both paths share this function, and the HTTP path
+/// verifies for real, so both halves earn their place.
+///
+/// Every string here has to classify in `domain::check_error`, or it lands in
+/// `ErrorClass::Other` and recreates the errno-shaped problem this replaced.
 pub(crate) fn tls_reason(io: &io::Error) -> &'static str {
-    use rustls::CertificateError;
-    let Some(rustls::Error::InvalidCertificate(cert)) =
-        io.get_ref().and_then(|e| e.downcast_ref::<rustls::Error>())
-    else {
-        return "tls";
+    use rustls::{CertificateError, Error};
+    let Some(err) = io.get_ref().and_then(|e| e.downcast_ref::<Error>()) else {
+        // Not a rustls error, so the transport died mid-handshake. Connect
+        // already succeeded, which is why this cannot borrow `tcp_reason`:
+        // its fallback says "connect".
+        return match io.kind() {
+            std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted => {
+                "tls handshake reset"
+            }
+            std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::BrokenPipe => {
+                "tls handshake closed early"
+            }
+            // No arm for TimedOut: the check's own `timeout` future wins first
+            // and reports "timeout", so it would never be reached.
+            _ => "tls",
+        };
     };
-    match cert {
-        CertificateError::Expired | CertificateError::ExpiredContext { .. } => {
-            "certificate expired"
-        }
-        CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => {
-            "certificate not yet valid"
-        }
-        CertificateError::Revoked => "certificate revoked",
-        CertificateError::UnknownIssuer => "certificate not trusted",
-        CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => {
-            "certificate hostname mismatch"
-        }
-        _ => "certificate invalid",
+    match err {
+        Error::InvalidCertificate(cert) => match cert {
+            CertificateError::Expired | CertificateError::ExpiredContext { .. } => {
+                "certificate expired"
+            }
+            CertificateError::NotValidYet | CertificateError::NotValidYetContext { .. } => {
+                "certificate not yet valid"
+            }
+            CertificateError::Revoked => "certificate revoked",
+            CertificateError::UnknownIssuer => "certificate not trusted",
+            CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => {
+                "certificate hostname mismatch"
+            }
+            _ => "certificate invalid",
+        },
+        // The server answered the hello with a refusal.
+        Error::AlertReceived(_) => "tls handshake rejected",
+        // No TLS version or cipher suite in common, which is what an old
+        // server looks like from here.
+        Error::PeerIncompatible(_) => "tls version or cipher mismatch",
+        // The bytes are not TLS records at all, most often a plaintext port.
+        Error::InvalidMessage(_) => "malformed tls response",
+        // Same condition tls_cert reports when the chain is empty, so it
+        // reuses that wording rather than opening a second name for it.
+        Error::NoCertificatesPresented => "server returned no certificate chain",
+        _ => "tls",
     }
 }
 
@@ -422,14 +454,118 @@ mod tests {
         assert_eq!(tls_cert(C::BadEncoding).reason(), "certificate invalid");
     }
 
-    #[test]
-    fn tls_non_certificate_error_stays_generic() {
-        let e = ConnectError::Tls {
-            err: io::Error::other("handshake eof"),
+    fn tls_err(err: rustls::Error) -> ConnectError {
+        ConnectError::Tls {
+            err: io::Error::other(err),
             dns_ms: 0,
             connect_ms: 0,
-        };
-        assert_eq!(e.reason(), "tls");
+        }
+    }
+
+    fn tls_io(kind: io::ErrorKind) -> ConnectError {
+        ConnectError::Tls {
+            err: io::Error::new(kind, "x"),
+            dns_ms: 0,
+            connect_ms: 0,
+        }
+    }
+
+    /// The tls_cert monitor installs `NoVerify`, so every certificate arm is
+    /// dead on that path and these are the failures it actually produces.
+    /// Before they were named, all of them reached the customer as "tls".
+    #[test]
+    fn tls_protocol_errors_are_named_not_lumped_together() {
+        use rustls::Error as E;
+        assert_eq!(
+            tls_err(E::AlertReceived(rustls::AlertDescription::HandshakeFailure)).reason(),
+            "tls handshake rejected"
+        );
+        assert_eq!(
+            tls_err(E::PeerIncompatible(
+                rustls::PeerIncompatible::NoCipherSuitesInCommon
+            ))
+            .reason(),
+            "tls version or cipher mismatch"
+        );
+        assert_eq!(
+            tls_err(E::InvalidMessage(rustls::InvalidMessage::InvalidCcs)).reason(),
+            "malformed tls response"
+        );
+        // Reuses the wording tls_cert already emits for an empty chain.
+        assert_eq!(
+            tls_err(E::NoCertificatesPresented).reason(),
+            "server returned no certificate chain"
+        );
+        // A rustls error with no arm of its own still has to stay generic.
+        assert_eq!(tls_err(E::DecryptError).reason(), "tls");
+    }
+
+    /// A transport death mid-handshake is not a rustls error at all. Connect
+    /// has already succeeded here, so `tcp_reason` would be wrong: its
+    /// fallback says "connect".
+    #[test]
+    fn tls_transport_failures_name_the_handshake_phase() {
+        assert_eq!(
+            tls_io(io::ErrorKind::ConnectionReset).reason(),
+            "tls handshake reset"
+        );
+        assert_eq!(
+            tls_io(io::ErrorKind::ConnectionAborted).reason(),
+            "tls handshake reset"
+        );
+        assert_eq!(
+            tls_io(io::ErrorKind::UnexpectedEof).reason(),
+            "tls handshake closed early"
+        );
+        assert_eq!(
+            tls_io(io::ErrorKind::BrokenPipe).reason(),
+            "tls handshake closed early"
+        );
+        assert_eq!(tls_io(io::ErrorKind::Other).reason(), "tls");
+        // Deliberately generic: the check's own timeout future reports
+        // "timeout" long before an io TimedOut could surface here, so naming
+        // it would be a dead arm.
+        assert_eq!(tls_io(io::ErrorKind::TimedOut).reason(), "tls");
+    }
+
+    /// An unclassified reason lands in `ErrorClass::Other`, which is what the
+    /// errno leak did before it was normalised. Sampling from the emitter
+    /// rather than from the match arm is the point: a renamed string fails
+    /// here instead of silently falling through in production.
+    #[test]
+    fn every_tls_reason_this_emits_is_classified() {
+        use crate::domain::check_error::{ErrorClass, classify_check_error, humanize_check_error};
+        use rustls::Error as E;
+
+        let emitted = [
+            tls_err(E::InvalidCertificate(rustls::CertificateError::Expired)).reason(),
+            tls_err(E::AlertReceived(rustls::AlertDescription::HandshakeFailure)).reason(),
+            tls_err(E::PeerIncompatible(
+                rustls::PeerIncompatible::NoCipherSuitesInCommon,
+            ))
+            .reason(),
+            tls_err(E::InvalidMessage(rustls::InvalidMessage::InvalidCcs)).reason(),
+            tls_err(E::NoCertificatesPresented).reason(),
+            tls_err(E::DecryptError).reason(),
+            tls_io(io::ErrorKind::ConnectionReset).reason(),
+            tls_io(io::ErrorKind::UnexpectedEof).reason(),
+            tls_io(io::ErrorKind::Other).reason(),
+        ];
+        for reason in emitted {
+            assert_ne!(
+                classify_check_error(reason),
+                ErrorClass::Other,
+                "{reason:?} is emitted but unclassified"
+            );
+            // Several reasons are already plain English and pass through
+            // unchanged, which is fine. What is not fine is shipping the
+            // protocol spelled in lowercase to a reader.
+            let shown = humanize_check_error(reason);
+            assert!(
+                !shown.contains("tls"),
+                "{reason:?} reaches the reader as {shown:?}, with tls uncapitalised"
+            );
+        }
     }
 
     #[test]
