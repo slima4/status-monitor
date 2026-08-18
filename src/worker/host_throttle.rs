@@ -50,8 +50,8 @@ impl HostThrottle {
     }
 
     /// Lowercase TLD (last label) of a domain. `None` when the input has no
-    /// label. Operates on the canonical (IDN-encoded) form so that `bähn.рф`
-    /// and `bähn.xn--p1ai` and `BÄHN.рф` collapse onto the same TLD bucket.
+    /// label. Operates on the canonical (IDN-encoded) form so that `bähn.укр`
+    /// and `bähn.xn--j1amh` and `BÄHN.укр` collapse onto the same TLD bucket.
     pub fn rdap_tld(domain: &str) -> Option<String> {
         let canonical = canonical_host(domain);
         canonical
@@ -290,11 +290,11 @@ mod tests {
 
     #[test]
     fn rdap_tld_collapses_unicode_and_punycode_tld() {
-        // Cyrillic .рф and its punycode xn--p1ai map to the same bucket.
-        let unicode_tld = HostThrottle::rdap_tld("пример.рф");
-        let puny_tld = HostThrottle::rdap_tld("xn--e1afmkfd.xn--p1ai");
+        // Cyrillic .укр and its punycode xn--j1amh map to the same bucket.
+        let unicode_tld = HostThrottle::rdap_tld("приклад.укр");
+        let puny_tld = HostThrottle::rdap_tld("xn--80aikifvh.xn--j1amh");
         assert_eq!(unicode_tld, puny_tld);
-        assert_eq!(unicode_tld.as_deref(), Some("xn--p1ai"));
+        assert_eq!(unicode_tld.as_deref(), Some("xn--j1amh"));
     }
 
     #[test]
