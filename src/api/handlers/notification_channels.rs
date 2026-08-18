@@ -423,11 +423,26 @@ async fn mint_and_send_verification(
             },
         };
         let sender = delivery.sender;
-        tokio::spawn(async move {
-            if let Err(err) = sender.send(outgoing).await {
-                tracing::warn!(%channel_id, error = %err, "channel verification mail failed");
-            }
-        });
+        let metric_outcome = if let Err(err) = sender.send(outgoing).await {
+            tracing::warn!(%channel_id, error = %err, "channel verification mail failed");
+            "failed"
+        } else {
+            "sent"
+        };
+        metrics::counter!(
+            crate::observability::metrics::names::CONFIRM_EMAILS_TOTAL,
+            "path" => "channel",
+            "outcome" => metric_outcome,
+        )
+        .increment(1);
+    } else {
+        // MintOutcome::LimitReached — daily cap hit, no mail was attempted.
+        metrics::counter!(
+            crate::observability::metrics::names::CONFIRM_EMAILS_TOTAL,
+            "path" => "channel",
+            "outcome" => "rate_limited",
+        )
+        .increment(1);
     }
     Ok(outcome)
 }

@@ -74,6 +74,7 @@ these names verbatim.
 | `uptimepage_http_request_duration_ms{method,route}` | histogram | inbound HTTP request latency, exposed as summary quantiles (single web instance, no cross-instance merge). Query `name{quantile="0.99"}` for tail latency per route |
 | `uptimepage_http_responses_inflight` | gauge | inbound HTTP requests currently being served. Climbing alongside flat throughput points at handler back-pressure on a downstream pool |
 | `uptimepage_ratelimit_drops_total{scope}` | counter | HTTP 429s from the per-org / per-user rate-limit middleware. `scope` is the same string carried in the error body (`per_org_api_writes`, `per_user_bulk_ops`, …) so dashboards can join with `record_quota_event` audit rows. Abuse signal — a tenant hammering the API spikes one scope before shared resources notice |
+| `uptimepage_confirm_emails_total{path,outcome}` | counter | Confirm/verify emails sent for double opt-in flows. `path` is `subscribe` (public status-page subscribe form) or `channel` (authenticated alert-channel email verification). `outcome` is `sent`, `rate_limited` (daily cap hit — no mail attempted), or `failed` (transport error). Abuse signal: a sustained spike on `outcome=sent` is consistent with subscription-stuffing of the public subscribe endpoint; see the `UptimepageConfirmEmailSpike` alert |
 
 Scrape interval of 15 s is plenty — counters are written from hot tokio tasks; histograms aggregate per bucket without lock contention.
 

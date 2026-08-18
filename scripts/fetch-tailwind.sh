@@ -32,6 +32,7 @@ case "$uname_s-$uname_m" in
     Darwin-x86_64)  asset="tailwindcss-macos-x64" ;;
     Linux-aarch64)  asset="tailwindcss-linux-arm64${libc_suffix}" ;;
     Linux-x86_64)   asset="tailwindcss-linux-x64${libc_suffix}" ;;
+    MINGW*-x86_64|MSYS*-x86_64|CYGWIN*-x86_64) asset="tailwindcss-windows-x64.exe"; TARGET="$BIN_DIR/tailwindcss.exe" ;;
     *) echo "unsupported platform: $uname_s-$uname_m" >&2; exit 1 ;;
 esac
 

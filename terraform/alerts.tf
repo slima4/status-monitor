@@ -1144,6 +1144,65 @@ resource "grafana_rule_group" "availability" {
   }
 }
 
+# Subscription-abuse alerts. Fires when confirm/verify email volume spikes
+# above a threshold consistent with subscription stuffing (someone or a bot
+# submitting the public /subscribe form at scale). The existing per-address
+# and per-page caps bound the actual harm; this alert is the early-warning
+# signal that lets the operator investigate before the caps exhaust.
+resource "grafana_rule_group" "abuse" {
+  name             = "uptimepage-abuse"
+  folder_uid       = grafana_folder.obs.uid
+  interval_seconds = 60
+
+  # A confirm-email rate above 1/s over 5 minutes means more than 300
+  # confirm mails sent from a single process in that window — well above
+  # any organic subscribe wave (the per-address daily cap is 10, per-page
+  # is 200). for = 10m avoids alerting on a legitimate traffic spike from
+  # a blog post linking a status page; sustained elevated rate is the
+  # signal. Warning: the caps bound the harm; this is an awareness
+  # signal, not a production emergency.
+  # no_data = OK: the counter is absent until the first confirm mail is sent.
+  # Tune the threshold from the uptimepage_confirm_emails_total panel once
+  # a real-traffic baseline is established.
+  rule {
+    name           = "UptimepageConfirmEmailSpike"
+    condition      = "C"
+    for            = "10m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: confirm-email send rate spike"
+      description = "confirm/verify email send rate (outcome=sent) > 1/s over 5m for 10m — possible subscription-stuffing attack on the public /subscribe endpoint or the alert-channel verification flow. Check uptimepage_confirm_emails_total{path,outcome} and the quota_events table for per-address abuse patterns. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "sum(rate(uptimepage_confirm_emails_total{outcome=\"sent\"}[5m])) > 1"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+}
+
 # Churn alerts. Not health — nothing here means the product is broken. Every
 # rule is a customer leaving while there is still time to ask why, so both fire
 # at warning: a nudge to look, not a page.
