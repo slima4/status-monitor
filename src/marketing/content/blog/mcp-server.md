@@ -1,7 +1,7 @@
 +++
 title = "Your monitors can talk to an AI, with your permission"
 date = "2026-06-03"
-updated = "2026-08-10"
+updated = "2026-08-18"
 slug = "mcp-server"
 excerpt = "Uptimepage now speaks MCP, so an LLM can answer \"what's broken and since when?\" in plain language, plus what we did to stop it from wrecking things."
 tags = ["mcp", "ai", "monitoring", "security", "api"]
@@ -100,5 +100,7 @@ The MCP server adds a new way to *ask questions* and a tightly-fenced way to *ta
 It's the same monitoring you can [manage entirely as code](/blog/monitoring-as-code): queried by an assistant over MCP on one side, declared in a pull request with Terraform on the other. Two front doors, one tenant-isolated data layer behind both. And they know about each other: a monitor declared in Terraform cannot be retuned, paused or resumed by the assistant, because an edit that a `terraform apply` silently reverts an hour later is worse than one that never happened. There is no override flag. The fix is to change the `.tf`, which is where that monitor's truth lives.
 
 Other monitoring tools are shipping MCP servers too, and they differ mostly in what they let a model change rather than read. [The monitoring MCP servers, compared](/compare/mcp-servers) lays out where each one draws that line.
+
+Running an MCP server of your own raises the obvious question of who watches it, and the answer is not a 200 on the endpoint: [how to monitor an MCP server](/blog/monitor-an-mcp-server) walks through probing the handshake instead.
 
 Point your assistant at it and ask it what's broken. Worst case, it tells you everything's fine, and you didn't have to open a single dashboard to find out.

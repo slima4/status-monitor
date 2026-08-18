@@ -2112,7 +2112,7 @@ resource "uptimepage_target" "api" {
     Landing {
         path: "/mcp-server",
         created: "2026-06-18",
-        lastmod: "2026-08-11",
+        lastmod: "2026-08-18",
         title: "MCP Server for Uptime Monitoring",
         eyebrow: "for ai & llm workflows",
         h1: "Ask an AI what’s broken, over MCP",
@@ -2220,6 +2220,10 @@ resource "uptimepage_target" "api" {
             ResourceLink {
                 label: "How the MCP server works",
                 href: "/blog/mcp-server",
+            },
+            ResourceLink {
+                label: "Monitoring an MCP server",
+                href: "/blog/monitor-an-mcp-server",
             },
             ResourceLink {
                 label: "MCP Registry entry (JSON)",

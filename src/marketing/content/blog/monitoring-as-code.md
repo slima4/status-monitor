@@ -115,6 +115,8 @@ The shape that holds up: remote state with locking (so two people can't apply at
 
 Monitors and status pages and notification channels are all just resources here (`uptimepage_status_page`, `uptimepage_notification_channel`, and friends), so the whole public face of your monitoring (which page shows what, who gets paged on which channel) ends up reviewable in the same PR as the checks themselves.
 
+The same trick works in the other direction: an MCP server is itself a thing that goes down, and [monitoring one](/blog/monitor-an-mcp-server) is a monitor you can declare here alongside the rest.
+
 And the same monitors you declare in code, an AI assistant can [read back over MCP](/blog/mcp-server): "what's broken right now, and since when?" answered in plain language, from the exact config that's sitting in your repo. Declared in a pull request on one side, queried by an assistant on the other. Same data, same scopes.
 
 ## Boring, in code too
