@@ -116,7 +116,9 @@ impl ConnectError {
     }
 }
 
-fn dns_reason(e: &anyhow::Error) -> &'static str {
+/// Shared with the TCP and TLS-cert kinds through `worker::allowed_addrs`,
+/// which would otherwise hand the resolver's own Display to the customer.
+pub(crate) fn dns_reason(e: &anyhow::Error) -> &'static str {
     let Some(n) = e.downcast_ref::<hickory_resolver::net::NetError>() else {
         return "dns: lookup failed";
     };

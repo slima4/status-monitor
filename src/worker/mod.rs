@@ -102,13 +102,15 @@ pub(crate) async fn allowed_addrs(
     clients: &HttpClients,
 ) -> anyhow::Result<Vec<std::net::IpAddr>> {
     let guard = clients.ssrf_guard();
-    let addrs: Vec<std::net::IpAddr> = clients
-        .resolver()
-        .resolve_addrs(host)
-        .await?
-        .into_iter()
-        .filter(|ip| guard.allow(*ip))
-        .collect();
+    // The resolver's own Display names the query it failed, brace-printed
+    // struct and all. Same reason the connect below is normalised: no error
+    // class can name that, so it reaches the customer verbatim and lands in
+    // `ErrorClass::Other`.
+    let resolved = clients.resolver().resolve_addrs(host).await.map_err(|e| {
+        let reason = crate::http_client::connector::dns_reason(&e);
+        e.context(reason)
+    })?;
+    let addrs: Vec<std::net::IpAddr> = resolved.into_iter().filter(|ip| guard.allow(*ip)).collect();
     if addrs.is_empty() {
         anyhow::bail!("no allowed addresses for {host}");
     }
