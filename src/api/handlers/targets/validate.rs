@@ -524,10 +524,12 @@ pub(crate) fn canonicalize_check(check: &mut crate::domain::CheckSpec) -> Result
     fn canon_host(host: &mut String, field: &'static str, code: &'static str) -> Result<()> {
         let raw = std::mem::take(host);
         let unbracketed = crate::security::unbracket(&raw);
-        // IPs (literal or bracketed IPv6) bypass IDN — they have no host
-        // shape to canonicalise.
-        if unbracketed.parse::<IpAddr>().is_ok() {
-            *host = unbracketed.to_owned();
+        // IPs bypass IDN, but not canonicalisation: `2001:db8::1` and
+        // `2001:db8:0:0::1` are one address written two ways, and storing them
+        // verbatim gave each its own breaker and throttle bucket. Displaying
+        // the parsed address collapses the spellings, lowercase included.
+        if let Ok(ip) = unbracketed.parse::<IpAddr>() {
+            *host = ip.to_string();
             return Ok(());
         }
         match canonical_host_strict(unbracketed) {

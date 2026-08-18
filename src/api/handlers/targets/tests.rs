@@ -618,7 +618,15 @@ fn host_canonicalization_is_pinned_to_a_fixed_corpus() {
         ("1.2.3.4", "1.2.3.4"),
         ("1.2.3.4.", "1.2.3.4"),
         ("2001:db8::1", "2001:db8::1"),
-        ("2001:DB8::1", "2001:DB8::1"),
+        ("2001:DB8::1", "2001:db8::1"),
+        ("2001:db8:0:0::1", "2001:db8::1"),
+        ("2001:0db8:0000:0000:0000:0000:0000:0001", "2001:db8::1"),
+        // Rust keeps the v4-mapped prefix where Go's net.ParseIP collapses it
+        // to the dotted form, so a client mirroring this cannot use that.
+        ("::FFFF:1.2.3.4", "::ffff:1.2.3.4"),
+        // A leading zero stops it parsing as an IP, so it stays a host name
+        // and takes the IDN path instead.
+        ("1.2.3.04", "1.2.3.04"),
         ("[2001:db8::1]", "2001:db8::1"),
         ("[example.com]", "example.com"),
         ("[oops", ""),
