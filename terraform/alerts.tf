@@ -120,8 +120,9 @@ resource "grafana_rule_group" "pipeline" {
   # Critical: this is the path that tells users their own monitored sites
   # are down, and a signal lost here is lost for everyone at once. Scoped
   # to that counter alone: a per-attempt dispatch failure is one tenant's
-  # own endpoint, usually recovered by the retry, and pages via the
-  # warning-level UptimepageChannelNotDelivering instead. no_data = OK:
+  # own endpoint, usually recovered by the retry, and surfaces at warning
+  # level instead — UptimepageNotificationSendsFailing while it recovers,
+  # UptimepageChannelNotDelivering once it stops recovering. no_data = OK:
   # nothing dispatched means nothing to fail.
   rule {
     name           = "UptimepageNotificationDeliveryFailing"
@@ -1029,6 +1030,49 @@ resource "grafana_rule_group" "pipeline" {
         refId   = "A"
         instant = true
         expr    = "max(uptimepage_channels_failing) > 0"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # Sends that fail and keep recovering. UptimepageChannelNotDelivering needs
+  # a channel to fail a whole retry run, so a transport failing half its sends
+  # and succeeding on the retry never builds a run and stays invisible there.
+  # A ratio, not a raw count: one tenant's broken endpoint is background noise,
+  # a quarter of all sends failing is not. The floor spares a quiet hour.
+  rule {
+    name           = "UptimepageNotificationSendsFailing"
+    condition      = "C"
+    for            = "15m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: notification sends failing intermittently"
+      description = "more than a quarter of notification sends failed over the last hour, at least 5 of them — incidents are paging late or not at all. Check the failures-by-transport panel on the ops dashboard. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 3600
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "(sum(rate(uptimepage_notifications_failures_total[1h])) / sum(rate(uptimepage_notifications_total[1h])) > 0.25) and (sum(increase(uptimepage_notifications_failures_total[1h])) >= 5)"
       })
     }
     data {
