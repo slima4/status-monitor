@@ -56,6 +56,65 @@ fn updated(o: LifecycleOutcome) -> uptimepage::domain::OpsIncident {
     }
 }
 
+/// A declared incident may name no monitor at all, and every read and write
+/// path over it decodes the same row. `target_id` is NULL there, so a column
+/// typed non-null turns the whole edit surface into a 500.
+#[tokio::test]
+#[ignore]
+async fn a_target_less_incident_survives_every_narration_path_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, _) = seed(&pool, "incnotgt").await;
+    let ops = PgIncidentOpsStore::new(pool.clone());
+    let narration = uptimepage::storage::PgIncidentNarrationStore::new(pool.clone());
+
+    let declared = ops
+        .declare(
+            org,
+            NewManualIncident {
+                title: Some("partner outage".into()),
+                ..Default::default()
+            },
+            Actor::User(user),
+        )
+        .await
+        .expect("declare");
+    assert_eq!(declared.target_id, None, "declared without a monitor");
+
+    let read = uptimepage::storage::IncidentNarrationStore::get(&narration, org, declared.id)
+        .await
+        .expect("read narration")
+        .expect("incident exists");
+    assert_eq!(read.target_id, None);
+
+    let patched = uptimepage::storage::IncidentNarrationStore::patch_narration(
+        &narration,
+        org,
+        declared.id,
+        uptimepage::domain::IncidentNarrationUpdate {
+            public_title: Some(Some("Partner API down".into())),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("amend")
+    .expect("incident exists");
+    assert_eq!(patched.target_id, None);
+    assert_eq!(patched.public_title.as_deref(), Some("Partner API down"));
+
+    // A brief names a monitor, so this incident has no place in that list and
+    // must be skipped rather than break the query for the whole org.
+    let briefs = uptimepage::storage::IncidentNarrationStore::list_briefs(
+        &narration,
+        org,
+        uptimepage::storage::IncidentBriefFilter::default(),
+    )
+    .await
+    .expect("list briefs");
+    assert!(!briefs.iter().any(|b| b.id == declared.id), "{briefs:?}");
+}
+
 /// Declaring is done with the least information, so every field it captures
 /// has to be changeable after.
 #[tokio::test]

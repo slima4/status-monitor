@@ -132,7 +132,7 @@ impl PgIncidentNarrationStore {
 #[derive(sqlx::FromRow)]
 struct IncidentRow {
     id: Uuid,
-    target_id: Uuid,
+    target_id: Option<Uuid>,
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
     severity: String,
@@ -549,7 +549,7 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
             .lock()
             .incidents
             .iter()
-            .filter(|i| i.target_id == target_id && i.ended_at.is_none())
+            .filter(|i| i.target_id == Some(target_id) && i.ended_at.is_none())
             .count() as u32)
     }
 
@@ -620,21 +620,25 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
             .incidents
             .iter()
             .filter(|i| !filter.open_only || i.ended_at.is_none())
-            .filter(|i| filter.target_id.is_none_or(|t| i.target_id == t))
+            .filter(|i| filter.target_id.is_none_or(|t| i.target_id == Some(t)))
             .filter(|i| {
                 filter
                     .range
                     .is_none_or(|r| i.started_at < r.to && i.ended_at.is_none_or(|e| e >= r.from))
             })
-            .map(|i| IncidentBrief {
-                id: i.id,
-                target_id: i.target_id,
-                target_name: String::new(),
-                severity: i.severity,
-                started_at: i.started_at,
-                ended_at: i.ended_at,
-                public_title: i.public_title.clone(),
-                latest_update: i.updates.last().cloned(),
+            // A brief names a monitor, so a target-less declared incident has
+            // no place in this list.
+            .filter_map(|i| {
+                Some(IncidentBrief {
+                    id: i.id,
+                    target_id: i.target_id?,
+                    target_name: String::new(),
+                    severity: i.severity,
+                    started_at: i.started_at,
+                    ended_at: i.ended_at,
+                    public_title: i.public_title.clone(),
+                    latest_update: i.updates.last().cloned(),
+                })
             })
             .collect();
         out.sort_by_key(|a| (a.started_at, a.id));
@@ -673,7 +677,7 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
             .lock()
             .incidents
             .iter()
-            .filter(|i| i.target_id == target_id)
+            .filter(|i| i.target_id == Some(target_id))
             .filter(|i| i.started_at < range.to && i.ended_at.is_none_or(|e| e >= range.from))
             .filter(|i| !ongoing_only || i.ended_at.is_none())
             .cloned()
@@ -689,10 +693,15 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
     ) -> Result<HashMap<Uuid, i64>> {
         let mut out: HashMap<Uuid, i64> = HashMap::new();
         for i in self.inner.lock().incidents.iter() {
+            // Downtime is per monitor; a declared incident naming none has no
+            // monitor to charge it to.
+            let Some(target_id) = i.target_id else {
+                continue;
+            };
             if i.started_at < range.to && i.ended_at.is_none_or(|e| e >= range.from) {
                 let end = i.ended_at.unwrap_or(range.to).min(range.to);
                 let start = i.started_at.max(range.from);
-                *out.entry(i.target_id).or_default() += (end - start).num_seconds().max(0);
+                *out.entry(target_id).or_default() += (end - start).num_seconds().max(0);
             }
         }
         Ok(out)
@@ -707,7 +716,7 @@ mod tests {
     fn sample() -> Incident {
         Incident {
             id: Uuid::now_v7(),
-            target_id: Uuid::now_v7(),
+            target_id: Some(Uuid::now_v7()),
             started_at: Utc::now() - ChronoDuration::minutes(15),
             ended_at: None,
             status: CheckStatus::Down,
@@ -727,6 +736,57 @@ mod tests {
 
     fn org() -> OrgId {
         OrgId(Uuid::nil())
+    }
+
+    /// The public projection carries no monitor for an incident declared
+    /// without one, and every narration path decodes the same row.
+    #[tokio::test]
+    async fn a_target_less_incident_reads_and_patches() {
+        let store = InMemoryIncidentNarrationStore::new();
+        let mut inc = sample();
+        inc.target_id = None;
+        let id = inc.id;
+        store.seed(inc);
+
+        let read = store.get(org(), id).await.unwrap().unwrap();
+        assert_eq!(read.target_id, None);
+
+        let patched = store
+            .patch_narration(
+                org(),
+                id,
+                IncidentNarrationUpdate {
+                    public_title: Some(Some("Partner API down".into())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(patched.target_id, None);
+        assert_eq!(patched.public_title.as_deref(), Some("Partner API down"));
+    }
+
+    /// A brief names a monitor, so one that has none belongs to no list rather
+    /// than to an arbitrary monitor.
+    #[tokio::test]
+    async fn briefs_leave_out_an_incident_with_no_monitor() {
+        let store = InMemoryIncidentNarrationStore::new();
+        let mut bound = sample();
+        bound.target_id = Some(Uuid::now_v7());
+        let mut loose = sample();
+        loose.id = Uuid::now_v7();
+        loose.target_id = None;
+        let (bound_id, loose_id) = (bound.id, loose.id);
+        store.seed(bound);
+        store.seed(loose);
+
+        let briefs = store
+            .list_briefs(org(), IncidentBriefFilter::default())
+            .await
+            .unwrap();
+        assert!(briefs.iter().any(|b| b.id == bound_id));
+        assert!(!briefs.iter().any(|b| b.id == loose_id));
     }
 
     #[tokio::test]
@@ -827,7 +887,7 @@ mod tests {
         let mk = |tid: Uuid, started_min_ago: i64, ended_min_ago: Option<i64>| {
             let mut inc = sample();
             inc.id = Uuid::now_v7();
-            inc.target_id = tid;
+            inc.target_id = Some(tid);
             inc.started_at = now - ChronoDuration::minutes(started_min_ago);
             inc.ended_at = ended_min_ago.map(|m| now - ChronoDuration::minutes(m));
             inc
@@ -872,7 +932,7 @@ mod tests {
         let mk = |tid: Uuid, started_min_ago: i64, ended_min_ago: Option<i64>| {
             let mut inc = sample();
             inc.id = Uuid::now_v7();
-            inc.target_id = tid;
+            inc.target_id = Some(tid);
             inc.started_at = now - ChronoDuration::minutes(started_min_ago);
             inc.ended_at = ended_min_ago.map(|m| now - ChronoDuration::minutes(m));
             inc
@@ -975,7 +1035,7 @@ mod tests {
         let mk = |tid: Uuid, start_min: i64, end_min: Option<i64>| {
             let mut i = sample();
             i.id = Uuid::now_v7();
-            i.target_id = tid;
+            i.target_id = Some(tid);
             i.started_at = now - ChronoDuration::minutes(start_min);
             i.ended_at = end_min.map(|m| now - ChronoDuration::minutes(m));
             i

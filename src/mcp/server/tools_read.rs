@@ -864,14 +864,17 @@ impl McpServer {
             .map_err(|e| McpToolError::internal(format!("get incident: {e}")))?
             .ok_or_else(|| McpToolError::not_found("incident not found"))?;
 
-        let monitor_name = self
-            .state
-            .target_store
-            .get(org, incident.target_id)
-            .await
-            .ok()
-            .flatten()
-            .map(|t| t.name);
+        let monitor_name = match incident.target_id {
+            Some(t) => self
+                .state
+                .target_store
+                .get(org, t)
+                .await
+                .ok()
+                .flatten()
+                .map(|x| x.name),
+            None => None,
+        };
 
         Ok(Json(incident_detail(&incident, monitor_name)))
     }

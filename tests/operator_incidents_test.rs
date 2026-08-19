@@ -15,7 +15,7 @@ use uuid::Uuid;
 fn seed_incident() -> Incident {
     Incident {
         id: Uuid::now_v7(),
-        target_id: Uuid::now_v7(),
+        target_id: Some(Uuid::now_v7()),
         started_at: Utc::now() - Duration::minutes(10),
         ended_at: None,
         status: CheckStatus::Down,
@@ -222,6 +222,27 @@ fn owner_json(method: &str, path: &str, body: serde_json::Value) -> Request<Body
         .header("X-Requested-With", "uptimepage")
         .body(Body::from(serde_json::to_vec(&body).unwrap()))
         .unwrap()
+}
+
+/// An incident can name no monitor, and the wire says so rather than
+/// inventing an id. Amending one is covered against Postgres
+/// (`a_target_less_incident_survives_every_narration_path_pg`): the ops and
+/// narration doubles hold separate maps, while the real ones share a row.
+#[tokio::test]
+async fn a_declared_incident_may_name_no_monitor() {
+    let app = build_test_app_with_owner(|_| {});
+    let resp = app
+        .oneshot(owner_json(
+            "POST",
+            "/api/v1/incidents",
+            json!({ "title": "partner API degraded" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let declared = body_json(resp).await;
+    assert!(declared["target_id"].is_null(), "{declared}");
+    assert_eq!(declared["origin"], "manual");
 }
 
 /// Recording a problem the monitors cannot see must not page anyone or tell

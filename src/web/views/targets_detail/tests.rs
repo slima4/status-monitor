@@ -1076,7 +1076,7 @@ fn incident_row_falls_back_to_start_end_when_duration_secs_missing() {
     let end = Utc.with_ymd_and_hms(2026, 5, 12, 8, 7, 0).unwrap();
     let inc = crate::domain::Incident {
         id: Uuid::nil(),
-        target_id: Uuid::nil(),
+        target_id: Some(Uuid::nil()),
         started_at: start,
         ended_at: Some(end),
         status: crate::domain::CheckStatus::Down,

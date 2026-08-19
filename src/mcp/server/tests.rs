@@ -1297,7 +1297,7 @@ fn incident_summary_no_update_yields_null_phase() {
 fn incident_detail_maps_state_severity_and_updates() {
     let inc = Incident {
         id: Uuid::nil(),
-        target_id: Uuid::nil(),
+        target_id: Some(Uuid::nil()),
         started_at: Utc::now(),
         ended_at: None,
         status: CheckStatus::Down,

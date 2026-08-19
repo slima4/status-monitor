@@ -14,7 +14,9 @@ use super::user::UserId;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Incident {
     pub id: Uuid,
-    pub target_id: Uuid,
+    /// `None` for an incident an operator declared without naming a monitor.
+    #[schema(nullable = true)]
+    pub target_id: Option<Uuid>,
     pub started_at: DateTime<Utc>,
     /// `null` if the incident is ongoing.
     #[schema(nullable = true)]
@@ -211,7 +213,7 @@ fn new_incident(
 ) -> Incident {
     Incident {
         id: Uuid::now_v7(),
-        target_id,
+        target_id: Some(target_id),
         started_at: ts,
         ended_at: None,
         status,

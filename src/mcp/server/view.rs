@@ -332,7 +332,7 @@ pub(super) fn incident_summary(i: &IncidentBrief) -> IncidentSummary {
 pub(super) fn incident_detail(i: &Incident, monitor_name: Option<String>) -> IncidentDetail {
     IncidentDetail {
         id: i.id.to_string(),
-        monitor_id: i.target_id.to_string(),
+        monitor_id: i.target_id.map(|t| t.to_string()).unwrap_or_default(),
         monitor_name: monitor_name.map(|n| sanitize_data(&n)),
         state: i.status.as_str().to_string(),
         severity: i.severity.as_db_str().to_string(),
