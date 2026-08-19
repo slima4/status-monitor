@@ -29,6 +29,15 @@
         {% if c.unverified %}
         <span class="cli-brackets font-normal" title="alerts are held until the address confirms its verification link">unverified</span>
         {% endif %}
+        {% if let Some(since) = c.failing_for %}
+        <span class="status-badge status-badge--down" title="alerts are still being sent to this channel, but nothing has landed">not delivering</span>
+        <p class="mt-1 font-mono text-xs text-quiet"># nothing delivered for {{ since }}. alerts are still being sent</p>
+        {% else if let Some(ago) = c.last_delivered %}
+        <p class="mt-1 font-mono text-xs text-quiet"># last delivered {{ ago }} ago</p>
+        {% endif %}
+        {% if !c.disabled_reason.is_empty() %}
+        <p class="mt-1 font-mono text-xs text-quiet"># {{ c.disabled_reason }}. re-enable from the channel's page</p>
+        {% endif %}
       </td>
       <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ c.created|iso_ts }}" data-tz="exact">{{ c.created|human_ts }}</time></td>
       <td class="px-4 py-2">

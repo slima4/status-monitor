@@ -1,11 +1,14 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures::stream::{FuturesUnordered, StreamExt};
+use std::sync::Arc;
 use tokio::time::Instant;
+
 use uuid::Uuid;
 
 use crate::domain::{
     EscalationDecision, IncidentEventKind, IncidentState, NewIncidentNotification,
-    NotificationOutcome, NotificationReason, NotificationStatus, OrgId, next_step,
+    NotificationChannel, NotificationOutcome, NotificationReason, NotificationStatus, OrgId,
+    failure_run_reached, next_step,
 };
 use crate::error::Result;
 use crate::notifier::event::IncidentNotice;
@@ -13,6 +16,104 @@ use crate::storage::{Actor, DueIncident, PendingNotification};
 
 use super::rules::{Paged, channel_targets, reason_is_stale, resolvable_channels};
 use super::{PageTarget, SWEEP_CONCURRENCY, Worker};
+
+/// Cap on the transport response quoted into the mail: a broken endpoint
+/// answers with a page of HTML.
+const MAX_MAIL_ERROR_CHARS: usize = 400;
+
+/// Everything the owner mail needs, owned, so it can outlive the page that
+/// triggered it. Claims inside the task: a lost race costs nothing, while
+/// claiming on the caller's thread would put a DB round trip on the page path.
+struct FailingChannelMail {
+    org: OrgId,
+    channel_id: Uuid,
+    channel_name: String,
+    transport: String,
+    consecutive_failures: i32,
+    failing_since: Option<DateTime<Utc>>,
+    last_error: Option<String>,
+    channels: Arc<dyn crate::storage::NotificationChannelStore>,
+    orgs: Arc<dyn crate::storage::orgs::OrgDirectory>,
+    base_url: String,
+    email: crate::notifier::EmailDelivery,
+}
+
+impl FailingChannelMail {
+    async fn claim_and_send(self) {
+        let recipients = match self.orgs.owner_emails(self.org).await {
+            Ok(to) => to,
+            Err(err) => {
+                tracing::warn!(org_id = %self.org.0, error = %err, "owner lookup for channel-failure mail failed");
+                return;
+            }
+        };
+        if recipients.is_empty() {
+            tracing::warn!(org_id = %self.org.0, channel_id = %self.channel_id, "no owner to tell that a channel stopped delivering");
+            return;
+        }
+        let claimed = match self
+            .channels
+            .claim_failure_alert(self.org, self.channel_id)
+            .await
+        {
+            Ok(Some(at)) => at,
+            Ok(None) => return,
+            Err(err) => {
+                tracing::warn!(channel_id = %self.channel_id, error = %err, "failure alert not claimed");
+                return;
+            }
+        };
+        if self.send_to(&recipients).await {
+            return;
+        }
+        // Unreleased, the run reads as reported and nobody is told until the
+        // claim ages out.
+        if let Err(err) = self
+            .channels
+            .release_failure_alert(self.org, self.channel_id, claimed)
+            .await
+        {
+            tracing::warn!(channel_id = %self.channel_id, error = %err, "failure alert not released");
+        }
+    }
+
+    /// `true` once at least one owner has the mail.
+    async fn send_to(&self, recipients: &[String]) -> bool {
+        let org_name = self.orgs.display_name(self.org).await.ok().flatten();
+        let base = self.base_url.trim_end_matches('/');
+        let channel_url = (!base.is_empty())
+            .then(|| format!("{base}/settings/notifications/{}/edit", self.channel_id));
+        let template = crate::email::EmailTemplate::ChannelFailing {
+            channel_name: self.channel_name.clone(),
+            transport: self.transport.clone(),
+            org_name,
+            consecutive_failures: self.consecutive_failures,
+            failing_secs: self
+                .failing_since
+                .map(|since| (Utc::now() - since).num_seconds()),
+            last_error: self.last_error.clone(),
+            channel_url,
+        };
+        let mut told = false;
+        for to in recipients {
+            let outgoing = crate::email::TransactionalEmail {
+                from: crate::email::EmailAddress::new(
+                    self.email.from_address.clone(),
+                    self.email.from_name.clone(),
+                ),
+                to: crate::email::EmailAddress::new(to.clone(), to.clone()),
+                template: template.clone(),
+            };
+            match self.email.sender.send(outgoing).await {
+                Ok(_) => told = true,
+                Err(err) => {
+                    tracing::warn!(org_id = %self.org.0, error = %err, "channel-failure mail not sent");
+                }
+            }
+        }
+        told
+    }
+}
 
 impl Worker {
     /// Walk the next rung of every due incident's policy, bounded-concurrent so
@@ -268,6 +369,8 @@ impl Worker {
             if status == NotificationStatus::Failed {
                 self.note_dead_letter(channel.kind.as_db_str(), next_attempt_at);
             }
+            self.record_channel_health(org, &channel, status, next_attempt_at, error.as_deref())
+                .await;
             self.ops
                 .mark_notification(
                     org,
@@ -284,6 +387,73 @@ impl Worker {
                 .await?;
         }
         Ok(paged)
+    }
+
+    /// Fold a finished delivery into the channel's failure run. Only one that
+    /// has run out of retries counts: one still due a retry has not failed yet.
+    async fn record_channel_health(
+        &self,
+        org: OrgId,
+        channel: &NotificationChannel,
+        status: NotificationStatus,
+        next_attempt_at: Option<DateTime<Utc>>,
+        error: Option<&str>,
+    ) {
+        // An unverified address fails every delivery by design, and the
+        // console already says so.
+        if channel.awaiting_verification() {
+            return;
+        }
+        let delivered = match status {
+            NotificationStatus::Sent => true,
+            NotificationStatus::Failed if next_attempt_at.is_none() => false,
+            _ => return,
+        };
+        let health = match self
+            .channels
+            .record_delivery_outcome(org, channel.id, delivered)
+            .await
+        {
+            Ok(health) => health,
+            Err(err) => {
+                tracing::warn!(channel_id = %channel.id, error = %err, "channel delivery run not recorded");
+                return;
+            }
+        };
+        if delivered
+            || !failure_run_reached(health.consecutive_failures, self.cfg.channel_failure_limit)
+        {
+            return;
+        }
+        tracing::warn!(
+            org_id = %org.0,
+            channel_id = %channel.id,
+            transport = channel.kind.as_db_str(),
+            consecutive_failures = health.consecutive_failures,
+            "notification channel is not delivering"
+        );
+        // Claiming with no way to send would burn the run's one report.
+        let Some(email) = self.email.clone() else {
+            return;
+        };
+        // Detached: this runs inside the incident's page lock, and a slow mail
+        // provider must not hold up the channels queued behind this one.
+        tokio::spawn(
+            FailingChannelMail {
+                org,
+                channel_id: channel.id,
+                channel_name: channel.name.clone(),
+                transport: channel.kind.as_db_str().to_string(),
+                consecutive_failures: health.consecutive_failures,
+                failing_since: health.failing_since,
+                last_error: error.map(|e| crate::text::truncate_chars(e, MAX_MAIL_ERROR_CHARS)),
+                channels: self.channels.clone(),
+                orgs: self.orgs.clone(),
+                base_url: self.base_url.clone(),
+                email,
+            }
+            .claim_and_send(),
+        );
     }
 
     pub(super) async fn log_paged(
@@ -375,10 +545,11 @@ impl Worker {
     async fn retry_one(&self, p: &PendingNotification) -> Result<()> {
         let next_attempt = p.attempt + 1;
         // Resolve the same channel the original page targeted. A missing
-        // channel/monitor/incident — or a page whose reason no longer matches
-        // the incident's state (e.g. an Opened page after the incident already
-        // resolved) — is dropped so on-call never gets a stale notice. Burning
-        // an attempt lets the row exhaust instead of retrying forever.
+        // channel/monitor/incident, a channel turned off since the page was
+        // queued, or a page whose reason no longer matches the incident's state
+        // (e.g. an Opened page after the incident already resolved) is dropped
+        // so on-call never gets a stale notice. Burning an attempt lets the row
+        // exhaust instead of retrying forever.
         let rebuilt = match p.channel_id {
             Some(cid) => {
                 self.rebuild_notice(p.org, p.incident_id, cid, p.reason)
@@ -407,8 +578,8 @@ impl Worker {
                 .await?;
             return Ok(());
         };
-        if reason_is_stale(p.reason, state) {
-            // Terminal: the page no longer matches the incident state.
+        if !channel.enabled || reason_is_stale(p.reason, state) {
+            // Terminal: turned off, or the page no longer matches the state.
             self.ops
                 .mark_notification(
                     p.org,
@@ -441,6 +612,8 @@ impl Worker {
         if status == NotificationStatus::Failed {
             self.note_dead_letter(&p.transport, next_attempt_at);
         }
+        self.record_channel_health(p.org, &channel, status, next_attempt_at, error.as_deref())
+            .await;
         self.ops
             .mark_notification(
                 p.org,

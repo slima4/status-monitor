@@ -193,7 +193,11 @@ impl McpServer {
             Some(ids) if wants_channels => resolve_bindings(ids, &channels)?,
             _ => TargetAlerts::default(),
         };
-        let channel_summary = channel_names(&alerts, &channels);
+        let channel_summary = channel_names(
+            &alerts,
+            &channels,
+            self.state.cfg.escalation.channel_failure_limit,
+        );
 
         let mut new = NewTarget {
             name: name.to_string(),
@@ -342,7 +346,12 @@ impl McpServer {
             .channels_for_binding(auth, args.channel_ids.is_some())
             .await?;
 
-        let (update, changes) = build_monitor_patch(args, &target, &channels)?;
+        let (update, changes) = build_monitor_patch(
+            args,
+            &target,
+            &channels,
+            self.state.cfg.escalation.channel_failure_limit,
+        )?;
         if changes.is_empty() {
             return Ok(Json(MonitorUpdateResult {
                 id: id.to_string(),
@@ -391,7 +400,12 @@ impl McpServer {
         // The monitor can move while a human reads the prompt, and the approval
         // describes the diff as it stood then.
         let current = self.load_writable_target(auth.org, id).await?;
-        let (update, still) = build_monitor_patch(args, &current, &channels)?;
+        let (update, still) = build_monitor_patch(
+            args,
+            &current,
+            &channels,
+            self.state.cfg.escalation.channel_failure_limit,
+        )?;
         if still != changes {
             return Err(McpToolError::new(
                 codes::CONFLICT,

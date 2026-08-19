@@ -403,6 +403,14 @@ max_pages_per_tick = 500
 # Give up paging a channel after this many failed attempts.
 max_attempts = 5
 
+# Flag a channel as not delivering after this many deliveries in a row exhaust
+# max_attempts, and mail the org's owners once a day at most. The channel is
+# never taken off the air for it: a revoked webhook costs a handful of requests
+# per incident, while disabling one that was only briefly sick costs the next
+# outage. Any send that lands clears the run, as does turning the channel off
+# and back on. Set 0 to never flag.
+channel_failure_limit = 3
+
 # How far back to look for an incident whose open signal was dropped. A lost
 # signal shows up within a tick or two, so anything older is not a dropped
 # signal — it is an incident nobody can be paged about.

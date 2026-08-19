@@ -632,6 +632,9 @@ pub struct ChannelItem {
     /// An email channel whose address was never confirmed. It is enabled and
     /// still delivers nothing, so binding a monitor to it is not enough.
     pub awaiting_verification: bool,
+    /// Enabled, but nothing has landed for a run of deliveries. Alerts sent
+    /// here are not arriving.
+    pub not_delivering: bool,
 }
 
 /// `list_notification_channels` result.

@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use parking_lot::Mutex;
 use serde_json::Value;
 use sqlx::PgPool;
@@ -71,6 +71,20 @@ fn open(value: Value, cipher: Option<&Cipher>) -> Result<ChannelConfig> {
     }
 }
 
+/// How long a reported run stays reported. Long enough that a flapping
+/// endpoint cannot mail the owners on every cycle, short enough that a claim
+/// stranded by a crash mid-send is owed again the same day.
+pub const FAILURE_ALERT_COOLDOWN: Duration = Duration::hours(24);
+
+/// A channel's delivery run after one finished delivery.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChannelHealth {
+    /// Exhausted deliveries in a row; `0` once a send lands.
+    pub consecutive_failures: i32,
+    /// Start of the current run.
+    pub failing_since: Option<DateTime<Utc>>,
+}
+
 #[async_trait]
 pub trait NotificationChannelStore: Send + Sync {
     /// Atomically capped at `max_channels` for `org`. A breach returns
@@ -118,6 +132,30 @@ pub trait NotificationChannelStore: Send + Sync {
     ) -> Result<u64>;
     /// Channels of `kind` (any org) still carrying `external_ref`.
     async fn count_by_external_ref(&self, kind: ChannelKind, external_ref: &str) -> Result<i64>;
+    /// Fold one finished delivery into the channel's failure run. One that
+    /// lands clears it and stamps `last_delivered_at`; one that used up every
+    /// retry extends it. The report stamp is left alone either way, so the
+    /// cooldown on [`Self::claim_failure_alert`] survives a recovery.
+    async fn record_delivery_outcome(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        delivered: bool,
+    ) -> Result<ChannelHealth>;
+    /// Claim the alert owed for the current run, returning the stamp taken.
+    /// A run reported less than [`FAILURE_ALERT_COOLDOWN`] ago claims nothing,
+    /// so an endpoint that fails, recovers and fails again cannot mail the
+    /// owners on every cycle, and a claim stranded by a crash frees itself.
+    async fn claim_failure_alert(&self, org: OrgId, id: Uuid) -> Result<Option<DateTime<Utc>>>;
+    /// Hand back an unsent claim, identified by the stamp
+    /// [`Self::claim_failure_alert`] returned, so a late release cannot clear
+    /// a claim some other run has since taken.
+    async fn release_failure_alert(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        claimed: DateTime<Utc>,
+    ) -> Result<()>;
     /// Subset of `ids` that exist in `org`. Mirrors
     /// [`crate::storage::MaintenanceStore::existing_target_ids`] so the
     /// "ids belong to the caller's org" idiom is uniform — used to validate
@@ -186,6 +224,9 @@ struct ChannelRow {
     enabled: bool,
     disabled_reason: Option<String>,
     verified_at: Option<DateTime<Utc>>,
+    consecutive_failures: i32,
+    failing_since: Option<DateTime<Utc>>,
+    last_delivered_at: Option<DateTime<Utc>>,
     write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -204,6 +245,9 @@ impl ChannelRow {
             enabled: self.enabled,
             disabled_reason: self.disabled_reason,
             verified_at: self.verified_at,
+            consecutive_failures: self.consecutive_failures,
+            failing_since: self.failing_since,
+            last_delivered_at: self.last_delivered_at,
             write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -244,7 +288,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             r#"INSERT INTO notification_channels (org_id, name, kind, config, external_ref, enabled, write_source)
                SELECT $1, $2, $3, $4, $5, $6, $8
                WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $7
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&new.name)
@@ -317,7 +361,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                SELECT $1, $2, 'email', $3, $2, true, now(), 'ui'
                WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $4
                ON CONFLICT (org_id, name) DO NOTHING
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&address)
@@ -346,7 +390,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
         let rows: Vec<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at
                FROM notification_channels
                WHERE org_id = $1
                ORDER BY name"#,
@@ -362,7 +406,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>> {
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at
                FROM notification_channels WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -414,13 +458,18 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                    enabled     = COALESCE($5, enabled),
                    -- Re-enabling clears the platform's disable note.
                    disabled_reason = CASE WHEN $5 THEN NULL ELSE disabled_reason END,
+                   -- Only the disabled -> enabled transition clears the run;
+                   -- every ordinary save carries enabled = true.
+                   consecutive_failures = CASE WHEN $5 AND NOT enabled THEN 0 ELSE consecutive_failures END,
+                   failing_since = CASE WHEN $5 AND NOT enabled THEN NULL ELSE failing_since END,
+                   failing_notified_at = CASE WHEN $5 AND NOT enabled THEN NULL ELSE failing_notified_at END,
                    -- A replaced config must re-verify its address.
                    verified_at = CASE WHEN $4::jsonb IS NOT NULL THEN NULL ELSE verified_at END,
                    external_ref = CASE WHEN $4::jsonb IS NOT NULL THEN $8 ELSE external_ref END,
                    write_source = $7,
                    updated_at  = now()
                WHERE id = $1 AND org_id = $6
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.name.as_ref())
@@ -524,6 +573,86 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         Ok(n)
     }
 
+    async fn record_delivery_outcome(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        delivered: bool,
+    ) -> Result<ChannelHealth> {
+        // Bookkeeping is not an edit: `set_verified` reads `updated_at` to spot
+        // a config swap racing a verify click, so none of these touch it.
+        let sql = if delivered {
+            // Nothing to write while the channel is healthy and its stamp is
+            // fresh; the console reads that stamp at hour granularity.
+            r#"UPDATE notification_channels
+               SET consecutive_failures = 0,
+                   failing_since = NULL,
+                   last_delivered_at = now()
+               WHERE id = $1 AND org_id = $2
+                 AND (consecutive_failures <> 0
+                      OR last_delivered_at IS NULL
+                      OR last_delivered_at < now() - interval '1 hour')
+               RETURNING consecutive_failures, failing_since"#
+        } else {
+            r#"UPDATE notification_channels
+               SET consecutive_failures = consecutive_failures + 1,
+                   failing_since = COALESCE(failing_since, now())
+               WHERE id = $1 AND org_id = $2
+               RETURNING consecutive_failures, failing_since"#
+        };
+        let row: Option<(i32, Option<DateTime<Utc>>)> = sqlx::query_as(sql)
+            .bind(id)
+            .bind(org.0)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::Other(anyhow!("record delivery outcome: {e}")))?;
+        Ok(
+            row.map_or(ChannelHealth::default(), |(n, since)| ChannelHealth {
+                consecutive_failures: n,
+                failing_since: since,
+            }),
+        )
+    }
+
+    async fn claim_failure_alert(&self, org: OrgId, id: Uuid) -> Result<Option<DateTime<Utc>>> {
+        // The stamp comparison is the claim: of two racing sweeps, one wins.
+        let claimed: Option<(DateTime<Utc>,)> = sqlx::query_as(
+            r#"UPDATE notification_channels
+               SET failing_notified_at = now()
+               WHERE id = $1 AND org_id = $2
+                 AND failing_since IS NOT NULL
+                 AND (failing_notified_at IS NULL OR failing_notified_at < $3)
+               RETURNING failing_notified_at"#,
+        )
+        .bind(id)
+        .bind(org.0)
+        .bind(Utc::now() - FAILURE_ALERT_COOLDOWN)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("claim failure alert: {e}")))?;
+        Ok(claimed.map(|(at,)| at))
+    }
+
+    async fn release_failure_alert(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        claimed: DateTime<Utc>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"UPDATE notification_channels
+               SET failing_notified_at = NULL
+               WHERE id = $1 AND org_id = $2 AND failing_notified_at = $3"#,
+        )
+        .bind(id)
+        .bind(org.0)
+        .bind(claimed)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("release failure alert: {e}")))?;
+        Ok(())
+    }
+
     async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
         if ids.is_empty() {
             return Ok(Vec::new());
@@ -584,6 +713,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 struct MemEntry {
     org: OrgId,
     external_ref: Option<String>,
+    notified_at: Option<DateTime<Utc>>,
     ch: NotificationChannel,
 }
 
@@ -639,6 +769,9 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             enabled: new.enabled,
             disabled_reason: None,
             verified_at: None,
+            consecutive_failures: 0,
+            failing_since: None,
+            last_delivered_at: None,
             write_source: source,
             created_at: now,
             updated_at: now,
@@ -646,6 +779,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         g.push(MemEntry {
             org,
             external_ref: ch.config.lifecycle_ref().map(str::to_owned),
+            notified_at: None,
             ch: ch.clone(),
         });
         Ok(ch)
@@ -674,6 +808,9 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             enabled: true,
             disabled_reason: None,
             verified_at: Some(now),
+            consecutive_failures: 0,
+            failing_since: None,
+            last_delivered_at: None,
             write_source: WriteSource::Ui,
             created_at: now,
             updated_at: now,
@@ -681,6 +818,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
         g.push(MemEntry {
             org,
             external_ref: ch.config.lifecycle_ref().map(str::to_owned),
+            notified_at: None,
             ch: ch.clone(),
         });
         Ok(Some(ch))
@@ -739,13 +877,19 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             entry.ch.config = cfg;
             entry.ch.verified_at = None;
         }
-        let ch = &mut entry.ch;
         if let Some(enabled) = update.enabled {
-            ch.enabled = enabled;
+            let was_disabled = !entry.ch.enabled;
+            entry.ch.enabled = enabled;
             if enabled {
-                ch.disabled_reason = None;
+                entry.ch.disabled_reason = None;
+            }
+            if enabled && was_disabled {
+                entry.ch.consecutive_failures = 0;
+                entry.ch.failing_since = None;
+                entry.notified_at = None;
             }
         }
+        let ch = &mut entry.ch;
         ch.write_source = source;
         ch.updated_at = Utc::now();
         Ok(Some(ch.clone()))
@@ -785,6 +929,63 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             .iter()
             .filter(|e| e.ch.kind == kind && e.external_ref.as_deref() == Some(external_ref))
             .count() as i64)
+    }
+
+    async fn record_delivery_outcome(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        delivered: bool,
+    ) -> Result<ChannelHealth> {
+        let mut g = self.inner.lock();
+        let Some(entry) = g.iter_mut().find(|e| e.org == org && e.ch.id == id) else {
+            return Ok(ChannelHealth::default());
+        };
+        if delivered {
+            entry.ch.consecutive_failures = 0;
+            entry.ch.failing_since = None;
+            entry.ch.last_delivered_at = Some(Utc::now());
+        } else {
+            entry.ch.consecutive_failures += 1;
+            entry.ch.failing_since.get_or_insert_with(Utc::now);
+        }
+        Ok(ChannelHealth {
+            consecutive_failures: entry.ch.consecutive_failures,
+            failing_since: entry.ch.failing_since,
+        })
+    }
+
+    async fn claim_failure_alert(&self, org: OrgId, id: Uuid) -> Result<Option<DateTime<Utc>>> {
+        let mut g = self.inner.lock();
+        let Some(entry) = g.iter_mut().find(|e| e.org == org && e.ch.id == id) else {
+            return Ok(None);
+        };
+        let now = Utc::now();
+        if entry.ch.failing_since.is_none()
+            || entry
+                .notified_at
+                .is_some_and(|at| at >= now - FAILURE_ALERT_COOLDOWN)
+        {
+            return Ok(None);
+        }
+        entry.notified_at = Some(now);
+        Ok(Some(now))
+    }
+
+    async fn release_failure_alert(
+        &self,
+        org: OrgId,
+        id: Uuid,
+        claimed: DateTime<Utc>,
+    ) -> Result<()> {
+        let mut g = self.inner.lock();
+        if let Some(entry) = g
+            .iter_mut()
+            .find(|e| e.org == org && e.ch.id == id && e.notified_at == Some(claimed))
+        {
+            entry.notified_at = None;
+        }
+        Ok(())
     }
 
     async fn existing_channel_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>> {
@@ -1034,6 +1235,289 @@ mod tests {
             .unwrap();
         assert!(re.enabled);
         assert_eq!(re.disabled_reason, None);
+    }
+
+    #[tokio::test]
+    async fn a_delivery_that_lands_clears_the_failure_run() {
+        let store = InMemoryNotificationChannelStore::new();
+        let ch = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+
+        for expected in 1..=3 {
+            let health = store
+                .record_delivery_outcome(org(), ch.id, false)
+                .await
+                .unwrap();
+            assert_eq!(health.consecutive_failures, expected);
+            assert!(health.failing_since.is_some());
+        }
+        let started = store
+            .get(org(), ch.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .failing_since
+            .expect("run has a start");
+
+        // A later failure extends the same run rather than restarting it.
+        let health = store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        assert_eq!(health.failing_since, Some(started));
+
+        assert!(store.get(org(), ch.id).await.unwrap().unwrap().enabled);
+
+        let health = store
+            .record_delivery_outcome(org(), ch.id, true)
+            .await
+            .unwrap();
+        assert_eq!(health.consecutive_failures, 0);
+        assert_eq!(health.failing_since, None);
+    }
+
+    /// A send that lands re-arms the claim, so a channel that dies twice is
+    /// reported twice.
+    #[tokio::test]
+    async fn the_failure_alert_is_claimed_once_per_run() {
+        let store = InMemoryNotificationChannelStore::new();
+        let ch = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+
+        macro_rules! claim {
+            () => {
+                store.claim_failure_alert(org(), ch.id).await.unwrap()
+            };
+        }
+
+        assert!(claim!().is_none(), "nothing has failed yet");
+
+        store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        assert!(claim!().is_some());
+        assert!(claim!().is_none());
+
+        store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        assert!(
+            claim!().is_none(),
+            "the same run must not be reported twice"
+        );
+
+        // Recovering and dying again inside the cooldown is a flapping
+        // endpoint, not news: one report per channel per cooldown, whatever
+        // the run boundaries do.
+        store
+            .record_delivery_outcome(org(), ch.id, true)
+            .await
+            .unwrap();
+        store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        assert!(claim!().is_none());
+    }
+
+    /// A channel bound only to quiet monitors never fails, so a stamp that
+    /// only moved on recovery would never move at all for the one case the
+    /// console needs it for.
+    #[tokio::test]
+    async fn every_landed_delivery_stamps_the_channel() {
+        let store = InMemoryNotificationChannelStore::new();
+        let ch = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+        assert_eq!(ch.last_delivered_at, None);
+
+        store
+            .record_delivery_outcome(org(), ch.id, true)
+            .await
+            .unwrap();
+        let first = store.get(org(), ch.id).await.unwrap().unwrap();
+        let stamped = first.last_delivered_at.expect("a landed delivery stamps");
+
+        store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        let failed = store.get(org(), ch.id).await.unwrap().unwrap();
+        assert_eq!(
+            failed.last_delivered_at,
+            Some(stamped),
+            "a failure says nothing about when the channel last worked"
+        );
+
+        // Re-enabling resolves the failure run, not the delivery history.
+        let save = |enabled| NotificationChannelUpdate {
+            enabled: Some(enabled),
+            ..Default::default()
+        };
+        store
+            .update(org(), ch.id, save(false), WriteSource::Ui, None)
+            .await
+            .unwrap();
+        store
+            .update(org(), ch.id, save(true), WriteSource::Ui, None)
+            .await
+            .unwrap();
+        let saved = store.get(org(), ch.id).await.unwrap().unwrap();
+        assert_eq!(saved.consecutive_failures, 0);
+        assert_eq!(saved.last_delivered_at, Some(stamped));
+    }
+
+    /// An unsent claim has to come back, or nobody is ever told.
+    #[tokio::test]
+    async fn a_released_claim_is_owed_again() {
+        let store = InMemoryNotificationChannelStore::new();
+        let ch = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+        store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        let claimed = store
+            .claim_failure_alert(org(), ch.id)
+            .await
+            .unwrap()
+            .expect("a fresh run is claimable");
+        assert!(
+            store
+                .claim_failure_alert(org(), ch.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        // A release from some other run must not free this claim.
+        store
+            .release_failure_alert(org(), ch.id, claimed - Duration::seconds(1))
+            .await
+            .unwrap();
+        assert!(
+            store
+                .claim_failure_alert(org(), ch.id)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        store
+            .release_failure_alert(org(), ch.id, claimed)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .claim_failure_alert(org(), ch.id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn only_the_enable_transition_clears_the_failure_run() {
+        let store = InMemoryNotificationChannelStore::new();
+        let ch = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+        store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        store.claim_failure_alert(org(), ch.id).await.unwrap();
+
+        // Every ordinary save carries `enabled: true`.
+        let save = |enabled| NotificationChannelUpdate {
+            enabled: Some(enabled),
+            ..Default::default()
+        };
+        store
+            .update(
+                org(),
+                ch.id,
+                NotificationChannelUpdate {
+                    name: Some("ops renamed".into()),
+                    ..save(true)
+                },
+                WriteSource::Ui,
+                None,
+            )
+            .await
+            .unwrap();
+        let saved = store.get(org(), ch.id).await.unwrap().unwrap();
+        assert_eq!(saved.consecutive_failures, 1);
+        assert!(saved.failing_since.is_some());
+        assert!(
+            store
+                .claim_failure_alert(org(), ch.id)
+                .await
+                .unwrap()
+                .is_none(),
+            "the run was already reported, so a rename owes no second mail"
+        );
+
+        // Off and back on is the operator saying it is dealt with.
+        store
+            .update(org(), ch.id, save(false), WriteSource::Ui, None)
+            .await
+            .unwrap();
+        store
+            .update(org(), ch.id, save(true), WriteSource::Ui, None)
+            .await
+            .unwrap();
+        let fresh = store.get(org(), ch.id).await.unwrap().unwrap();
+        assert_eq!(fresh.consecutive_failures, 0);
+        assert_eq!(fresh.failing_since, None);
+        // Re-enabling clears the report stamp too, so an operator who fixed the
+        // endpoint hears about it again without waiting out the cooldown.
+        store
+            .record_delivery_outcome(org(), ch.id, false)
+            .await
+            .unwrap();
+        assert!(
+            store
+                .claim_failure_alert(org(), ch.id)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn is_failing_needs_a_limit_and_a_run_that_reaches_it() {
+        let mut ch = NotificationChannel {
+            id: Uuid::now_v7(),
+            name: "ops".into(),
+            kind: ChannelKind::Slack,
+            config: ChannelConfig::Slack(crate::domain::SlackConfig {
+                webhook_url: "https://hooks.slack.com/services/x".into(),
+            }),
+            enabled: true,
+            disabled_reason: None,
+            verified_at: None,
+            consecutive_failures: 2,
+            failing_since: Some(Utc::now()),
+            last_delivered_at: None,
+            write_source: WriteSource::Ui,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
+        assert!(!ch.is_failing(3));
+        ch.consecutive_failures = 3;
+        assert!(ch.is_failing(3));
+        assert!(!ch.is_failing(0));
     }
 
     #[tokio::test]

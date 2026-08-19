@@ -254,6 +254,15 @@ pub struct NotificationChannel {
     /// config change. Only consulted for `kind = email` — `None` elsewhere.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verified_at: Option<DateTime<Utc>>,
+    /// Deliveries in a row that used up every retry; any send that lands
+    /// resets it, so it is the current run and not a lifetime total.
+    pub consecutive_failures: i32,
+    /// Start of the current run of failures.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failing_since: Option<DateTime<Utc>>,
+    /// Last delivery that landed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_delivered_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Where this channel was last changed from (UI, API, or Terraform).
@@ -266,6 +275,20 @@ impl NotificationChannel {
     pub fn awaiting_verification(&self) -> bool {
         self.kind == ChannelKind::Email && self.verified_at.is_none()
     }
+
+    /// Enabled, able to deliver at all, and nothing has landed for `limit`
+    /// deliveries running. An unverified address is excluded because it fails
+    /// every delivery by design and says so on its own.
+    pub fn is_failing(&self, limit: u32) -> bool {
+        self.enabled
+            && !self.awaiting_verification()
+            && failure_run_reached(self.consecutive_failures, limit)
+    }
+}
+
+/// The threshold alone, for callers holding a fresh count; `0` never flags.
+pub fn failure_run_reached(consecutive_failures: i32, limit: u32) -> bool {
+    limit > 0 && consecutive_failures >= i32::try_from(limit).unwrap_or(i32::MAX)
 }
 
 fn default_true() -> bool {
@@ -675,6 +698,9 @@ mod tests {
             enabled: true,
             disabled_reason: None,
             verified_at: verified.then(Utc::now),
+            consecutive_failures: 0,
+            failing_since: None,
+            last_delivered_at: None,
             write_source: WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),

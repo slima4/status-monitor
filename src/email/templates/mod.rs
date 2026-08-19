@@ -1,5 +1,6 @@
 pub mod account_deletion;
 pub mod account_restored;
+pub mod channel_failing;
 pub mod channel_verification;
 pub mod incident_alert;
 pub mod invitation;
@@ -37,6 +38,18 @@ pub(crate) fn html_escape(input: &str) -> String {
 /// entities cover `href="…"`); a distinct name keeps call sites self-documenting.
 pub(crate) fn attr_escape(input: &str) -> String {
     html_escape(input)
+}
+
+/// Two-unit duration for mail prose. Mail owns its wording so a view change
+/// cannot silently reword an email.
+pub(crate) fn duration_words(secs: i64) -> String {
+    let minutes = (secs / 60).max(0);
+    match (minutes / 1440, (minutes % 1440) / 60, minutes % 60) {
+        (0, 0, 0) => "under a minute".into(),
+        (0, 0, m) => format!("{m}m"),
+        (0, h, m) => format!("{h}h {m}m"),
+        (d, h, _) => format!("{d}d {h}h"),
+    }
 }
 
 /// Wall-clock stamp for mail. Always UTC and always says so — unlike the app,

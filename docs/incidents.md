@@ -131,5 +131,6 @@ The `[escalation]` block (env prefix `UPTIMEPAGE_ESCALATION__*`) controls the en
 | `tick_interval_secs` | `15` | How often the engine sweeps for due escalations and failed-page retries. |
 | `max_pages_per_tick` | `500` | Backpressure cap on pages re-sent per sweep. |
 | `max_attempts` | `5` | Give up paging a channel after this many failed attempts. |
+| `channel_failure_limit` | `3` | Flag a channel as not delivering after this many deliveries in a row exhaust `max_attempts`, and mail the org's owners at most once a day. The channel keeps being paged; nothing is turned off. Any send that lands clears the run, as does turning the channel off and back on. `0` never flags. |
 
 Per-org limits (`max_escalation_policies`, `max_on_call_schedules`, `on_call_enabled`) are plan quotas; see [Quotas & rate limits](quotas.md).

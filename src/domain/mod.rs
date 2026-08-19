@@ -61,7 +61,7 @@ pub use notification_channel::{
     MsTeamsConfig, NewNotificationChannel, NotificationChannel, NotificationChannelUpdate,
     NtfyConfig, PagerDutyConfig, PushoverConfig, SlackConfig, SmsConfig, TelegramAppConfig,
     TelegramConfig, TransportConfig, WebhookConfig, WhatsAppAppConfig, WhatsAppConfig,
-    validate_channel_name,
+    failure_run_reached, validate_channel_name,
 };
 pub use on_call::{
     NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, OnCallLayer,

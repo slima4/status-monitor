@@ -111,6 +111,17 @@ pub enum EmailTemplate {
         page_url: Option<String>,
         app_version: String,
     },
+    /// Sent to the org's owners once per run of failures, not per swallowed
+    /// alert.
+    ChannelFailing {
+        channel_name: String,
+        transport: String,
+        org_name: Option<String>,
+        consecutive_failures: i32,
+        failing_secs: Option<i64>,
+        last_error: Option<String>,
+        channel_url: Option<String>,
+    },
     /// A maintenance-window announcement or completion for a confirmed
     /// subscriber. `phase` is `scheduled` or `completed`.
     SubscriberMaintenance {
@@ -178,6 +189,26 @@ impl EmailTemplate {
                 *expires_hours,
                 org_name.as_deref(),
                 decline_url.as_deref(),
+            ),
+            EmailTemplate::ChannelFailing {
+                channel_name,
+                transport,
+                org_name,
+                consecutive_failures,
+                failing_secs,
+                last_error,
+                channel_url,
+            } => templates::channel_failing::render(
+                site_name,
+                &templates::channel_failing::FailingChannel {
+                    channel_name,
+                    transport,
+                    org_name: org_name.as_deref(),
+                    consecutive_failures: *consecutive_failures,
+                    failing_secs: *failing_secs,
+                    last_error: last_error.as_deref(),
+                    channel_url: channel_url.as_deref(),
+                },
             ),
             EmailTemplate::IncidentAlert(alert) => {
                 templates::incident_alert::render(site_name, alert)
@@ -262,6 +293,7 @@ impl EmailTemplate {
             EmailTemplate::MagicLink { url, .. } => Some(url),
             EmailTemplate::AccountDeletion { .. } | EmailTemplate::AccountRestored => None,
             EmailTemplate::ChannelVerification { verify_url, .. } => Some(verify_url),
+            EmailTemplate::ChannelFailing { channel_url, .. } => channel_url.as_deref(),
             EmailTemplate::IncidentAlert(_) => None,
             EmailTemplate::SubscriberConfirm { confirm_url, .. } => Some(confirm_url),
             EmailTemplate::SubscriberIncident { incident_url, .. } => Some(incident_url),

@@ -319,6 +319,17 @@ pub async fn test_send(
         ));
     }
     deliver_test(&state, &channel.config).await?;
+    // A test that lands proves the endpoint is back, so it clears the run. Not
+    // for a disabled channel, which delivers nothing whatever the test proves,
+    // and never at the cost of failing a test that already went out.
+    if channel.enabled
+        && let Err(err) = state
+            .notification_channel_store
+            .record_delivery_outcome(org, id, true)
+            .await
+    {
+        tracing::warn!(channel_id = %id, error = %err, "channel delivery run not cleared");
+    }
     Ok(Json(TestNotificationResponse { delivered: true }))
 }
 

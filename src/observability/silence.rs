@@ -110,6 +110,15 @@ impl SilenceDelivery for SilenceNotifier {
                 Ok(n) => n.notify_incident(&notice).await.is_ok(),
                 Err(_) => false,
             };
+            // A landed send proves the endpoint is alive, whatever sent it.
+            if sent
+                && let Err(err) = self
+                    .channels
+                    .record_delivery_outcome(org, channel.id, true)
+                    .await
+            {
+                tracing::warn!(channel_id = %channel.id, error = %err, "channel delivery run not cleared");
+            }
             delivered |= sent;
         }
         delivered

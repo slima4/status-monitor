@@ -42,6 +42,12 @@ pub struct ChannelRow {
     pub enabled: bool,
     /// Email channel still awaiting address verification.
     pub unverified: bool,
+    /// Why the platform turned this channel off; empty when an operator did.
+    pub disabled_reason: String,
+    /// How long nothing has landed on a channel that is still being paged.
+    pub failing_for: Option<String>,
+    /// How long since the last landed delivery.
+    pub last_delivered: Option<String>,
     pub created: chrono::DateTime<chrono::Utc>,
     /// `terraform`/`api` chip for externally-managed channels; `None` (UI) hides it.
     pub managed_by: Option<&'static str>,
@@ -271,6 +277,8 @@ pub async fn list_partial(
         Ok(o) => o,
         Err(resp) => return Ok(*resp),
     };
+    let failure_limit = state.cfg.escalation.channel_failure_limit;
+    let now = chrono::Utc::now();
     let channels = state
         .notification_channel_store
         .list(org)
@@ -281,6 +289,14 @@ pub async fn list_partial(
             kind: super::channel_kind_label(c.kind),
             enabled: c.enabled,
             unverified: c.awaiting_verification(),
+            disabled_reason: c.disabled_reason.clone().unwrap_or_default(),
+            failing_for: c
+                .is_failing(failure_limit)
+                .then(|| c.failing_since.map(|s| super::humanize_duration(now - s)))
+                .flatten(),
+            last_delivered: c
+                .last_delivered_at
+                .map(|t| super::humanize_duration(now - t)),
             created: c.created_at,
             managed_by: c.write_source.managed_label(),
             name: c.name,
@@ -742,6 +758,9 @@ mod tests {
             enabled: true,
             disabled_reason: None,
             verified_at: None,
+            consecutive_failures: 0,
+            failing_since: None,
+            last_delivered_at: None,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -804,6 +823,9 @@ mod tests {
             enabled: true,
             disabled_reason: None,
             verified_at: None,
+            consecutive_failures: 0,
+            failing_since: None,
+            last_delivered_at: None,
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
@@ -1004,6 +1026,9 @@ mod tests {
                 kind: "slack",
                 enabled: true,
                 unverified: false,
+                disabled_reason: String::new(),
+                failing_for: None,
+                last_delivered: None,
                 created: "2026-05-18T12:00:00Z".parse().unwrap(),
                 managed_by: None,
             }],
@@ -1014,6 +1039,55 @@ mod tests {
         assert!(html.contains(r#"href="/settings/notifications/abc/edit""#));
         assert!(html.contains(r#"hx-post="/api/v1/notification-channels/abc/test""#));
         assert!(html.contains(r#"hx-delete="/api/v1/notification-channels/abc""#));
+    }
+
+    /// A channel the platform turned off has to say so where an operator looks
+    /// at the fleet, not only inside its edit form.
+    #[test]
+    fn channels_partial_shows_why_the_platform_disabled_a_channel() {
+        let html = ChannelsPartial {
+            channels: vec![ChannelRow {
+                id: "abc".into(),
+                name: "Ops Slack".into(),
+                kind: "slack",
+                enabled: false,
+                unverified: false,
+                disabled_reason: "unlinked from the Telegram side".into(),
+                failing_for: None,
+                last_delivered: None,
+                created: "2026-05-18T12:00:00Z".parse().unwrap(),
+                managed_by: None,
+            }],
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("# unlinked from the Telegram side"));
+    }
+
+    /// A channel nothing lands on stays enabled, so without this the fleet
+    /// view reads "enabled" for an endpoint that swallows every alert.
+    #[test]
+    fn channels_partial_flags_a_channel_that_stopped_delivering() {
+        let html = ChannelsPartial {
+            channels: vec![ChannelRow {
+                id: "abc".into(),
+                name: "Ops Slack".into(),
+                kind: "slack",
+                enabled: true,
+                unverified: false,
+                disabled_reason: String::new(),
+                failing_for: Some("2d 3h".into()),
+                last_delivered: Some("2d 3h".into()),
+                created: "2026-05-18T12:00:00Z".parse().unwrap(),
+                managed_by: None,
+            }],
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("not delivering"));
+        assert!(html.contains("# nothing delivered for 2d 3h"));
+        assert!(html.contains("enabled"));
+        assert!(html.contains("alerts are still being sent"));
     }
 
     mod deduped_create {

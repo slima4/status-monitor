@@ -571,7 +571,7 @@ impl McpServer {
     /// The channel inventory. Channels are created in the app, where their
     /// tokens and addresses are entered; this only names them.
     #[tool(
-        description = "The org's notification channels: id, operator-set name, kind (email, slack, telegram, webhook, and so on), and whether the channel is enabled. Channel settings are withheld, since they hold webhook URLs and bot tokens. Channels are created in the Uptimepage app, not here. Read-only.",
+        description = "The org's notification channels: id, operator-set name, kind (email, slack, telegram, webhook, and so on), and whether the channel is enabled. Two flags say a channel is not working even where it reads as ready: awaiting_verification for an email address nobody confirmed, and not_delivering for an enabled channel whose recent alerts all failed to arrive. Channel settings are withheld, since they hold webhook URLs and bot tokens. Channels are created in the Uptimepage app, not here. Read-only.",
         title = "List notification channels",
         annotations(read_only_hint = true)
     )]
@@ -581,6 +581,7 @@ impl McpServer {
     ) -> Result<Json<ChannelList>, McpToolError> {
         let auth = McpAuth::from_ctx(&ctx)?;
         auth.require(Scope::ChannelsRead)?;
+        let failure_limit = self.state.cfg.escalation.channel_failure_limit;
         let channels = self
             .state
             .notification_channel_store
@@ -594,11 +595,10 @@ impl McpServer {
                     id: c.id.to_string(),
                     name: sanitize_data(&c.name),
                     kind: c.kind.as_db_str().to_string(),
-                    // An enabled email channel that never confirmed its address
-                    // delivers nothing, and reads as ready without this.
-                    awaiting_verification: c.kind
-                        == crate::domain::notification_channel::ChannelKind::Email
-                        && c.verified_at.is_none(),
+                    // Both of these read as ready without saying so: an enabled
+                    // channel can be unconfirmed, or landing nothing.
+                    awaiting_verification: c.awaiting_verification(),
+                    not_delivering: c.is_failing(failure_limit),
                     enabled: c.enabled,
                 })
                 .collect(),

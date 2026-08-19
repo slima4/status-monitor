@@ -126,6 +126,10 @@ pub struct EscalationConfig {
     pub max_pages_per_tick: u32,
     /// Give up paging a channel after this many failed attempts.
     pub max_attempts: u32,
+    /// Flag a channel as not delivering after this many deliveries in a row
+    /// exhaust `max_attempts`, and mail the org's owners. It stays on the air
+    /// either way. `0` never flags.
+    pub channel_failure_limit: u32,
     /// Base delay for the exponential retry backoff: attempt n waits
     /// `base * 2^(n-1)` (capped) before the next try.
     pub retry_backoff_base_secs: u64,
@@ -154,6 +158,7 @@ impl Default for EscalationConfig {
             tick_interval_secs: 15,
             max_pages_per_tick: 500,
             max_attempts: 5,
+            channel_failure_limit: 3,
             retry_backoff_base_secs: 30,
             retry_backoff_cap_secs: 3600,
             reconcile_window_secs: 3600,

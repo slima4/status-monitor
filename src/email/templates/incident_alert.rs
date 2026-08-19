@@ -111,19 +111,11 @@ impl IncidentAlert {
         (total > 1).then_some((self.regions_down.len(), total))
     }
 
-    /// Two-unit duration. The app's `HumanDur` renders the same shape, but mail
-    /// must not reach into the web views for it.
     fn duration(&self) -> Option<String> {
         let end = self.ended_at?;
-        let minutes = (end - self.started_at).num_minutes().max(0);
-        Some(
-            match (minutes / 1440, (minutes % 1440) / 60, minutes % 60) {
-                (0, 0, 0) => "under a minute".into(),
-                (0, 0, m) => format!("{m}m"),
-                (0, h, m) => format!("{h}h {m}m"),
-                (d, h, _) => format!("{d}d {h}h"),
-            },
-        )
+        Some(crate::email::templates::duration_words(
+            (end - self.started_at).num_seconds(),
+        ))
     }
 
     /// The failure as a single scannable line, when it is one. Longer or

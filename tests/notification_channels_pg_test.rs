@@ -843,3 +843,195 @@ async fn seeded_owner_email_is_verified_idempotent_and_capped() {
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn delivery_health_is_org_scoped_and_alerts_once_per_run_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "nc-health").await;
+    let store = PgNotificationChannelStore::new(pool.clone(), None);
+
+    let ch = store
+        .create(
+            org_a,
+            slack("A Ops", "T/B/health"),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .expect("A creates its channel");
+    let stamped_at = ch.updated_at;
+
+    // Another org can neither move A's run nor claim A's alert.
+    assert_eq!(
+        store
+            .record_delivery_outcome(org_b, ch.id, false)
+            .await
+            .unwrap()
+            .consecutive_failures,
+        0
+    );
+    assert!(
+        store
+            .claim_failure_alert(org_b, ch.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        store
+            .get(org_a, ch.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .consecutive_failures,
+        0
+    );
+
+    let first = store
+        .record_delivery_outcome(org_a, ch.id, false)
+        .await
+        .unwrap();
+    assert_eq!(first.consecutive_failures, 1);
+    let started = first.failing_since.expect("run has a start");
+
+    let second = store
+        .record_delivery_outcome(org_a, ch.id, false)
+        .await
+        .unwrap();
+    assert_eq!(second.consecutive_failures, 2);
+    assert_eq!(
+        second.failing_since,
+        Some(started),
+        "a longer run keeps its original start"
+    );
+
+    // Counting is not an edit: `set_verified` reads this stamp to spot a
+    // config swap racing a verify click.
+    let live = store.get(org_a, ch.id).await.unwrap().unwrap();
+    assert!(live.enabled);
+    assert_eq!(live.updated_at, stamped_at);
+    assert!(live.is_failing(2));
+
+    let claimed = store
+        .claim_failure_alert(org_a, ch.id)
+        .await
+        .unwrap()
+        .expect("a fresh run is claimable");
+    assert!(
+        store
+            .claim_failure_alert(org_a, ch.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // An unsent claim comes back. A release naming some other run's stamp does
+    // not free it, so a late release cannot hand back a claim it no longer owns.
+    store
+        .release_failure_alert(org_a, ch.id, claimed - chrono::Duration::seconds(1))
+        .await
+        .unwrap();
+    assert!(
+        store
+            .claim_failure_alert(org_a, ch.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    store
+        .release_failure_alert(org_a, ch.id, claimed)
+        .await
+        .unwrap();
+    let reclaimed = store
+        .claim_failure_alert(org_a, ch.id)
+        .await
+        .unwrap()
+        .expect("a released claim is owed again");
+    assert!(reclaimed >= claimed);
+
+    let recovered = store
+        .record_delivery_outcome(org_a, ch.id, true)
+        .await
+        .unwrap();
+    assert_eq!(recovered.consecutive_failures, 0);
+    assert_eq!(recovered.failing_since, None);
+    assert!(
+        store
+            .claim_failure_alert(org_a, ch.id)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    // Recovering and dying again inside the cooldown is a flapping endpoint,
+    // not news: one report per channel per cooldown, whatever the runs do.
+    store
+        .record_delivery_outcome(org_a, ch.id, false)
+        .await
+        .unwrap();
+    assert!(
+        store
+            .claim_failure_alert(org_a, ch.id)
+            .await
+            .unwrap()
+            .is_none(),
+        "a flapping endpoint does not mail on every cycle"
+    );
+
+    // The stamp says when the channel last worked, so a later failure leaves it
+    // where the recovery above put it.
+    let landed = store.get(org_a, ch.id).await.unwrap().unwrap();
+    let stamped = landed
+        .last_delivered_at
+        .expect("the delivery that landed above stamps");
+    store
+        .record_delivery_outcome(org_a, ch.id, false)
+        .await
+        .unwrap();
+    let failed = store.get(org_a, ch.id).await.unwrap().unwrap();
+    assert_eq!(failed.last_delivered_at, Some(stamped));
+
+    // Every ordinary save carries `enabled: true`.
+    let save = |enabled| NotificationChannelUpdate {
+        enabled: Some(enabled),
+        ..Default::default()
+    };
+    store
+        .update(
+            org_a,
+            ch.id,
+            NotificationChannelUpdate {
+                name: Some("ops renamed".into()),
+                ..save(true)
+            },
+            WriteSource::Ui,
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let saved = store.get(org_a, ch.id).await.unwrap().unwrap();
+    assert!(saved.consecutive_failures > 0);
+    assert!(saved.failing_since.is_some());
+
+    // Off and back on is the operator saying it is dealt with.
+    store
+        .update(org_a, ch.id, save(false), WriteSource::Ui, None)
+        .await
+        .unwrap()
+        .unwrap();
+    store
+        .update(org_a, ch.id, save(true), WriteSource::Ui, None)
+        .await
+        .unwrap()
+        .unwrap();
+    let reset = store.get(org_a, ch.id).await.unwrap().unwrap();
+    assert_eq!(reset.consecutive_failures, 0);
+    assert_eq!(reset.failing_since, None);
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}

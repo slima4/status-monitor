@@ -437,6 +437,9 @@ fn test_channel(id: Uuid, name: &str) -> NotificationChannel {
         enabled: true,
         disabled_reason: None,
         verified_at: None,
+        consecutive_failures: 0,
+        failing_since: None,
+        last_delivered_at: None,
         write_source: WriteSource::Ui,
         created_at: Utc::now(),
         updated_at: Utc::now(),
@@ -489,7 +492,7 @@ fn a_patch_reports_every_field_it_moves() {
         }),
         ..patch_args()
     };
-    let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
+    let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[], 3).unwrap();
     assert_eq!(update.interval, Some(std::time::Duration::from_secs(300)));
     assert_eq!(update.alert_confirmations, Some(3));
     assert_eq!(update.region_policy, Some(RegionIncidentPolicy::Count(2)));
@@ -519,8 +522,8 @@ fn the_patch_is_the_same_both_times_it_is_built() {
         ..patch_args()
     };
     let target = stored_monitor();
-    let (_, first) = build_monitor_patch(&args, &target, &channels).unwrap();
-    let (update, second) = build_monitor_patch(&args, &target, &channels).unwrap();
+    let (_, first) = build_monitor_patch(&args, &target, &channels, 3).unwrap();
+    let (update, second) = build_monitor_patch(&args, &target, &channels, 3).unwrap();
     assert_eq!(first, second);
     assert!(
         first.iter().any(|c| c.field == "alerts"),
@@ -546,7 +549,7 @@ fn a_value_that_already_matches_is_not_a_change() {
         }),
         ..patch_args()
     };
-    let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
+    let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[], 3).unwrap();
     assert!(changes.is_empty(), "{changes:?}");
     assert!(update.interval.is_none());
     assert!(update.tags.is_none());
@@ -558,7 +561,7 @@ fn a_dropped_tag_is_spelled_out_before_it_happens() {
         tags: Some(vec!["prod".into(), "prod".into()]),
         ..patch_args()
     };
-    let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
+    let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &[], 3).unwrap();
     assert_eq!(update.tags, Some(vec!["prod".to_string()]));
     assert_eq!(changes[0].from, "prod, payments");
     assert_eq!(changes[0].to, "prod");
@@ -569,7 +572,7 @@ fn a_dropped_tag_is_spelled_out_before_it_happens() {
         tags: Some(vec!["prod".into(), "  ".into()]),
         ..patch_args()
     };
-    let err = build_monitor_patch(&blank, &stored_monitor(), &[]).unwrap_err();
+    let err = build_monitor_patch(&blank, &stored_monitor(), &[], 3).unwrap_err();
     assert_eq!(err.code, codes::INVALID_ARGUMENT);
 }
 
@@ -579,7 +582,7 @@ fn a_group_clears_on_null_and_refuses_a_blank() {
         group_name: Some(None),
         ..patch_args()
     };
-    let (update, changes) = build_monitor_patch(&cleared, &stored_monitor(), &[]).unwrap();
+    let (update, changes) = build_monitor_patch(&cleared, &stored_monitor(), &[], 3).unwrap();
     assert_eq!(update.group_name, Some(None));
     assert_eq!(
         (changes[0].from.as_str(), changes[0].to.as_str()),
@@ -590,7 +593,7 @@ fn a_group_clears_on_null_and_refuses_a_blank() {
         group_name: Some(Some("   ".into())),
         ..patch_args()
     };
-    let err = build_monitor_patch(&blank, &stored_monitor(), &[]).unwrap_err();
+    let err = build_monitor_patch(&blank, &stored_monitor(), &[], 3).unwrap_err();
     assert_eq!(err.code, codes::INVALID_ARGUMENT);
 }
 
@@ -601,23 +604,23 @@ fn a_second_count_too_wide_for_the_column_is_refused_not_wrapped() {
         interval_secs: Some(4_294_967_356),
         ..patch_args()
     };
-    let err = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap_err();
+    let err = build_monitor_patch(&args, &stored_monitor(), &[], 3).unwrap_err();
     assert_eq!(err.code, codes::INVALID_ARGUMENT);
     let args = UpdateMonitorArgs {
         renotify_interval_secs: Some(u32::MAX),
         ..patch_args()
     };
-    assert!(build_monitor_patch(&args, &stored_monitor(), &[]).is_err());
+    assert!(build_monitor_patch(&args, &stored_monitor(), &[], 3).is_err());
     let args = UpdateMonitorArgs {
         alert_confirmations: Some(u32::MAX),
         ..patch_args()
     };
-    assert!(build_monitor_patch(&args, &stored_monitor(), &[]).is_err());
+    assert!(build_monitor_patch(&args, &stored_monitor(), &[], 3).is_err());
     let args = UpdateMonitorArgs {
         interval_secs: Some(86_400),
         ..patch_args()
     };
-    assert!(build_monitor_patch(&args, &stored_monitor(), &[]).is_ok());
+    assert!(build_monitor_patch(&args, &stored_monitor(), &[], 3).is_ok());
 }
 
 #[test]
@@ -1011,7 +1014,7 @@ fn reordering_the_same_channels_is_not_a_change() {
         channel_ids: Some(vec![b.to_string(), a.to_string()]),
         ..patch_args()
     };
-    let (update, changes) = build_monitor_patch(&args, &target, &channels).unwrap();
+    let (update, changes) = build_monitor_patch(&args, &target, &channels, 3).unwrap();
     assert!(changes.is_empty(), "{changes:?}");
     assert!(update.alerts.is_none());
 
@@ -1020,7 +1023,7 @@ fn reordering_the_same_channels_is_not_a_change() {
         channel_ids: Some(vec![a.to_string()]),
         ..patch_args()
     };
-    let (_, changes) = build_monitor_patch(&args, &target, &channels).unwrap();
+    let (_, changes) = build_monitor_patch(&args, &target, &channels, 3).unwrap();
     assert_eq!(changes.len(), 1, "{changes:?}");
     assert_eq!(changes[0].from, "ops, pager");
     assert_eq!(changes[0].to, "ops");
@@ -1030,7 +1033,7 @@ fn reordering_the_same_channels_is_not_a_change() {
         channel_ids: Some(vec![]),
         ..patch_args()
     };
-    let (update, changes) = build_monitor_patch(&args, &target, &channels).unwrap();
+    let (update, changes) = build_monitor_patch(&args, &target, &channels, 3).unwrap();
     assert_eq!(changes.len(), 1, "{changes:?}");
     assert_eq!(
         (changes[0].from.as_str(), changes[0].to.as_str()),
@@ -1041,7 +1044,8 @@ fn reordering_the_same_channels_is_not_a_change() {
 
 #[test]
 fn a_channel_that_delivers_nothing_says_so_where_it_is_named() {
-    let (live, off, unverified, gone) = (
+    let (live, off, unverified, dead, gone) = (
+        Uuid::now_v7(),
         Uuid::now_v7(),
         Uuid::now_v7(),
         Uuid::now_v7(),
@@ -1059,16 +1063,29 @@ fn a_channel_that_delivers_nothing_says_so_where_it_is_named() {
             to: "on-call@example.com".into(),
         },
     );
-    let channels = vec![test_channel(live, "ops"), disabled, email];
+    // Enabled and confirmed, so nothing but its delivery run marks it.
+    let mut silent = test_channel(dead, "ops-webhook");
+    silent.consecutive_failures = 3;
+    silent.failing_since = Some(Utc::now());
+    let channels = vec![test_channel(live, "ops"), disabled, email, silent];
 
-    assert_eq!(undeliverable_reason(&channels[0]), None);
+    assert_eq!(undeliverable_reason(&channels[0], 3), None);
     assert_eq!(
-        undeliverable_reason(&channels[1]),
+        undeliverable_reason(&channels[1], 3),
         Some("disabled, delivers nothing")
     );
     assert_eq!(
-        undeliverable_reason(&channels[2]),
+        undeliverable_reason(&channels[2], 3),
         Some("address never verified, delivers nothing")
+    );
+    assert_eq!(
+        undeliverable_reason(&channels[3], 3),
+        Some("recent alerts did not arrive")
+    );
+    assert_eq!(
+        undeliverable_reason(&channels[3], 0),
+        None,
+        "a limit of zero switches the flag off"
     );
 
     let named = |ids: &[Uuid]| {
@@ -1079,6 +1096,7 @@ fn a_channel_that_delivers_nothing_says_so_where_it_is_named() {
                     .collect(),
             ),
             &channels,
+            3,
         )
     };
     assert_eq!(named(&[]), "nobody");
@@ -1088,6 +1106,7 @@ fn a_channel_that_delivers_nothing_says_so_where_it_is_named() {
         named(&[unverified]),
         "on-call inbox (address never verified, delivers nothing)"
     );
+    assert_eq!(named(&[dead]), "ops-webhook (recent alerts did not arrive)");
     // A binding whose channel is gone is named, not dropped: a shorter list
     // would read as one fewer channel losing its alerts.
     assert_eq!(named(&[gone]), format!("a deleted channel ({gone})"));
@@ -1498,7 +1517,7 @@ fn a_prompt_says_when_it_is_showing_less_than_the_whole_value() {
         tags: Some(tags),
         ..patch_args()
     };
-    let (_, changes) = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap();
+    let (_, changes) = build_monitor_patch(&args, &stored_monitor(), &[], 3).unwrap();
     let shown = sanitize_prompt(&changes[0].to);
     assert!(shown.ends_with("... (truncated)"), "{shown}");
     assert_eq!(sanitize_prompt("short"), "short");
@@ -1510,7 +1529,7 @@ fn a_tag_cannot_hide_an_instruction_in_what_comes_back() {
         tags: Some(vec!["prod\u{202e}drop everything".into()]),
         ..patch_args()
     };
-    let err = build_monitor_patch(&args, &stored_monitor(), &[]).unwrap_err();
+    let err = build_monitor_patch(&args, &stored_monitor(), &[], 3).unwrap_err();
     assert_eq!(err.code, codes::INVALID_ARGUMENT);
 
     // A tag stored before the rule still gets scrubbed on its way back out.
@@ -1520,7 +1539,7 @@ fn a_tag_cannot_hide_an_instruction_in_what_comes_back() {
         tags: Some(vec!["prod".into()]),
         ..patch_args()
     };
-    let (_, changes) = build_monitor_patch(&args, &target, &[]).unwrap();
+    let (_, changes) = build_monitor_patch(&args, &target, &[], 3).unwrap();
     assert_eq!(changes[0].from, "proddrop everything");
 }
 

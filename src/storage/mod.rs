@@ -71,7 +71,8 @@ pub use monitor_shares::{
     CreateShareOutcome, InMemoryMonitorShareStore, MonitorShareStore, PgMonitorShareStore,
 };
 pub use notification_channels::{
-    InMemoryNotificationChannelStore, NotificationChannelStore, PgNotificationChannelStore,
+    ChannelHealth, InMemoryNotificationChannelStore, NotificationChannelStore,
+    PgNotificationChannelStore,
 };
 pub use on_call::{InMemoryOnCallStore, OnCallStore, PgOnCallStore};
 pub use operator::{AgentAuth, AgentRow, DeleteRegion, OperatorRepo, RegionRow};

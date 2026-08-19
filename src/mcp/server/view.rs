@@ -50,14 +50,18 @@ pub(super) fn check_diagnostic(result: &CheckResult) -> Option<CheckDiagnosticVi
 /// Bindings as the names a human approves, flagging any that deliver nothing.
 /// A binding whose channel is gone is named as deleted rather than dropped from
 /// the line, which would read as one fewer channel losing its alerts.
-pub(super) fn channel_names(alerts: &TargetAlerts, channels: &[NotificationChannel]) -> String {
+pub(super) fn channel_names(
+    alerts: &TargetAlerts,
+    channels: &[NotificationChannel],
+    failure_limit: u32,
+) -> String {
     if alerts.is_empty() {
         return "nobody".to_string();
     }
     alerts
         .iter()
         .map(|b| match channels.iter().find(|c| c.id == b.channel_id) {
-            Some(c) => match undeliverable_reason(c) {
+            Some(c) => match undeliverable_reason(c, failure_limit) {
                 Some(why) => format!("{} ({why})", sanitize_data(&c.name)),
                 None => sanitize_data(&c.name),
             },
@@ -70,14 +74,18 @@ pub(super) fn channel_names(alerts: &TargetAlerts, channels: &[NotificationChann
 /// Why a channel would deliver nothing if a monitor were bound to it. One
 /// definition, so a new undeliverable state cannot be added to the listing and
 /// forgotten in the confirmation.
-pub(super) fn undeliverable_reason(channel: &NotificationChannel) -> Option<&'static str> {
+pub(super) fn undeliverable_reason(
+    channel: &NotificationChannel,
+    failure_limit: u32,
+) -> Option<&'static str> {
     if !channel.enabled {
         return Some("disabled, delivers nothing");
     }
-    if channel.kind == crate::domain::notification_channel::ChannelKind::Email
-        && channel.verified_at.is_none()
-    {
+    if channel.awaiting_verification() {
         return Some("address never verified, delivers nothing");
+    }
+    if channel.is_failing(failure_limit) {
+        return Some("recent alerts did not arrive");
     }
     None
 }

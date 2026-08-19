@@ -4,10 +4,11 @@ use std::time::Duration as StdDuration;
 
 use crate::domain::NotificationStatus;
 use crate::domain::{
-    AlertBinding, ChannelConfig, CheckSpec, EscalationTargetType, ExpectedStatus, HttpCheck,
-    HttpMethod, IncidentOrigin, IncidentSeverity, IncidentState, IncidentUrgency,
+    AlertBinding, ChannelConfig, CheckSpec, EmailConfig, EscalationTargetType, ExpectedStatus,
+    HttpCheck, HttpMethod, IncidentOrigin, IncidentSeverity, IncidentState, IncidentUrgency,
     IncidentVisibility, NewEscalationPolicy, NewEscalationStep, NewEscalationTarget,
-    NewNotificationChannel, OpsIncident, Target, TargetAlerts, WebhookConfig, WriteSource,
+    NewNotificationChannel, NotificationChannelUpdate, OpsIncident, Target, TargetAlerts,
+    WebhookConfig, WriteSource,
 };
 use crate::storage::{
     Actor, DueIncident, InMemoryContactStore, InMemoryEscalationPolicyStore,
@@ -182,6 +183,60 @@ fn engine_cfg(
             email: None,
         },
     )
+}
+
+/// [`engine_cfg`] with a capturing mail sender and an org that has an owner.
+fn engine_mailing(
+    ops: Arc<dyn IncidentOpsStore>,
+    targets: Arc<dyn TargetStore>,
+    channels: Arc<dyn NotificationChannelStore>,
+    cfg: EscalationConfig,
+) -> (EscalationEngine, crate::email::InMemoryEmailSender) {
+    engine_mailing_owned(ops, targets, channels, cfg, true)
+}
+
+/// [`engine_mailing`], with `owner` controlling whether the org has anyone to
+/// mail at all.
+fn engine_mailing_owned(
+    ops: Arc<dyn IncidentOpsStore>,
+    targets: Arc<dyn TargetStore>,
+    channels: Arc<dyn NotificationChannelStore>,
+    cfg: EscalationConfig,
+    owner: bool,
+) -> (EscalationEngine, crate::email::InMemoryEmailSender) {
+    let sender = crate::email::InMemoryEmailSender::new();
+    let orgs = Arc::new(crate::storage::orgs::InMemoryOrgDirectory::new());
+    orgs.insert(org(), "Acme Inc");
+    if owner {
+        orgs.insert_owner_email(org(), "owner@example.test");
+    }
+    let (_tx, rx) = mpsc::channel(4);
+    let engine = EscalationEngine::new(
+        rx,
+        EngineDeps {
+            ops,
+            policies: Arc::new(InMemoryEscalationPolicyStore::new()),
+            on_call: Arc::new(InMemoryOnCallStore::new()),
+            contacts: Arc::new(InMemoryContactStore::new()),
+            targets,
+            channels,
+            orgs,
+            http: crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::relaxed_for_tests(),
+            ),
+            cfg,
+            base_url: "https://app.test".into(),
+            alert_channel_stop_secret: String::new(),
+            central_bot: None,
+            central_whatsapp: None,
+            email: Some(crate::notifier::EmailDelivery {
+                sender: Arc::new(sender.clone()),
+                from_address: "alerts@example.test".into(),
+                from_name: "Uptimepage".into(),
+            }),
+        },
+    );
+    (engine, sender)
 }
 
 fn engine_with(
@@ -848,6 +903,311 @@ async fn retry_sweep_increments_attempts_then_exhausts() {
         EscalationConfig::default().max_attempts as i32
     );
     assert_eq!(rows[0].status, NotificationStatus::Failed);
+}
+
+/// A page that runs out of retries is one strike. Enough in a row and the
+/// endpoint is dead, not busy, and the whole remedy is that somebody is told.
+#[tokio::test]
+async fn a_channel_that_stops_delivering_mails_the_owners_once() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let cfg = EscalationConfig {
+        channel_failure_limit: 2,
+        ..Default::default()
+    };
+    let max_attempts = cfg.max_attempts;
+    let (eng, mail) = engine_mailing(ops.clone(), targets, channels.clone(), cfg);
+
+    // One incident short of the limit, the one that crosses it, and one more
+    // that must not mail again.
+    for round in 1..=3 {
+        let id = seed_incident(&ops, Some(tid));
+        eng.page(org(), id, NotificationReason::Opened)
+            .await
+            .unwrap();
+        for _ in 0..max_attempts {
+            ops.clear_retry_backoff();
+            eng.retry_pending().await;
+        }
+        settle().await;
+        let live = channels.get(org(), cid).await.unwrap().unwrap();
+        assert!(live.enabled, "round {round}: the channel stays on the air");
+        assert_eq!(
+            mail.len(),
+            usize::from(round >= 2),
+            "round {round}: one mail per run of failures, not per incident"
+        );
+    }
+
+    let flagged = channels.get(org(), cid).await.unwrap().unwrap();
+    assert!(flagged.is_failing(2));
+    assert!(flagged.failing_since.is_some());
+    assert!(
+        flagged.disabled_reason.is_none(),
+        "nothing disabled it, so it owes no disable note"
+    );
+
+    settle().await;
+    let sent = mail.sent();
+    let to = &sent[0].to;
+    assert_eq!(to.address, "owner@example.test");
+    let rendered = sent[0].template.render("Uptimepage");
+    assert!(rendered.subject.contains(&flagged.name));
+    assert!(
+        rendered.text_body.contains("Acme Inc"),
+        "mail should attribute the org: {}",
+        rendered.text_body
+    );
+    // Without the transport's own error the owner cannot tell what broke.
+    assert!(
+        rendered.text_body.contains("What the endpoint returned"),
+        "mail should carry the transport error: {}",
+        rendered.text_body
+    );
+    assert!(
+        rendered.text_body.contains("still being sent"),
+        "the owner must not read this as the channel having been turned off"
+    );
+}
+
+/// The owner mail is spawned off the paging path, so a test has to hand the
+/// runtime enough turns for it to finish before counting what was sent.
+async fn settle() {
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+}
+
+/// Answers 200 to anything, so a delivery through the engine really lands.
+async fn spawn_ok_endpoint() -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((mut sock, _)) = listener.accept().await else {
+                return;
+            };
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut scratch = [0u8; 4096];
+                let _ = sock.read(&mut scratch).await;
+                let _ = sock
+                    .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                    .await;
+            });
+        }
+    });
+    format!("http://{addr}/notify")
+}
+
+async fn page_and_exhaust(
+    eng: &EscalationEngine,
+    ops: &Arc<InMemoryIncidentOpsStore>,
+    tid: Uuid,
+    max_attempts: u32,
+) {
+    let id = seed_incident(ops, Some(tid));
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    for _ in 0..max_attempts {
+        ops.clear_retry_backoff();
+        eng.retry_pending().await;
+    }
+}
+
+/// A send that lands restarts the run, so the next outage is its own.
+#[tokio::test]
+async fn a_delivery_that_lands_re_arms_the_alert() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let cfg = EscalationConfig {
+        channel_failure_limit: 1,
+        ..Default::default()
+    };
+    let max_attempts = cfg.max_attempts;
+    let (eng, mail) = engine_mailing(ops.clone(), targets, channels.clone(), cfg);
+
+    page_and_exhaust(&eng, &ops, tid, max_attempts).await;
+    settle().await;
+    assert_eq!(mail.len(), 1, "a dead endpoint is reported once");
+
+    // The engine has to notice the delivery landed, not just that it was tried.
+    let url = spawn_ok_endpoint().await;
+    channels
+        .update(
+            org(),
+            cid,
+            NotificationChannelUpdate {
+                config: Some(ChannelConfig::Webhook(WebhookConfig {
+                    url,
+                    headers: Default::default(),
+                    secret: None,
+                })),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+    let id = seed_incident(&ops, Some(tid));
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    settle().await;
+
+    let recovered = channels.get(org(), cid).await.unwrap().unwrap();
+    assert_eq!(recovered.consecutive_failures, 0);
+    assert_eq!(recovered.failing_since, None);
+    assert!(!recovered.is_failing(1));
+    assert_eq!(mail.len(), 1, "recovery is not itself news");
+    // The run restarts, so the next outage is a run of its own. It owes no
+    // second mail yet: the cooldown is what stops a flapping endpoint from
+    // mailing the owners on every cycle.
+    channels
+        .record_delivery_outcome(org(), cid, false)
+        .await
+        .unwrap();
+    let again = channels.get(org(), cid).await.unwrap().unwrap();
+    assert!(again.is_failing(1));
+    assert!(
+        channels
+            .claim_failure_alert(org(), cid)
+            .await
+            .unwrap()
+            .is_none(),
+        "a run reported minutes ago does not report again"
+    );
+}
+
+/// Claiming before sending is only safe if a claim that cannot be sent comes
+/// back; otherwise nobody is ever told until the cooldown expires.
+#[tokio::test]
+async fn a_claim_that_cannot_be_mailed_is_handed_back() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let cfg = EscalationConfig {
+        channel_failure_limit: 1,
+        ..Default::default()
+    };
+    let max_attempts = cfg.max_attempts;
+    let (eng, mail) = engine_mailing_owned(ops.clone(), targets, channels.clone(), cfg, false);
+
+    page_and_exhaust(&eng, &ops, tid, max_attempts).await;
+    settle().await;
+    assert_eq!(mail.len(), 0, "there was nobody to mail");
+    // A claim was taken and handed back, so the run is unreported and the next
+    // caller can take it. Without the release this second claim would be None.
+    let live = channels.get(org(), cid).await.unwrap().unwrap();
+    assert!(live.is_failing(1), "the run itself is still open");
+    assert!(
+        channels
+            .claim_failure_alert(org(), cid)
+            .await
+            .unwrap()
+            .is_some(),
+        "the unsent alert is still owed"
+    );
+}
+
+/// A channel turned off mid-outage stops receiving the retries already queued
+/// for it, rather than draining them into a destination nobody is watching.
+#[tokio::test]
+async fn disabling_a_channel_suppresses_its_queued_retries() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let eng = engine_cfg(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        targets,
+        channels.clone(),
+        EscalationConfig::default(),
+    );
+
+    let id = seed_incident(&ops, Some(tid));
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    channels
+        .update(
+            org(),
+            cid,
+            NotificationChannelUpdate {
+                enabled: Some(false),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+            None,
+        )
+        .await
+        .unwrap();
+    ops.clear_retry_backoff();
+    eng.retry_pending().await;
+
+    let rows = ops.notifications_for(org(), id).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].status, NotificationStatus::Suppressed);
+}
+
+/// An unverified address fails every delivery by design, and its own badge
+/// already says so.
+#[tokio::test]
+async fn an_unverified_email_channel_is_not_flagged_as_failing() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = channels
+        .create(
+            org(),
+            NewNotificationChannel {
+                name: "owner mailbox".into(),
+                config: ChannelConfig::Email(EmailConfig {
+                    to: "unconfirmed@example.test".into(),
+                }),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            100,
+            None,
+        )
+        .await
+        .unwrap()
+        .id;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let cfg = EscalationConfig {
+        channel_failure_limit: 1,
+        ..Default::default()
+    };
+    let max_attempts = cfg.max_attempts;
+    let (eng, mail) = engine_mailing(ops.clone(), targets, channels.clone(), cfg);
+
+    for _ in 0..3 {
+        page_and_exhaust(&eng, &ops, tid, max_attempts).await;
+    }
+
+    settle().await;
+    let live = channels.get(org(), cid).await.unwrap().unwrap();
+    assert_eq!(live.consecutive_failures, 0);
+    assert!(!live.is_failing(1));
+    assert_eq!(mail.len(), 0, "the unverified badge is the whole message");
 }
 
 #[tokio::test]

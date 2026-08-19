@@ -27,6 +27,7 @@ pub(super) fn build_monitor_patch(
     args: &UpdateMonitorArgs,
     target: &Target,
     channels: &[NotificationChannel],
+    failure_limit: u32,
 ) -> Result<(TargetUpdate, Vec<FieldChange>), McpToolError> {
     let mut update = TargetUpdate::default();
     let mut changes = Vec::new();
@@ -125,8 +126,8 @@ pub(super) fn build_monitor_patch(
         if bound_ids(&alerts) != bound_ids(&target.alerts) {
             moved(
                 "alerts",
-                channel_names(&target.alerts, channels),
-                channel_names(&alerts, channels),
+                channel_names(&target.alerts, channels, failure_limit),
+                channel_names(&alerts, channels, failure_limit),
             );
             update.alerts = Some(alerts);
         }

@@ -1239,6 +1239,9 @@ struct MemberRow {
 #[async_trait]
 pub trait OrgDirectory: Send + Sync {
     async fn display_name(&self, org: OrgId) -> Result<Option<String>>;
+    /// Addresses of the org's owners, for mail about the account rather than
+    /// about a monitor. Soft-deleted users and orgs are skipped.
+    async fn owner_emails(&self, org: OrgId) -> Result<Vec<String>>;
 }
 
 pub struct PgOrgDirectory {
@@ -1270,11 +1273,29 @@ impl OrgDirectory for PgOrgDirectory {
         self.names.insert(org, name.clone()).await;
         Ok(name)
     }
+
+    async fn owner_emails(&self, org: OrgId) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"SELECT u.email
+               FROM memberships m
+               JOIN users u ON u.id = m.user_id
+               JOIN organizations o ON o.id = m.org_id
+               WHERE m.org_id = $1 AND m.role = 'owner'
+                 AND u.deleted_at IS NULL AND o.deleted_at IS NULL
+               ORDER BY u.email"#,
+        )
+        .bind(org.0)
+        .fetch_all(&self.pool)
+        .await
+        .context("owner_emails")?;
+        Ok(rows.into_iter().map(|(e,)| e).collect())
+    }
 }
 
 #[derive(Default)]
 pub struct InMemoryOrgDirectory {
     names: parking_lot::Mutex<std::collections::HashMap<OrgId, String>>,
+    owners: parking_lot::Mutex<std::collections::HashMap<OrgId, Vec<String>>>,
 }
 
 impl InMemoryOrgDirectory {
@@ -1285,11 +1306,23 @@ impl InMemoryOrgDirectory {
     pub fn insert(&self, org: OrgId, name: impl Into<String>) {
         self.names.lock().insert(org, name.into());
     }
+
+    pub fn insert_owner_email(&self, org: OrgId, email: impl Into<String>) {
+        self.owners
+            .lock()
+            .entry(org)
+            .or_default()
+            .push(email.into());
+    }
 }
 
 #[async_trait]
 impl OrgDirectory for InMemoryOrgDirectory {
     async fn display_name(&self, org: OrgId) -> Result<Option<String>> {
         Ok(self.names.lock().get(&org).cloned())
+    }
+
+    async fn owner_emails(&self, org: OrgId) -> Result<Vec<String>> {
+        Ok(self.owners.lock().get(&org).cloned().unwrap_or_default())
     }
 }
