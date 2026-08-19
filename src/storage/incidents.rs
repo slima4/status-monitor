@@ -67,6 +67,10 @@ impl Default for IncidentBriefFilter {
 #[async_trait]
 pub trait IncidentNarrationStore: Send + Sync {
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<Incident>>;
+    /// Amend an incident: the customer-facing narration plus the operator
+    /// fields on the same row (`title`, `severity`, `urgency`). One writer, so
+    /// a save cannot half-apply. The returned projection is public, so the
+    /// operator fields do not come back.
     async fn patch_narration(
         &self,
         org: OrgId,
@@ -230,11 +234,14 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         update: IncidentNarrationUpdate,
     ) -> Result<Option<Incident>> {
         let severity = update.severity.map(|s| s.as_db_str());
+        let urgency = update.urgency.map(|u| u.as_db_str());
         let row: Option<IncidentRow> = sqlx::query_as(
             r#"UPDATE incidents
                SET public_title       = CASE WHEN $2::bool THEN $3 ELSE public_title END,
                    public_description = CASE WHEN $4::bool THEN $5 ELSE public_description END,
                    severity           = COALESCE($6, severity),
+                   title              = CASE WHEN $8::bool THEN $9 ELSE title END,
+                   urgency            = COALESCE($10, urgency),
                    updated_at         = now()
                WHERE id = $1 AND org_id = $7
                RETURNING id, target_id, started_at, ended_at, severity, status_at_start,
@@ -248,6 +255,9 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         .bind(update.public_description.clone().flatten())
         .bind(severity)
         .bind(org.0)
+        .bind(update.title.is_some())
+        .bind(update.title.clone().flatten())
+        .bind(urgency)
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("patch_narration: {e}"))?;
@@ -733,6 +743,7 @@ mod tests {
                     public_title: Some(Some("Latency spike".into())),
                     public_description: Some(Some("EU".into())),
                     severity: Some(IncidentSeverity::Critical),
+                    ..Default::default()
                 },
             )
             .await
@@ -756,8 +767,7 @@ mod tests {
                 id,
                 IncidentNarrationUpdate {
                     public_title: Some(None),
-                    public_description: None,
-                    severity: None,
+                    ..Default::default()
                 },
             )
             .await

@@ -24,8 +24,8 @@ use crate::auth::sha256_hex;
 use crate::auth::token_hash::generate_raw_token;
 use crate::auth::url::token_link;
 use crate::domain::{
-    ChannelConfig, IncidentSeverity, IncidentUrgency, NewNotificationChannel, NotificationChannel,
-    NotificationChannelUpdate, NotificationReason, validate_channel_name,
+    ChannelConfig, IncidentOrigin, IncidentSeverity, IncidentUrgency, NewNotificationChannel,
+    NotificationChannel, NotificationChannelUpdate, NotificationReason, validate_channel_name,
 };
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::error::{AppError, Result};
@@ -1061,6 +1061,7 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
         title: None,
         severity: IncidentSeverity::Minor,
         urgency: IncidentUrgency::Low,
+        origin: IncidentOrigin::Monitor,
         started_at: Utc::now(),
         ended_at: None,
         error_sample: Some(

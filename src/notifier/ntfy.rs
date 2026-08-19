@@ -93,7 +93,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::domain::IncidentSeverity;
+    use crate::domain::{IncidentOrigin, IncidentSeverity};
 
     fn notice(reason: NotificationReason, urgency: IncidentUrgency) -> IncidentNotice {
         IncidentNotice {
@@ -103,6 +103,7 @@ mod tests {
             title: None,
             severity: IncidentSeverity::Major,
             urgency,
+            origin: IncidentOrigin::Monitor,
             started_at: Utc.with_ymd_and_hms(2026, 6, 12, 8, 0, 0).unwrap(),
             ended_at: None,
             error_sample: None,

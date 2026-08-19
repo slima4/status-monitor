@@ -11,8 +11,8 @@ use chrono::Utc;
 use parking_lot::Mutex;
 use serde_json::Value;
 use uptimepage::domain::{
-    ChannelConfig, IncidentSeverity, IncidentUrgency, NotificationReason, SlackConfig,
-    TelegramConfig, WebhookConfig,
+    ChannelConfig, IncidentOrigin, IncidentSeverity, IncidentUrgency, NotificationReason,
+    SlackConfig, TelegramConfig, WebhookConfig,
 };
 use uptimepage::http_outbound::build_outbound_client;
 use uptimepage::notifier::build_notifier;
@@ -62,6 +62,7 @@ fn make_notice() -> IncidentNotice {
         title: None,
         severity: IncidentSeverity::Major,
         urgency: IncidentUrgency::High,
+        origin: IncidentOrigin::Monitor,
         started_at: Utc::now(),
         ended_at: None,
         error_sample: Some("500".into()),

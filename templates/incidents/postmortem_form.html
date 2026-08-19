@@ -1,95 +1,148 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}Postmortem · {{ incident_label }} · Uptimepage{% endblock %}
 {% block content %}
-<section class="space-y-6" data-postmortem data-incident-id="{{ incident_id }}">
-  <header class="flex flex-wrap items-end justify-between gap-3">
-    <div class="space-y-1">
-      <a href="/incidents/{{ incident_id }}" class="inline-block text-sm text-muted hover:text-body">← incident</a>
-      <h1 class="page-title truncate"><span class="page-title__prefix" aria-hidden="true">$</span>postmortem</h1>
-      <p class="text-sm text-muted">{{ incident_label }}</p>
-    </div>
-    {% if exists %}
-    <div class="flex items-center gap-2">
-      {% if published %}
-      <span class="dashboard-chip dashboard-chip--active">published</span>
-      <button type="button" data-postmortem-publish="false" class="btn-ghost px-3 py-1.5 text-sm">unpublish</button>
-      {% else %}
-      <button type="button" data-postmortem-publish="true" class="sticker-btn px-3 py-1.5 text-sm">publish</button>
-      {% endif %}
-    </div>
-    {% endif %}
-  </header>
+<section class="mx-auto w-full max-w-7xl" data-postmortem data-incident-id="{{ incident_id }}">
 
-  <form id="postmortem-form" novalidate class="space-y-6">
+  <form id="postmortem-form" novalidate>
+
+    <div class="form-grid grid grid-cols-1 gap-6 lg:grid-cols-[17rem_1fr] lg:items-start lg:gap-8 xl:grid-cols-[17rem_1fr_15rem]">
+
+    <aside class="type-rail lg:sticky lg:top-6">
+      <span class="form-legend">who reads it</span>
+      <div class="check-type-cards check-type-cards--rail mt-3" role="group" aria-label="Postmortem visibility">
+        {% call reg::chooser_card_static(!published, "draft", "yours alone, nothing is shown to customers") %}{% endcall %}
+        {% call reg::chooser_card_static(published, "published", "on the public incident page, owners stay hidden") %}{% endcall %}
+      </div>
+      <p class="mt-2 font-mono text-xs text-quiet">
+        {% if exists %}
+        # publish and unpublish both land on the incident timeline
+        {% else %}
+        # save it first, then you can publish
+        {% endif %}
+      </p>
+    </aside>
+
+    <div class="space-y-6">
+
+    <header class="space-y-1">
+      <a href="/incidents/{{ incident_id }}" class="inline-block text-sm text-muted hover:text-body">← incident</a>
+      <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>postmortem</h1>
+      <p class="text-sm text-muted">{{ incident_label }}</p>
+    </header>
+
     <div id="form-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
 
-    <fieldset class="sticker-card form-card">
-      <legend>write-up</legend>
-      <div class="clear-both space-y-5 p-5">
-      <label class="field-outline block">
-        <span class="field-outline__label">Summary</span>
+    <div class="space-y-6">
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">what happened</span></legend>
+      <div class="clear-both">
         <textarea name="summary" rows="3" maxlength="5000" class="w-full field"
-                  placeholder="What happened, in a sentence or two.">{{ summary }}</textarea>
-      </label>
-      <label class="field-outline block">
-        <span class="field-outline__label">Root cause</span>
+                  aria-label="Summary"
+                  placeholder="the outage in a sentence or two, as you would tell a colleague">{{ summary }}</textarea>
+        <span class="mt-1 block text-xs text-muted">Shown first on the public page, so lead with impact rather than chronology.</span>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">why it happened</span></legend>
+      <div class="clear-both">
         <textarea name="root_cause" rows="3" maxlength="5000" class="w-full field"
-                  placeholder="Why it happened.">{{ root_cause }}</textarea>
-      </label>
-      <label class="field-outline block">
-        <span class="field-outline__label">Impact</span>
+                  aria-label="Root cause"
+                  placeholder="the condition that made this possible, not the trigger that set it off">{{ root_cause }}</textarea>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">who it hit</span></legend>
+      <div class="clear-both">
         <textarea name="impact" rows="3" maxlength="5000" class="w-full field"
-                  placeholder="Who was affected and for how long.">{{ impact }}</textarea>
-      </label>
+                  aria-label="Impact"
+                  placeholder="which customers, which features, for how long">{{ impact }}</textarea>
       </div>
     </fieldset>
 
-    <fieldset class="sticker-card form-card">
-      <legend>action items</legend>
-      <div class="clear-both space-y-3 p-5">
-      <div id="action-items" class="space-y-2">
-        {% for a in action_items %}
-        <div data-action-item class="flex flex-wrap items-center gap-2">
-          <input type="text" data-ai-text maxlength="2000" value="{{ a.text }}"
-                 aria-label="action item description"
-                 class="min-w-48 flex-1 field" placeholder="follow-up task…">
-          <select data-ai-owner data-sm-combobox class="field" aria-label="action item owner">
-            <option value="">unassigned</option>
-            {% for m in members %}
-            <option value="{{ m.id }}"{% if m.id == a.owner_user_id %} selected{% endif %}>{{ m.email }}</option>
-            {% endfor %}
-          </select>
-          <label class="inline-flex items-center gap-1 text-sm text-muted">
-            <input type="checkbox" data-ai-done{% if a.done %} checked{% endif %}> done
-          </label>
-          <button type="button" data-ai-remove class="row-link row-link--danger text-xs">remove</button>
+    <div class="space-y-6 border-t border-[color:var(--theme-line)] pt-6">
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">follow-ups</span></legend>
+      <div class="clear-both space-y-3">
+        <div id="action-items" class="space-y-2">
+          {% for a in action_items %}
+          <div data-action-item class="flex flex-wrap items-center gap-2">
+            <input type="text" data-ai-text maxlength="2000" value="{{ a.text }}"
+                   aria-label="action item description"
+                   class="min-w-48 flex-1 field" placeholder="the change that stops this happening again">
+            <select data-ai-owner data-sm-combobox class="field" aria-label="action item owner">
+              <option value="">unassigned</option>
+              {% for m in members %}
+              <option value="{{ m.id }}"{% if m.id == a.owner_user_id %} selected{% endif %}>{{ m.email }}</option>
+              {% endfor %}
+            </select>
+            <label class="inline-flex min-h-9 items-center gap-2 text-sm text-muted">
+              <input type="checkbox" data-ai-done{% if a.done %} checked{% endif %}> done
+            </label>
+            <button type="button" data-ai-remove class="row-remove" aria-label="Remove action item"></button>
+          </div>
+          {% endfor %}
         </div>
-        {% endfor %}
-      </div>
-      <button type="button" id="add-action-item" class="sticker-btn px-3 py-1.5 text-sm font-medium">add action item</button>
+        <button type="button" id="add-action-item"
+                class="check-type-card check-type-card--add w-full sm:w-auto">
+          <span class="check-type-card__plus" aria-hidden="true">+</span>
+          <span class="check-type-card__name">add action item</span>
+        </button>
+        <p class="font-mono text-xs text-quiet"># owners are internal — customers see the text and whether it is done</p>
       </div>
     </fieldset>
 
-    <div class="flex justify-end gap-2">
-      <a href="/incidents/{{ incident_id }}" class="btn-ghost px-3 py-1.5 text-sm">cancel</a>
-      <button type="submit" class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">save postmortem</button>
+    </div>
+    </div>
+    </div>
+
+    <aside class="action-rail lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6">
+      <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
+          save postmortem
+        </button>
+        {% if exists %}
+        {% if published %}
+        <button type="button" data-postmortem-publish="false"
+                class="sticker-btn min-h-10 px-4 py-2 text-sm font-medium">unpublish</button>
+        {% else %}
+        <button type="button" data-postmortem-publish="true"
+                class="sticker-btn sticker-btn--highlight min-h-10 px-4 py-2 text-sm font-medium inline-flex items-center justify-center gap-1.5">
+          <span aria-hidden="true">↗</span> publish
+        </button>
+        {% endif %}
+        {% endif %}
+        <a href="/incidents/{{ incident_id }}"
+           class="btn-ghost inline-flex min-h-10 items-center justify-center px-4 py-2 text-center text-sm">cancel</a>
+        <span class="text-xs text-quiet xl:text-center">
+          tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
+               <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
+        </span>
+      </div>
+    </aside>
+
     </div>
   </form>
 
   <template id="action-item-template">
     <div data-action-item class="flex flex-wrap items-center gap-2">
       <input type="text" data-ai-text maxlength="2000" value="" aria-label="action item description"
-             class="min-w-48 flex-1 field" placeholder="follow-up task…">
+             class="min-w-48 flex-1 field" placeholder="the change that stops this happening again">
       <select data-ai-owner class="field" aria-label="action item owner">
         <option value="">unassigned</option>
         {% for m in members %}
         <option value="{{ m.id }}">{{ m.email }}</option>
         {% endfor %}
       </select>
-      <label class="inline-flex items-center gap-1 text-sm text-muted">
+      <label class="inline-flex min-h-9 items-center gap-2 text-sm text-muted">
         <input type="checkbox" data-ai-done> done
       </label>
-      <button type="button" data-ai-remove class="row-link row-link--danger text-xs">remove</button>
+      <button type="button" data-ai-remove class="row-remove" aria-label="Remove action item"></button>
     </div>
   </template>
 </section>

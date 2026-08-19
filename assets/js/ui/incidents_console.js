@@ -22,8 +22,12 @@
   }
 
   async function post(url, body) {
+    return request("POST", url, body);
+  }
+
+  async function request(method, url, body) {
     const r = await fetch(url, {
-      method: "POST",
+      method: method,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -172,6 +176,25 @@
     window.location.reload();
   }
 
+  // Blank fields send null (clear) rather than "", so the public page falls
+  // back to generated wording instead of rendering an empty title.
+  async function submitEdit(form) {
+    const id = form.dataset.incidentId;
+    if (!id) return;
+    const fd = new FormData(form);
+    const text = (k) => (fd.get(k) || "").toString().trim() || null;
+    const res = await request("PATCH", "/api/v1/incidents/" + encodeURIComponent(id), {
+      title: text("title"),
+      severity: (fd.get("severity") || "major").toString(),
+      urgency: (fd.get("urgency") || "high").toString(),
+      public_title: text("public_title"),
+      public_description: text("public_description"),
+    });
+    if (!res.ok) return showError(errMsg(res));
+    if (window.smToast) window.smToast({ message: "Saved", kind: "ok" });
+    window.location.href = "/incidents/" + encodeURIComponent(id);
+  }
+
   async function submitDeclare(form) {
     const fd = new FormData(form);
     const tid = (fd.get("target_id") || "").toString().trim();
@@ -179,6 +202,8 @@
       title: (fd.get("title") || "").toString().trim(),
       severity: (fd.get("severity") || "major").toString(),
       urgency: (fd.get("urgency") || "high").toString(),
+      visibility: (fd.get("visibility") || "internal").toString(),
+      notify: (fd.get("notify") || "0").toString() === "1",
     };
     if (tid) body.target_id = tid;
     const res = await post("/api/v1/incidents", body);
@@ -231,6 +256,22 @@
       ev.preventDefault();
       return submitUpdate(update);
     }
+    const edit = ev.target.closest("[data-incident-edit-form]");
+    if (edit) {
+      ev.preventDefault();
+      return submitEdit(edit);
+    }
+  });
+
+  // ⌘/Ctrl+Enter submits, as on the monitor and channel forms.
+  root.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
+    const form =
+      e.target.closest &&
+      e.target.closest("[data-incident-declare-form], [data-incident-edit-form]");
+    if (!form) return;
+    e.preventDefault();
+    form.requestSubmit();
   });
 
   // `/` focuses the incidents search, unless already typing in a field.

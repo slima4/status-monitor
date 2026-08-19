@@ -14,11 +14,12 @@ use uuid::Uuid;
 use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::{
-    IncidentEvent, IncidentSeverity, IncidentState, IncidentStatusPhase, OpsIncident, OrgId, UserId,
+    CheckResult, CheckStatus, IncidentEvent, IncidentSeverity, IncidentState, IncidentStatusPhase,
+    OpsIncident, OrgId, UserId,
 };
 use crate::error::AppError;
 use crate::storage::orgs::list_members;
-use crate::storage::{IncidentOpsFilter, IncidentSort, TargetFilter};
+use crate::storage::{ClampedRange, IncidentOpsFilter, IncidentSort, TargetFilter, TimeRange};
 use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::views::{PageSizeLink, PagerLink};
@@ -33,6 +34,12 @@ const SORTS: &[(&str, &str)] = &[
 ];
 const PAGE_SIZES: &[usize] = &[25, 50, 100, 200];
 const DEFAULT_PAGE_SIZE: usize = 50;
+/// Long enough to catch a slow interval's last check, short enough that a
+/// long-paused monitor reads as no evidence rather than as recovered.
+const RECOVERY_LOOKBACK: chrono::Duration = chrono::Duration::hours(24);
+/// Rows pulled to find each region's latest check: more than one round across
+/// every region a monitor can be probed from.
+const RECOVERY_SAMPLE: usize = 60;
 
 #[derive(Debug, Default, Deserialize)]
 pub struct ListParams {
@@ -691,6 +698,15 @@ pub struct IncidentDetailPage {
     pub postmortem_published: bool,
     /// Per-channel delivery log (the `incident_notifications` rows).
     pub notifications: Vec<NotificationRow>,
+    /// Set when the incident is still open but its monitor is passing again.
+    /// Nothing else in the product reconciles the two.
+    pub monitor_recovered_at: Option<DateTime<Utc>>,
+    /// Time open: elapsed so far while ongoing, total once it ended.
+    pub duration_label: String,
+    /// How long anyone took to take the page. `None` until acked.
+    pub ack_delay_label: Option<String>,
+    /// Bad checks folded into this incident. Zero for a hand-declared one.
+    pub check_count: u64,
 }
 
 /// One paging-delivery row for the incident's notifications section.
@@ -842,6 +858,7 @@ pub async fn detail(
         label: email,
     }));
 
+    let recovered_at = monitor_recovered_at(&state, org, &inc).await;
     let label = inc
         .title
         .clone()
@@ -859,6 +876,7 @@ pub async fn detail(
     page.owner = owner;
     page.owner_options = owner_options;
     page.notifications = notifications;
+    page.monitor_recovered_at = recovered_at;
     Ok(page)
 }
 
@@ -871,6 +889,13 @@ fn make_detail_page(
     public_updates: Vec<PublicUpdateRow>,
     postmortem: Option<&crate::domain::IncidentPostmortem>,
 ) -> IncidentDetailPage {
+    let until = inc.ended_at.unwrap_or_else(Utc::now);
+    let duration_label = fmt_secs(Some((until - inc.started_at).num_seconds().max(0) as f64))
+        .unwrap_or_else(|| "0s".to_string());
+    let ack_delay_label = inc
+        .acknowledged_at
+        .and_then(|at| fmt_secs(Some((at - inc.started_at).num_seconds().max(0) as f64)));
+    let check_count = inc.check_count;
     IncidentDetailPage {
         active_tab: "incidents",
         id: inc.id.to_string(),
@@ -896,7 +921,53 @@ fn make_detail_page(
         has_postmortem: postmortem.is_some(),
         postmortem_published: postmortem.is_some_and(|p| p.published_at.is_some()),
         notifications: Vec::new(),
+        monitor_recovered_at: None,
+        duration_label,
+        ack_delay_label,
+        check_count,
     }
+}
+
+/// The moment every region that reported had been passing by, if all of them
+/// are. `None` for a standalone incident, a closed one, or a monitor any region
+/// still calls bad.
+///
+/// Per region on purpose: the newest single row belongs to whichever agent
+/// reported last, so a partial outage would read as a recovery about a third of
+/// the time on a three-region monitor.
+async fn monitor_recovered_at(
+    state: &AppState,
+    org: OrgId,
+    inc: &OpsIncident,
+) -> Option<DateTime<Utc>> {
+    if !inc.state.is_open() {
+        return None;
+    }
+    let target_id = inc.target_id?;
+    let now = Utc::now();
+    let range = ClampedRange::unclamped(TimeRange {
+        from: now - RECOVERY_LOOKBACK,
+        to: now,
+    });
+    let rows = state
+        .results_store
+        .list_results_by_region(org, target_id, range, RECOVERY_SAMPLE, 0)
+        .await
+        .ok()?;
+    // Rows arrive newest first, so a region's first row is its latest check.
+    let mut latest_per_region: HashMap<String, CheckResult> = HashMap::new();
+    for (region, result) in rows {
+        latest_per_region.entry(region).or_insert(result);
+    }
+    if latest_per_region.is_empty()
+        || latest_per_region
+            .values()
+            .any(|r| r.status != CheckStatus::Up)
+    {
+        return None;
+    }
+    // The weakest claim the evidence supports.
+    latest_per_region.values().map(|r| r.timestamp).min()
 }
 
 pub struct MonitorOption {
@@ -936,6 +1007,60 @@ pub async fn declare_form(
     Ok(DeclareIncidentPage {
         active_tab: "incidents",
         monitors,
+    })
+}
+
+#[derive(Template, WebTemplate)]
+#[template(path = "incidents/edit.html")]
+pub struct EditIncidentPage {
+    pub active_tab: &'static str,
+    pub id: String,
+    pub title: String,
+    /// Read-only: one monitor holds one open incident, so rebinding would
+    /// collide with the open-incident index.
+    pub monitor_name: Option<String>,
+    pub target_id: Option<String>,
+    pub severity: &'static str,
+    pub urgency: &'static str,
+    pub visibility: &'static str,
+    pub public_title: String,
+    pub public_description: String,
+}
+
+pub async fn edit_form(
+    _auth: AuthedBrowser,
+    CurrentOrg(org): CurrentOrg,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> WebResult<EditIncidentPage> {
+    let inc = state
+        .incident_ops_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
+    let monitor_name = match inc.target_id {
+        Some(t) => state.target_store.get(org, t).await?.map(|x| x.name),
+        None => None,
+    };
+    // Separate read-model over the same row; the ops one carries no public copy.
+    let narration = state.incident_narration_store.get(org, id).await?;
+    Ok(EditIncidentPage {
+        active_tab: "incidents",
+        id: inc.id.to_string(),
+        title: inc.title.clone().unwrap_or_default(),
+        monitor_name,
+        target_id: inc.target_id.map(|t| t.to_string()),
+        severity: inc.severity.as_db_str(),
+        urgency: inc.urgency.as_db_str(),
+        visibility: inc.visibility.as_db_str(),
+        public_title: narration
+            .as_ref()
+            .and_then(|n| n.public_title.clone())
+            .unwrap_or_default(),
+        public_description: narration
+            .as_ref()
+            .and_then(|n| n.public_description.clone())
+            .unwrap_or_default(),
     })
 }
 
@@ -1173,6 +1298,7 @@ mod tests {
             urgency: crate::domain::IncidentUrgency::High,
             origin: crate::domain::IncidentOrigin::Monitor,
             visibility: crate::domain::IncidentVisibility::Internal,
+            paging_enabled: true,
             started_at: Utc::now(),
             ended_at: None,
             acknowledged_at: None,
@@ -1421,6 +1547,116 @@ mod tests {
         assert!(html.contains(r#"data-incident-assign-select"#));
     }
 
+    /// The form's defaults are the promise: record it, tell nobody yet.
+    #[test]
+    fn declare_form_defaults_to_telling_nobody() {
+        let html = DeclareIncidentPage {
+            active_tab: "incidents",
+            monitors: vec![MonitorOption {
+                id: Uuid::now_v7().to_string(),
+                name: "api-prod".into(),
+            }],
+        }
+        .render()
+        .unwrap();
+        assert!(
+            html.contains(r#"name="notify" value="0" class="sr-only" checked"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"name="visibility" value="internal" class="sr-only" checked"#),
+            "{html}"
+        );
+        assert!(html.contains("api-prod"), "{html}");
+    }
+
+    /// The only place these can change after declaring, so it has to arrive
+    /// holding what the incident already says.
+    #[test]
+    fn edit_form_arrives_prefilled_and_leaves_the_monitor_alone() {
+        let html = EditIncidentPage {
+            active_tab: "incidents",
+            id: Uuid::now_v7().to_string(),
+            title: "partner API degraded".into(),
+            monitor_name: Some("api-prod".into()),
+            target_id: Some(Uuid::now_v7().to_string()),
+            severity: "critical",
+            urgency: "low",
+            visibility: "public",
+            public_title: "Elevated errors".into(),
+            public_description: "Some checkouts fail.".into(),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"value="partner API degraded""#), "{html}");
+        assert!(
+            html.contains(r#"name="severity" value="critical" checked"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"name="urgency" value="low" class="sr-only" checked"#),
+            "{html}"
+        );
+        assert!(html.contains("Elevated errors"), "{html}");
+        assert!(html.contains("Some checkouts fail."), "{html}");
+        // Context, not a field: rebinding collides with the open-incident rule.
+        assert!(!html.contains(r#"name="target_id""#), "{html}");
+        assert!(html.contains("fixed after declaring"), "{html}");
+    }
+
+    /// Nothing else reconciles a passing monitor against an incident still
+    /// open over it.
+    #[test]
+    fn detail_offers_to_close_an_incident_whose_monitor_recovered() {
+        let mut page = make_detail_page(
+            ops(IncidentState::Triggered),
+            Some("api".into()),
+            None,
+            "api".to_string(),
+            vec![],
+            vec![],
+            None,
+        );
+        assert!(
+            !page.render().unwrap().contains("still open"),
+            "no claim without evidence the monitor is passing"
+        );
+        page.monitor_recovered_at = Some(Utc::now());
+        let html = page.render().unwrap();
+        assert!(html.contains("still open"), "{html}");
+        assert!(
+            html.contains("every region's latest check passed"),
+            "{html}"
+        );
+    }
+
+    /// The first row answers what a review asks: how long, how fast anyone
+    /// took it, how loud it was, how much broke.
+    #[test]
+    fn detail_leads_with_how_long_how_fast_how_loud() {
+        let mut inc = ops(IncidentState::Resolved);
+        inc.started_at = Utc::now() - chrono::Duration::minutes(30);
+        inc.acknowledged_at = Some(inc.started_at + chrono::Duration::minutes(5));
+        inc.ended_at = Some(inc.started_at + chrono::Duration::minutes(22));
+        inc.check_count = 7;
+        let page = make_detail_page(
+            inc,
+            Some("api".into()),
+            Some("alice@example.com".into()),
+            "api".to_string(),
+            vec![],
+            vec![],
+            None,
+        );
+        let html = page.render().unwrap();
+        assert!(html.contains("lasted"), "{html}");
+        assert!(html.contains("22m 0s"), "{html}");
+        assert!(html.contains("5m 0s"), "acknowledged in: {html}");
+        assert!(html.contains(">7</p>"), "failed checks: {html}");
+        // Nothing paged: that reads as quiet, not as a measured zero.
+        assert!(html.contains("dashboard-rail__value--muted"), "{html}");
+    }
+
     #[test]
     fn detail_renders_delivery_log_with_dead_letter_and_retry() {
         let mut page = make_detail_page(
@@ -1624,7 +1860,9 @@ mod tests {
         assert!(html.contains("5m 0s"));
         assert!(html.contains("1h 2m"));
         assert!(html.contains("api-gateway"));
-        assert!(html.contains("last 7d"));
+        // Shares the dashboard's range tabs, so labels are bare keys.
+        assert!(html.contains("range-tabs__btn"), "{html}");
+        assert!(html.contains(">7d</a>"), "{html}");
     }
 
     #[test]
@@ -1653,5 +1891,29 @@ mod tests {
         assert!(html.contains("add jitter"));
         assert!(html.contains("alice@example.com"));
         assert!(html.contains(r#"data-postmortem-publish="true""#));
+        // A draft that reads as published is the expensive mistake here.
+        assert!(html.contains("check-type-card--on"), "{html}");
+        assert!(html.contains("yours alone"), "{html}");
+    }
+
+    /// It cannot be published before it exists, so the button must be absent
+    /// rather than fail on click.
+    #[test]
+    fn postmortem_form_offers_publish_only_once_there_is_something_to_publish() {
+        let page = PostmortemFormPage {
+            active_tab: "incidents",
+            incident_id: Uuid::now_v7().to_string(),
+            incident_label: "Payments degraded".into(),
+            exists: false,
+            published: false,
+            summary: String::new(),
+            root_cause: String::new(),
+            impact: String::new(),
+            action_items: vec![],
+            members: vec![],
+        };
+        let html = page.render().unwrap();
+        assert!(!html.contains("data-postmortem-publish"), "{html}");
+        assert!(html.contains("save it first"), "{html}");
     }
 }

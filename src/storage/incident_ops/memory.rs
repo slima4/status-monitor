@@ -300,6 +300,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             urgency: new.urgency,
             origin: IncidentOrigin::Manual,
             visibility: IncidentVisibility::Internal,
+            paging_enabled: new.notify,
             started_at: now,
             ended_at: None,
             acknowledged_at: None,

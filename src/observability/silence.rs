@@ -23,7 +23,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::config::WhatsAppAppBotConfig;
-use crate::domain::{IncidentSeverity, IncidentUrgency, NotificationReason, OrgId};
+use crate::domain::{IncidentOrigin, IncidentSeverity, IncidentUrgency, NotificationReason, OrgId};
 use crate::error::Result;
 use crate::http_outbound::OutboundHttpClient;
 use crate::notifier::event::IncidentNotice;
@@ -74,6 +74,7 @@ impl SilenceDelivery for SilenceNotifier {
             title: None,
             severity: IncidentSeverity::default(),
             urgency: IncidentUrgency::default(),
+            origin: IncidentOrigin::Monitor,
             started_at: Utc::now(),
             ended_at: None,
             error_sample: None,

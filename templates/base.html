@@ -67,7 +67,6 @@
             {% if active_tab != "" %}
             <span hx-get="/web/partials/nav" hx-trigger="load" hx-swap="outerHTML"></span>
             {% endif %}
-            {% block nav_crumb %}{% endblock %}
             <div class="hidden items-center gap-6 lg:flex">
               {% include "nav/_primary_links.html" %}
             </div>

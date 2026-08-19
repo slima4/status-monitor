@@ -64,3 +64,30 @@
   <button type="button" data-flow-remove class="row-remove" aria-label="Remove step"></button>
 </div>
 {% endmacro %}
+
+{# One owner of the severity wording: pickable on the declare and edit forms,
+   read-only on the incident itself. #}
+{% macro severity_rail(selected, interactive) %}
+<div class="check-type-cards check-type-cards--rail mt-3"
+     role="{% if interactive %}radiogroup{% else %}group{% endif %}" aria-label="Severity">
+  {% if interactive %}
+  {% call chooser_card("data-severity-card", "severity", "minor", selected == "minor", "minor", "degraded, workaround exists") %}{% endcall %}
+  {% call chooser_card("data-severity-card", "severity", "major", selected == "major", "major", "core function is broken") %}{% endcall %}
+  {% call chooser_card("data-severity-card", "severity", "critical", selected == "critical", "critical", "unusable, revenue or data at risk") %}{% endcall %}
+  {% else %}
+  {% call chooser_card_static(selected == "minor", "minor", "degraded, workaround exists") %}{% endcall %}
+  {% call chooser_card_static(selected == "major", "major", "core function is broken") %}{% endcall %}
+  {% call chooser_card_static(selected == "critical", "critical", "unusable, revenue or data at risk") %}{% endcall %}
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# Read-only: the action rail's buttons move the state, so a card that looked
+   clickable would lie. #}
+{% macro incident_state_rail(selected) %}
+<div class="check-type-cards check-type-cards--rail mt-3" role="group" aria-label="State">
+  {% call chooser_card_static(selected == "triggered", "triggered", "nobody has taken it yet") %}{% endcall %}
+  {% call chooser_card_static(selected == "acknowledged", "acknowledged", "owned, escalation stopped") %}{% endcall %}
+  {% call chooser_card_static(selected == "resolved", "resolved", "closed out") %}{% endcall %}
+</div>
+{% endmacro %}

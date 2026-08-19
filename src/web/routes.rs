@@ -37,6 +37,7 @@ pub fn routes(state: AppState) -> Router {
         .route("/incidents/declare", get(views::incidents::declare_form))
         .route("/incidents/reports", get(views::incidents::reports))
         .route("/incidents/{id}", get(views::incidents::detail))
+        .route("/incidents/{id}/edit", get(views::incidents::edit_form))
         .route(
             "/incidents/{id}/postmortem",
             get(views::incidents::postmortem_form),

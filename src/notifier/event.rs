@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::domain::{IncidentSeverity, IncidentUrgency, NotificationReason};
+use crate::domain::{IncidentOrigin, IncidentSeverity, IncidentUrgency, NotificationReason};
 use crate::text::{single_line, truncate_chars};
 
 /// The incident-shaped payload handed to a transport. Serialized as-is for the
@@ -16,6 +16,9 @@ pub struct IncidentNotice {
     pub title: Option<String>,
     pub severity: IncidentSeverity,
     pub urgency: IncidentUrgency,
+    /// Whether a monitor found this or an operator declared it. One that reads
+    /// like a detection makes the product look like it misfired.
+    pub origin: IncidentOrigin,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub error_sample: Option<String>,
@@ -168,6 +171,7 @@ mod tests {
             title: None,
             severity: IncidentSeverity::Major,
             urgency: IncidentUrgency::High,
+            origin: IncidentOrigin::Monitor,
             started_at: DateTime::from_timestamp(1_700_000_000, 0).unwrap(),
             ended_at: None,
             error_sample: Some("job reported failure (exit 137)".into()),

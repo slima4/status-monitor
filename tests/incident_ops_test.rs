@@ -56,6 +56,174 @@ fn updated(o: LifecycleOutcome) -> uptimepage::domain::OpsIncident {
     }
 }
 
+/// Declaring is done with the least information, so every field it captures
+/// has to be changeable after.
+#[tokio::test]
+#[ignore]
+async fn an_incident_can_be_amended_after_it_is_declared_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, _) = seed(&pool, "incedit").await;
+    let ops = PgIncidentOpsStore::new(pool.clone());
+    let narration = uptimepage::storage::PgIncidentNarrationStore::new(pool.clone());
+
+    let declared = ops
+        .declare(
+            org,
+            NewManualIncident {
+                title: Some("partner outage".into()),
+                ..Default::default()
+            },
+            Actor::User(user),
+        )
+        .await
+        .expect("declare");
+    assert_eq!(declared.urgency, uptimepage::domain::IncidentUrgency::High);
+
+    uptimepage::storage::IncidentNarrationStore::patch_narration(
+        &narration,
+        org,
+        declared.id,
+        uptimepage::domain::IncidentNarrationUpdate {
+            title: Some(Some("partner API degraded".into())),
+            severity: Some(uptimepage::domain::IncidentSeverity::Critical),
+            urgency: Some(uptimepage::domain::IncidentUrgency::Low),
+            public_title: Some(Some("Elevated errors".into())),
+            public_description: Some(Some("Some checkouts fail.".into())),
+        },
+    )
+    .await
+    .expect("amend")
+    .expect("incident exists");
+
+    let after = ops.get(org, declared.id).await.unwrap().unwrap();
+    assert_eq!(after.title.as_deref(), Some("partner API degraded"));
+    assert_eq!(
+        after.severity,
+        uptimepage::domain::IncidentSeverity::Critical
+    );
+    assert_eq!(after.urgency, uptimepage::domain::IncidentUrgency::Low);
+
+    // Clearing the internal title falls the label back to the monitor name.
+    uptimepage::storage::IncidentNarrationStore::patch_narration(
+        &narration,
+        org,
+        declared.id,
+        uptimepage::domain::IncidentNarrationUpdate {
+            title: Some(None),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("clear title")
+    .expect("incident exists");
+    let cleared = ops.get(org, declared.id).await.unwrap().unwrap();
+    assert_eq!(cleared.title, None);
+    assert_eq!(
+        cleared.severity,
+        uptimepage::domain::IncidentSeverity::Critical,
+        "an omitted field is left alone"
+    );
+}
+
+/// The reconcile sweep pages any triggered incident that reached no channel,
+/// which would undo the declare path's silence a minute later.
+#[tokio::test]
+#[ignore]
+async fn a_quietly_declared_incident_is_never_reconciled_into_a_page_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, _) = seed(&pool, "incquiet").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    let quiet = store
+        .declare(org, NewManualIncident::default(), Actor::User(user))
+        .await
+        .expect("declare quiet");
+    let loud = store
+        .declare(
+            org,
+            NewManualIncident {
+                notify: true,
+                ..Default::default()
+            },
+            Actor::User(user),
+        )
+        .await
+        .expect("declare with alerts");
+    assert!(!quiet.paging_enabled);
+    assert!(loud.paging_enabled);
+
+    sqlx::query("UPDATE incidents SET started_at = now() - interval '1 hour' WHERE org_id = $1")
+        .bind(org.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let window = (
+        chrono::Utc::now() - chrono::Duration::hours(6),
+        chrono::Utc::now() - chrono::Duration::seconds(60),
+    );
+    let due = store.due_for_reconcile(window, 100).await.unwrap();
+    assert!(
+        !due.iter().any(|d| d.id == quiet.id),
+        "a declare that asked for no alerts must stay unpaged"
+    );
+    assert!(
+        due.iter().any(|d| d.id == loud.id),
+        "a declare that asked for alerts keeps the dropped-signal safety net"
+    );
+}
+
+/// Incidents cascade away with their monitor, so the audit log is the only
+/// place a churned customer's incident work survives.
+#[tokio::test]
+#[ignore]
+async fn operator_incident_actions_reach_the_org_audit_log_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, seeded) = seed(&pool, "incaudit").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    let declared = store
+        .declare(
+            org,
+            NewManualIncident {
+                title: Some("partner outage".into()),
+                ..Default::default()
+            },
+            Actor::User(user),
+        )
+        .await
+        .expect("declare");
+    store
+        .resolve(org, declared.id, Actor::User(user), None)
+        .await
+        .expect("resolve");
+    store.auto_resolve(org, seeded).await.expect("auto resolve");
+
+    let actions: Vec<String> = sqlx::query_scalar(
+        "SELECT action FROM org_audit_log WHERE org_id = $1 AND action LIKE 'incident.%'          ORDER BY occurred_at",
+    )
+    .bind(org.0)
+    .fetch_all(&pool)
+    .await
+    .expect("read audit log");
+    assert_eq!(actions, vec!["incident.declared", "incident.resolved"]);
+
+    let declared_meta: serde_json::Value = sqlx::query_scalar(
+        "SELECT metadata FROM org_audit_log WHERE org_id = $1 AND action = 'incident.declared'",
+    )
+    .bind(org.0)
+    .fetch_one(&pool)
+    .await
+    .expect("read declare metadata");
+    assert_eq!(declared_meta["incident_id"], declared.id.to_string());
+    assert_eq!(declared_meta["severity"], "major");
+}
+
 #[tokio::test]
 #[ignore]
 async fn acknowledge_then_manual_resolve_pg() {

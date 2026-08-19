@@ -86,6 +86,7 @@ impl Notifier for EmailNotifier {
                 reason: notice.reason,
                 severity: notice.severity,
                 urgency: notice.urgency,
+                origin: notice.origin,
                 started_at: notice.started_at,
                 ended_at: notice.ended_at,
                 error_sample: notice

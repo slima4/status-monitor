@@ -106,7 +106,7 @@ impl Notifier for SlackNotifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{IncidentSeverity, IncidentUrgency};
+    use crate::domain::{IncidentOrigin, IncidentSeverity, IncidentUrgency};
     use chrono::Utc;
     use uuid::Uuid;
 
@@ -118,6 +118,7 @@ mod tests {
             title: None,
             severity: IncidentSeverity::Major,
             urgency: IncidentUrgency::High,
+            origin: IncidentOrigin::Monitor,
             started_at: Utc::now(),
             ended_at: None,
             error_sample: None,

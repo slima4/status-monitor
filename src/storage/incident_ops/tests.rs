@@ -47,6 +47,7 @@ fn seed_triggered(store: &InMemoryIncidentOpsStore) -> Uuid {
         urgency: IncidentUrgency::High,
         origin: IncidentOrigin::Monitor,
         visibility: IncidentVisibility::Internal,
+        paging_enabled: true,
         started_at: now,
         ended_at: None,
         acknowledged_at: None,

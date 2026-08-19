@@ -167,7 +167,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
 
     use super::*;
-    use crate::domain::IncidentUrgency;
+    use crate::domain::{IncidentOrigin, IncidentUrgency};
 
     fn notice(reason: NotificationReason) -> IncidentNotice {
         IncidentNotice {
@@ -177,6 +177,7 @@ mod tests {
             title: None,
             severity: IncidentSeverity::Major,
             urgency: IncidentUrgency::High,
+            origin: IncidentOrigin::Monitor,
             started_at: Utc.with_ymd_and_hms(2026, 6, 12, 8, 0, 0).unwrap(),
             ended_at: None,
             error_sample: Some("timeout after 10s".into()),

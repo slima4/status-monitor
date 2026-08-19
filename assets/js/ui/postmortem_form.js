@@ -57,6 +57,14 @@
     return { ok: r.ok, status: r.status, json: json };
   }
 
+  // ⌘/Ctrl+Enter saves: the write-up is all textareas, where Enter alone has
+  // to stay a newline.
+  form.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter" || !(ev.metaKey || ev.ctrlKey)) return;
+    ev.preventDefault();
+    form.requestSubmit();
+  });
+
   const submitBtn = form.querySelector("button[type=submit]");
   form.addEventListener("submit", async (ev) => {
     ev.preventDefault();

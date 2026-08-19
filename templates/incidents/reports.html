@@ -7,43 +7,61 @@
       <a href="/incidents" class="inline-block text-sm text-muted hover:text-body">← incidents</a>
       <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>incident reports</h1>
     </div>
-    <nav aria-label="Window" class="flex flex-wrap items-center gap-2">
+    <div class="range-tabs" role="tablist" aria-label="Window">
       {% for w in windows %}
       <a href="/incidents/reports?window_days={{ w.days }}"
-         class="dashboard-chip{% if w.active %} dashboard-chip--active{% endif %}">last {{ w.days }}d</a>
+         role="tab"
+         class="range-tabs__btn{% if w.active %} range-tabs__btn--active{% endif %}"
+         aria-selected="{% if w.active %}true{% else %}false{% endif %}"
+         {% if w.active %}aria-current="page"{% endif %}>{{ w.days }}d</a>
       {% endfor %}
-    </nav>
+    </div>
   </header>
 
-  <section class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-    <div class="sticker-card p-4">
-      <div class="text-xs uppercase tracking-wide text-muted">Incidents</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums">{{ total }}</div>
-    </div>
-    <div class="sticker-card p-4">
-      <div class="text-xs uppercase tracking-wide text-muted">MTTA</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums">{% match mtta %}{% when Some with (v) %}{{ v }}{% when None %}—{% endmatch %}</div>
-      <div class="text-xs text-quiet">mean time to acknowledge</div>
-    </div>
-    <div class="sticker-card p-4">
-      <div class="text-xs uppercase tracking-wide text-muted">MTTR</div>
-      <div class="mt-1 text-2xl font-semibold tabular-nums">{% match mttr %}{% when Some with (v) %}{{ v }}{% when None %}—{% endmatch %}</div>
-      <div class="text-xs text-quiet">mean time to resolve</div>
-    </div>
-    <div class="sticker-card p-4">
-      <div class="text-xs uppercase tracking-wide text-muted">Resolution</div>
-      <div class="mt-1 text-sm tabular-nums">
-        <div>{{ auto_resolved }} <span class="text-quiet">auto</span></div>
-        <div>{{ human_resolved }} <span class="text-quiet">by hand</span></div>
+  <section class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <article class="sticker-card dashboard-kpi-card corner-frame">
+      <p class="dashboard-kpi-card__label">Incidents</p>
+      <div class="dashboard-kpi-card__row">
+        <p class="dashboard-kpi-card__value{% if total == 0 %} dashboard-kpi-card__value--quiet{% endif %}">{{ total }}</p>
       </div>
-    </div>
+      <p class="dashboard-kpi-card__hint">opened in this window</p>
+    </article>
+    <article class="sticker-card dashboard-kpi-card corner-frame">
+      <p class="dashboard-kpi-card__label">MTTA</p>
+      <div class="dashboard-kpi-card__row">
+        {% match mtta %}{% when Some with (v) %}
+        <p class="dashboard-kpi-card__value">{{ v }}</p>
+        {% when None %}
+        <p class="dashboard-kpi-card__value dashboard-kpi-card__value--quiet">no data</p>
+        {% endmatch %}
+      </div>
+      <p class="dashboard-kpi-card__hint">mean time to acknowledge</p>
+    </article>
+    <article class="sticker-card dashboard-kpi-card corner-frame">
+      <p class="dashboard-kpi-card__label">MTTR</p>
+      <div class="dashboard-kpi-card__row">
+        {% match mttr %}{% when Some with (v) %}
+        <p class="dashboard-kpi-card__value">{{ v }}</p>
+        {% when None %}
+        <p class="dashboard-kpi-card__value dashboard-kpi-card__value--quiet">no data</p>
+        {% endmatch %}
+      </div>
+      <p class="dashboard-kpi-card__hint">mean time to resolve</p>
+    </article>
+    <article class="sticker-card dashboard-kpi-card corner-frame">
+      <p class="dashboard-kpi-card__label">Resolved by hand</p>
+      <div class="dashboard-kpi-card__row">
+        <p class="dashboard-kpi-card__value{% if human_resolved == 0 %} dashboard-kpi-card__value--quiet{% endif %}">{{ human_resolved }}</p>
+      </div>
+      <p class="dashboard-kpi-card__hint">{{ auto_resolved }} closed themselves when the monitor recovered</p>
+    </article>
   </section>
 
   <div class="grid gap-4 lg:grid-cols-3">
-    <section class="sticker-card p-4">
-      <h2 class="panel-label">By severity</h2>
+    <section class="sticker-card p-5">
+      <h2 class="panel-label">by severity</h2>
       {% if by_severity.is_empty() %}
-      <p class="mt-2 text-sm text-muted">No incidents in this window.</p>
+      <p class="mt-2 font-mono text-xs text-quiet"># no incidents in this window</p>
       {% else %}
       <ul class="mt-2 space-y-1 text-sm">
         {% for b in by_severity %}
@@ -56,10 +74,10 @@
       {% endif %}
     </section>
 
-    <section class="sticker-card p-4">
-      <h2 class="panel-label">By state</h2>
+    <section class="sticker-card p-5">
+      <h2 class="panel-label">by state</h2>
       {% if by_state.is_empty() %}
-      <p class="mt-2 text-sm text-muted">No incidents in this window.</p>
+      <p class="mt-2 font-mono text-xs text-quiet"># no incidents in this window</p>
       {% else %}
       <ul class="mt-2 space-y-1 text-sm">
         {% for b in by_state %}
@@ -72,10 +90,10 @@
       {% endif %}
     </section>
 
-    <section class="sticker-card p-4">
-      <h2 class="panel-label">Noisiest monitors</h2>
+    <section class="sticker-card p-5">
+      <h2 class="panel-label">noisiest monitors</h2>
       {% if top_monitors.is_empty() %}
-      <p class="mt-2 text-sm text-muted">No incidents in this window.</p>
+      <p class="mt-2 font-mono text-xs text-quiet"># no incidents in this window</p>
       {% else %}
       <ul class="mt-2 space-y-1 text-sm">
         {% for m in top_monitors %}

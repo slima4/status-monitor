@@ -19,8 +19,8 @@ use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
 use crate::domain::{
     Incident, IncidentEvent, IncidentEventKind, IncidentMetrics, IncidentNarrationUpdate,
-    IncidentPostmortem, IncidentState, NewIncidentUpdate, NewManualIncident, NotificationReason,
-    OpsIncident, PostmortemUpsert, PublicIncidentUpdate, UserId,
+    IncidentPostmortem, IncidentState, IncidentVisibility, NewIncidentUpdate, NewManualIncident,
+    NotificationReason, OpsIncident, PostmortemUpsert, PublicIncidentUpdate, UserId,
 };
 use crate::error::{AppError, Result};
 use crate::storage::{Actor, IncidentOpsFilter, LifecycleOutcome};
@@ -30,15 +30,18 @@ use crate::web::{Authorized, CurrentUser, IncidentsRead, IncidentsWrite};
     patch,
     path = "/api/v1/incidents/{id}",
     tag = "incidents",
-    summary = "Update incident narration (public title, description, severity)",
-    description = "Sending JSON `null` for `public_title` or `public_description` clears the \
-                   stored value; omitting the field leaves it unchanged. The public page falls \
-                   back to auto-generated content when the title is null.",
+    summary = "Amend an incident (title, severity, urgency, public narration)",
+    description = "Sending JSON `null` for `title`, `public_title` or `public_description` clears \
+                   the stored value; omitting the field leaves it unchanged. The public page falls \
+                   back to auto-generated content when the public title is null. A severity change \
+                   is recorded on the incident's internal timeline.",
     params(("id" = Uuid, Path)),
     request_body(content = IncidentNarrationUpdate, example = json!({
+        "title": "Checkout failing for EU customers",
         "public_title": "Latency spike on EU API",
         "public_description": "Investigation in progress.",
-        "severity": "major"
+        "severity": "major",
+        "urgency": "low"
     })),
     responses(
         (status = 200, body = Incident),
@@ -49,25 +52,53 @@ use crate::web::{Authorized, CurrentUser, IncidentsRead, IncidentsWrite};
 pub async fn update_incident_narration(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<IncidentsWrite>,
+    CurrentUser(user): CurrentUser,
     Path(id): Path<Uuid>,
     Json(update): Json<IncidentNarrationUpdate>,
 ) -> Result<Json<Incident>> {
+    validation::validate_optional_title(update.title.as_ref(), "title")?;
     validation::validate_optional_title(update.public_title.as_ref(), "public_title")?;
     validation::validate_optional_description(
         update.public_description.as_ref(),
         "public_description",
     )?;
-    match state
+    // Read before the write so the timeline can say what it changed from.
+    let was = match update.severity {
+        Some(_) => state.incident_ops_store.get(org, id).await?,
+        None => None,
+    };
+    let patched = state
         .incident_narration_store
         .patch_narration(org, id, update)
         .await?
+        .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
+    if let Some(before) = was
+        && before.severity != patched.severity
     {
-        Some(inc) => Ok(Json(inc)),
-        None => Err(AppError::not_found(
-            codes::INCIDENT_NOT_FOUND,
-            "incident not found",
-        )),
+        // The severity is already committed: failing here would report a save
+        // that happened as a failure, and the retry would find nothing to log.
+        if let Err(err) = state
+            .incident_ops_store
+            .append_event(
+                org,
+                id,
+                IncidentEventKind::SeverityChanged,
+                Actor::User(user),
+                Some(format!(
+                    "severity {} to {}",
+                    before.severity.as_db_str(),
+                    patched.severity.as_db_str()
+                )),
+            )
+            .await
+        {
+            tracing::warn!(
+                %org, incident_id = %id, error = %err,
+                "severity changed but its timeline entry was lost"
+            );
+        }
     }
+    Ok(Json(patched))
 }
 
 #[utoipa::path(
@@ -277,6 +308,9 @@ pub async fn incident_notifications(
 #[utoipa::path(
     post, path = "/api/v1/incidents", tag = "incidents",
     summary = "Declare a manual incident",
+    description = "Opens an incident nobody's monitor found. It stays internal and pages no \
+                   one unless `visibility` and `notify` say otherwise, so declaring is safe to \
+                   do while you are still working out what broke.",
     request_body = NewManualIncident,
     responses((status = 201, body = OpsIncident), (status = 400, body = ApiError)),
 )]
@@ -287,11 +321,34 @@ pub async fn declare_incident(
     Json(new): Json<NewManualIncident>,
 ) -> Result<(StatusCode, Json<OpsIncident>)> {
     validation::validate_optional_title(Some(&new.title), "title")?;
-    let inc = state
-        .incident_ops_store
-        .declare(org, new, Actor::User(user))
-        .await?;
-    state.signal_incident(org, inc.id, NotificationReason::Opened);
+    let (notify, publish) = (new.notify, new.visibility == IncidentVisibility::Public);
+    let actor = Actor::User(user);
+    let inc = state.incident_ops_store.declare(org, new, actor).await?;
+    // Same path as the publish button, so the Published event, opening update
+    // and subscriber fan-out keep one owner. A failure must not fail the
+    // request: the incident is open, and retrying it would 409 on the
+    // one-open-incident index forever.
+    let inc = if publish {
+        match state
+            .incident_ops_store
+            .publish(org, inc.id, None, None, actor)
+            .await
+        {
+            Ok(published) => published.unwrap_or(inc),
+            Err(err) => {
+                tracing::warn!(
+                    %org, incident_id = %inc.id, error = %err,
+                    "declared incident stayed internal: publishing it failed"
+                );
+                inc
+            }
+        }
+    } else {
+        inc
+    };
+    if notify {
+        state.signal_incident(org, inc.id, NotificationReason::Opened);
+    }
     Ok((StatusCode::CREATED, Json(inc)))
 }
 
@@ -358,7 +415,10 @@ pub async fn reopen_incident(
         .incident_ops_store
         .reopen(org, id, Actor::User(user), note)
         .await?;
-    if let LifecycleOutcome::Updated(inc) = &outcome {
+    // Declared quiet stays quiet for its whole life, reopening included.
+    if let LifecycleOutcome::Updated(inc) = &outcome
+        && inc.paging_enabled
+    {
         state.signal_incident(org, inc.id, NotificationReason::Reopened);
     }
     lifecycle_response(outcome)

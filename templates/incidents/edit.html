@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% import "_register.html" as reg %}
+{% block title %}Edit incident · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <form data-incident-edit-form data-incident-id="{{ id }}" class="mx-auto w-full max-w-7xl">
+
+    <div class="form-grid grid grid-cols-1 gap-6 lg:grid-cols-[17rem_1fr] lg:items-start lg:gap-8 xl:grid-cols-[17rem_1fr_15rem]">
+
+    <aside class="type-rail lg:sticky lg:top-6">
+      <span class="form-legend">how bad is it</span>
+      {% call reg::severity_rail(severity, true) %}{% endcall %}
+      <p class="mt-2 font-mono text-xs text-quiet"># a change lands on the incident timeline</p>
+    </aside>
+
+    <div class="space-y-6">
+
+    <header class="space-y-1">
+      <a href="/incidents/{{ id }}" class="inline-block text-sm text-muted hover:text-body">← incident</a>
+      <h1 class="page-title">
+        <span class="page-title__prefix" aria-hidden="true">$</span><input
+          name="title" type="text" maxlength="200" value="{{ title }}"
+          autocomplete="off" spellcheck="false"
+          placeholder="{% match monitor_name %}{% when Some with (n) %}{{ n }}{% when None %}untitled incident{% endmatch %}"
+          aria-label="Incident title" class="page-title__input w-full sm:w-[40ch]">
+      </h1>
+      <p class="text-sm text-muted">
+        Everything but the monitor, which is fixed once an incident exists.
+      </p>
+    </header>
+
+    <div data-incident-error role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+
+    <div class="space-y-6">
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">what it affects</span></legend>
+      <div class="clear-both">
+        {% match monitor_name %}{% when Some with (n) %}
+        <a href="/targets/{{ target_id.as_deref().unwrap_or("") }}"
+           class="dashboard-chip hover:underline">monitor: {{ n }}</a>
+        <p class="mt-2 font-mono text-xs text-quiet"># fixed after declaring — one monitor holds one open incident</p>
+        {% when None %}
+        <p class="font-mono text-xs text-quiet"># standalone — this incident hangs off no monitor</p>
+        {% endmatch %}
+      </div>
+    </fieldset>
+
+    <div class="space-y-6 border-t border-[color:var(--theme-line)] pt-6">
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">who hears about it</span></legend>
+      <div class="clear-both">
+        <span class="mb-1.5 block text-xs text-muted">Urgency</span>
+        <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Urgency">
+          <label class="sm-rail__seg">
+            <input type="radio" name="urgency" value="high" class="sr-only"{% if urgency == "high" %} checked{% endif %}>high
+          </label>
+          <label class="sm-rail__seg">
+            <input type="radio" name="urgency" value="low" class="sr-only"{% if urgency == "low" %} checked{% endif %}>low
+          </label>
+        </div>
+        <p class="mt-1 text-xs text-muted">High walks the on-call ladder, low notifies without paging. Takes effect on the next page this incident sends.</p>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">what customers see</span></legend>
+      <div class="clear-both space-y-5">
+        <p class="font-mono text-xs text-quiet">
+          {% if visibility == "public" %}
+          # published — this copy is live on every status page carrying the monitor
+          {% else %}
+          # internal — this copy stays a draft until you publish from the incident
+          {% endif %}
+        </p>
+        <div>
+          <span class="mb-1.5 block text-xs text-muted">Public title</span>
+          <input name="public_title" type="text" maxlength="200" value="{{ public_title }}"
+                 autocomplete="off" placeholder="what customers should call this"
+                 aria-label="Public title" class="w-full field">
+          <span class="mt-1 block text-xs text-muted">Blank falls back to wording generated from the monitor and its state.</span>
+        </div>
+        <div>
+          <span class="mb-1.5 block text-xs text-muted">Public description</span>
+          <textarea name="public_description" rows="3" maxlength="2000"
+                    placeholder="one plain sentence about the impact"
+                    aria-label="Public description" class="w-full field">{{ public_description }}</textarea>
+        </div>
+      </div>
+    </fieldset>
+
+    </div>
+    </div>
+    </div>
+
+    <aside class="action-rail lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6">
+      <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
+          save changes
+        </button>
+        <a href="/incidents/{{ id }}" class="btn-ghost inline-flex min-h-10 items-center justify-center px-4 py-2 text-center text-sm">cancel</a>
+        <span class="text-xs text-quiet xl:text-center">
+          tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
+               <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
+        </span>
+      </div>
+    </aside>
+
+    </div>
+  </form>
+
+  <script defer src="{{ "js/ui/incidents_console.js"|asset }}"></script>
+</section>
+{% endblock %}

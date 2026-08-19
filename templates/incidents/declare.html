@@ -1,59 +1,120 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}Declare incident · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
-  <header class="space-y-1">
-    <a href="/incidents" class="inline-block text-sm text-muted hover:text-body">← incidents</a>
-    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>declare incident</h1>
-    <p class="text-sm text-muted">
-      Open an incident by hand — for problems a monitor can't see on its own
-      (a customer report, a partner outage, a planned investigation).
-    </p>
-  </header>
+  <form data-incident-declare-form class="mx-auto w-full max-w-7xl">
 
-  <form data-incident-declare-form class="space-y-6">
-    <div data-incident-error class="hidden alert-card alert-card--error"></div>
+    <div class="form-grid grid grid-cols-1 gap-6 lg:grid-cols-[17rem_1fr] lg:items-start lg:gap-8 xl:grid-cols-[17rem_1fr_15rem]">
 
-    <fieldset class="space-y-5 sticker-card p-5">
-      <label class="field-outline block">
-        <span class="field-outline__label">Title</span>
-        <input name="title" type="text" required maxlength="200" autocomplete="off"
-               class="w-full field" placeholder="e.g. Checkout failing for EU customers…">
-      </label>
+    <aside class="type-rail lg:sticky lg:top-6">
+      <span class="form-legend">how bad is it</span>
+      {% call reg::severity_rail("major", true) %}{% endcall %}
+      <p class="mt-2 font-mono text-xs text-quiet"># change it later as you learn more</p>
+    </aside>
 
-      <div class="grid gap-4 sm:grid-cols-2">
-        <div class="field-outline">
-          <span class="field-outline__label">Severity</span>
-          <select name="severity" data-sm-combobox aria-label="Severity" class="w-full field">
-            <option value="minor">minor</option>
-            <option value="major" selected>major</option>
-            <option value="critical">critical</option>
-          </select>
-        </div>
-        <div class="field-outline">
-          <span class="field-outline__label">Urgency</span>
-          <select name="urgency" data-sm-combobox aria-label="Urgency" class="w-full field">
-            <option value="high" selected>high (page on-call)</option>
-            <option value="low">low (notify only)</option>
-          </select>
-        </div>
-      </div>
+    <div class="space-y-6">
 
-      <div class="field-outline">
-        <span class="field-outline__label">Affected monitor (optional)</span>
+    <header class="space-y-1">
+      <a href="/incidents" class="inline-block text-sm text-muted hover:text-body">← incidents</a>
+      <h1 class="page-title">
+        <span class="page-title__prefix" aria-hidden="true">$</span><input
+          name="title" type="text" required maxlength="200" autocomplete="off" spellcheck="false"
+          placeholder="checkout failing for EU customers"
+          aria-label="Incident title" class="page-title__input w-full sm:w-[40ch]">
+      </h1>
+      <p class="text-sm text-muted">
+        For a problem no monitor can see: a customer report, a partner outage, an investigation you want on the record.
+      </p>
+    </header>
+
+    <div data-incident-error role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+
+    <div class="space-y-6">
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">what it affects</span></legend>
+      <div class="clear-both">
         <select name="target_id" data-sm-combobox aria-label="Affected monitor" class="w-full field">
-          <option value="">— none —</option>
+          <option value="">— no monitor —</option>
           {% for m in monitors %}
           <option value="{{ m.id }}">{{ m.name }}</option>
           {% endfor %}
         </select>
-        <p class="mt-1 text-xs text-muted">Link a monitor for context, or leave unset for a standalone incident.</p>
+        <span class="mt-1 block text-xs text-muted">
+          Links the incident to a monitor's timeline and status pages. Leave unset for something the platform doesn't watch.
+        </span>
       </div>
     </fieldset>
 
-    <div class="flex justify-end gap-2">
-      <a href="/incidents" class="btn-ghost px-3 py-1.5 text-sm font-medium">cancel</a>
-      <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">declare</button>
+    <div class="space-y-6 border-t border-[color:var(--theme-line)] pt-6">
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">who hears about it</span></legend>
+      <div class="clear-both space-y-5">
+        <div>
+          <span class="mb-1.5 block text-xs text-muted">Alert channels</span>
+          <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Alert channels">
+            <label class="sm-rail__seg">
+              <input type="radio" name="notify" value="0" class="sr-only" checked>nobody yet
+            </label>
+            <label class="sm-rail__seg">
+              <input type="radio" name="notify" value="1" class="sr-only">page them now
+            </label>
+          </div>
+          <p class="mt-1 text-xs text-muted">Declaring is quiet by default, so you can open one while you are still working out what broke.</p>
+        </div>
+        <div>
+          <span class="mb-1.5 block text-xs text-muted">Urgency</span>
+          <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Urgency">
+            <label class="sm-rail__seg">
+              <input type="radio" name="urgency" value="high" class="sr-only" checked>high
+            </label>
+            <label class="sm-rail__seg">
+              <input type="radio" name="urgency" value="low" class="sr-only">low
+            </label>
+          </div>
+          <p class="mt-1 text-xs text-muted">High walks the on-call ladder, low notifies without paging. Applies once alerts are on.</p>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend class="float-left mb-3 w-full"><span class="form-legend">what customers see</span></legend>
+      <div class="clear-both">
+        <div class="sm-rail sm-rail--wide" role="radiogroup" aria-label="Status page visibility">
+          <label class="sm-rail__seg">
+            <input type="radio" name="visibility" value="internal" class="sr-only" checked>internal only
+          </label>
+          <label class="sm-rail__seg">
+            <input type="radio" name="visibility" value="public" class="sr-only">publish to status page
+          </label>
+        </div>
+        <p class="mt-1 text-xs text-muted">
+          Publishing shows it on every status page carrying the monitor above and posts an opening update. You can publish later from the incident.
+        </p>
+      </div>
+    </fieldset>
+
+    </div>
+    </div>
+    </div>
+
+    <aside class="action-rail lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6">
+      <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
+        <button type="submit"
+                class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
+          declare
+        </button>
+        <a href="/incidents" class="btn-ghost inline-flex min-h-10 items-center justify-center px-4 py-2 text-center text-sm">cancel</a>
+        <span class="text-xs text-quiet xl:text-center">
+          tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
+               <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to declare
+        </span>
+      </div>
+    </aside>
+
     </div>
   </form>
 

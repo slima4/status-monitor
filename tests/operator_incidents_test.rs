@@ -1,8 +1,12 @@
 mod common;
 
+use axum::body::Body;
+use axum::http::Request;
 use axum::http::StatusCode;
 use chrono::{Duration, Utc};
-use common::{body_json, build_test_app_with_seedable_incidents, json_request};
+use common::{
+    body_json, build_test_app_with_owner, build_test_app_with_seedable_incidents, json_request,
+};
 use serde_json::json;
 use tower::ServiceExt;
 use uptimepage::domain::{CheckStatus, Incident, IncidentSeverity};
@@ -206,4 +210,47 @@ async fn post_update_invalid_phase_rejected_by_serde() {
         "phase validation should be 4xx; got {}",
         resp.status()
     );
+}
+
+/// Same as [`json_request`] plus the header the CSRF layer requires of a
+/// session-authenticated write.
+fn owner_json(method: &str, path: &str, body: serde_json::Value) -> Request<Body> {
+    Request::builder()
+        .method(method)
+        .uri(path)
+        .header("content-type", "application/json")
+        .header("X-Requested-With", "uptimepage")
+        .body(Body::from(serde_json::to_vec(&body).unwrap()))
+        .unwrap()
+}
+
+/// Recording a problem the monitors cannot see must not page anyone or tell
+/// customers, unless asked.
+#[tokio::test]
+async fn a_declared_incident_stays_internal_unless_it_asks_to_be_public() {
+    let app = build_test_app_with_owner(|_| {});
+    let resp = app
+        .clone()
+        .oneshot(owner_json(
+            "POST",
+            "/api/v1/incidents",
+            json!({ "title": "partner API degraded" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let quiet = body_json(resp).await;
+    assert_eq!(quiet["visibility"], "internal");
+    assert_eq!(quiet["origin"], "manual");
+
+    let resp = app
+        .oneshot(owner_json(
+            "POST",
+            "/api/v1/incidents",
+            json!({ "title": "partner API down", "visibility": "public" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(body_json(resp).await["visibility"], "public");
 }

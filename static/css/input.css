@@ -1885,18 +1885,6 @@
     .nav-link--active:hover { color: var(--theme-text); }
 
     .nav-root { display: inline-flex; align-items: center; gap: 0.5rem; }
-    /* Deep-page trail; detail templates fill the nav_crumb block. */
-    .nav-crumb {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.4rem;
-        font-family: var(--font-mono);
-        font-size: 0.875rem;
-        color: var(--theme-text-muted);
-    }
-    .nav-crumb a { color: var(--theme-text-muted); text-decoration: none; }
-    .nav-crumb a:hover { color: var(--theme-accent); }
-
     /* Right cluster as one hairline rail, same register as .sm-rail: a framed
        toolbar of borderless segments that fill on hover, instead of three
        separate boxes. */

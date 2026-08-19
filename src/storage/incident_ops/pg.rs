@@ -37,8 +37,8 @@ impl PgIncidentOpsStore {
 /// Columns selected for an [`OpsIncident`]. Kept in one place so every
 /// `RETURNING` / `SELECT` stays in lockstep with [`OpsIncidentRow`].
 const OPS_COLS: &str = "id, target_id, title, state, severity, urgency, origin, visibility, \
-     started_at, ended_at, acknowledged_at, acknowledged_by, assigned_to, resolved_by, \
-     escalation_policy_id, escalation_level, escalation_round, next_escalation_at, \
+     paging_enabled, started_at, ended_at, acknowledged_at, acknowledged_by, assigned_to, \
+     resolved_by, escalation_policy_id, escalation_level, escalation_round, next_escalation_at, \
      check_count, error_sample, regions_down, regions_up, created_at, updated_at";
 
 /// A `%…%` `LIKE` pattern with the operator's wildcards neutralised, so a
@@ -70,6 +70,7 @@ struct OpsIncidentRow {
     urgency: String,
     origin: String,
     visibility: String,
+    paging_enabled: bool,
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
     acknowledged_at: Option<DateTime<Utc>>,
@@ -98,6 +99,7 @@ fn row_to_ops(r: OpsIncidentRow) -> OpsIncident {
         urgency: IncidentUrgency::from_db_str(&r.urgency),
         origin: IncidentOrigin::from_db_str(&r.origin),
         visibility: IncidentVisibility::from_db_str(&r.visibility),
+        paging_enabled: r.paging_enabled,
         started_at: r.started_at,
         ended_at: r.ended_at,
         acknowledged_at: r.acknowledged_at,
@@ -212,6 +214,22 @@ async fn insert_event_tx(
     Ok(())
 }
 
+/// Mirror an operator's incident action into `org_audit_log`: incidents and
+/// their events cascade away with the monitor, leaving no trace the incident
+/// existed. System transitions are skipped, or every recovery writes a row.
+async fn record_incident_audit_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    org: OrgId,
+    actor: Actor,
+    action: &str,
+    metadata: Value,
+) -> Result<()> {
+    let Some(user) = actor.user_id() else {
+        return Ok(());
+    };
+    crate::storage::orgs::record_audit_tx(tx, org, Some(user), action, metadata).await
+}
+
 async fn incident_was_published(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     org: OrgId,
@@ -292,6 +310,14 @@ impl PgIncidentOpsStore {
         };
 
         insert_event_tx(&mut tx, org, id, event_kind, actor, note.as_deref()).await?;
+        record_incident_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            &format!("incident.{}", event_kind.as_db_str()),
+            serde_json::json!({ "incident_id": id, "target_id": row.target_id }),
+        )
+        .await?;
         // An incident unpublished before it resolves still has subscribers who
         // were told it opened; write the closing update whenever it was ever
         // public, not only while currently public.
@@ -545,8 +571,8 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         let sql = format!(
             "INSERT INTO incidents \
                 (org_id, target_id, started_at, status_at_start, origin, state, \
-                 severity, urgency, title, visibility) \
-             VALUES ($1, $2, now(), 'down', 'manual', 'triggered', $3, $4, $5, 'internal') \
+                 severity, urgency, title, visibility, paging_enabled) \
+             VALUES ($1, $2, now(), 'down', 'manual', 'triggered', $3, $4, $5, 'internal', $6) \
              ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL DO NOTHING \
              RETURNING {OPS_COLS}"
         );
@@ -556,6 +582,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .bind(new.severity.as_db_str())
             .bind(new.urgency.as_db_str())
             .bind(new.title)
+            .bind(new.notify)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| anyhow::anyhow!("declare incident: {e}"))?;
@@ -567,6 +594,19 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         })?;
         let id = row.id;
         insert_event_tx(&mut tx, org, id, IncidentEventKind::Triggered, actor, None).await?;
+        record_incident_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            "incident.declared",
+            serde_json::json!({
+                "incident_id": id,
+                "target_id": row.target_id,
+                "severity": row.severity,
+                "urgency": row.urgency,
+            }),
+        )
+        .await?;
         tx.commit()
             .await
             .map_err(|e| anyhow::anyhow!("commit: {e}"))?;
@@ -794,6 +834,14 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .map_err(|e| anyhow::anyhow!("publish incident: {e}"))?;
         let Some(row) = row else { return Ok(None) };
         insert_event_tx(&mut tx, org, id, IncidentEventKind::Published, actor, None).await?;
+        record_incident_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            "incident.published",
+            serde_json::json!({ "incident_id": id, "target_id": row.target_id }),
+        )
+        .await?;
         // On the first publish of a still-active incident, post an opening
         // update unless the operator already narrated one, so subscriber
         // fan-out has a row to send. A retro-published, already-resolved
@@ -855,6 +903,14 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             IncidentEventKind::Unpublished,
             actor,
             None,
+        )
+        .await?;
+        record_incident_audit_tx(
+            &mut tx,
+            org,
+            actor,
+            "incident.unpublished",
+            serde_json::json!({ "incident_id": id, "target_id": row.target_id }),
         )
         .await?;
         tx.commit()
@@ -1255,6 +1311,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             "SELECT id, org_id, target_id, escalation_policy_id, escalation_level, escalation_round \
              FROM incidents i \
              WHERE state = 'triggered' AND started_at <= $1 AND started_at >= $2 \
+                 AND paging_enabled \
                  AND escalation_policy_id IS NULL AND next_escalation_at IS NULL \
                  AND NOT EXISTS ( \
                      SELECT 1 FROM incident_notifications n WHERE n.incident_id = i.id \

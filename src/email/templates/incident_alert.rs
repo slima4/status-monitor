@@ -3,7 +3,7 @@
 
 use chrono::{DateTime, Utc};
 
-use crate::domain::{IncidentSeverity, IncidentUrgency, NotificationReason};
+use crate::domain::{IncidentOrigin, IncidentSeverity, IncidentUrgency, NotificationReason};
 use crate::email::templates::layout::{self, ButtonStyle, Page, Tone};
 use crate::email::templates::{html_escape, single_line, utc_stamp};
 use crate::email::trait_def::RenderedEmail;
@@ -21,6 +21,7 @@ pub struct IncidentAlert {
     pub reason: NotificationReason,
     pub severity: IncidentSeverity,
     pub urgency: IncidentUrgency,
+    pub origin: IncidentOrigin,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
     pub error_sample: Option<String>,
@@ -67,6 +68,11 @@ impl IncidentAlert {
             },
             NotificationReason::NoData => "No check results are arriving".into(),
             NotificationReason::DataResumed => "Check results are arriving again".into(),
+            // No failing check behind it, so the detection wording would be a
+            // claim the product cannot support.
+            _ if self.origin == IncidentOrigin::Manual => {
+                format!("Declared by hand at {}", utc_stamp(self.started_at))
+            }
             _ => match self.region_counts() {
                 Some((down, total)) => format!("Failing in {down} of {total} regions"),
                 None => format!("Failing since {}", utc_stamp(self.started_at)),
@@ -146,6 +152,9 @@ impl IncidentAlert {
         if self.is_open() {
             rows.push(("Severity", self.severity.as_db_str().to_string()));
             rows.push(("Urgency", self.urgency.as_db_str().to_string()));
+            if self.origin == IncidentOrigin::Manual {
+                rows.push(("Origin", "declared by hand, no monitor detection".into()));
+            }
         }
         if self.has_incident_window() {
             rows.push(("Started", utc_stamp(self.started_at)));
@@ -281,6 +290,7 @@ mod tests {
             reason,
             severity: IncidentSeverity::Major,
             urgency: IncidentUrgency::High,
+            origin: IncidentOrigin::Monitor,
             started_at: Utc.with_ymd_and_hms(2026, 8, 17, 12, 41, 0).unwrap(),
             ended_at: None,
             error_sample: Some("no response".into()),
@@ -324,6 +334,33 @@ mod tests {
             assert!(body.contains("high"), "urgency");
         }
         assert!(r.html_body.contains("MAJOR INCIDENT OPEN"));
+        assert!(r.html_body.contains("Failing in 2 of 3 regions"));
+    }
+
+    /// Reading like a detection tells an operator the product fired on a
+    /// healthy site.
+    #[test]
+    fn a_declared_incident_says_so_instead_of_claiming_a_detection() {
+        let mut a = alert(NotificationReason::Opened);
+        a.origin = IncidentOrigin::Manual;
+        a.error_sample = None;
+        a.regions_down = Vec::new();
+        a.regions_up = Vec::new();
+        let r = render("Uptimepage", &a);
+        for body in [&r.text_body, &r.html_body] {
+            assert!(body.contains("declared by hand"), "{body}");
+            assert!(!body.contains("Failing"), "{body}");
+        }
+        assert!(
+            r.html_body
+                .contains("Declared by hand at 17 Aug 2026 12:41 UTC")
+        );
+    }
+
+    #[test]
+    fn a_monitor_detection_never_mentions_being_declared() {
+        let r = render("Uptimepage", &alert(NotificationReason::Opened));
+        assert!(!r.text_body.contains("declared by hand"), "{}", r.text_body);
         assert!(r.html_body.contains("Failing in 2 of 3 regions"));
     }
 

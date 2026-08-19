@@ -106,7 +106,8 @@ pub fn uptime_pct_from_downtime(downtime_secs: i64, window_secs: i64) -> f64 {
     (up / window_secs as f64 * 100.0).clamp(0.0, 100.0)
 }
 
-/// Operator-narration patch.
+/// Amendment to an existing incident: the operator-facing fields (`title`,
+/// `severity`, `urgency`) and the customer-facing narration.
 ///
 /// `public_title` and `public_description` use a "double-Option" pattern so
 /// callers can distinguish three cases:
@@ -124,8 +125,14 @@ pub struct IncidentNarrationUpdate {
     #[serde(default, deserialize_with = "double_option")]
     #[schema(nullable = true, value_type = Option<String>)]
     pub public_description: Option<Option<String>>,
+    /// Internal title. Clearing it falls the label back to the monitor name.
+    #[serde(default, deserialize_with = "double_option")]
+    #[schema(nullable = true, value_type = Option<String>)]
+    pub title: Option<Option<String>>,
     #[serde(default)]
     pub severity: Option<IncidentSeverity>,
+    #[serde(default)]
+    pub urgency: Option<IncidentUrgency>,
 }
 
 /// Lifts the inner `Option<T>` into a `Some(Option<T>)` so missing fields stay
@@ -541,6 +548,11 @@ pub struct OpsIncident {
     pub urgency: IncidentUrgency,
     pub origin: IncidentOrigin,
     pub visibility: IncidentVisibility,
+    /// Whether this incident may page at all. Honoured by every open-side
+    /// path, not just the first signal: the reconcile sweep pages anything
+    /// triggered that reached no channel.
+    #[serde(default = "default_true")]
+    pub paging_enabled: bool,
     pub started_at: DateTime<Utc>,
     #[schema(nullable = true)]
     pub ended_at: Option<DateTime<Utc>>,
@@ -570,6 +582,10 @@ pub struct OpsIncident {
     pub updated_at: DateTime<Utc>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// Operator-declared incident not driven by a monitor's check stream.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct NewManualIncident {
@@ -584,6 +600,13 @@ pub struct NewManualIncident {
     #[serde(default)]
     #[schema(nullable = true)]
     pub target_id: Option<Uuid>,
+    /// Publish to the status pages carrying the monitor as the incident opens.
+    #[serde(default)]
+    pub visibility: IncidentVisibility,
+    /// Alert the org's channels. Off by default: an unasked-for page reads as
+    /// the product misfiring.
+    #[serde(default)]
+    pub notify: bool,
 }
 
 /// One internal timeline entry.
@@ -913,6 +936,22 @@ mod tests {
         ];
         assert_eq!(confirmed_downtime_secs(&incidents, from, to, now), 400);
         assert!((uptime_pct_from_downtime(400, 1000) - 60.0).abs() < 1e-9);
+    }
+
+    /// A client that omits these cannot page an org by accident.
+    #[test]
+    fn a_declare_body_that_says_nothing_pages_nobody_and_stays_internal() {
+        let new: NewManualIncident = serde_json::from_str(r#"{"title":"db failover"}"#).unwrap();
+        assert!(!new.notify);
+        assert_eq!(new.visibility, IncidentVisibility::Internal);
+    }
+
+    #[test]
+    fn a_declare_body_can_ask_for_both() {
+        let new: NewManualIncident =
+            serde_json::from_str(r#"{"title":"x","notify":true,"visibility":"public"}"#).unwrap();
+        assert!(new.notify);
+        assert_eq!(new.visibility, IncidentVisibility::Public);
     }
 
     #[test]

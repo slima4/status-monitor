@@ -399,6 +399,7 @@ mod tests {
             reason: crate::domain::NotificationReason::Opened,
             severity: crate::domain::IncidentSeverity::Major,
             urgency: crate::domain::IncidentUrgency::High,
+            origin: crate::domain::IncidentOrigin::Monitor,
             started_at: Utc::now(),
             ended_at: None,
             error_sample: None,

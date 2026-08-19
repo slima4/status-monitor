@@ -190,6 +190,7 @@ impl Worker {
             title: inc.title.clone(),
             severity: inc.severity,
             urgency: inc.urgency,
+            origin: inc.origin,
             started_at: inc.started_at,
             ended_at: inc.ended_at,
             error_sample: inc.error_sample.clone(),

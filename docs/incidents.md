@@ -22,9 +22,11 @@ A background writer scans every enabled monitor (not only status-page components
 
 Visibility is derived at open time: if the monitor is a component of an enabled status page the incident opens `public`, otherwise `internal`. A monitor on no page still gets a fully tracked internal incident.
 
-You can also declare an incident by hand from the console (`/incidents/declare`) — for a problem a monitor can't see, like a customer report or a partner outage. A manual incident may stand alone or link to a monitor, and opens `internal`.
+You can also declare an incident by hand from the console (`/incidents/declare`) — for a problem a monitor can't see, like a customer report or a partner outage. A manual incident may stand alone or link to a monitor.
 
-Each incident carries a **severity** (`minor` / `major` / `critical`) and an **urgency** (`high` pages on-call, `low` notifies only). A declared incident takes the severity you choose; an auto-opened one currently defaults to `major` until an operator changes it.
+Declaring is quiet by default: the incident opens `internal` and pages nobody, so you can open one while you are still working out what broke. The form offers both louder options explicitly — publish it to the status pages carrying the linked monitor, and alert the org's channels now. Over the API those are the `visibility` and `notify` fields on `POST /api/v1/incidents`, both off unless set. Alert mail for a declared incident says it was declared by hand, so nobody reads it as a monitor detection.
+
+Each incident carries a **severity** (`minor` / `major` / `critical`) and an **urgency** (`high` pages on-call, `low` notifies only; urgency decides how hard it pages once alerting is on). A declared incident takes the severity you choose; an auto-opened one currently defaults to `major` until an operator changes it.
 
 ## The console
 
@@ -87,7 +89,7 @@ A resolved user is paged through the org [notification channels](notifications.m
 
 Internal incidents never reach customers. Publishing is the explicit gate.
 
-Every public read — the status page, its JSON API, the RSS feed, and the history markers — filters on `visibility = 'public'`, so an internal incident on a public-component monitor never leaks. Monitors that sit on an enabled status page open `public` automatically; everything else (manual incidents, monitors not on a page) stays internal until you publish.
+Every public read — the status page, its JSON API, the RSS feed, and the history markers — filters on `visibility = 'public'`, so an internal incident on a public-component monitor never leaks. Monitors that sit on an enabled status page open `public` automatically; everything else (manual incidents, monitors not on a page) stays internal until you publish, either from the incident detail page or from the declare form itself.
 
 From the incident detail page, **publish** flips visibility to `public` (optionally seeding a public title) and **unpublish** hides it again. A published incident appears on any status page whose components include its monitor. Narrate it for customers with public updates (the `investigating` → `monitoring` → `resolved` timeline); posting an update is separate from the internal state, exactly as the two-axis model intends.
 
@@ -116,6 +118,7 @@ An LLM connected through the [MCP server](mcp.md) can triage and operate inciden
 | Surface | Requirement |
 |---|---|
 | Incident lifecycle (ack / assign / resolve / note / publish / declare) | `incidents:write` — any member; responders are not owners |
+| Operator lifecycle actions in the org audit log | written for every member action (declare, acknowledge, resolve, reopen, publish, unpublish); automatic monitor transitions are not audited |
 | Reading incidents and metrics | `incidents:read` |
 | Escalation policies + on-call schedules (config) | `oncall:write` (owner-only); `oncall:read` to view |
 
