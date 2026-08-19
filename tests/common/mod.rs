@@ -698,6 +698,72 @@ pub async fn spawn_self_signed_tls_router(router: Router) -> SocketAddr {
     addr
 }
 
+/// Serves a CA-issued leaf and nothing else, the shape a server takes when
+/// its operator installs the certificate without the intermediate.
+pub async fn spawn_truncated_chain_tls_router(router: Router) -> SocketAddr {
+    use axum_server::tls_rustls::RustlsConfig;
+    use rcgen::{
+        BasicConstraints, CertificateParams, CustomExtension, DnType, IsCa, Issuer, KeyPair,
+    };
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let ca_key = KeyPair::generate().expect("ca key");
+    let mut ca_params = CertificateParams::new(Vec::new()).expect("ca params");
+    ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+    ca_params
+        .distinguished_name
+        .push(DnType::CommonName, "Test Issuing CA");
+    let issuer = Issuer::from_params(&ca_params, &ca_key);
+
+    let key = KeyPair::generate().expect("leaf key");
+    let mut params = CertificateParams::new(vec!["localhost".to_string()]).expect("leaf params");
+    params
+        .distinguished_name
+        .push(DnType::CommonName, "localhost");
+    params
+        .custom_extensions
+        .push(CustomExtension::from_oid_content(
+            &[1, 3, 6, 1, 5, 5, 7, 1, 1],
+            aia_ca_issuers_der("http://ca.test/issuer.crt"),
+        ));
+    let leaf = params.signed_by(&key, &issuer).expect("leaf cert");
+
+    let cfg = RustlsConfig::from_pem(leaf.pem().into_bytes(), key.serialize_pem().into_bytes())
+        .await
+        .expect("rustls config");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    listener.set_nonblocking(true).expect("nonblocking");
+    let addr = listener.local_addr().expect("local_addr");
+
+    tokio::spawn(async move {
+        axum_server::from_tcp_rustls(listener, cfg)
+            .expect("rustls server")
+            .serve(router.into_make_service())
+            .await
+            .expect("serve");
+    });
+
+    addr
+}
+
+/// `AuthorityInfoAccessSyntax` with one id-ad-caIssuers URI. Hand-rolled
+/// because rcgen models no AIA.
+fn aia_ca_issuers_der(uri: &str) -> Vec<u8> {
+    const CA_ISSUERS: [u8; 10] = [0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x30, 0x02];
+    let mut desc = CA_ISSUERS.to_vec();
+    desc.push(0x86);
+    desc.push(u8::try_from(uri.len()).expect("short test uri"));
+    desc.extend_from_slice(uri.as_bytes());
+
+    let mut inner = vec![0x30, u8::try_from(desc.len()).expect("short desc")];
+    inner.extend_from_slice(&desc);
+    let mut out = vec![0x30, u8::try_from(inner.len()).expect("short aia")];
+    out.extend_from_slice(&inner);
+    out
+}
+
 pub fn test_client() -> HttpClients {
     build_clients_with(default_dns()).unwrap()
 }

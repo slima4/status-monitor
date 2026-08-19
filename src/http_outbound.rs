@@ -46,8 +46,8 @@ pub fn build_outbound_client(guard: SsrfGuard) -> OutboundHttpClient {
     crate::http_client::client::install_default_crypto_provider();
     // Native trust store first; fall back to the bundled webpki roots when
     // it can't be read (an empty/broken store, or a macOS keychain I/O
-    // hiccup under load) rather than panicking the process. Mirrors the
-    // check-client TLS builder; outbound talks to public CAs either way.
+    // hiccup under load) rather than panicking the process. Same rule as
+    // `http_client::client::server_roots`, which needs an owned store.
     let https = match hyper_rustls::HttpsConnectorBuilder::new().with_native_roots() {
         Ok(b) => b,
         Err(_) => hyper_rustls::HttpsConnectorBuilder::new().with_webpki_roots(),

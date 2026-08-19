@@ -7,7 +7,9 @@ use uptimepage::worker::execute_http_check;
 use url::Url;
 use uuid::Uuid;
 
-use crate::common::{default_http_check, spawn_self_signed_tls_router, test_client};
+use crate::common::{
+    default_http_check, spawn_self_signed_tls_router, spawn_truncated_chain_tls_router, test_client,
+};
 
 fn router() -> Router {
     Router::new().route("/", get(|| async { "ok" }))
@@ -50,10 +52,30 @@ async fn verify_tls_true_rejects_self_signed() {
 
     assert_eq!(result.status, CheckStatus::Error);
     let err = result.error.expect("error message");
-    // The probe drills the rustls error: a self-signed cert is an untrusted
-    // issuer, named specifically rather than a generic TLS/connect failure.
+    // webpki calls this an unknown issuer either way; the probe reads the leaf
+    // back to say which shape it is.
     assert_eq!(
-        err, "certificate not trusted",
-        "expected untrusted-cert reason, got {err}"
+        err, "certificate self-signed",
+        "expected self-signed reason, got {err}"
+    );
+}
+
+/// A leaf installed without its intermediate. Browsers hide this by fetching
+/// the missing certificate over AIA, so the operator sees a padlock.
+#[tokio::test]
+async fn verify_tls_true_names_a_truncated_chain() {
+    let addr = spawn_truncated_chain_tls_router(router()).await;
+    let clients = test_client();
+    let url = Url::parse(&format!("https://localhost:{}/", addr.port())).unwrap();
+    let mut check = default_http_check(url, ExpectedStatus::Exact(200));
+    check.verify_tls = true;
+
+    let result = execute_http_check(Uuid::now_v7(), uuid::Uuid::nil(), &check, &clients).await;
+
+    assert_eq!(result.status, CheckStatus::Error);
+    let err = result.error.expect("error message");
+    assert_eq!(
+        err, "certificate chain incomplete",
+        "expected truncated-chain reason, got {err}"
     );
 }

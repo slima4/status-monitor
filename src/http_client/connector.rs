@@ -15,6 +15,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 use tokio_rustls::client::TlsStream;
 
+use crate::http_client::client::ChainFault;
 use crate::http_client::dns::HickoryDnsResolver;
 use crate::security::SsrfGuard;
 
@@ -185,6 +186,13 @@ pub(crate) fn tls_reason(io: &io::Error) -> &'static str {
             CertificateError::NotValidForName | CertificateError::NotValidForNameContext { .. } => {
                 "certificate hostname mismatch"
             }
+            // `ChainFault` is ours; rustls raises `Other` for any webpki error
+            // it does not map by hand, which is what `None` catches.
+            CertificateError::Other(other) => match other.0.downcast_ref::<ChainFault>() {
+                Some(ChainFault::Incomplete) => "certificate chain incomplete",
+                Some(ChainFault::SelfSigned) => "certificate self-signed",
+                None => "certificate invalid",
+            },
             _ => "certificate invalid",
         },
         // The server answered the hello with a refusal.
@@ -456,6 +464,28 @@ mod tests {
         assert_eq!(tls_cert(C::BadEncoding).reason(), "certificate invalid");
     }
 
+    /// webpki calls all three `UnknownIssuer`.
+    #[test]
+    fn chain_faults_split_untrusted_into_actionable_reasons() {
+        use std::sync::Arc;
+
+        use rustls::{CertificateError as C, OtherError};
+
+        assert_eq!(
+            tls_cert(C::Other(OtherError(Arc::new(ChainFault::Incomplete)))).reason(),
+            "certificate chain incomplete"
+        );
+        assert_eq!(
+            tls_cert(C::Other(OtherError(Arc::new(ChainFault::SelfSigned)))).reason(),
+            "certificate self-signed"
+        );
+        // An `Other` raised anywhere else keeps the flat name.
+        assert_eq!(
+            tls_cert(C::Other(OtherError(Arc::new(io::Error::other("x"))))).reason(),
+            "certificate invalid"
+        );
+    }
+
     fn tls_err(err: rustls::Error) -> ConnectError {
         ConnectError::Tls {
             err: io::Error::other(err),
@@ -549,6 +579,14 @@ mod tests {
             tls_err(E::InvalidMessage(rustls::InvalidMessage::InvalidCcs)).reason(),
             tls_err(E::NoCertificatesPresented).reason(),
             tls_err(E::DecryptError).reason(),
+            tls_cert(rustls::CertificateError::Other(rustls::OtherError(
+                std::sync::Arc::new(ChainFault::Incomplete),
+            )))
+            .reason(),
+            tls_cert(rustls::CertificateError::Other(rustls::OtherError(
+                std::sync::Arc::new(ChainFault::SelfSigned),
+            )))
+            .reason(),
             tls_io(io::ErrorKind::ConnectionReset).reason(),
             tls_io(io::ErrorKind::UnexpectedEof).reason(),
             tls_io(io::ErrorKind::Other).reason(),

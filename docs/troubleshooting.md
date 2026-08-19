@@ -46,6 +46,14 @@ The cached row in `domain_expiry_state` is older than the 7-day staleness ceilin
 
 Set `verify_tls: false` on the offending target. The check executor picks between a verifying and a non-verifying hyper-util client based on the flag — both share the same DNS cache and connection-pool sizing.
 
+## An HTTPS monitor reports `certificate chain incomplete` while the site loads in a browser
+
+The server sent its own certificate and nothing else, so there is no path from it up to a trusted root. Browsers hide this. When a certificate names its issuer through the AIA extension, a browser fetches that issuer over HTTP and completes the chain itself. Monitors do not, and neither does `curl`, so a padlock is not evidence the chain is right. Confirm with `openssl s_client -connect host:443 -showcerts`, which prints every certificate the server actually sent.
+
+Usually the fix is on the server: install the full chain, leaf first, then every intermediate up to but not including the root. One other cause produces the same message, because the leaf on its own cannot tell the two apart: the issuer may be a private CA the probe does not carry, in which case there is no intermediate to add. For an internal host behind a private CA, set `verify_tls: false` as above.
+
+Two neighbouring reasons: `certificate self-signed` means the certificate is its own issuer, and `certificate not trusted` means what was sent does not reach a root we carry and the certificate gave no hint as to why.
+
 ## `400 Bad Request` on POST /targets — `target address ... is in a blocked range`
 
 SSRF guard rejected the target. The URL or TCP host resolves to a private / loopback / link-local / reserved IP. Verify the resolved address is what you expect. To monitor private infrastructure deliberately, set `security.allow_private_targets = true` and ensure network segmentation prevents abuse.

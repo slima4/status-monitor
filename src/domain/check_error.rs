@@ -34,6 +34,10 @@ pub fn humanize_check_error(raw: &str) -> String {
         "malformed tls response" => "malformed TLS response".into(),
         "tls handshake reset" => "TLS handshake reset".into(),
         "tls handshake closed early" => "server closed the TLS handshake early".into(),
+        "certificate chain incomplete" => {
+            "incomplete certificate chain (server sent only its own certificate)".into()
+        }
+        "certificate self-signed" => "self-signed certificate".into(),
         "connect" => "connection failed".into(),
         "transport" => "transport error".into(),
         "dns: domain not found" => "domain not found (DNS)".into(),
@@ -296,7 +300,9 @@ pub fn classify_check_error(raw: &str) -> ErrorClass {
         "certificate expired" => return ErrorClass::CertExpired,
         "certificate not yet valid" => return ErrorClass::CertNotYetValid,
         "certificate revoked" => return ErrorClass::CertRevoked,
-        "certificate not trusted" => return ErrorClass::CertNotTrusted,
+        "certificate not trusted" | "certificate self-signed" => {
+            return ErrorClass::CertNotTrusted;
+        }
         "certificate hostname mismatch" => return ErrorClass::CertHostnameMismatch,
         "certificate invalid" => return ErrorClass::CertInvalid,
         "rdap throttled" => return ErrorClass::RdapLookup,
@@ -316,7 +322,9 @@ pub fn classify_check_error(raw: &str) -> ErrorClass {
         "dns: domain not found" | "dns: no address records" => {
             return ErrorClass::DnsNoRecord;
         }
-        "server returned no certificate chain" | "empty certificate chain" => {
+        "server returned no certificate chain"
+        | "empty certificate chain"
+        | "certificate chain incomplete" => {
             return ErrorClass::CertChain;
         }
         _ => {}
@@ -506,6 +514,8 @@ mod tests {
         ("certificate not yet valid", ErrorClass::CertNotYetValid),
         ("certificate revoked", ErrorClass::CertRevoked),
         ("certificate not trusted", ErrorClass::CertNotTrusted),
+        ("certificate self-signed", ErrorClass::CertNotTrusted),
+        ("certificate chain incomplete", ErrorClass::CertChain),
         (
             "certificate hostname mismatch",
             ErrorClass::CertHostnameMismatch,
