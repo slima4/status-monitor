@@ -2243,7 +2243,7 @@ resource "uptimepage_target" "api" {
     Landing {
         path: "/why-uptimepage",
         created: "2026-08-15",
-        lastmod: "2026-08-15",
+        lastmod: "2026-08-19",
         title: "Why Uptimepage",
         eyebrow: "why this one",
         h1: "Why people pick Uptimepage",
@@ -2310,7 +2310,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "Or keep it in version control",
-                body: "The dashboard, the REST API, the Terraform provider and the MCP tools drive the same endpoints, so a monitor you made by clicking is the same object a script reads back. Scoped API tokens bind to one org and carry only the permissions you grant. The provider manages HTTP, TCP, DNS, TLS, domain and flow monitors, your notification channels, and the status pages and components they appear on, so if your infrastructure already lives in Terraform all of that goes through the same review and the same rollback as the rest of it. Ping and heartbeat monitors are not in the provider yet; the API takes them today.",
+                body: "The dashboard, the REST API, the Terraform provider and the MCP tools drive the same endpoints, so a monitor you made by clicking is the same object a script reads back. Scoped API tokens bind to one org and carry only the permissions you grant. The provider manages HTTP, TCP, DNS, TLS, domain, ping, heartbeat and flow monitors, your notification channels, and the status pages and components they appear on, so if your infrastructure already lives in Terraform all of that goes through the same review and the same rollback as the rest of it.",
             },
             Section {
                 heading: "Run it yourself, or let us run it",

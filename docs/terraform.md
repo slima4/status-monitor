@@ -63,11 +63,12 @@ resource "uptimepage_target" "api" {
 
 | Name | Kind | Manages |
 |---|---|---|
-| `uptimepage_target` | resource | Monitors — `http`, `tcp`, `tls_cert`, `domain_expiry`, `dns`, `flow` checks. On a self-hosted install, applying a `flow` needs `max_flow_checks` raised on the plan first ([monitor types](monitor-types.md#flow)). Ping and heartbeat monitors are not yet manageable through the provider |
+| `uptimepage_target` | resource | Monitors — `http`, `tcp`, `ping`, `heartbeat`, `tls_cert`, `domain_expiry`, `dns`, `flow` checks. On a self-hosted install, applying a `flow` needs `max_flow_checks` raised on the plan first ([monitor types](monitor-types.md#flow)) |
 | `uptimepage_notification_channel` | resource | Alert destinations — `webhook`, `slack`, `discord`, `msteams`, `google_chat`, `telegram`, `whatsapp`, `email`, `pagerduty`, `ntfy`, `pushover`, `sms`. The one-tap `telegram_app` and `whatsapp_app` kinds are not manageable: their configs are minted by the link flows and the API rejects them in request bodies (`CHANNEL_KIND_MANAGED`) |
 | `uptimepage_status_page` | resource | Public status pages — slug, operator and display names, enabled state, and the branding a visitor sees: about text, brand colour, style, logo, status URL, and whether the powered-by mark shows |
 | `uptimepage_status_page_component` | resource | What a page publishes — one monitor placed on one page, with its public name, description, group and sort order. The public name is separate from the monitor's internal one |
 | `uptimepage_target` | data source | Look up an existing target by id |
+| `uptimepage_heartbeat` | data source | The ping URL of a heartbeat monitor, for the job that reports in. The API mints it at creation, so it is read back rather than configured. Reading it needs `targets:write`, since the URL is itself a write capability. Any other check kind reads as not found |
 
 For the full attribute reference and an example per check type, see the
 [provider docs on the Terraform Registry](https://registry.terraform.io/providers/uptimepage/uptimepage/latest/docs).

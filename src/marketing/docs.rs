@@ -293,7 +293,7 @@ pub const DOCS: &[DocPage] = &[
         blurb: "Managing monitors, channels, and status pages as code with the official provider.",
         section: Section::Reference,
         scope: Scope::Everyone,
-        lastmod: "2026-08-15",
+        lastmod: "2026-08-19",
         source: include_str!("../../docs/terraform.md"),
         dir: "",
     },
