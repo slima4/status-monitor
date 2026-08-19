@@ -1164,6 +1164,14 @@ async fn disabling_a_channel_suppresses_its_queued_retries() {
     let rows = ops.notifications_for(org(), id).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].status, NotificationStatus::Suppressed);
+    assert!(
+        rows[0]
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("turned off")),
+        "expected the disabled-channel reason, got {:?}",
+        rows[0].error
+    );
 }
 
 /// An unverified address fails every delivery by design, and its own badge
@@ -1231,6 +1239,14 @@ async fn retry_drops_a_page_whose_reason_no_longer_matches_state() {
     let rows = ops.notifications_for(org(), id).await.unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].status, NotificationStatus::Suppressed);
+    assert!(
+        rows[0]
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("state moved on")),
+        "expected the stale-reason cause, not the disabled-channel one, got {:?}",
+        rows[0].error
+    );
 }
 
 #[test]

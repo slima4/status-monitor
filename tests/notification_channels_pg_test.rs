@@ -16,7 +16,7 @@ use std::time::Duration;
 use chrono::Utc;
 use uptimepage::api::error::codes;
 use uptimepage::domain::{
-    AlertBinding, ChannelConfig, CheckSpec, ExpectedStatus, NewIncidentNotification,
+    AlertBinding, ChannelConfig, CheckSpec, EmailConfig, ExpectedStatus, NewIncidentNotification,
     NewNotificationChannel, NewTarget, NotificationChannelUpdate, NotificationReason,
     NotificationStatus, SlackConfig, TargetAlerts, WriteSource,
 };
@@ -1032,6 +1032,140 @@ async fn delivery_health_is_org_scoped_and_alerts_once_per_run_live_pg() {
     let reset = store.get(org_a, ch.id).await.unwrap().unwrap();
     assert_eq!(reset.consecutive_failures, 0);
     assert_eq!(reset.failing_since, None);
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+async fn failing_now(pool: &sqlx::PgPool, limit: u32, transport: &str) -> i64 {
+    uptimepage::observability::channel_health::failing_by_transport(pool, limit)
+        .await
+        .expect("gauge query runs")
+        .into_iter()
+        .find(|(kind, _)| kind == transport)
+        .map_or(0, |(_, n)| n)
+}
+
+/// The gauge SQL and `NotificationChannel::is_failing` have to agree. Asserts
+/// deltas, not absolutes: the query is operator-wide and the DB is shared.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn the_failing_channel_gauge_agrees_with_the_domain_predicate_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    const LIMIT: u32 = 3;
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "nc-gauge").await;
+    let store = PgNotificationChannelStore::new(pool.clone(), None);
+
+    let slack_before = failing_now(&pool, LIMIT, "slack").await;
+    let email_before = failing_now(&pool, LIMIT, "email").await;
+
+    let dead = store
+        .create(
+            org_a,
+            slack("Gauge Dead", "T/G/dead"),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .expect("dead channel created");
+    let flaky = store
+        .create(
+            org_a,
+            slack("Gauge Flaky", "T/G/flaky"),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .expect("flaky channel created");
+    // Seeding would land it pre-verified; the unverified one is the case here.
+    let unverified = store
+        .create(
+            org_a,
+            NewNotificationChannel {
+                name: "Gauge Unverified".into(),
+                config: ChannelConfig::Email(EmailConfig {
+                    to: format!("gauge-{}@example.com", org_a.0),
+                }),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .expect("unverified address created");
+    assert_eq!(unverified.verified_at, None);
+
+    for _ in 0..LIMIT {
+        store
+            .record_delivery_outcome(org_a, dead.id, false)
+            .await
+            .unwrap();
+        store
+            .record_delivery_outcome(org_a, unverified.id, false)
+            .await
+            .unwrap();
+    }
+    store
+        .record_delivery_outcome(org_a, flaky.id, false)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        failing_now(&pool, LIMIT, "slack").await - slack_before,
+        1,
+        "only the channel past the threshold counts"
+    );
+    assert_eq!(
+        failing_now(&pool, LIMIT, "email").await - email_before,
+        0,
+        "an unverified address fails by design and is not a dead endpoint"
+    );
+
+    let dead_row = store.get(org_a, dead.id).await.unwrap().unwrap();
+    let flaky_row = store.get(org_a, flaky.id).await.unwrap().unwrap();
+    let unverified_row = store.get(org_a, unverified.id).await.unwrap().unwrap();
+    assert!(dead_row.is_failing(LIMIT));
+    assert!(!flaky_row.is_failing(LIMIT));
+    assert!(!unverified_row.is_failing(LIMIT));
+
+    assert!(
+        uptimepage::observability::channel_health::failing_by_transport(&pool, 0)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // Deleting the org pauses monitoring, freezing the run where it stands —
+    // counting it would alert on something no operator can clear.
+    sqlx::query("UPDATE organizations SET deleted_at = now() WHERE id = $1")
+        .bind(org_a.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        failing_now(&pool, LIMIT, "slack").await - slack_before,
+        0,
+        "a deleted org's channels drop out of the count"
+    );
+    sqlx::query("UPDATE organizations SET deleted_at = NULL WHERE id = $1")
+        .bind(org_a.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    store
+        .record_delivery_outcome(org_a, dead.id, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        failing_now(&pool, LIMIT, "slack").await - slack_before,
+        0,
+        "a recovered channel stops being counted"
+    );
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }

@@ -1651,13 +1651,13 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (channel, kind) (rate(uptimepage_notifications_total[$__rate_interval]))",
-          "legendFormat": "{{channel}} {{kind}}",
+          "expr": "sum by (transport, outcome) (rate(uptimepage_notifications_total[$__rate_interval]))",
+          "legendFormat": "{{transport}} {{outcome}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Notifications dispatched by channel/kind",
+      "title": "Notifications dispatched by transport",
       "type": "timeseries"
     },
     {
@@ -1734,13 +1734,13 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (channel) (rate(uptimepage_notifications_failures_total[$__rate_interval]))",
-          "legendFormat": "{{channel}}",
+          "expr": "sum by (transport) (rate(uptimepage_notifications_failures_total[$__rate_interval]))",
+          "legendFormat": "{{transport}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "Notification dispatch failures by channel",
+      "title": "Notification dispatch failures by transport",
       "type": "timeseries"
     },
     {
@@ -1832,7 +1832,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 74
+        "y": 82
       },
       "id": 23,
       "panels": [],
@@ -1888,7 +1888,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 75
+        "y": 83
       },
       "id": 24,
       "options": {
@@ -1980,7 +1980,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 75
+        "y": 83
       },
       "id": 25,
       "options": {
@@ -2064,7 +2064,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 75
+        "y": 83
       },
       "id": 26,
       "options": {
@@ -2104,7 +2104,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 83
+        "y": 91
       },
       "id": 27,
       "panels": [],
@@ -2160,7 +2160,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 84
+        "y": 92
       },
       "id": 28,
       "options": {
@@ -2254,7 +2254,7 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 84
+        "y": 92
       },
       "id": 29,
       "options": {
@@ -2338,7 +2338,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 84
+        "y": 92
       },
       "id": 30,
       "options": {
@@ -2378,7 +2378,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 92
+        "y": 100
       },
       "id": 31,
       "panels": [],
@@ -2434,7 +2434,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 93
+        "y": 101
       },
       "id": 32,
       "options": {
@@ -2517,7 +2517,7 @@
         "h": 8,
         "w": 10,
         "x": 8,
-        "y": 93
+        "y": 101
       },
       "id": 33,
       "options": {
@@ -2587,7 +2587,7 @@
         "h": 8,
         "w": 6,
         "x": 18,
-        "y": 93
+        "y": 101
       },
       "id": 34,
       "options": {
@@ -2629,7 +2629,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 102
+        "y": 110
       },
       "id": 40,
       "panels": [],
@@ -2685,7 +2685,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 103
+        "y": 111
       },
       "id": 41,
       "options": {
@@ -2749,7 +2749,7 @@
           "range": true
         }
       ],
-      "title": "Probe phase latency — p95",
+      "title": "Probe phase latency \u2014 p95",
       "type": "timeseries"
     },
     {
@@ -2802,7 +2802,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 103
+        "y": 111
       },
       "id": 42,
       "options": {
@@ -2855,7 +2855,7 @@
           "range": true
         }
       ],
-      "title": "Total check duration — p50/p90/p99",
+      "title": "Total check duration \u2014 p50/p90/p99",
       "type": "timeseries"
     },
     {
@@ -2865,7 +2865,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 111
+        "y": 119
       },
       "id": 43,
       "panels": [],
@@ -2903,7 +2903,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 112
+        "y": 120
       },
       "id": 44,
       "options": {
@@ -2970,7 +2970,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 112
+        "y": 120
       },
       "id": 45,
       "options": {
@@ -3041,7 +3041,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 112
+        "y": 120
       },
       "id": 46,
       "options": {
@@ -3126,7 +3126,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 116
+        "y": 124
       },
       "id": 47,
       "options": {
@@ -3210,7 +3210,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 116
+        "y": 124
       },
       "id": 48,
       "options": {
@@ -3251,7 +3251,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 124
+        "y": 132
       },
       "id": 49,
       "panels": [],
@@ -3289,7 +3289,7 @@
         "h": 4,
         "w": 8,
         "x": 0,
-        "y": 125
+        "y": 133
       },
       "id": 50,
       "options": {
@@ -3364,7 +3364,7 @@
         "h": 4,
         "w": 8,
         "x": 8,
-        "y": 125
+        "y": 133
       },
       "id": 51,
       "options": {
@@ -3431,7 +3431,7 @@
         "h": 4,
         "w": 8,
         "x": 16,
-        "y": 125
+        "y": 133
       },
       "id": 52,
       "options": {
@@ -3516,7 +3516,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 129
+        "y": 137
       },
       "id": 53,
       "options": {
@@ -3600,7 +3600,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 129
+        "y": 137
       },
       "id": 54,
       "options": {
@@ -3625,7 +3625,7 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum(rate(uptimepage_notifications_total[$__rate_interval]))",
+          "expr": "sum(rate(uptimepage_notifications_total{outcome=\"sent\"}[$__rate_interval]))",
           "legendFormat": "sent",
           "refId": "A",
           "range": true
@@ -3636,8 +3636,8 @@
             "uid": "${DS_PROMETHEUS}"
           },
           "editorMode": "code",
-          "expr": "sum by (channel) (rate(uptimepage_notifications_failures_total[$__rate_interval]))",
-          "legendFormat": "fail {{channel}}",
+          "expr": "sum by (transport) (rate(uptimepage_notifications_failures_total[$__rate_interval]))",
+          "legendFormat": "fail {{transport}}",
           "refId": "B",
           "range": true
         }
@@ -3708,7 +3708,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 137
+        "y": 145
       },
       "id": 55,
       "options": {
@@ -3740,6 +3740,172 @@
         }
       ],
       "title": "CH max parts / partition (trend)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 74
+      },
+      "id": 56,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "max by (transport) (uptimepage_channels_failing)",
+          "legendFormat": "{{transport}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Channels not delivering by transport",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 74
+      },
+      "id": 57,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "lastNotNull"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "editorMode": "code",
+          "expr": "uptimepage_notification_delivery_ms{quantile=\"0.95\"}",
+          "legendFormat": "{{transport}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Notification send latency p95 by transport",
       "type": "timeseries"
     }
   ],
@@ -3785,7 +3951,7 @@
   },
   "timepicker": {},
   "timezone": "utc",
-  "title": "uptimepage — Ops",
+  "title": "uptimepage \u2014 Ops",
   "uid": "uptimepage-ops",
   "weekStart": ""
 }

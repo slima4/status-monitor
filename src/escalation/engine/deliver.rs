@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::Utc;
 use uuid::Uuid;
@@ -13,6 +14,47 @@ use crate::notifier::{EmailAlert, build_notifier};
 
 use super::rules::{log_error_snippet, push_target, redact_secrets, retry_after_hint};
 use super::{PageTarget, Worker};
+use crate::observability::metrics::names;
+
+#[derive(Clone, Copy, PartialEq)]
+enum SendOutcome {
+    Sent,
+    Failed,
+    /// Held back by the transport's own send budget: the retry is the plan, so
+    /// it is neither a delivery nor a fault.
+    Deferred,
+}
+
+impl SendOutcome {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Sent => "sent",
+            Self::Failed => "failed",
+            Self::Deferred => "deferred",
+        }
+    }
+}
+
+/// Per attempt, not per page: a transport that only succeeds on its third try
+/// reads healthy in the row and unhealthy here. Called only where a send was
+/// actually made, so a build error never lands a 0 ms sample.
+fn note_send(transport: &str, started: Instant, outcome: SendOutcome) {
+    metrics::counter!(
+        names::NOTIFICATIONS_TOTAL,
+        "transport" => transport.to_string(),
+        "outcome" => outcome.label(),
+    )
+    .increment(1);
+    if outcome == SendOutcome::Deferred {
+        return;
+    }
+    metrics::histogram!(names::NOTIFICATION_DELIVERY_MS, "transport" => transport.to_string())
+        .record(started.elapsed().as_millis() as f64);
+    if outcome == SendOutcome::Failed {
+        metrics::counter!(names::NOTIFICATIONS_FAILURES, "transport" => transport.to_string())
+            .increment(1);
+    }
+}
 
 impl Worker {
     /// Re-resolve the incident + monitor + channel for a retry, returning the
@@ -57,7 +99,8 @@ impl Worker {
     ) -> (NotificationStatus, Option<String>, Option<String>) {
         let central = self.central_bot.as_ref().map(|c| c.as_central());
         let email_alert = self.email_alert(org, channel).await;
-        let error = match build_notifier(
+        let transport = channel.kind.as_db_str();
+        let (error, sent_at) = match build_notifier(
             &channel.config,
             &self.http,
             central,
@@ -65,11 +108,27 @@ impl Worker {
             self.email.as_ref(),
             email_alert,
         ) {
-            Ok(n) => match n.notify_incident(notice).await {
-                Ok(()) => return (NotificationStatus::Sent, None, n.taken_receipt()),
-                Err(err) => redact_secrets(&err.to_string()),
-            },
-            Err(err) => redact_secrets(&err.to_string()),
+            Ok(n) => {
+                let started = Instant::now();
+                match n.notify_incident(notice).await {
+                    Ok(()) => {
+                        note_send(transport, started, SendOutcome::Sent);
+                        tracing::info!(
+                            org_id = %org.0,
+                            incident_id = %notice.incident_id,
+                            channel_id = %channel.id,
+                            notification_id = %notification_id,
+                            transport,
+                            attempt,
+                            took_ms = started.elapsed().as_millis(),
+                            "incident notification delivered"
+                        );
+                        return (NotificationStatus::Sent, None, n.taken_receipt());
+                    }
+                    Err(err) => (redact_secrets(&err.to_string()), Some(started)),
+                }
+            }
+            Err(err) => (redact_secrets(&err.to_string()), None),
         };
         let snippet = log_error_snippet(&error);
         // A telegram throttle hint means the send was deferred, not broken —
@@ -80,6 +139,17 @@ impl Worker {
             channel.kind,
             crate::domain::ChannelKind::Telegram | crate::domain::ChannelKind::TelegramApp
         ) && retry_after_hint(Some(&error)).is_some();
+        if let Some(started) = sent_at {
+            note_send(
+                transport,
+                started,
+                if deferred {
+                    SendOutcome::Deferred
+                } else {
+                    SendOutcome::Failed
+                },
+            );
+        }
         if deferred {
             tracing::info!(
                 org_id = %org.0,

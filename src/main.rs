@@ -429,6 +429,17 @@ async fn main() -> Result<()> {
         tokio::spawn(async move { uptimepage::observability::inventory::run(pg, token).await })
     };
 
+    // Delivery health of the channels themselves — a dead endpoint nothing has
+    // tried to page is invisible to the dispatch counters.
+    let channel_health_handle: JoinHandle<()> = {
+        let pg = pg_pool_for_stores.clone();
+        let limit = cfg.escalation.channel_failure_limit;
+        let token = root.clone();
+        tokio::spawn(async move {
+            uptimepage::observability::channel_health::run(pg, limit, token).await
+        })
+    };
+
     // Per-region probe quality from ClickHouse — brain-side, so it covers the
     // remote agents Alloy can't scrape and scales with regions, not customers.
     let region_health_handle: JoinHandle<()> = {
@@ -838,6 +849,7 @@ async fn main() -> Result<()> {
             incident_writer_handle,
             agent_health_handle,
             inventory_handle,
+            channel_health_handle,
             region_health_handle,
             error_class_handle,
             silence_sweep_handle,

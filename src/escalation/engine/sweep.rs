@@ -569,7 +569,7 @@ impl Worker {
                     NotificationOutcome {
                         status: NotificationStatus::Failed,
                         attempt: next_attempt,
-                        error: None,
+                        error: Some("channel, monitor or incident no longer exists".to_string()),
                         sent_at: None,
                         next_attempt_at,
                         provider_receipt: None,
@@ -578,8 +578,26 @@ impl Worker {
                 .await?;
             return Ok(());
         };
-        if !channel.enabled || reason_is_stale(p.reason, state) {
-            // Terminal: turned off, or the page no longer matches the state.
+        // Terminal either way, but the two causes read alike on the row unless
+        // it says which.
+        let suppressed = if !channel.enabled {
+            Some("channel was turned off before the retry landed")
+        } else if reason_is_stale(p.reason, state) {
+            Some("incident state moved on before the retry landed")
+        } else {
+            None
+        };
+        if let Some(reason) = suppressed {
+            tracing::info!(
+                org_id = %p.org.0,
+                incident_id = %p.incident_id,
+                channel_id = %channel.id,
+                notification_id = %p.id,
+                transport = %p.transport,
+                attempt = next_attempt,
+                reason,
+                "incident notification suppressed"
+            );
             self.ops
                 .mark_notification(
                     p.org,
@@ -587,7 +605,7 @@ impl Worker {
                     NotificationOutcome {
                         status: NotificationStatus::Suppressed,
                         attempt: next_attempt,
-                        error: None,
+                        error: Some(reason.to_string()),
                         sent_at: None,
                         next_attempt_at: None,
                         provider_receipt: None,

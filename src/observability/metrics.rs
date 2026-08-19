@@ -186,11 +186,19 @@ fn register_descriptions() {
     );
     describe_counter!(
         "uptimepage_notifications_total",
-        "Alert notifications dispatched, labelled by channel and kind"
+        "Alert notification sends attempted, labelled by transport and outcome. A retry counts again, so this is attempts, not incidents"
     );
     describe_counter!(
         "uptimepage_notifications_failures_total",
-        "Alert notification dispatches that returned an error, labelled by channel"
+        "Alert notification sends that returned an error, labelled by transport"
+    );
+    describe_histogram!(
+        "uptimepage_notification_delivery_ms",
+        "Time one alert notification send took in milliseconds, labelled by transport"
+    );
+    describe_gauge!(
+        "uptimepage_channels_failing",
+        "Notification channels whose failure run has reached the alerting threshold, labelled by transport. Holds while the endpoint stays dead, so it is visible without an incident having to page"
     );
     describe_counter!(
         "uptimepage_alerts_dropped_total",
@@ -303,6 +311,8 @@ pub mod names {
     pub const STORAGE_WRITES: &str = "uptimepage_storage_writes_total";
     pub const STORAGE_DROPPED: &str = "uptimepage_storage_dropped_results_total";
     pub const NOTIFICATIONS_DEAD_LETTERED: &str = "uptimepage_notifications_dead_lettered_total";
+    pub const NOTIFICATION_DELIVERY_MS: &str = "uptimepage_notification_delivery_ms";
+    pub const CHANNELS_FAILING: &str = "uptimepage_channels_failing";
     pub const ALERTS_DAMPED: &str = "uptimepage_alerts_damped_total";
     pub const MONITORS_UNMONITORED: &str = "uptimepage_monitors_unmonitored";
     pub const TELEGRAM_SEND_DEFERRED: &str = "uptimepage_telegram_send_deferred_total";

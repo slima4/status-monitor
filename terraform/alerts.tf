@@ -116,14 +116,13 @@ resource "grafana_rule_group" "pipeline" {
     }
   }
 
-  # Outbound alert delivery is failing (notification dispatch errors or
-  # alert signals dropped before the engine). Critical: this is the
-  # path that tells users their own monitored sites are down — a silent
-  # failure here means incidents go unnoticed. `or` (not `+`): the two
-  # counters are independent and each absent until first increment, so a
-  # bare `+` matches to empty and would silently stay OK. no_data = OK:
-  # nothing dispatched means
-  # nothing to fail.
+  # Alert signals dropped before they reach the escalation engine.
+  # Critical: this is the path that tells users their own monitored sites
+  # are down, and a signal lost here is lost for everyone at once. Scoped
+  # to that counter alone: a per-attempt dispatch failure is one tenant's
+  # own endpoint, usually recovered by the retry, and pages via the
+  # warning-level UptimepageChannelNotDelivering instead. no_data = OK:
+  # nothing dispatched means nothing to fail.
   rule {
     name           = "UptimepageNotificationDeliveryFailing"
     condition      = "C"
@@ -136,7 +135,7 @@ resource "grafana_rule_group" "pipeline" {
     }
     annotations = {
       summary     = "uptimepage: alert delivery failing"
-      description = "notification dispatch errors or dropped alert signals > 0 for 5m — outbound incident alerts may not be reaching users. Runbook: runbooks/grafana-cloud.md."
+      description = "incident paging signals dropped before the escalation engine > 0 for 5m — those incidents notify nobody at all. Runbook: runbooks/grafana-cloud.md."
     }
     data {
       ref_id         = "A"
@@ -148,7 +147,7 @@ resource "grafana_rule_group" "pipeline" {
       model = jsonencode({
         refId   = "A"
         instant = true
-        expr    = "sum(rate(uptimepage_notifications_failures_total[5m])) > 0 or sum(rate(uptimepage_alerts_dropped_total[5m])) > 0"
+        expr    = "sum(rate(uptimepage_alerts_dropped_total[5m])) > 0"
       })
     }
     data {
@@ -987,6 +986,49 @@ resource "grafana_rule_group" "pipeline" {
         refId   = "A"
         instant = true
         expr    = "uptimepage_check_error_class_truncated > 0"
+      })
+    }
+    data {
+      ref_id         = "C"
+      datasource_uid = "__expr__"
+      relative_time_range {
+        from = 0
+        to   = 0
+      }
+      model = local.threshold_c
+    }
+  }
+
+  # A channel whose endpoint has died. The dispatch-failure rule above only
+  # sees transports an incident happened to page; this one holds while the
+  # channel stays broken, so a dead endpoint bound to quiet monitors still
+  # surfaces. Warning, not critical: it is one tenant's own endpoint, and
+  # its owners are mailed directly.
+  rule {
+    name           = "UptimepageChannelNotDelivering"
+    condition      = "C"
+    for            = "30m"
+    no_data_state  = "OK"
+    exec_err_state = "Error"
+    labels = {
+      severity = "warning"
+      service  = "uptimepage"
+    }
+    annotations = {
+      summary     = "uptimepage: a notification channel has stopped delivering"
+      description = "one or more channels have failed every send for their whole retry run, so incidents on the monitors bound to them are paging nobody. Check which in the console or the ops dashboard. Runbook: runbooks/grafana-cloud.md."
+    }
+    data {
+      ref_id         = "A"
+      datasource_uid = data.grafana_data_source.prometheus.uid
+      relative_time_range {
+        from = 900
+        to   = 0
+      }
+      model = jsonencode({
+        refId   = "A"
+        instant = true
+        expr    = "max(uptimepage_channels_failing) > 0"
       })
     }
     data {
