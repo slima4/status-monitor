@@ -1306,7 +1306,9 @@
         border-color: var(--theme-state-bad-line);
     }
 
-    /* Remove a repeatable form row; square box matches .field height, × in CSS. */
+    /* Remove a repeatable form row; square box matches .field height. The ×
+       is an inline SVG from reg::row_remove, which frees ::after to pad the
+       target. */
     .row-remove {
         @apply relative inline-flex shrink-0 items-center justify-center rounded-sm border;
         width: 2rem;
@@ -1335,6 +1337,49 @@
         outline-offset: 2px;
     }
 
+    /* Theme picker: each card wears the theme it offers, so the swatches are
+       the real tokens rather than a second copy of every palette that would
+       drift the moment a theme is retuned. */
+    .theme-cards { @apply grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4; }
+    .theme-card {
+        @apply relative flex cursor-pointer items-center gap-2 rounded-sm border p-2;
+        background: var(--theme-surface-elev);
+        border-color: var(--theme-line);
+        font-family: var(--font-mono);
+        transition: border-color 120ms ease, scale 90ms ease;
+    }
+    .theme-card:hover { border-color: var(--theme-text-muted); }
+    .theme-card:has(input:checked) { border-color: var(--theme-ink); border-width: 2px; padding: calc(0.5rem - 1px); }
+    .theme-card:has(input:focus-visible) { outline: 2px solid var(--theme-focus-ring); }
+    .theme-card:not(:has(input:checked)):active { scale: 0.96; }
+    @media (prefers-reduced-motion: reduce) {
+        .theme-card:not(:has(input:checked)):active { scale: 1; }
+    }
+    /* `default` is the base :root palette, which carries no theme class. Inside
+       a console wearing one, the card would paint the operator's theme instead
+       of the public default, so the swatch tokens are restated here. */
+    .theme-card.theme-default {
+        --theme-surface: oklch(0.985 0.003 240);
+        --theme-ink: oklch(0.18 0.015 240);
+        --theme-state-ok-fg: oklch(0.45 0.14 158);
+    }
+    .theme-card__swatches { @apply flex shrink-0; }
+    .theme-card__swatch {
+        @apply inline-block h-4 w-2.5 border;
+        border-color: color-mix(in oklab, var(--theme-ink) 18%, transparent);
+    }
+    .theme-card__swatch--bg  { background: var(--theme-surface); border-right: 0; }
+    .theme-card__swatch--ink { background: var(--theme-ink); border-right: 0; }
+    .theme-card__swatch--ok  { background: var(--theme-state-ok-fg); }
+    .theme-card__name { @apply truncate text-xs; color: var(--theme-text); }
+
+    /* A pale logo on a pale card has no edge of its own. Derived from ink so
+       the hairline stays a hairline whichever way the theme points. */
+    .logo-preview {
+        outline: 1px solid color-mix(in oklab, var(--theme-ink) 12%, transparent);
+        outline-offset: -1px;
+    }
+
     /* CLI file picker: native <input type=file> is sr-only; the label's
        bracket button is the visible control and a sibling span echoes the
        chosen filename (`> name` / `no file selected`). Mono throughout. */
@@ -1344,7 +1389,8 @@
         font-size: 0.8rem;
     }
     .file-cli__btn {
-        @apply rounded-sm border px-3 py-1.5 whitespace-nowrap;
+        @apply inline-flex items-center rounded-sm border px-3 py-1.5 whitespace-nowrap;
+        min-height: 2.5rem;
         border-color: var(--theme-line);
         background: var(--theme-surface-elev);
         color: var(--theme-text);

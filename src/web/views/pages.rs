@@ -57,10 +57,6 @@ pub struct PagesPartial {
     pub max_pages: Option<i32>,
 }
 
-/// Self-host reports `i32::MAX`, and an override that overflows clamps to it.
-/// Past this a cap is a sentinel, not a count worth showing an operator.
-const CAP_IS_SENTINEL_ABOVE: i32 = 1_000;
-
 async fn build_rows(state: &AppState, org: OrgId) -> WebResult<Vec<PageRow>> {
     let pages = state.status_page_store.list(org).await?;
     let counts: std::collections::HashMap<Uuid, i64> = match state.db.as_ref() {
@@ -110,8 +106,11 @@ pub async fn pages_partial(
         Err(resp) => return Ok(*resp),
     };
     let rows = build_rows(&state, org).await?;
+    // Self-host reports `i32::MAX`, and an override that overflows clamps to
+    // it. That exact value is the "no ceiling" sentinel; anything else is a
+    // real cap, however large.
     let cap = state.quotas.limit_for_org(org).await?.max_status_pages;
-    let max_pages = (cap <= CAP_IS_SENTINEL_ABOVE).then_some(cap);
+    let max_pages = (cap != i32::MAX).then_some(cap);
     Ok(PagesPartial {
         at_limit: max_pages.is_some_and(|m| rows.len() as i32 >= m),
         max_pages,
@@ -189,6 +188,9 @@ pub struct PageEditorPage {
     pub brand_color_value: String,
     pub show_powered_by: bool,
     pub styles: Vec<StyleOption>,
+    /// Groups already in use, offered as suggestions so a second spelling of
+    /// one group does not quietly become a second section on the page.
+    pub groups: Vec<String>,
     pub host_suffix: Option<String>,
     pub status_url: String,
     /// Absolute base for the embeddable badge SVG. `None` only when no public
@@ -337,7 +339,7 @@ pub async fn page_editor(
     } else {
         (0, 0)
     };
-    let styles = PublicStyle::ALL
+    let styles: Vec<StyleOption> = PublicStyle::ALL
         .iter()
         .map(|v| StyleOption {
             value: v,
@@ -370,6 +372,15 @@ pub async fn page_editor(
     let public_display_name = b.public_display_name.clone().unwrap_or_default();
     let badge_alt = badge_alt_label(&public_display_name, &page.name);
 
+    let mut groups: Vec<String> = rows
+        .iter()
+        .map(|c| c.public_group.trim())
+        .filter(|g| !g.is_empty())
+        .map(str::to_owned)
+        .collect();
+    groups.sort_unstable();
+    groups.dedup();
+
     Ok(PageEditorPage {
         active_tab: TAB_PAGES,
         id: page.id.to_string(),
@@ -384,6 +395,7 @@ pub async fn page_editor(
             .unwrap_or_else(|| cfg.default_brand_color.clone()),
         show_powered_by: b.show_powered_by(cfg.default_show_powered_by),
         styles,
+        groups,
         host_suffix: public_host_suffix(&state.cfg),
         status_url,
         badge_url,
@@ -440,6 +452,7 @@ mod tests {
             brand_color_value: "#000000".into(),
             show_powered_by: true,
             styles: Vec::new(),
+            groups: Vec::new(),
             host_suffix: Some(".uptimepage.dev".into()),
             status_url: "https://acme.uptimepage.dev".into(),
             badge_url,
@@ -489,6 +502,91 @@ mod tests {
         assert_eq!(badge_alt_label("", "acme"), "acme");
         assert_eq!(badge_alt_label("Acme Public", "acme"), "Acme Public");
         assert_eq!(badge_alt_label("Acme \"Pro\"", "acme"), "Acme Pro");
+    }
+
+    /// Slug and branding ride one PATCH, so the editor must offer one save
+    /// rather than the two buttons that used to hit the same endpoint.
+    #[test]
+    fn the_editor_saves_everything_through_one_form() {
+        let html = editor(None).render().unwrap();
+        assert!(html.contains(r#"id="page-form""#), "{html}");
+        assert!(!html.contains(r#"id="slug-form""#), "{html}");
+        assert!(!html.contains(r#"id="branding-form""#), "{html}");
+        assert_eq!(html.matches("type=\"submit\"").count(), 1, "{html}");
+    }
+
+    /// A second listener still parses, but the outer one only registers the
+    /// inner and never prevents the default — the browser submits natively,
+    /// the page reloads, and every unsaved field is discarded.
+    #[test]
+    fn the_editor_registers_exactly_one_submit_handler() {
+        let html = editor(None).render().unwrap();
+        assert_eq!(
+            html.matches("addEventListener('submit'").count(),
+            1,
+            "{html}"
+        );
+    }
+
+    /// The warning ships in the markup and is revealed once the field is
+    /// dirty, so a rename cannot ride along on a save unannounced.
+    #[test]
+    fn a_rename_carries_its_warning() {
+        let html = editor(None).render().unwrap();
+        assert!(html.contains(r#"id="slug-warning""#), "{html}");
+        assert!(html.contains("hard cutover"), "{html}");
+        assert!(html.contains(r#"data-original="acme""#), "{html}");
+    }
+
+    /// Publish state is a rail choice now, not a checkbox buried in the form.
+    #[test]
+    fn the_rail_offers_publish_and_draft() {
+        let html = editor(None).render().unwrap();
+        assert!(
+            html.contains(r#"name="enabled" value="1" checked"#),
+            "{html}"
+        );
+        assert!(html.contains(r#"name="enabled" value="0""#), "{html}");
+        assert!(!html.contains(r#"id="f-enabled""#), "{html}");
+    }
+
+    fn styled_editor() -> PageEditorPage {
+        let mut p = editor(None);
+        p.styles = vec![
+            StyleOption {
+                value: "default",
+                selected: false,
+            },
+            StyleOption {
+                value: "nord",
+                selected: true,
+            },
+        ];
+        p.groups = vec!["Core".into(), "Edge".into()];
+        p
+    }
+
+    /// A theme is a visual thing; picking one from a list of bare words means
+    /// guessing what `dim` looks like versus `night`.
+    #[test]
+    fn themes_are_swatch_cards_wearing_their_own_palette() {
+        let html = styled_editor().render().unwrap();
+        assert!(html.contains(r#"class="theme-card theme-nord""#), "{html}");
+        assert!(html.contains("theme-card__swatch--ink"), "{html}");
+        assert!(!html.contains(r#"id="f-style""#), "{html}");
+    }
+
+    /// Two spellings of one group silently become two sections on the public
+    /// page, so the groups already in use are offered back.
+    #[test]
+    fn existing_groups_are_offered_as_suggestions() {
+        let html = styled_editor().render().unwrap();
+        assert!(
+            html.contains(r#"<datalist id="component-groups">"#),
+            "{html}"
+        );
+        assert!(html.contains(r#"<option value="Core">"#), "{html}");
+        assert!(html.contains(r#"list="component-groups""#), "{html}");
     }
 
     #[test]

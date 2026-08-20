@@ -32,6 +32,7 @@
         let row = rows.find((r) => keyEl(r).value.trim().toLowerCase() === name.toLowerCase());
         if (!row) row = rows.find((r) => keyEl(r).value.trim() === "" && valEl(r).value.trim() === "");
         if (!row) row = addRow(false);
+        if (!row) return null;
         keyEl(row).value = name;
         valEl(row).value = value;
         refreshSecretHint();

@@ -1,90 +1,91 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}{{ name }} · Status pages · Uptimepage{% endblock %}
 {% block content %}
-<section class="space-y-6" data-page-id="{{ id }}" data-suffix="{% if let Some(s) = host_suffix %}{{ s }}{% endif %}">
+<section class="mx-auto w-full max-w-7xl space-y-6" data-page-id="{{ id }}" data-suffix="{% if let Some(s) = host_suffix %}{{ s }}{% endif %}">
+
+  <form id="page-form" novalidate>
+
+  <div class="form-grid grid grid-cols-1 gap-6 lg:grid-cols-[17rem_1fr] lg:items-start lg:gap-8 xl:grid-cols-[17rem_1fr_15rem]">
+
+  <aside class="type-rail lg:sticky lg:top-6">
+    <span class="form-legend">how it ships</span>
+    <div class="check-type-cards check-type-cards--rail mt-3" role="radiogroup" aria-label="Visibility">
+      {% call reg::chooser_card("", "enabled", "1", enabled, "published", "anyone with the URL can read it") %}{% endcall %}
+      {% call reg::chooser_card("", "enabled", "0", !enabled, "draft", "the URL 404s until you publish") %}{% endcall %}
+    </div>
+    <p class="mt-2 font-mono text-xs text-quiet"># takes effect when you save</p>
+    {% if status_url != "" %}
+    <p class="mt-5 font-mono text-xs text-quiet"># live url</p>
+    <a id="live-url" href="{{ status_url }}" target="_blank" rel="noopener"
+       class="mt-1 block font-mono text-xs break-all text-body hover:underline">{{ status_url }} ↗</a>
+    {% endif %}
+  </aside>
+
+  <div class="space-y-6">
+
   <header class="space-y-1">
     <a href="/settings/pages" class="inline-block text-sm text-muted hover:text-body">← status pages</a>
-    <div class="flex flex-wrap items-center justify-between gap-3">
-      <h1 class="page-title truncate"><span class="page-title__prefix" aria-hidden="true">$</span>{{ name }}</h1>
-      {% if status_url != "" %}<a href="{{ status_url }}" target="_blank" rel="noopener" class="btn-ghost px-3 py-1.5 text-sm">view live ↗</a>{% endif %}
-    </div>
+    <h1 class="page-title">
+      <span class="page-title__prefix" aria-hidden="true">$</span><input
+        id="f-name" type="text" maxlength="80" value="{{ name }}"
+        autocomplete="off" spellcheck="false" placeholder="untitled page"
+        aria-label="Page name" class="page-title__input w-full sm:w-[30ch]">
+    </h1>
+    <p class="text-sm text-muted">Your name for it. What visitors read is set below.</p>
   </header>
 
   <div id="editor-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
   <div id="editor-ok" aria-live="polite" class="hidden alert-card alert-card--ok"></div>
 
-  <div class="sticker-card space-y-1 p-4 font-mono text-xs leading-relaxed text-muted">
-    <p class="text-quiet"># page --help</p>
-    <p># url ........ change the slug; a rename is a hard cutover</p>
-    <p># page ....... internal name + the branding visitors see</p>
-    <p># logo ....... optional · PNG / JPEG / WebP</p>
-    <p># components . toggle which monitors show; set a public name / group</p>
-    <p># publish off = draft, the URL 404s</p>
-  </div>
+  <div class="space-y-6">
 
-  <!-- ── Public URL ──────────────────────────────────────────── -->
-  <div class="sticker-card overflow-hidden text-sm">
-    <header class="card-band">
-      <h2 class="panel-label">url</h2>
-    </header>
-    <div class="space-y-3 p-4">
-    <div class="flex flex-wrap items-center gap-3">
-      <span class="text-muted">This page is at</span>
-      {% if status_url != "" %}
-      <a id="live-url" href="{{ status_url }}" target="_blank" rel="noopener"
-         class="font-medium text-body underline decoration-dotted">{{ status_url }} ↗</a>
-      {% else %}
-      <span class="font-mono text-body">/status</span>
-      {% endif %}
-    </div>
-
-    <form id="slug-form" novalidate class="space-y-2 border-t border-[color:var(--theme-line)] pt-3">
-      <label for="f-slug" class="mb-1.5 block text-xs text-muted">Change URL slug</label>
+  <fieldset>
+    <legend class="float-left mb-3 w-full"><span class="form-legend">where it lives</span></legend>
+    <div class="clear-both">
       <div class="flex flex-wrap items-center gap-2">
-        {% if host_suffix.is_some() %}<span class="text-muted font-mono">https://</span>{% endif %}
-        <input id="f-slug" name="slug" type="text" value="{{ slug }}"
+        {% if host_suffix.is_some() %}<span class="font-mono text-sm text-muted">https://</span>{% endif %}
+        <input id="f-slug" type="text" value="{{ slug }}" data-original="{{ slug }}"
                minlength="3" maxlength="30" pattern="[a-z][a-z0-9-]*[a-z0-9]"
-               autocomplete="off" spellcheck="false" class="field w-48 text-sm font-mono">
-        {% if let Some(suffix) = host_suffix %}<span class="text-muted font-mono">{{ suffix }}</span>{% endif %}
-        <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">save url</button>
-        <span id="slug-result" aria-live="polite" class="text-sm"></span>
+               autocomplete="off" spellcheck="false" aria-label="URL slug"
+               class="field w-48 font-mono text-sm">
+        {% if let Some(suffix) = host_suffix %}<span class="font-mono text-sm text-muted">{{ suffix }}</span>{% endif %}
+        <span id="slug-status" role="status" aria-live="polite" class="font-mono text-xs"></span>
       </div>
-      <p class="text-pretty text-xs text-muted">
-        3–30 lowercase letters, digits or hyphens; must start with a letter.
-        Renaming is a hard cutover — the old URL stops working immediately.
+      <p id="slug-warning" hidden class="mt-2 alert-card alert-card--warn text-xs">
+        Renaming is a hard cutover — the old URL stops working the moment you save.
       </p>
-    </form>
+      <span class="mt-1 block text-xs text-muted">3–30 lowercase letters, digits or hyphens; must start with a letter.</span>
     </div>
-  </div>
+  </fieldset>
 
-  <!-- ── Page + branding ─────────────────────────────────────── -->
-  <form id="branding-form" novalidate class="space-y-6">
-    <fieldset class="sticker-card form-card">
-      <legend>page</legend>
-      <div class="clear-both space-y-5 p-5">
+  <div class="space-y-6 border-t border-[color:var(--theme-line)] pt-6">
 
-      <div class="grid gap-5 sm:grid-cols-2">
-        <label class="field-outline">
-          <span class="field-outline__label">Name</span>
-          <input id="f-name" type="text" maxlength="80" value="{{ name }}" autocomplete="off" class="w-full field">
-        </label>
-        <label class="inline-flex items-center gap-2 self-end pb-2">
-          <input id="f-enabled" type="checkbox"{% if enabled %} checked{% endif %}>
-          <span class="text-sm">Published<span class="block text-xs text-muted">When off, the URL 404s.</span></span>
-        </label>
-      </div>
-
+  <fieldset>
+    <legend class="float-left mb-3 w-full"><span class="form-legend">what visitors see</span></legend>
+    <div class="clear-both space-y-5">
       <div class="grid gap-5 sm:grid-cols-2">
         <label class="field-outline">
           <span class="field-outline__label">Public display name</span>
           <input id="f-display" type="text" maxlength="80" value="{{ public_display_name }}"
                  autocomplete="off" placeholder="Falls back to the org name" class="w-full field">
         </label>
-        <div class="field-outline">
-          <span class="field-outline__label">Theme</span>
-          <select id="f-style" data-sm-combobox aria-label="Theme" class="w-full field">
-            {% for s in styles %}<option value="{{ s.value }}"{% if s.selected %} selected{% endif %}>{{ s.value }}</option>{% endfor %}
-          </select>
+      </div>
+
+      <div>
+        <span class="mb-1.5 block text-xs text-muted">Theme</span>
+        <div class="theme-cards" role="radiogroup" aria-label="Theme">
+          {% for s in styles %}
+          <label class="theme-card theme-{{ s.value }}">
+            <input type="radio" name="public_style" value="{{ s.value }}"{% if s.selected %} checked{% endif %} class="sr-only">
+            <span class="theme-card__swatches" aria-hidden="true">
+              <span class="theme-card__swatch theme-card__swatch--bg"></span>
+              <span class="theme-card__swatch theme-card__swatch--ink"></span>
+              <span class="theme-card__swatch theme-card__swatch--ok"></span>
+            </span>
+            <span class="theme-card__name">{{ s.value }}</span>
+          </label>
+          {% endfor %}
         </div>
       </div>
 
@@ -94,38 +95,62 @@
                   placeholder="Short line shown under the header">{{ public_about }}</textarea>
       </label>
 
-      <div class="flex flex-wrap items-center gap-6">
-        <label class="inline-flex items-center gap-2 text-sm">
-          <span class="text-xs text-muted">Brand color</span>
-          <input id="f-color" type="color" value="{{ brand_color_value }}" class="h-8 w-12 cursor-pointer align-middle">
-        </label>
+      <div>
+        <span class="mb-1.5 block text-xs text-muted">Brand color</span>
+        <div class="flex flex-wrap items-center gap-3">
+          <input id="f-color" type="color" value="{{ brand_color_value }}"
+                 aria-label="Brand color" class="h-10 w-16 cursor-pointer align-middle">
+          <span id="color-contrast" class="font-mono text-xs text-quiet"></span>
+        </div>
+        <p id="color-warning" hidden class="mt-2 alert-card alert-card--warn text-xs">
+          Neither white nor dark text clears 4.5:1 on this colour, so the header
+          reads poorly whichever we pick. A deeper or lighter shade fixes it.
+        </p>
       </div>
-      </div>
-    </fieldset>
-
-    <div class="flex gap-3">
-      <button type="submit" class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium">save page</button>
-    </div>
-  </form>
-
-  <!-- ── Logo ─────────────────────────────────────────────────── -->
-  <fieldset class="sticker-card form-card">
-    <legend>logo</legend>
-    <div class="clear-both space-y-5 p-5">
-    {% if logo_url != "" %}<div class="h-12"><img src="{{ logo_url }}" alt="current logo" decoding="async"{% if logo_w > 0 %} width="{{ logo_w }}" height="{{ logo_h }}"{% endif %} class="h-12 w-auto"></div>{% endif %}
-    <div class="flex flex-wrap items-center gap-3">
-      <label class="file-cli">
-        <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp"
-               aria-label="Logo file" aria-describedby="logo-help" class="sr-only">
-        <span class="file-cli__btn" aria-hidden="true">[ choose file ]</span>
-        <span class="file-cli__name" data-logo-name>no file selected</span>
-      </label>
-      <button id="logo-upload" type="button" class="btn-ghost px-3 py-1.5 text-[0.8rem]">[ upload ]</button>
-      {% if logo_url != "" %}<button id="logo-remove" type="button" class="row-link row-link--danger">remove</button>{% endif %}
-    </div>
-    <p id="logo-help" class="text-pretty text-xs text-muted">PNG / JPEG / WebP · up to {{ max_logo_bytes|human_bytes }} · max {{ max_logo_dim_px }}px.</p>
     </div>
   </fieldset>
+
+  <fieldset>
+    <legend class="float-left mb-3 w-full"><span class="form-legend">logo</span></legend>
+    <div id="logo-zone" class="clear-both space-y-3">
+      {% if logo_url != "" %}<div class="h-12"><img src="{{ logo_url }}" alt="current logo" decoding="async"{% if logo_w > 0 %} width="{{ logo_w }}" height="{{ logo_h }}"{% endif %} class="logo-preview h-12 w-auto"></div>{% endif %}
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="file-cli">
+          <input id="logo-file" type="file" accept="image/png,image/jpeg,image/webp"
+                 aria-label="Logo file" aria-describedby="logo-help" class="sr-only">
+          <span class="file-cli__btn" aria-hidden="true">[ choose file ]</span>
+          <span class="file-cli__name" data-logo-name>no file selected</span>
+        </label>
+        <button id="logo-upload" type="button" class="btn-ghost inline-flex min-h-10 items-center px-3 py-1.5 text-[0.8rem]">[ upload ]</button>
+        {% if logo_url != "" %}<button id="logo-remove" type="button" class="row-link row-link--danger -mx-2 inline-flex min-h-10 items-center px-2">remove</button>{% endif %}
+      </div>
+      <p id="logo-help" class="text-pretty text-xs text-muted">PNG / JPEG / WebP · up to {{ max_logo_bytes|human_bytes }} · max {{ max_logo_dim_px }}px. Uploads on its own, no save needed.</p>
+    </div>
+  </fieldset>
+
+  </div>
+  </div>
+  </div>
+
+  <aside class="action-rail lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6">
+    <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium motion-safe:hover:-translate-y-0.5">
+        save page
+      </button>
+      {% if status_url != "" %}
+      <a href="{{ status_url }}" target="_blank" rel="noopener"
+         class="btn-ghost inline-flex min-h-10 items-center justify-center px-4 py-2 text-center text-sm">view live ↗</a>
+      {% endif %}
+      <span class="text-xs text-quiet xl:text-center">
+        tip: <kbd class="rounded border px-1.5 py-0.5">⌘/Ctrl</kbd> +
+             <kbd class="rounded border px-1.5 py-0.5">Enter</kbd> to save
+      </span>
+    </div>
+  </aside>
+
+  </div>
+  </form>
 
   <!-- ── Components ───────────────────────────────────────────── -->
   <section aria-labelledby="components-heading">
@@ -134,6 +159,8 @@
         <h2 id="components-heading" class="panel-label">components</h2>
       </header>
       <p class="text-pretty px-4 pt-3 text-xs text-muted">Toggle which monitors appear on this page; set an optional public name / group. Drag the <span aria-hidden="true">⠿</span> handle to reorder live components.</p>
+      <p class="px-4 pt-1 font-mono text-xs text-quiet"># saves as you edit — the save button above is for the page itself</p>
+      <datalist id="component-groups">{% for g in groups %}<option value="{{ g }}"></option>{% endfor %}</datalist>
       <div class="mt-3 overflow-x-auto">
       <table class="w-full text-left text-sm">
         <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
@@ -155,7 +182,7 @@
             <td class="px-4 py-2 align-middle"><input type="checkbox" data-on-page aria-label="Show {{ c.monitor_name }} on this page"{% if c.on_page %} checked{% endif %}></td>
             <td class="px-4 py-2 align-middle text-body">{{ c.monitor_name }} <span class="ml-1 rounded bg-[color:var(--theme-surface-sunk)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-muted">{{ c.kind }}</span></td>
             <td class="px-4 py-2"><input type="text" data-field="public_name" value="{{ c.public_name }}" maxlength="80" placeholder="{{ c.name_hint }}" aria-label="Public name for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
-            <td class="px-4 py-2"><input type="text" data-field="public_group" value="{{ c.public_group }}" maxlength="50" aria-label="Group for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
+            <td class="px-4 py-2"><input type="text" data-field="public_group" list="component-groups" value="{{ c.public_group }}" maxlength="50" aria-label="Group for {{ c.monitor_name }}" autocomplete="off" class="w-full field text-xs"{% if !c.on_page %} disabled{% endif %}></td>
           </tr>
           {% endfor %}
           {% endif %}
@@ -272,14 +299,21 @@
       const okBox = document.getElementById('editor-ok');
       const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       function err(msg) { okBox.classList.add('hidden'); errBox.textContent = msg; errBox.classList.remove('hidden'); errBox.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' }); }
-      function ok(msg) { errBox.classList.add('hidden'); okBox.textContent = msg; okBox.classList.remove('hidden'); }
+      let okTimer = null;
+      function hideOk() { clearTimeout(okTimer); okTimer = null; okBox.classList.add('hidden'); }
+      function ok(msg) {
+        errBox.classList.add('hidden');
+        okBox.textContent = msg;
+        okBox.classList.remove('hidden');
+        clearTimeout(okTimer);
+        okTimer = setTimeout(hideOk, 4000);
+      }
 
-      // Warn before leaving with unsaved slug / branding edits (component
-      // rows save on change, so they never set this).
-      const dirty = { slug: false, branding: false };
-      function markClean(form) { dirty[form] = false; }
+      // Warn before leaving with unsaved edits (component rows save on
+      // change, and the logo uploads on its own, so neither sets this).
+      let dirty = false;
       window.addEventListener('beforeunload', (e) => {
-        if (dirty.slug || dirty.branding) { e.preventDefault(); e.returnValue = ''; }
+        if (dirty) { e.preventDefault(); e.returnValue = ''; }
       });
       async function api(method, path, body) {
         const opt = { method, headers: { 'X-Requested-With': 'uptimepage' } };
@@ -289,59 +323,122 @@
         return res;
       }
 
-      // Slug has its own save — a rename is a hard cutover, so it's deliberately
-      // separate from the branding save and confirms the new live URL inline.
-      const slugForm = document.getElementById('slug-form');
-      slugForm.addEventListener('input', () => { dirty.slug = true; });
-      slugForm.addEventListener('submit', async (e) => {
+      // Slug rides the same PATCH as the rest of the page, so the warning has
+      // to appear while the field is dirty rather than at the click.
+      const form = document.getElementById('page-form');
+      const slugEl = document.getElementById('f-slug');
+      const slugWarn = document.getElementById('slug-warning');
+      const slugChanged = () => slugEl.value.trim().toLowerCase() !== slugEl.dataset.original;
+      function refreshSlugWarning() { slugWarn.hidden = !slugChanged(); }
+      slugEl.addEventListener('input', refreshSlugWarning);
+      refreshSlugWarning();
+
+      // The logo saves on its own, so its controls must not arm the unsaved
+      // guard — otherwise every upload trips a "you have unsaved work" modal.
+      const markDirty = (e) => {
+        if (e && e.target && e.target.closest && e.target.closest('#logo-zone')) return;
+        dirty = true;
+        hideOk();
+      };
+      form.addEventListener('input', markDirty);
+      form.addEventListener('change', markDirty);
+
+      // Enter alone submits a one-line field by default; the shortcut is for
+      // the About textarea, where Enter has to stay a newline.
+      form.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || !(e.metaKey || e.ctrlKey)) return;
         e.preventDefault();
-        const btn = slugForm.querySelector('button[type=submit]');
+        form.requestSubmit();
+      });
+
+      // Mirror of safe_brand_text_for in public_status/branding.rs — the server
+      // picks whichever of white/dark contrasts better, so the number shown
+      // has to be measured against that same choice.
+      const BRAND_DARK = '#0f172a';
+      const lin = (c) => { const s = c / 255; return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); };
+      const lumOf = (hex) => {
+        const n = parseInt(hex.slice(1), 16);
+        return 0.2126 * lin((n >> 16) & 255) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+      };
+      const ratio = (a, b) => { const [x, y] = [a, b].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+
+      const contrastOut = document.getElementById('color-contrast');
+      const colorWarn = document.getElementById('color-warning');
+      const colorEl = document.getElementById('f-color');
+
+      function refreshContrast() {
+        const lum = lumOf(colorEl.value);
+        const best = Math.max(ratio(1, lum), ratio(lum, lumOf(BRAND_DARK)));
+        contrastOut.textContent = best.toFixed(1) + ':1 header text';
+        colorWarn.hidden = best >= 4.5;
+      }
+      colorEl.addEventListener('input', refreshContrast);
+      refreshContrast();
+
+      // Shape can be judged here; availability cannot, since it is a question
+      // about other tenants' pages. The save reports that against the field.
+      const slugStatus = document.getElementById('slug-status');
+      function slugShapeError(v) {
+        if (v.length < 3) return 'at least 3 characters';
+        if (v.length > 30) return 'at most 30 characters';
+        if (!/^[a-z]/.test(v)) return 'must start with a letter';
+        if (!/[a-z0-9]$/.test(v)) return 'must end with a letter or digit';
+        if (!/^[a-z0-9-]+$/.test(v)) return 'letters, digits and hyphens only';
+        if (v.includes('--')) return 'no double hyphens';
+        return '';
+      }
+      function refreshSlugShape() {
+        const v = slugEl.value.trim().toLowerCase();
+        const problem = slugChanged() && v ? slugShapeError(v) : '';
+        slugStatus.textContent = problem;
+        slugStatus.className = 'font-mono text-xs text-[color:var(--theme-state-bad-fg)]';
+      }
+      slugEl.addEventListener('input', refreshSlugShape);
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = form.querySelector('button[type=submit]');
         if (btn.disabled) return;
-        const slugEl = document.getElementById('f-slug');
-        const result = document.getElementById('slug-result');
         const slug = slugEl.value.trim().toLowerCase();
         if (!slug) { err('url slug is required.'); slugEl.focus(); return; }
         slugEl.value = slug;
-        result.textContent = '';
         const label = btn.textContent;
         btn.disabled = true; btn.textContent = 'saving…';
         try {
-          await api('PATCH', '/api/v1/status-pages/' + id, { slug });
-          markClean('slug');
-          result.textContent = 'saved ✓';
-          result.className = 'text-sm text-[color:var(--theme-state-ok-fg-strong)]';
+          const style = form.querySelector('input[name=public_style]:checked');
+          const visibility = form.querySelector('input[name=enabled]:checked');
+          if (!style || !visibility) throw 'the form is missing a selection — reload the page.';
+          await api('PATCH', '/api/v1/status-pages/' + id, {
+            slug,
+            name: document.getElementById('f-name').value,
+            enabled: visibility.value === '1',
+            branding: {
+              public_display_name: document.getElementById('f-display').value || null,
+              public_about: document.getElementById('f-about').value || null,
+              public_brand_color: document.getElementById('f-color').value || null,
+              public_style: style.value,
+            },
+          });
+          dirty = false;
+          slugEl.dataset.original = slug;
+          refreshSlugWarning();
+          slugStatus.textContent = '';
           const link = document.getElementById('live-url');
           if (link && suffix !== null) {
             const url = 'https://' + slug + suffix;
             link.href = url; link.textContent = url + ' ↗';
           }
-        } catch (m) { result.textContent = ''; err(m); }
+          ok('saved');
+        } catch (m) {
+          const aboutSlug = /slug|address/i.test(String(m));
+          if (aboutSlug) {
+            slugStatus.textContent = String(m);
+            slugStatus.className = 'font-mono text-xs text-[color:var(--theme-state-bad-fg)]';
+            slugEl.focus();
+          }
+          err(m);
+        }
         finally { btn.disabled = false; btn.textContent = label; }
-      });
-
-      const brandingForm = document.getElementById('branding-form');
-      const markBrandingDirty = () => { dirty.branding = true; };
-      brandingForm.addEventListener('input', markBrandingDirty);
-      brandingForm.addEventListener('change', markBrandingDirty);
-      brandingForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const btn = brandingForm.querySelector('button[type=submit]');
-        if (btn.disabled) return;
-        const body = {
-          name: document.getElementById('f-name').value,
-          enabled: document.getElementById('f-enabled').checked,
-          branding: {
-            public_display_name: document.getElementById('f-display').value || null,
-            public_about: document.getElementById('f-about').value || null,
-            public_brand_color: document.getElementById('f-color').value || null,
-            public_style: document.getElementById('f-style').value,
-          },
-        };
-        const btnLabel = btn.textContent;
-        btn.disabled = true; btn.textContent = 'saving…';
-        try { await api('PATCH', '/api/v1/status-pages/' + id, body); markClean('branding'); ok('saved'); }
-        catch (m) { err(m); }
-        finally { btn.disabled = false; btn.textContent = btnLabel; }
       });
 
       const logoInput = document.getElementById('logo-file');
@@ -351,18 +448,31 @@
         logoName.textContent = f ? '> ' + f.name : 'no file selected';
       });
 
+      // Both logo paths reload to redraw the image, which would spend any
+      // unsaved edits in the form above without asking.
+      async function confirmReload(title, body) {
+        if (!dirty) return true;
+        return window.smConfirm({
+          title,
+          body: body + ' Unsaved changes above are lost — save the page first to keep them.',
+          confirmLabel: 'continue anyway',
+          danger: true,
+        });
+      }
+
       const uploadBtn = document.getElementById('logo-upload');
       uploadBtn.addEventListener('click', async () => {
         if (uploadBtn.disabled) return;
         const f = document.getElementById('logo-file').files[0];
         if (!f) { err('pick a file first.'); return; }
+        if (!(await confirmReload('Upload logo now?', 'The page reloads to show it.'))) return;
         const fd = new FormData(); fd.append('file', f);
         const label = uploadBtn.textContent;
         uploadBtn.disabled = true; uploadBtn.textContent = '[ uploading… ]';
         try {
           const res = await fetch('/api/v1/status-pages/' + id + '/logo', { method: 'POST', headers: { 'X-Requested-With': 'uptimepage' }, body: fd });
           if (!res.ok) { const d = await res.json().catch(() => null); throw (d && d.error && d.error.message) || ('HTTP ' + res.status); }
-          dirty.slug = dirty.branding = false;
+          dirty = false;
           location.reload();
         } catch (m) { err(m); uploadBtn.disabled = false; uploadBtn.textContent = label; }
       });
@@ -370,12 +480,13 @@
       if (rm) rm.addEventListener('click', async () => {
         const okToRemove = await window.smConfirm({
           title: 'Remove logo?',
-          body: 'The page falls back to no logo. You can upload a new one anytime.',
+          body: 'The page falls back to no logo. You can upload a new one anytime.' +
+            (dirty ? ' It reloads afterwards, so unsaved changes above are lost.' : ''),
           confirmLabel: 'remove logo',
           danger: true,
         });
         if (!okToRemove) return;
-        try { await api('DELETE', '/api/v1/status-pages/' + id + '/logo'); dirty.slug = dirty.branding = false; location.reload(); }
+        try { await api('DELETE', '/api/v1/status-pages/' + id + '/logo'); dirty = false; location.reload(); }
         catch (m) { err(m); }
       });
 
@@ -483,6 +594,23 @@
         h.focus(); scheduleOrder();
       });
 
+      // Rebuild from the live rows, so a group typed a moment ago is offered
+      // to the next row rather than becoming a second section on the page.
+      const groupList = document.getElementById('component-groups');
+      function refreshGroupOptions() {
+        if (!groupList) return;
+        const seen = [...rowsBody.querySelectorAll('[data-field="public_group"]')]
+          .map((i) => i.value.trim())
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+        groupList.innerHTML = '';
+        for (const g of new Set(seen)) {
+          const o = document.createElement('option');
+          o.value = g;
+          groupList.appendChild(o);
+        }
+      }
+
       rowsBody.querySelectorAll(ROW).forEach((tr) => {
         const tid = tr.dataset.targetId;
         const toggle = tr.querySelector('[data-on-page]');
@@ -509,7 +637,7 @@
           input.addEventListener('change', async () => {
             if (!toggle.checked) return;
             const body = {}; body[input.dataset.field] = input.value || null;
-            try { await api('PATCH', '/api/v1/status-pages/' + id + '/components/' + tid, body); renderBadgeList(); } catch (m) { err(m); }
+            try { await api('PATCH', '/api/v1/status-pages/' + id + '/components/' + tid, body); renderBadgeList(); refreshGroupOptions(); } catch (m) { err(m); }
           });
         });
       });
