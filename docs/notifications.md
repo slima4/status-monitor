@@ -50,9 +50,11 @@ A message in a busy channel is easy to miss, so a Slack channel takes an optiona
 
 Changing the ping goes through the same replace-config toggle as the webhook URL, so re-enter the webhook when you edit it.
 
-### What a Slack alert looks like
+### What a chat alert looks like
 
-Slack gets a laid-out card rather than one line of text. The header names the monitor, and under it sit the severity and state, the start time rendered in each reader's own timezone, and, for a monitor watched from several regions, which ones are down and which are still up. An open incident also carries the error the check saw, and one you declared by hand says so instead of claiming a detection. A resolved message reports how long the incident ran, and an interrupted one how long it has been quiet. The card ends in a button to the incident wherever the app knows its own public address, which self-hosters set in config. The layout is fixed, so there is nothing to configure, and the one-line version still rides along as the text a phone shows in its notification preview.
+Slack, Discord and Teams get a laid-out card rather than one line of text. The heading names the monitor with a colour or emoji for how bad it is, and under it sit the state, the start time rendered in each reader's own timezone, and, for a monitor watched from several regions, which ones are down and which are still up. An open incident also carries the error the check saw, and one you declared by hand says so instead of claiming a detection. A resolved message reports how long the incident ran, and an interrupted one how long it has been quiet. Wherever the app knows its own public address, which self-hosters set in config, the card carries a link straight to the incident.
+
+Each of the three renders that same card in its own format: Block Kit on Slack, an embed with a coloured bar on Discord, an Adaptive Card on Teams. The layout is fixed, so there is nothing to configure. On Slack the one-line version still rides along as the text a phone shows in its notification preview. Google Chat still gets plain text.
 
 ### Delegating the connect step
 

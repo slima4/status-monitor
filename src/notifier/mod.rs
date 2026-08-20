@@ -1,3 +1,4 @@
+pub mod card;
 pub mod discord;
 pub mod email;
 pub mod event;

@@ -29,8 +29,9 @@ pub struct IncidentNotice {
     pub url: Option<String>,
     /// Carries what the recipient needs to interpret the alert stream itself,
     /// such as the fact that further alerts from a flapping monitor are being
-    /// held. Rides [`Self::plain_text`], which most transports render; Slack
-    /// and PagerDuty build their own bodies and carry it separately.
+    /// held. Rides [`Self::plain_text`], which the text transports render; the
+    /// card transports (Slack, Discord, Teams) and PagerDuty build their own
+    /// bodies and carry it separately.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
 }
@@ -196,8 +197,8 @@ mod tests {
         assert!(text.contains("major incident OPEN"), "{text}");
         assert!(!text.contains("REOPENED"), "{text}");
     }
-    /// The note rides `plain_text`, which every transport renders, so a
-    /// recipient on Slack or Telegram learns about the hold too — not just
+    /// The note rides `plain_text`, which every text transport renders, so a
+    /// recipient on Telegram or WhatsApp learns about the hold too, not just
     /// whoever gets the email.
     #[test]
     fn a_note_is_appended_to_the_body_for_every_transport() {

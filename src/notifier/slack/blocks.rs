@@ -1,15 +1,85 @@
-//! The slice of Slack's Block Kit the templates build on, with Slack's own
-//! limits applied at construction: a block over the cap is refused as
-//! `invalid_blocks`, which loses the whole alert rather than a corner of it.
+//! Slack's dialect of the alert card: Block Kit JSON, mrkdwn escaping, and
+//! Slack's own date markup. Its limits are applied at construction, because an
+//! over-long block is refused as `invalid_blocks`, which loses the whole alert
+//! rather than a corner of it.
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 
+use crate::notifier::card::{AlertCard, CardField, CardValue, MAX_ERROR_CHARS};
 use crate::text::{single_line, truncate_chars};
 
 const HEADER_MAX: usize = 150;
-pub const SECTION_MAX: usize = 3000;
+const SECTION_MAX: usize = 3000;
 const FIELD_MAX: usize = 2000;
 const MAX_FIELDS: usize = 10;
+
+/// Escaping can quintuple the text (`&` becomes `&amp;`), so the shared error
+/// cap holds against Slack's only while the worst case plus the fence still fits.
+const _: () = assert!(MAX_ERROR_CHARS * 5 + 32 <= SECTION_MAX);
+
+/// The card as Slack blocks. Who gets woken is the card's decision, so no
+/// future call site can page a channel with an all-clear.
+pub fn render(card: &AlertCard, mention: Option<&str>) -> Vec<Block> {
+    let mention = card.ping(mention);
+    let headline = match mention {
+        Some(m) => format!("{m} *{}*", escape(&card.headline)),
+        None => format!("*{}*", escape(&card.headline)),
+    };
+    let mut blocks = vec![
+        Block::header(&plain_label(&card.heading())),
+        Block::section(headline),
+    ];
+    blocks.extend(Block::fields(card.fields.iter().map(field).collect()));
+    if let Some(error) = &card.error {
+        blocks.push(Block::section(format!("*Error*\n```{}```", fenced(error))));
+    }
+    if let Some(note) = &card.note {
+        blocks.push(Block::context(escape(note)));
+    }
+    if let Some(link) = &card.link {
+        blocks.push(Block::link_button("View incident", link));
+    }
+    blocks
+}
+
+fn field(f: &CardField) -> Text {
+    let value = match &f.value {
+        CardValue::Text(text) => escape(text),
+        CardValue::Time(at) => stamp(*at),
+    };
+    Text::field(f.label, &value)
+}
+
+/// Slack renders this in each reader's own timezone, so an on-call in another
+/// country does not convert UTC by hand at 3am.
+fn stamp(at: DateTime<Utc>) -> String {
+    format!(
+        "<!date^{epoch}^{{date_short_pretty}} {{time}}|{fallback}>",
+        epoch = at.timestamp(),
+        fallback = at.format("%Y-%m-%d %H:%M UTC"),
+    )
+}
+
+/// Error text for a code fence. Backticks in the payload would close the fence
+/// early and hand the rest of the error to the mrkdwn parser.
+fn fenced(error: &str) -> String {
+    escape(error).replace('`', "'")
+}
+
+/// Escape the three characters Slack mrkdwn treats specially, so customer text
+/// renders literally rather than as a live link or a mention.
+pub fn escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// Angle brackets carry every mrkdwn control sequence, and `plain_text` shows
+/// entities verbatim, so a header cannot use [`escape`]: it drops them instead.
+fn plain_label(s: &str) -> String {
+    s.replace(['<', '>'], "")
+}
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -32,13 +102,13 @@ pub enum Block {
 }
 
 impl Block {
-    pub fn header(text: &str) -> Self {
+    fn header(text: &str) -> Self {
         Self::Header {
             text: Text::plain(text),
         }
     }
 
-    pub fn section(markdown: String) -> Self {
+    fn section(markdown: String) -> Self {
         Self::Section {
             text: Some(Text::mrkdwn(markdown, SECTION_MAX)),
             fields: Vec::new(),
@@ -47,7 +117,7 @@ impl Block {
 
     /// Two-column layout, capped at the ten Slack accepts. `None` for an empty
     /// set, because a section with neither text nor fields is refused.
-    pub fn fields(mut fields: Vec<Text>) -> Option<Self> {
+    fn fields(mut fields: Vec<Text>) -> Option<Self> {
         if fields.is_empty() {
             return None;
         }
@@ -55,13 +125,13 @@ impl Block {
         Some(Self::Section { text: None, fields })
     }
 
-    pub fn context(markdown: String) -> Self {
+    fn context(markdown: String) -> Self {
         Self::Context {
             elements: vec![Text::mrkdwn(markdown, SECTION_MAX)],
         }
     }
 
-    pub fn link_button(label: &str, url: &str) -> Self {
+    fn link_button(label: &str, url: &str) -> Self {
         Self::Actions {
             elements: vec![Element::Button {
                 text: Text::plain(label),
@@ -92,7 +162,7 @@ impl Text {
         }
     }
 
-    pub fn field(label: &str, value: &str) -> Self {
+    fn field(label: &str, value: &str) -> Self {
         Self::mrkdwn(format!("*{label}*\n{value}"), FIELD_MAX)
     }
 }
@@ -103,65 +173,146 @@ pub enum Element {
     Button { text: Text, url: String },
 }
 
-/// Escape the three characters Slack mrkdwn treats specially, so customer text
-/// renders literally rather than as a live link or a mention.
-pub fn escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
-/// Angle brackets carry every mrkdwn control sequence, and `plain_text` shows
-/// entities verbatim, so a header cannot use [`escape`]: it drops them instead.
-pub fn plain_label(s: &str) -> String {
-    s.replace(['<', '>'], "")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::NotificationReason;
+    use crate::notifier::card::tests::notice;
+    use serde_json::Value;
+
+    fn json(reason: NotificationReason, mention: Option<&str>) -> String {
+        let card = AlertCard::for_notice(&notice(reason));
+        serde_json::to_string(&render(&card, mention)).unwrap()
+    }
 
     #[test]
-    fn blocks_serialize_to_slacks_wire_names() {
-        let v = serde_json::to_value(vec![
-            Block::header("api"),
-            Block::fields(vec![Text::field("Started", "now")]).unwrap(),
-            Block::link_button("View incident", "https://example.test/i/1"),
-        ])
-        .unwrap();
-        assert_eq!(
-            v,
-            serde_json::json!([
-                {"type": "header", "text": {"type": "plain_text", "text": "api", "emoji": true}},
-                {"type": "section", "fields": [{"type": "mrkdwn", "text": "*Started*\nnow"}]},
-                {"type": "actions", "elements": [{
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "View incident", "emoji": true},
-                    "url": "https://example.test/i/1"
-                }]}
-            ])
+    fn an_open_incident_leads_with_the_ping_and_links_the_incident() {
+        let blocks = json(NotificationReason::Opened, Some("<!here>"));
+        assert!(blocks.contains(r#""text":"🔴 api-prod""#), "{blocks}");
+        assert!(blocks.contains("<!here> *major incident OPEN*"), "{blocks}");
+        assert!(blocks.contains("*Error*\\n```HTTP 500```"), "{blocks}");
+        assert!(
+            blocks.contains(r#""url":"https://app.test/i/7""#),
+            "{blocks}"
         );
+        assert!(blocks.contains("<!date^1700000000^"), "{blocks}");
     }
 
+    /// An all-clear that pinged would wake the room the alert spared.
     #[test]
-    fn an_over_long_section_is_cut_to_slacks_cap() {
-        let v = serde_json::to_value(Block::section("x".repeat(9_000))).unwrap();
-        let text = v["text"]["text"].as_str().unwrap();
-        assert_eq!(text.chars().count(), SECTION_MAX);
-        assert!(text.ends_with('…'));
+    fn only_the_events_that_need_a_human_carry_the_ping() {
+        for reason in [
+            NotificationReason::Opened,
+            NotificationReason::Reopened,
+            NotificationReason::Escalated,
+            NotificationReason::NoData,
+        ] {
+            assert!(
+                json(reason, Some("<!here>")).contains("<!here>"),
+                "{reason:?}"
+            );
+        }
+        for reason in [
+            NotificationReason::Resolved,
+            NotificationReason::DataResumed,
+        ] {
+            assert!(
+                !json(reason, Some("<!here>")).contains("<!here>"),
+                "{reason:?}"
+            );
+        }
     }
 
-    /// `plain_text` shows entities verbatim, so escaping here would put a
+    /// The customer names the monitor and the error, and both land in a channel
+    /// where `<!channel>` would wake everybody.
+    #[test]
+    fn customer_text_cannot_smuggle_a_ping_into_the_message() {
+        let mut n = notice(NotificationReason::Opened);
+        n.monitor_name = Some("<!channel> api".into());
+        n.error_sample = Some("<!here> fix me".into());
+        let blocks = serde_json::to_string(&render(&AlertCard::for_notice(&n), None)).unwrap();
+        assert!(!blocks.contains("<!channel>"), "{blocks}");
+        assert!(!blocks.contains("<!here>"), "{blocks}");
+    }
+
+    /// Backticks in the error would close the fence early and hand the rest of
+    /// the customer's text to the mrkdwn parser.
+    #[test]
+    fn an_error_cannot_break_out_of_its_code_fence() {
+        let mut n = notice(NotificationReason::Opened);
+        n.error_sample = Some("``` *not bold* ```".into());
+        let blocks = serde_json::to_string(&render(&AlertCard::for_notice(&n), None)).unwrap();
+        assert_eq!(blocks.matches("```").count(), 2, "{blocks}");
+    }
+
+    /// `plain_text` shows entities verbatim, so escaping the header would put a
     /// literal `&amp;` in front of the responders.
     #[test]
-    fn a_header_keeps_an_ampersand_as_typed() {
-        let v = serde_json::to_value(Block::header(&plain_label("search & index"))).unwrap();
-        assert_eq!(v["text"]["text"], "search & index");
+    fn a_header_keeps_an_ampersand_but_never_slack_markup() {
+        let mut n = notice(NotificationReason::Opened);
+        n.monitor_name = Some("search & index <!channel>".into());
+        let v: Value = serde_json::from_str(
+            &serde_json::to_string(&render(&AlertCard::for_notice(&n), None)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(v[0]["text"]["text"], "🔴 search & index !channel");
     }
 
+    /// The block names are Slack's contract: a renamed variant or a mangled
+    /// serde attribute still compiles and still reads right, and Slack refuses
+    /// every alert with `invalid_blocks`.
     #[test]
-    fn a_header_cannot_carry_slack_markup() {
-        let v = serde_json::to_value(Block::header(&plain_label("<!channel> down"))).unwrap();
-        assert_eq!(v["text"]["text"], "!channel down");
+    fn blocks_serialize_to_slacks_wire_names() {
+        let v = serde_json::to_value(render(
+            &AlertCard::for_notice(&notice(NotificationReason::Opened)),
+            None,
+        ))
+        .unwrap();
+        assert_eq!(v[0]["type"], "header");
+        assert_eq!(v[0]["text"]["type"], "plain_text");
+        assert_eq!(v[0]["text"]["emoji"], true);
+        assert_eq!(v[1]["type"], "section");
+        assert_eq!(v[1]["text"]["type"], "mrkdwn");
+        assert_eq!(v[2]["type"], "section");
+        assert_eq!(v[2]["fields"][0]["type"], "mrkdwn");
+        assert_eq!(v[4]["type"], "actions");
+        assert_eq!(v[4]["elements"][0]["type"], "button");
+        assert_eq!(v[4]["elements"][0]["text"]["type"], "plain_text");
+    }
+
+    /// A base URL set without a scheme is not a link Slack accepts, and Slack
+    /// refuses the message rather than the button.
+    #[test]
+    fn an_unusable_link_costs_the_button_not_the_alert() {
+        let mut n = notice(NotificationReason::Opened);
+        n.url = Some("app.example.test/incidents/7".into());
+        let blocks = serde_json::to_string(&render(&AlertCard::for_notice(&n), None)).unwrap();
+        assert!(!blocks.contains("actions"), "{blocks}");
+        assert!(blocks.contains("major incident OPEN"), "{blocks}");
+    }
+
+    /// A page of HTML in the error field would push its section past Slack's
+    /// cap, and Slack refuses the whole message rather than trimming it.
+    #[test]
+    fn no_block_can_exceed_slacks_cap() {
+        let mut n = notice(NotificationReason::Opened);
+        n.error_sample = Some("&".repeat(20_000));
+        let v: Value = serde_json::to_value(render(&AlertCard::for_notice(&n), None)).unwrap();
+
+        fn worst(v: &Value, out: &mut usize) {
+            match v {
+                Value::Object(map) => {
+                    if let Some(Value::String(s)) = map.get("text") {
+                        *out = (*out).max(s.chars().count());
+                    }
+                    map.values().for_each(|v| worst(v, out));
+                }
+                Value::Array(items) => items.iter().for_each(|v| worst(v, out)),
+                _ => {}
+            }
+        }
+        let mut longest = 0;
+        worst(&v, &mut longest);
+        assert!(longest <= SECTION_MAX, "{longest}");
     }
 }

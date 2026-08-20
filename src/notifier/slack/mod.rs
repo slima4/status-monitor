@@ -1,5 +1,4 @@
 mod blocks;
-mod template;
 
 use async_trait::async_trait;
 use serde::Serialize;
@@ -12,8 +11,9 @@ use crate::notifier::Notifier;
 use crate::notifier::event::IncidentNotice;
 use crate::text::truncate_chars;
 
-use blocks::{Block, escape};
-use template::{MAX_ERROR_CHARS, SlackTemplate};
+use crate::notifier::card::{AlertCard, MAX_ERROR_CHARS};
+
+use blocks::{Block, escape, render};
 
 pub struct SlackNotifier {
     client: OutboundHttpClient,
@@ -39,16 +39,20 @@ impl SlackNotifier {
         }
     }
 
-    fn ping<'a>(mention: Option<&'a str>, n: &IncidentNotice) -> Option<&'a str> {
-        mention.filter(|_| pings_someone(n.reason))
+    /// Both halves of the message, from one card: the blocks Slack renders and
+    /// the line a push notification shows.
+    fn compose(mention: Option<&str>, n: &IncidentNotice) -> (String, Vec<Block>) {
+        let card = AlertCard::for_notice(n);
+        let text = Self::render_incident(card.ping(mention), n, card.link.as_deref());
+        (text, render(&card, mention))
     }
 
-    fn render_incident(mention: Option<&str>, n: &IncidentNotice) -> String {
+    fn render_incident(mention: Option<&str>, n: &IncidentNotice, link: Option<&str>) -> String {
         let body = match &n.note {
-            Some(note) => format!("{}\n{}", Self::incident_line(n), escape(note)),
-            None => Self::incident_line(n),
+            Some(note) => format!("{}\n{}", Self::incident_line(n, link), escape(note)),
+            None => Self::incident_line(n, link),
         };
-        match Self::ping(mention, n) {
+        match mention {
             Some(m) => format!("{m} {body}"),
             None => body,
         }
@@ -57,10 +61,10 @@ impl SlackNotifier {
     /// Slack builds its own text rather than using
     /// [`IncidentNotice::plain_text`], so anything added to the shared renderer
     /// has to be added here too.
-    fn incident_line(n: &IncidentNotice) -> String {
-        let link = n
-            .url
-            .as_deref()
+    fn incident_line(n: &IncidentNotice, link: Option<&str>) -> String {
+        // The card's link, not the raw one: a base URL without a scheme has no
+        // button on the card, so it must not have a dead link here either.
+        let link = link
             .map(|u| format!(" <{u}|view incident>"))
             .unwrap_or_default();
         // Customer-supplied monitor name + error text must not inject Slack
@@ -96,17 +100,6 @@ impl SlackNotifier {
     }
 }
 
-/// Only the events that need a human carry the ping; recovery does not.
-fn pings_someone(reason: NotificationReason) -> bool {
-    matches!(
-        reason,
-        NotificationReason::Opened
-            | NotificationReason::Reopened
-            | NotificationReason::Escalated
-            | NotificationReason::NoData
-    )
-}
-
 /// Per-region breakdown line, escaped for mrkdwn; empty for single-region.
 fn region_line(n: &IncidentNotice) -> String {
     n.region_summary(escape, " • ")
@@ -117,9 +110,7 @@ fn region_line(n: &IncidentNotice) -> String {
 #[async_trait]
 impl Notifier for SlackNotifier {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
-        let mention = self.mention.as_deref();
-        let text = Self::render_incident(mention, notice);
-        let blocks = SlackTemplate::for_reason(notice.reason).render(notice, mention);
+        let (text, blocks) = Self::compose(self.mention.as_deref(), notice);
         post_json(
             &self.client,
             &self.webhook_url,
@@ -135,28 +126,7 @@ impl Notifier for SlackNotifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::{IncidentOrigin, IncidentSeverity, IncidentUrgency};
-    use chrono::Utc;
-    use uuid::Uuid;
-
-    fn notice(reason: NotificationReason) -> IncidentNotice {
-        IncidentNotice {
-            incident_id: Uuid::from_u128(7),
-            reason,
-            monitor_name: Some("api".into()),
-            title: None,
-            severity: IncidentSeverity::Major,
-            urgency: IncidentUrgency::High,
-            origin: IncidentOrigin::Monitor,
-            started_at: Utc::now(),
-            ended_at: None,
-            error_sample: None,
-            regions_down: Vec::new(),
-            regions_up: Vec::new(),
-            url: None,
-            note: None,
-        }
-    }
+    use crate::notifier::card::tests::notice;
 
     /// Slack does not use the shared body renderer, so a note added there
     /// reaches it only because this transport appends it too.
@@ -164,23 +134,14 @@ mod tests {
     fn a_note_reaches_slack_even_though_it_renders_its_own_body() {
         let mut n = notice(NotificationReason::Opened);
         n.note = Some("Flapping: alerts held".into());
-        assert!(SlackNotifier::render_incident(None, &n).contains("Flapping: alerts held"));
+        let (text, _) = SlackNotifier::compose(None, &n);
+        assert!(text.contains("Flapping: alerts held"), "{text}");
     }
 
+    /// One ping decision serves both halves; a fallback line that shouted while
+    /// the card stayed quiet would wake the room anyway.
     #[test]
-    fn a_mention_leads_the_alert_but_stays_off_the_all_clear() {
-        let opened =
-            SlackNotifier::render_incident(Some("<!here>"), &notice(NotificationReason::Opened));
-        assert!(opened.starts_with("<!here> *api*"), "{opened}");
-        let resolved =
-            SlackNotifier::render_incident(Some("<!here>"), &notice(NotificationReason::Resolved));
-        assert!(!resolved.contains("<!here>"), "{resolved}");
-    }
-
-    /// The ping rule is one decision for both halves of the message; a block
-    /// layout that pinged on recovery would wake the room the text spared.
-    #[test]
-    fn the_blocks_ping_exactly_when_the_text_does() {
+    fn the_text_and_the_card_ping_the_same_events() {
         for reason in [
             NotificationReason::Opened,
             NotificationReason::Reopened,
@@ -189,17 +150,23 @@ mod tests {
             NotificationReason::Resolved,
             NotificationReason::DataResumed,
         ] {
-            let n = notice(reason);
-            let text = SlackNotifier::render_incident(Some("<!here>"), &n);
-            let blocks = serde_json::to_string(
-                &SlackTemplate::for_reason(reason).render(&n, Some("<!here>")),
-            )
-            .unwrap();
+            let (text, blocks) = SlackNotifier::compose(Some("<!here>"), &notice(reason));
+            let card = serde_json::to_string(&blocks).unwrap();
             assert_eq!(
                 text.contains("<!here>"),
-                blocks.contains("<!here>"),
+                card.contains("<!here>"),
                 "{reason:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_mention_leads_the_alert_but_stays_off_the_all_clear() {
+        let (opened, _) =
+            SlackNotifier::compose(Some("<!here>"), &notice(NotificationReason::Opened));
+        assert!(opened.starts_with("<!here> *api-prod*"), "{opened}");
+        let (resolved, _) =
+            SlackNotifier::compose(Some("<!here>"), &notice(NotificationReason::Resolved));
+        assert!(!resolved.contains("<!here>"), "{resolved}");
     }
 }
