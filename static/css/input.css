@@ -3615,7 +3615,10 @@
     /* Stretch the rail across its row; segments share the width equally but
        keep the segmented pill look. */
     .sm-rail--wide { @apply flex; width: 100%; }
-    .sm-rail--wide .sm-rail__seg { @apply flex-1 justify-center; min-height: 2.5rem; }
+    .sm-rail--wide .sm-rail__seg { @apply flex-1 justify-center; }
+    /* Opt-in on rails that are a form's primary choice control, where the
+       segment is the thing being aimed at rather than a compact toggle. */
+    .sm-rail--tall .sm-rail__seg { min-height: 2.5rem; }
     /* Flush rail: segments stretch evenly and stand as tall as a .field input
        so the rail reads as a control of equal stature (sits beside one). */
     .sm-rail--fill {
