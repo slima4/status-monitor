@@ -3650,6 +3650,99 @@
     }
     .dashboard-chip--active .dashboard-chip__count { color: inherit; }
 
+    /* Status page register: one card per page, the last cell adds another.
+       Caps at five across so a wide screen never stretches a card past the
+       width its name and URL need. */
+    .page-cards {
+        @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5;
+    }
+    /* Ink fill, the same inverted register a chosen chooser card uses. Every
+       colour inside derives from --theme-surface, since ink flips light on
+       dark themes and a fixed black would strand the text. */
+    .page-card {
+        @apply relative flex flex-col gap-2 p-4;
+        background: var(--theme-ink);
+        border-color: var(--theme-ink);
+        color: var(--theme-surface);
+        transition: background-color 120ms ease;
+    }
+    .page-card:hover {
+        background: color-mix(in oklab, var(--theme-ink) 92%, var(--theme-surface));
+    }
+    /* The whole tile opens the editor, so only the two controls that go
+       elsewhere lift above the overlay — and only as wide as their own text,
+       or they shield the tile they sit on. */
+    .page-card__name::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+    }
+    .page-card__url,
+    .page-card .row-link { @apply relative z-10; }
+    /* A tinted chip reads as a blob on the ink fill, so state marks the badge
+       rather than filling it — the move .card-badge makes on a chosen card.
+       Colour mixes toward the surface so it reads whichever way ink points,
+       in oklab: oklch would interpolate the hue angle and swing green to cyan
+       against a surface that is faintly blue. */
+    .page-card .status-badge {
+        background: transparent;
+        border: 1px solid currentColor;
+    }
+    .page-card .status-badge--up {
+        color: color-mix(in oklab, var(--theme-state-ok-fg) 40%, var(--theme-surface));
+    }
+    .page-card .status-badge--disabled {
+        color: var(--theme-surface);
+        opacity: 0.65;
+    }
+    .page-card__name {
+        @apply min-w-0 font-mono text-sm font-semibold;
+        color: var(--theme-surface);
+        /* A slug is one unbreakable token. `anywhere` (not `break-word`) is
+           what shrinks min-content, so flex can shrink the name instead of
+           shoving the badge out of the card. */
+        overflow-wrap: anywhere;
+    }
+    .page-card__url {
+        @apply self-start font-mono text-xs break-all;
+        color: var(--theme-surface);
+        opacity: 0.75;
+    }
+    .page-card__meta {
+        @apply font-mono text-xs;
+        color: var(--theme-surface);
+        opacity: 0.55;
+    }
+    /* Sized to the 40px target floor; the negative margin keeps the label on
+       the card's padding edge while the box grows around it. */
+    .page-card .row-link {
+        @apply inline-flex items-center px-2;
+        min-height: 2.5rem;
+        margin-right: -0.5rem;
+    }
+    /* Pulled toward the surface rather than a fixed light red, so it keeps its
+       hue and its contrast whichever way ink points. Mixed in oklab — oklch
+       would take the long arc from red round to purple. */
+    .page-card .row-link--danger {
+        color: color-mix(in oklab, var(--theme-state-bad-fg) 45%, var(--theme-surface));
+        opacity: 1;
+    }
+    .page-card .row-link--danger:hover {
+        color: color-mix(in oklab, var(--theme-state-bad-fg) 60%, var(--theme-surface));
+    }
+    /* mt-auto pins the actions to the bottom so cards of unequal height keep
+       one action line across the row. */
+    .page-card__foot {
+        @apply mt-auto flex items-center justify-end gap-3 border-t;
+        border-color: color-mix(in oklab, var(--theme-surface) 25%, transparent);
+    }
+    /* Fills its grid cell so the add card stands as tall as the pages beside it. */
+    .page-card__add { @apply h-full gap-1.5 p-4; }
+    /* The locked-card dim exists for cards whose badge does the explaining.
+       Here the text IS the explanation, so it keeps its contrast. */
+    .page-card__add.check-type-card--static .check-type-card__name,
+    .page-card__add.check-type-card--static .check-type-card__desc { opacity: 1; }
+
     /* ── V2 ─ BigMetric KPI cards ─────────────────────────────────── */
     .dashboard-kpis {
         @apply grid gap-3 sm:grid-cols-3;

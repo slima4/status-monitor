@@ -3,44 +3,19 @@
 {% block title %}Status pages · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
-  <header class="flex items-start justify-between gap-4">
-    <div class="space-y-1">
-      <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>status pages</h1>
-      <p class="text-sm text-muted">Public uptime dashboards for this organization.</p>
-    </div>
-    {% if !rows.is_empty() && !at_limit %}
-    <button type="button" id="new-page-btn" onclick="smCreateDraftPage(this)"
-            class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium shrink-0">+ page</button>
-    {% endif %}
+  <header class="space-y-1">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>status pages</h1>
+    <p class="text-sm text-muted">Public uptime dashboards for this organization.</p>
   </header>
 
   <div id="page-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
 
   <div id="pages-list" data-hx-loader
        hx-get="/web/partials/settings/pages"
-       hx-trigger="load"
+       hx-trigger="load, pages:refresh from:body"
        hx-swap="innerHTML">
     {% call reg::loading("loading…") %}{% endcall %}
   </div>
-
-  {% if at_limit && !rows.is_empty() %}
-  <p class="alert-card alert-card--muted">Plan limit reached — delete a page to create another.</p>
-  {% endif %}
-
-  {% if !rows.is_empty() %}
-  <details class="sticker-card font-mono text-xs leading-relaxed text-muted">
-    <summary class="sm-help-summary flex cursor-pointer select-none items-center gap-2 p-4 text-quiet">
-      <span class="sm-help-tri" aria-hidden="true">▸</span>
-      <span># status-pages --help</span>
-    </summary>
-    <div class="space-y-1 px-4 pb-4">
-      <p># each page has its own URL and its own set of monitors</p>
-      <p># run several — e.g. a public page and a separate internal one</p>
-      <p># a monitor can sit on more than one page</p>
-      <p># unpublished = draft, its URL 404s until you publish it</p>
-    </div>
-  </details>
-  {% endif %}
 
   <script>
     (() => {

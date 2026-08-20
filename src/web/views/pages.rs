@@ -43,17 +43,23 @@ pub struct PageRow {
 #[template(path = "settings/pages.html")]
 pub struct PagesPage {
     pub active_tab: &'static str,
-    pub rows: Vec<PageRow>,
-    /// True when the org is at its `max_status_pages` cap (create disabled).
-    pub at_limit: bool,
-    pub max_pages: i32,
 }
 
 #[derive(Template, WebTemplate)]
 #[template(path = "settings/pages_partial.html")]
 pub struct PagesPartial {
     pub rows: Vec<PageRow>,
+    /// The add card is the last cell of the grid, so the partial carries the
+    /// cap too. The API is the authority; this only shapes what is offered.
+    pub at_limit: bool,
+    /// `None` where the plan sets no real ceiling, so the card says nothing
+    /// rather than printing the sentinel as a number.
+    pub max_pages: Option<i32>,
 }
+
+/// Self-host reports `i32::MAX`, and an override that overflows clamps to it.
+/// Past this a cap is a sentinel, not a count worth showing an operator.
+const CAP_IS_SENTINEL_ABOVE: i32 = 1_000;
 
 async fn build_rows(state: &AppState, org: OrgId) -> WebResult<Vec<PageRow>> {
     let pages = state.status_page_store.list(org).await?;
@@ -83,21 +89,14 @@ async fn build_rows(state: &AppState, org: OrgId) -> WebResult<Vec<PageRow>> {
         .collect())
 }
 
-pub async fn pages_list(
-    State(state): State<AppState>,
-    org: Result<CurrentOrg, AppError>,
-) -> WebResult<Response> {
-    let org = match resolve_org(org, "/settings/pages") {
-        Ok(o) => o,
-        Err(resp) => return Ok(*resp),
-    };
-    let rows = build_rows(&state, org).await?;
-    let max_pages = state.quotas.limit_for_org(org).await?.max_status_pages;
+/// The shell only carries chrome — the grid, its cap, and the help block all
+/// come from the partial, so nothing here needs to read the org's pages.
+pub async fn pages_list(org: Result<CurrentOrg, AppError>) -> WebResult<Response> {
+    if let Err(resp) = resolve_org(org, "/settings/pages") {
+        return Ok(*resp);
+    }
     Ok(PagesPage {
         active_tab: TAB_PAGES,
-        at_limit: rows.len() as i32 >= max_pages,
-        max_pages,
-        rows,
     }
     .into_response())
 }
@@ -111,7 +110,14 @@ pub async fn pages_partial(
         Err(resp) => return Ok(*resp),
     };
     let rows = build_rows(&state, org).await?;
-    Ok(PagesPartial { rows }.into_response())
+    let cap = state.quotas.limit_for_org(org).await?.max_status_pages;
+    let max_pages = (cap <= CAP_IS_SENTINEL_ABOVE).then_some(cap);
+    Ok(PagesPartial {
+        at_limit: max_pages.is_some_and(|m| rows.len() as i32 >= m),
+        max_pages,
+        rows,
+    }
+    .into_response())
 }
 
 // ── Editor ────────────────────────────────────────────────────────────────────
@@ -495,5 +501,115 @@ mod tests {
     fn badge_panel_absent_without_badge_url() {
         let html = editor(None).render().unwrap();
         assert!(!html.contains("/api/public/v1/badge.svg"));
+    }
+
+    fn page_row(name: &str) -> PageRow {
+        PageRow {
+            id: "33333333-3333-3333-3333-333333333333".into(),
+            name: name.into(),
+            slug: name.into(),
+            enabled: true,
+            url: format!("https://{name}.uptimepage.dev"),
+            subscriber_count: 1,
+        }
+    }
+
+    #[test]
+    fn add_card_invites_a_new_page_below_the_cap() {
+        let html = PagesPartial {
+            rows: vec![page_row("acme")],
+            at_limit: false,
+            max_pages: Some(3),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("smCreateDraftPage"), "{html}");
+        assert!(html.contains("1 of 3 used"), "{html}");
+        // A delete re-renders this partial, which is what re-reads the cap;
+        // a full page reload would work but throws the scroll position away.
+        assert!(html.contains("pages:refresh"), "{html}");
+        assert!(!html.contains("location.reload"), "{html}");
+    }
+
+    /// At the cap the add card stays visible so the ceiling is legible, but
+    /// offering a click the API would reject reads as the product misfiring.
+    #[test]
+    fn add_card_states_the_cap_instead_of_offering_a_page() {
+        let html = PagesPartial {
+            rows: vec![page_row("acme"), page_row("beta")],
+            at_limit: true,
+            max_pages: Some(2),
+        }
+        .render()
+        .unwrap();
+        assert!(!html.contains("smCreateDraftPage"), "{html}");
+        assert!(html.contains(r#"card-badge--warn">2 / 2"#), "{html}");
+    }
+
+    /// The empty state has its own hero CTA; a lone add card would be a
+    /// second, weaker front door.
+    #[test]
+    fn no_pages_renders_the_hero_and_no_grid() {
+        let html = PagesPartial {
+            rows: Vec::new(),
+            at_limit: false,
+            max_pages: Some(3),
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("create your first page"), "{html}");
+        assert!(!html.contains("page-cards"), "{html}");
+    }
+
+    /// A plan can carry no pages at all, and the hero must not offer a button
+    /// the API would reject — the cap governs the empty state too.
+    #[test]
+    fn a_cap_of_zero_leaves_the_hero_without_a_call_to_action() {
+        let html = PagesPartial {
+            rows: Vec::new(),
+            at_limit: true,
+            max_pages: Some(0),
+        }
+        .render()
+        .unwrap();
+        assert!(!html.contains("smCreateDraftPage"), "{html}");
+        assert!(html.contains("move up a plan"), "{html}");
+    }
+
+    /// Self-host reports `i32::MAX`. Printing it would read as a real number.
+    #[test]
+    fn an_uncapped_plan_names_no_ceiling() {
+        let html = PagesPartial {
+            rows: vec![page_row("acme")],
+            at_limit: false,
+            max_pages: None,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains("smCreateDraftPage"), "{html}");
+        assert!(!html.contains("used"), "{html}");
+        assert!(!html.contains(&i32::MAX.to_string()), "{html}");
+    }
+
+    /// The help block sits inside the swapped region, so deleting the last
+    /// page cannot leave it stranded above an empty state.
+    #[test]
+    fn the_help_block_travels_with_the_grid() {
+        let listed = PagesPartial {
+            rows: vec![page_row("acme")],
+            at_limit: false,
+            max_pages: Some(3),
+        }
+        .render()
+        .unwrap();
+        let empty = PagesPartial {
+            rows: Vec::new(),
+            at_limit: false,
+            max_pages: Some(3),
+        }
+        .render()
+        .unwrap();
+        assert!(listed.contains("status-pages --help"), "{listed}");
+        assert!(!empty.contains("status-pages --help"), "{empty}");
     }
 }

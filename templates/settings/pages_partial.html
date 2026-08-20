@@ -7,56 +7,89 @@
       A status page is a public uptime dashboard &mdash; give it a URL and pick
       the monitors to show on it. Share it, or keep it internal.
     </p>
+    {% if at_limit %}
+    <p class="font-mono text-xs text-quiet"># your plan carries no status pages — move up a plan to open one</p>
+    {% else %}
     <button type="button"
             class="empty-hero__cta sticker-btn sticker-btn--primary"
             onclick="smCreateDraftPage(this)">
       create your first page
     </button>
+    {% endif %}
   </div>
 </div>
 {% else %}
-<div class="sticker-card overflow-hidden">
-<table class="w-full text-left text-sm">
-  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
-    <tr>
-      <th scope="col" class="px-4 py-2">Name</th>
-      <th scope="col" class="px-4 py-2">URL</th>
-      <th scope="col" class="px-4 py-2">Subscribers</th>
-      <th scope="col" class="px-4 py-2">Status</th>
-      <th scope="col" class="px-4 py-2"><span class="sr-only">Actions</span></th>
-    </tr>
-  </thead>
-  <tbody class="divide-y divide-[color:var(--theme-line)]">
+<div class="space-y-6">
+  <div class="page-cards">
     {% for r in rows %}
-    <tr>
-      <td class="px-4 py-2 align-top text-body break-words">
-        <a href="/settings/pages/{{ r.id }}" class="underline decoration-dotted underline-offset-2">{{ r.name }}</a>
-      </td>
-      <td class="px-4 py-2 align-top font-mono text-xs">
-        {% if r.url != "" %}<a href="{{ r.url }}" target="_blank" rel="noopener" class="underline decoration-dotted">{{ r.slug }}</a>{% else %}{{ r.slug }}{% endif %}
-      </td>
-      <td class="px-4 py-2 align-top font-mono text-xs text-muted">{{ r.subscriber_count }}</td>
-      <td class="px-4 py-2 align-top">
-        {% if r.enabled %}<span class="status-badge status-badge--up">published</span>{% else %}<span class="status-badge status-badge--disabled">draft</span>{% endif %}
-      </td>
-      <td class="px-4 py-2">
-        <div class="flex items-center justify-end gap-3">
-          <a href="/settings/pages/{{ r.id }}" class="row-link">edit</a>
-          <button type="button"
-                  hx-delete="/api/v1/status-pages/{{ r.id }}"
-                  hx-headers='{"X-Requested-With":"uptimepage"}'
-                  hx-on::after-request="if(event.detail.successful){window.location.reload()}"
-                  data-confirm-modal
-                  data-confirm-title="Delete status page?"
-                  data-confirm-body="Deletes the page {{ r.name }} and its component selection. Monitors and their data are untouched."
-                  data-confirm-label="delete page"
-                  data-confirm-danger
-                  class="row-link row-link--danger">delete</button>
-        </div>
-      </td>
-    </tr>
+    <div class="sticker-card page-card">
+      <div class="flex min-w-0 items-start justify-between gap-2">
+        <a href="/settings/pages/{{ r.id }}" class="page-card__name hover:underline">{{ r.name }}</a>
+        {% if r.enabled %}
+        <span class="status-badge status-badge--up shrink-0">published</span>
+        {% else %}
+        <span class="status-badge status-badge--disabled shrink-0">draft</span>
+        {% endif %}
+      </div>
+
+      {% if r.url != "" %}
+      <a href="{{ r.url }}" target="_blank" rel="noopener"
+         class="page-card__url hover:underline">{{ r.slug }}</a>
+      {% else %}
+      <span class="page-card__url">{{ r.slug }}</span>
+      {% endif %}
+
+      <p class="page-card__meta">
+        {{ r.subscriber_count }} subscriber{% if r.subscriber_count != 1 %}s{% endif %}
+      </p>
+
+      <div class="page-card__foot">
+        <button type="button"
+                hx-delete="/api/v1/status-pages/{{ r.id }}"
+                hx-headers='{"X-Requested-With":"uptimepage"}'
+                hx-on::after-request="if(event.detail.successful){htmx.trigger('body','pages:refresh')}"
+                data-confirm-modal
+                data-confirm-title="Delete status page?"
+                data-confirm-body="Deletes the page {{ r.name }} and its component selection. Monitors and their data are untouched."
+                data-confirm-label="delete page"
+                data-confirm-danger
+                aria-label="delete {{ r.name }}"
+                class="row-link row-link--danger">delete</button>
+      </div>
+    </div>
     {% endfor %}
-  </tbody>
-</table>
+
+    {% if at_limit %}
+    <span class="check-type-card check-type-card--static check-type-card--add page-card__add">
+      <span class="check-type-card__name">plan limit reached</span>
+      <span class="check-type-card__desc">delete a page to make room, or move up a plan</span>
+      {% match max_pages %}{% when Some with (m) %}
+      <span class="card-badge card-badge--warn">{{ rows.len() }} / {{ m }}</span>
+      {% when None %}{% endmatch %}
+    </span>
+    {% else %}
+    <button type="button" onclick="smCreateDraftPage(this)"
+            class="check-type-card check-type-card--add page-card__add">
+      <span class="check-type-card__plus" aria-hidden="true">+</span>
+      <span class="check-type-card__name">new status page</span>
+      {% match max_pages %}{% when Some with (m) %}
+      <span class="check-type-card__desc">{{ rows.len() }} of {{ m }} used</span>
+      {% when None %}{% endmatch %}
+    </button>
+    {% endif %}
+  </div>
+
+  <details class="sticker-card font-mono text-xs leading-relaxed text-muted">
+    <summary class="sm-help-summary flex cursor-pointer select-none items-center gap-2 p-4 text-quiet">
+      <span class="sm-help-tri" aria-hidden="true">▸</span>
+      <span># status-pages --help</span>
+    </summary>
+    <div class="space-y-1 px-4 pb-4">
+      <p># each page has its own URL and its own set of monitors</p>
+      <p># run several — e.g. a public page and a separate internal one</p>
+      <p># a monitor can sit on more than one page</p>
+      <p># unpublished = draft, its URL 404s until you publish it</p>
+    </div>
+  </details>
 </div>
 {% endif %}
