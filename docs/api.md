@@ -445,13 +445,16 @@ never read, mutate, or test another's channels.
 {
   "name": "Ops Slack",
   "enabled": true,
-  "config": { "type": "slack", "webhook_url": "https://hooks.slack.com/services/T/B/XXXX" }
+  "config": { "type": "slack", "webhook_url": "https://hooks.slack.com/services/T/B/XXXX" },
+  "auto_bind_tags": ["db"]
 }
 ```
 
+`auto_bind_tags` is the channel's tag rule: on top of the monitors bound to it, the channel pages any monitor carrying at least one of these tags, resolved when the alert fires. Optional on create, replaced whole on `PATCH`, and `[]` clears it. Tags obey the same rules as monitor tags.
+
 `config` is `type`-tagged. Supported transports:
 
-- `slack` — `{ "type": "slack", "webhook_url": "https://…" }` (incoming webhook; posts `{ "text": "…" }`)
+- `slack` — `{ "type": "slack", "webhook_url": "https://…", "mention": "@here S01ABC234" }` (incoming webhook; posts `{ "text": "…" }`. `mention` is optional: `@here`, `@channel`, user-group ids (`S…`) or member ids (`U…` / `W…`), space or comma separated, up to 5. It leads the text on opened/reopened/escalated/no-data only, is dropped for `@here`/`@channel` on test sends, and is not a secret, so it is returned unmasked)
 - `discord` — `{ "type": "discord", "webhook_url": "https://discord.com/api/webhooks/…" }` (channel webhook; posts `{ "content": "…" }` with `?wait=true` so delivery failures surface synchronously; text capped at 2000 chars)
 - `msteams` — `{ "type": "msteams", "webhook_url": "https://….logic.azure.com/…" }` (Teams Workflows webhook; posts an Adaptive Card. Retired O365 connector URLs are not accepted)
 - `google_chat` — `{ "type": "google_chat", "webhook_url": "https://chat.googleapis.com/v1/spaces/…" }` (space webhook; posts `{ "text": "…" }`, capped at 4096 chars)

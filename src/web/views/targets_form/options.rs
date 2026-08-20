@@ -25,6 +25,7 @@ pub(super) async fn channel_choices(
             id: c.id.to_string(),
             name: c.name,
             kind: channel_kind_label(c.kind),
+            rule_tags: serde_json::to_string(&c.auto_bind_tags).unwrap_or_else(|_| "[]".into()),
         })
         .collect())
 }

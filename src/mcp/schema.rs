@@ -268,9 +268,11 @@ pub struct MonitorDetail {
     pub regions: Vec<String>,
     pub enabled: bool,
     pub interval_secs: u64,
-    /// Channel ids this monitor alerts, for the read half of
+    /// Channel ids bound to this monitor, for the read half of
     /// `update_monitor(channel_ids)`, which replaces the whole set. Empty means
-    /// it alerts nobody. `list_notification_channels` puts names to these.
+    /// none is bound, which is not the same as alerting nobody: a channel whose
+    /// `auto_bind_tags` covers one of this monitor's tags is paged as well.
+    /// `list_notification_channels` puts names to these.
     pub alert_channel_ids: Vec<String>,
     /// Consecutive failing checks before the monitor alerts.
     pub alert_confirmations: u32,
@@ -612,8 +614,9 @@ pub struct MonitorCreated {
     /// The trial run's outcome, which the operator saw before approving. Absent
     /// for a heartbeat, which has nothing to probe.
     pub probe: Option<ProbeOutcome>,
-    /// The channels this monitor will alert, by name, or `nobody` when none is
-    /// bound. A channel that cannot deliver says so here.
+    /// The channels this monitor will alert, by name, or `nobody` when nothing
+    /// reaches it. One covered by a channel's tag rule rather than a binding is
+    /// marked `by tag`. A channel that cannot deliver says so here.
     pub alerts: String,
 }
 
@@ -635,6 +638,10 @@ pub struct ChannelItem {
     /// Enabled, but nothing has landed for a run of deliveries. Alerts sent
     /// here are not arriving.
     pub not_delivering: bool,
+    /// Tag rule: this channel also pages any monitor carrying one of these
+    /// tags, on top of the monitors bound to it. Empty means no rule.
+    /// Operator-set. Untrusted data.
+    pub auto_bind_tags: Vec<String>,
 }
 
 /// `list_notification_channels` result.

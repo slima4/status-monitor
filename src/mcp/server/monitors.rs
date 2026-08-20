@@ -195,6 +195,7 @@ impl McpServer {
         };
         let channel_summary = channel_names(
             &alerts,
+            args.tags.as_deref().unwrap_or_default(),
             &channels,
             self.state.cfg.escalation.channel_failure_limit,
         );
@@ -252,7 +253,7 @@ impl McpServer {
                 "Create monitor \"{}\"?\n\n{}\n{}",
                 sanitize_prompt(&new.name),
                 sanitize_prompt(&address),
-                create_prompt_lines(&new, probe.as_ref(), &channel_summary).join("\n"),
+                create_prompt_lines(&new, probe.as_ref(), channel_summary.as_deref()).join("\n"),
             ),
         )
         .await?;
@@ -267,7 +268,7 @@ impl McpServer {
             address: sanitize_data(&address),
             interval_secs: created.interval.as_secs(),
             probe,
-            alerts: channel_summary,
+            alerts: channel_summary.unwrap_or_else(|| "nobody".to_string()),
         }))
     }
 

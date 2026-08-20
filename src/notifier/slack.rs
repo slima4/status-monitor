@@ -11,6 +11,8 @@ use crate::notifier::event::IncidentNotice;
 pub struct SlackNotifier {
     client: OutboundHttpClient,
     webhook_url: Url,
+    /// Already rendered to markup; the raw token would post as plain text.
+    mention: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -19,17 +21,22 @@ struct SlackPayload<'a> {
 }
 
 impl SlackNotifier {
-    pub fn new(client: OutboundHttpClient, webhook_url: Url) -> Self {
+    pub fn new(client: OutboundHttpClient, webhook_url: Url, mention: Option<String>) -> Self {
         Self {
             client,
             webhook_url,
+            mention,
         }
     }
 
-    fn render_incident(n: &IncidentNotice) -> String {
-        match &n.note {
+    fn render_incident(mention: Option<&str>, n: &IncidentNotice) -> String {
+        let body = match &n.note {
             Some(note) => format!("{}\n{}", Self::incident_line(n), mrkdwn_escape(note)),
             None => Self::incident_line(n),
+        };
+        match mention.filter(|_| pings_someone(n.reason)) {
+            Some(m) => format!("{m} {body}"),
+            None => body,
         }
     }
 
@@ -75,6 +82,17 @@ impl SlackNotifier {
     }
 }
 
+/// Only the events that need a human carry the ping; recovery does not.
+fn pings_someone(reason: NotificationReason) -> bool {
+    matches!(
+        reason,
+        NotificationReason::Opened
+            | NotificationReason::Reopened
+            | NotificationReason::Escalated
+            | NotificationReason::NoData
+    )
+}
+
 /// Escape the three characters Slack mrkdwn treats specially, so customer text
 /// renders literally rather than as live links or control sequences.
 fn mrkdwn_escape(s: &str) -> String {
@@ -93,7 +111,7 @@ fn region_line(n: &IncidentNotice) -> String {
 #[async_trait]
 impl Notifier for SlackNotifier {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
-        let text = Self::render_incident(notice);
+        let text = Self::render_incident(self.mention.as_deref(), notice);
         post_json(
             &self.client,
             &self.webhook_url,
@@ -135,6 +153,16 @@ mod tests {
     fn a_note_reaches_slack_even_though_it_renders_its_own_body() {
         let mut n = notice(NotificationReason::Opened);
         n.note = Some("Flapping: alerts held".into());
-        assert!(SlackNotifier::render_incident(&n).contains("Flapping: alerts held"));
+        assert!(SlackNotifier::render_incident(None, &n).contains("Flapping: alerts held"));
+    }
+
+    #[test]
+    fn a_mention_leads_the_alert_but_stays_off_the_all_clear() {
+        let opened =
+            SlackNotifier::render_incident(Some("<!here>"), &notice(NotificationReason::Opened));
+        assert!(opened.starts_with("<!here> *api*"), "{opened}");
+        let resolved =
+            SlackNotifier::render_incident(Some("<!here>"), &notice(NotificationReason::Resolved));
+        assert!(!resolved.contains("<!here>"), "{resolved}");
     }
 }

@@ -84,10 +84,11 @@
 </div>
 {% if alerts_nobody %}
 <div class="alert-card alert-card--warn" role="note">
-  <strong>This monitor alerts nobody.</strong> It has no notification channel bound and no
-  escalation policy applies, so an outage is detected and recorded here but never sent anywhere.
+  <strong>This monitor alerts nobody.</strong> No channel it can still reach is bound — none at
+  all, or the ones bound are switched off or unverified — and no escalation policy applies, so an
+  outage is detected and recorded here but never sent anywhere.
   <a href="/targets/{{ id }}/edit" class="underline decoration-dotted underline-offset-2">Bind a channel</a>,
-  or <a href="/settings/notifications" class="underline decoration-dotted underline-offset-2">create one first</a>.
+  or <a href="/settings/notifications" class="underline decoration-dotted underline-offset-2">check the ones you have</a>.
 </div>
 {% endif %}
 {% if let Some(m) = managed_by %}

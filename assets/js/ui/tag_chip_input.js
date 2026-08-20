@@ -1,13 +1,19 @@
 // Tag selector. Existing org tags are scope-token checkboxes; the + button
 // reveals an input that adds a brand-new tag as a checked chip. Selection is
-// the set of checked chips; smCollectTags() returns it for check_form.js.
+// the set of checked chips, read back through the container's own collect() —
+// chips, never a delimited string, because a tag may itself contain a space or
+// a comma. window.smCollectTags is the monitor form's container.
 
 (function () {
-    const container = document.querySelector("[data-tag-chips]");
-    if (!container) return;
+    for (const container of document.querySelectorAll("[data-tag-chips]")) {
+        wire(container);
+    }
+
+function wire(container) {
     const addBtn = container.querySelector("[data-tag-add]");
     const newInput = container.querySelector("[data-tag-new]");
     if (!addBtn || !newInput) return;
+    const capLabel = newInput.dataset.tagCapLabel || "A monitor takes at most";
 
     function picks() {
         return Array.from(container.querySelectorAll("[data-tag-pick]"));
@@ -35,7 +41,7 @@
         const value = (raw || "").trim();
         if (!value) return true;
         if (atCap()) {
-            refuse(`A monitor takes at most ${maxTags} tags.`);
+            refuse(`${capLabel} ${maxTags} tags.`);
             return false;
         }
         const lower = value.toLowerCase();
@@ -62,6 +68,8 @@
 
     function closeInput() {
         newInput.value = "";
+        // Hidden and still invalid blocks submit with nothing on screen to fix.
+        newInput.setCustomValidity("");
         newInput.classList.add("hidden");
     }
 
@@ -88,9 +96,13 @@
         if (!chip || !chip.checked || !maxTags) return;
         if (checkedCount() > maxTags) {
             chip.checked = false;
-            refuse(`A monitor takes at most ${maxTags} tags.`);
+            refuse(`${capLabel} ${maxTags} tags.`);
         }
     });
 
-    window.smCollectTags = () => picks().filter(c => c.checked).map(c => c.value);
+    container.collectTags = () => picks().filter(c => c.checked).map(c => c.value);
+    if (container.dataset.tagChips === "monitor") {
+        window.smCollectTags = container.collectTags;
+    }
+}
 })();

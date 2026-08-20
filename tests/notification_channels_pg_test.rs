@@ -33,8 +33,10 @@ fn slack(name: &str, secret: &str) -> NewNotificationChannel {
         name: name.into(),
         config: ChannelConfig::Slack(SlackConfig {
             webhook_url: format!("https://hooks.slack.com/services/{secret}"),
+            mention: None,
         }),
         enabled: true,
+        auto_bind_tags: Vec::new(),
     }
 }
 
@@ -137,6 +139,103 @@ async fn channels_isolated_across_orgs_live_pg() {
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
 
+/// The rule lookup is a Postgres array-overlap query behind a partial GIN
+/// index; only live SQL proves the operator, the bind type, and the org scope.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn tag_rule_lookup_is_org_scoped_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "nc-rule").await;
+    let store = PgNotificationChannelStore::new(pool.clone(), None);
+
+    let mut rule = slack("A db team", "T/B/rule");
+    rule.auto_bind_tags = vec!["db".into(), "cache".into()];
+    let by_rule = store
+        .create(org_a, rule, WriteSource::Ui, 10, Some(user_a))
+        .await
+        .unwrap();
+    // Same rule, other tenant: an overlap query without the org filter would
+    // page a stranger's channel.
+    let mut theirs = slack("B db team", "T/B/theirs");
+    theirs.auto_bind_tags = vec!["db".into()];
+    store
+        .create(org_b, theirs, WriteSource::Ui, 10, Some(user_b))
+        .await
+        .unwrap();
+    // No rule at all: never matched, whatever the monitor carries.
+    store
+        .create(
+            org_a,
+            slack("A plain", "T/B/plain"),
+            WriteSource::Ui,
+            10,
+            Some(user_a),
+        )
+        .await
+        .unwrap();
+
+    // One tag in common is enough, and only the caller's org answers.
+    assert_eq!(
+        store
+            .auto_bound_ids(org_a, &["prod".to_string(), "cache".to_string()])
+            .await
+            .unwrap(),
+        vec![by_rule.id]
+    );
+    assert!(
+        store
+            .auto_bound_ids(org_a, &["web".to_string()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    // An untagged monitor matches nothing rather than everything.
+    assert!(store.auto_bound_ids(org_a, &[]).await.unwrap().is_empty());
+
+    // The rule survives a round-trip and a PATCH replaces it whole.
+    assert_eq!(
+        store
+            .get(org_a, by_rule.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .auto_bind_tags,
+        vec!["db".to_string(), "cache".to_string()]
+    );
+    store
+        .update(
+            org_a,
+            by_rule.id,
+            NotificationChannelUpdate {
+                auto_bind_tags: Some(vec!["web".into()]),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+            Some(user_a),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        store
+            .auto_bound_ids(org_a, &["web".to_string()])
+            .await
+            .unwrap(),
+        vec![by_rule.id]
+    );
+    assert!(
+        store
+            .auto_bound_ids(org_a, &["db".to_string()])
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
 #[tokio::test]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn quota_cap_is_per_org_live_pg() {
@@ -226,7 +325,7 @@ async fn channel_config_sealed_at_rest_live_pg() {
     // Opened back through the store the caller sees plaintext again.
     let opened = store.get(org_a, ch.id).await.unwrap().unwrap();
     match opened.config {
-        ChannelConfig::Slack(SlackConfig { webhook_url }) => {
+        ChannelConfig::Slack(SlackConfig { webhook_url, .. }) => {
             assert!(webhook_url.ends_with(secret))
         }
         other => panic!("unexpected variant: {other:?}"),
@@ -618,6 +717,7 @@ async fn telegram_lifecycle_disable_by_external_ref() {
             },
         ),
         enabled: true,
+        auto_bind_tags: Vec::new(),
     };
     // Two orgs share the kicked chat; org A has a second, unrelated link.
     let a = store
@@ -728,6 +828,7 @@ async fn email_lifecycle_ref_is_derived_and_follows_the_address() {
         name: name.into(),
         config: ChannelConfig::Email(uptimepage::domain::EmailConfig { to: to.into() }),
         enabled: true,
+        auto_bind_tags: Vec::new(),
     };
     let ch = store
         .create(org_a, email("mail", &addr_a), WriteSource::Ui, 10, None)
@@ -1090,6 +1191,7 @@ async fn the_failing_channel_gauge_agrees_with_the_domain_predicate_live_pg() {
                     to: format!("gauge-{}@example.com", org_a.0),
                 }),
                 enabled: true,
+                auto_bind_tags: Vec::new(),
             },
             WriteSource::Ui,
             i64::MAX,

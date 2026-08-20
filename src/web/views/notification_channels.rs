@@ -70,6 +70,7 @@ pub struct ChannelsPartial {
 /// the `***` sentinel until the operator opts to replace the config.
 pub struct ConfigFields {
     pub slack_webhook_url: String,
+    pub slack_mention: String,
     pub discord_webhook_url: String,
     pub msteams_webhook_url: String,
     pub google_chat_webhook_url: String,
@@ -120,6 +121,7 @@ impl Default for ConfigFields {
     fn default() -> Self {
         Self {
             slack_webhook_url: String::new(),
+            slack_mention: String::new(),
             discord_webhook_url: String::new(),
             msteams_webhook_url: String::new(),
             google_chat_webhook_url: String::new(),
@@ -181,6 +183,8 @@ pub struct MonitorCard {
     pub managed_by: Option<&'static str>,
     /// Space-joined tags, feeding the picker's client-side search.
     pub tags: String,
+    /// The same tags as JSON, for matching a rule tag that contains a space.
+    pub tags_json: String,
 }
 
 pub struct ChannelFormModel {
@@ -194,6 +198,11 @@ pub struct ChannelFormModel {
     pub submit_method: &'static str,
     pub name: String,
     pub enabled: bool,
+    /// The channel's tag rule.
+    pub auto_bind_tags: Vec<String>,
+    /// The org's tags, offered as chips. Carries the rule's own tags even
+    /// where they fall outside the capped inventory, so none renders missing.
+    pub tag_options: Vec<String>,
     /// Platform-disable note; empty when none.
     pub disabled_reason: String,
     pub kind: &'static str,
@@ -259,6 +268,17 @@ pub struct ChannelFormPage {
     pub form: ChannelFormModel,
 }
 
+impl ChannelFormPage {
+    /// A rule names monitor tags, so it inherits their bounds.
+    fn max_tags(&self) -> usize {
+        crate::domain::target::MAX_TAGS_PER_TARGET
+    }
+
+    fn max_tag_len(&self) -> usize {
+        crate::domain::target::MAX_TAG_LEN
+    }
+}
+
 pub async fn index(org: Result<CurrentOrg, AppError>) -> Response {
     match resolve_org(org, "/settings/notifications") {
         Ok(_) => ChannelsPage {
@@ -318,6 +338,7 @@ pub async fn new_form(
     form.central_whatsapp = state.cfg.whatsapp_app.enabled();
     form.slack_oauth = state.cfg.slack_oauth.enabled();
     form.discord_oauth = state.cfg.discord_oauth.enabled();
+    form.tag_options = rule_tag_options(&state, org, &form.auto_bind_tags).await?;
     (_, form.bindable) = org_monitor_cards(&state, org, None).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -327,6 +348,29 @@ pub async fn new_form(
 }
 
 /// All org monitors as cards, split by alert binding to `channel`:
+/// The tag chips a rule can be built from: the org's inventory, with any tag
+/// the rule already holds appended — the inventory is capped, and a rule tag
+/// missing from the list would be silently dropped on the next save.
+async fn rule_tag_options(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    rule: &[String],
+) -> Result<Vec<String>, AppError> {
+    let mut options: Vec<String> = state
+        .target_store
+        .list_tags(org, None, 200)
+        .await?
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
+    for t in rule {
+        if !options.contains(t) {
+            options.push(t.clone());
+        }
+    }
+    Ok(options)
+}
+
 /// `(used_by, bindable)`. With no channel everything is bindable.
 async fn org_monitor_cards(
     state: &AppState,
@@ -355,6 +399,7 @@ async fn org_monitor_cards(
             enabled: t.enabled,
             managed_by: t.write_source.managed_label(),
             tags: t.tags.join(" "),
+            tags_json: serde_json::to_string(&t.tags).unwrap_or_else(|_| "[]".into()),
         }
     };
     let (used_by, bindable): (Vec<_>, Vec<_>) = targets
@@ -388,6 +433,7 @@ pub async fn edit_form(
     let mut form = form_from_channel(channel);
     form.central_telegram = state.cfg.telegram.enabled();
     form.central_whatsapp = state.cfg.whatsapp_app.enabled();
+    form.tag_options = rule_tag_options(&state, org, &form.auto_bind_tags).await?;
     (form.used_by, form.bindable) = org_monitor_cards(&state, org, Some(id)).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -404,6 +450,8 @@ fn empty_create_form() -> ChannelFormModel {
         submit_method: "POST",
         name: String::new(),
         enabled: true,
+        auto_bind_tags: Vec::new(),
+        tag_options: Vec::new(),
         disabled_reason: String::new(),
         kind: "slack",
         config: ConfigFields::default(),
@@ -425,7 +473,10 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
     redacted.redact_in_place();
     let mut config = ConfigFields::default();
     match redacted {
-        ChannelConfig::Slack(c) => config.slack_webhook_url = c.webhook_url,
+        ChannelConfig::Slack(c) => {
+            config.slack_webhook_url = c.webhook_url;
+            config.slack_mention = c.mention.unwrap_or_default();
+        }
         ChannelConfig::Discord(c) => config.discord_webhook_url = c.webhook_url,
         ChannelConfig::MsTeams(c) => config.msteams_webhook_url = c.webhook_url,
         ChannelConfig::GoogleChat(c) => config.google_chat_webhook_url = c.webhook_url,
@@ -539,6 +590,8 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
         submit_method: "PATCH",
         name: c.name,
         enabled: c.enabled,
+        auto_bind_tags: c.auto_bind_tags,
+        tag_options: Vec::new(),
         disabled_reason: c.disabled_reason.unwrap_or_default(),
         kind: c.kind.as_db_str(),
         config,
@@ -581,6 +634,8 @@ pub async fn create_channel_deduped(
             name: channel_name_with_suffix(base_name, suffix),
             config: config.clone(),
             enabled: true,
+            // A connect flow knows only the destination; rules come later.
+            auto_bind_tags: Vec::new(),
         };
         match store
             .create(org, new, WriteSource::Ui, max_channels, block_log.user)
@@ -745,6 +800,28 @@ mod tests {
     }
 
     #[test]
+    fn edit_form_prefills_the_tag_rule_outside_the_replace_config_toggle() {
+        let mut ch = slack_channel("https://hooks.slack.com/services/T/B/x");
+        ch.auto_bind_tags = vec!["db".into(), "us east".into()];
+        let mut form = form_from_channel(ch);
+        assert_eq!(form.auto_bind_tags, vec!["db", "us east"]);
+        // A tag holding a space rules out any joined form, so it stays a chip.
+        form.tag_options = vec!["db".into(), "us east".into(), "web".into()];
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"data-tag-chips="rule""#));
+        // A chip widget without the script that wires it renders fine, refuses
+        // to add a tag, and clears the rule on the next save.
+        assert!(html.contains("js/ui/tag_chip_input"));
+        assert!(html.contains(r#"value="us east" class="sr-only" checked"#));
+        assert!(html.contains(r#"value="web" class="sr-only">"#));
+    }
+
+    #[test]
     fn edit_form_linked_telegram_shows_chat_info_not_inputs() {
         use chrono::Utc;
         let ch = NotificationChannel {
@@ -764,6 +841,7 @@ mod tests {
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            auto_bind_tags: Vec::new(),
         };
         let form = form_from_channel(ch);
         assert_eq!(form.kind, "telegram_app");
@@ -795,6 +873,7 @@ mod tests {
             enabled: true,
             managed_by: None,
             tags: String::new(),
+            tags_json: "[]".into(),
         }];
         let html = ChannelFormPage {
             active_tab: TAB_NOTIFICATIONS,
@@ -819,6 +898,7 @@ mod tests {
             kind: crate::domain::ChannelKind::Slack,
             config: ChannelConfig::Slack(SlackConfig {
                 webhook_url: webhook_url.into(),
+                mention: None,
             }),
             enabled: true,
             disabled_reason: None,
@@ -829,6 +909,7 @@ mod tests {
             write_source: crate::domain::WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            auto_bind_tags: Vec::new(),
         }
     }
 
@@ -895,6 +976,7 @@ mod tests {
                 enabled: true,
                 managed_by: None,
                 tags: String::new(),
+                tags_json: "[]".into(),
             },
             MonitorCard {
                 id: "t2".into(),
@@ -904,6 +986,7 @@ mod tests {
                 enabled: false,
                 managed_by: None,
                 tags: String::new(),
+                tags_json: "[]".into(),
             },
         ];
         let html = ChannelFormPage {
@@ -938,6 +1021,7 @@ mod tests {
                 enabled: true,
                 managed_by: None,
                 tags: String::new(),
+                tags_json: "[]".into(),
             },
             MonitorCard {
                 id: "t4".into(),
@@ -947,6 +1031,7 @@ mod tests {
                 enabled: true,
                 managed_by: Some("terraform"),
                 tags: String::new(),
+                tags_json: "[]".into(),
             },
         ];
         let html = ChannelFormPage {
@@ -1002,6 +1087,7 @@ mod tests {
             enabled: true,
             managed_by: None,
             tags: String::new(),
+            tags_json: "[]".into(),
         }];
         let html = ChannelFormPage {
             active_tab: TAB_NOTIFICATIONS,

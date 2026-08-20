@@ -30,7 +30,7 @@ pub(super) fn field_label(field: &str) -> &str {
 pub(super) fn create_prompt_lines(
     new: &NewTarget,
     probe: Option<&ProbeOutcome>,
-    channel_summary: &str,
+    channel_summary: Option<&str>,
 ) -> Vec<String> {
     let mut lines = vec![format!("checked every {}s", new.interval.as_secs())];
     lines.push(match probe {
@@ -60,13 +60,13 @@ pub(super) fn create_prompt_lines(
             region_policy_str(policy)
         ));
     }
-    lines.push(if new.alerts.is_empty() {
-        "notification channels: none, so it alerts nobody until one is bound".to_string()
-    } else {
-        format!(
-            "notification channels: {}",
-            sanitize_prompt(channel_summary)
-        )
+    lines.push(match channel_summary {
+        Some(s) => format!("notification channels: {}", sanitize_prompt(s)),
+        // A channel tag rule can still cover it, but naming one costs the
+        // channel inventory this call did not ask for.
+        None => "notification channels: none bound, so it alerts nobody unless a channel's \
+                 tag rule covers its tags"
+            .to_string(),
     });
     lines
 }

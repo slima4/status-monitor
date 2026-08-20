@@ -44,6 +44,7 @@ fn email_channel(name: &str, to: &str) -> NewNotificationChannel {
         name: name.into(),
         config: ChannelConfig::Email(EmailConfig { to: to.into() }),
         enabled: true,
+        auto_bind_tags: Vec::new(),
     }
 }
 
@@ -200,8 +201,10 @@ async fn mint_cap_and_config_replace_resets_gate() {
                 name: "slk".into(),
                 config: ChannelConfig::Slack(uptimepage::domain::SlackConfig {
                     webhook_url: "https://hooks.slack.com/x".into(),
+                    mention: None,
                 }),
                 enabled: true,
+                auto_bind_tags: Vec::new(),
             },
             WriteSource::Ui,
             10,

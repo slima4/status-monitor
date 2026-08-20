@@ -124,11 +124,11 @@ pub(super) fn build_monitor_patch(
         // A set, not a sequence: the same channels in another order alert the
         // same people, and calling that a change spends a confirmation on one.
         if bound_ids(&alerts) != bound_ids(&target.alerts) {
-            moved(
-                "alerts",
-                channel_names(&target.alerts, channels, failure_limit),
-                channel_names(&alerts, channels, failure_limit),
-            );
+            let names = |a: &TargetAlerts| {
+                channel_names(a, &target.tags, channels, failure_limit)
+                    .unwrap_or_else(|| "nobody".to_string())
+            };
+            moved("alerts", names(&target.alerts), names(&alerts));
             update.alerts = Some(alerts);
         }
     }

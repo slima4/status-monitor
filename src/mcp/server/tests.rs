@@ -433,6 +433,7 @@ fn test_channel(id: Uuid, name: &str) -> NotificationChannel {
         kind: ChannelKind::Slack,
         config: ChannelConfig::Slack(SlackConfig {
             webhook_url: "https://hooks.slack.example/T/B/x".into(),
+            mention: None,
         }),
         enabled: true,
         disabled_reason: None,
@@ -443,6 +444,7 @@ fn test_channel(id: Uuid, name: &str) -> NotificationChannel {
         write_source: WriteSource::Ui,
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        auto_bind_tags: Vec::new(),
     }
 }
 
@@ -735,7 +737,7 @@ fn a_creation_prompt_states_every_setting_it_would_apply() {
         channel_id: Uuid::nil(),
     }]);
     let summary = "ops-slack, pager (disabled, delivers nothing)";
-    let lines = create_prompt_lines(&new, None, summary).join("\n");
+    let lines = create_prompt_lines(&new, None, Some(summary)).join("\n");
     for expected in [
         "checked every 300s",
         "tags: prod",
@@ -759,11 +761,11 @@ fn a_creation_prompt_states_every_setting_it_would_apply() {
     new.tags.clear();
     new.group_name = None;
     new.alerts = TargetAlerts::default();
-    let lines = create_prompt_lines(&new, None, "nobody").join("\n");
+    let lines = create_prompt_lines(&new, None, None).join("\n");
     assert!(lines.contains("reminds every 3600s"));
     assert!(!lines.contains("tags:"));
     // Silence is the one state worth stating outright.
-    assert!(lines.contains("alerts nobody until one is bound"));
+    assert!(lines.contains("alerts nobody unless a channel's tag rule covers its tags"));
 }
 
 #[test]
@@ -1095,21 +1097,56 @@ fn a_channel_that_delivers_nothing_says_so_where_it_is_named() {
                     .map(|id| AlertBinding { channel_id: *id })
                     .collect(),
             ),
+            &[],
             &channels,
             3,
         )
     };
-    assert_eq!(named(&[]), "nobody");
-    assert_eq!(named(&[live]), "ops");
-    assert_eq!(named(&[off]), "pager (disabled, delivers nothing)");
+    assert_eq!(named(&[]), None);
+    assert_eq!(named(&[live]).as_deref(), Some("ops"));
     assert_eq!(
-        named(&[unverified]),
-        "on-call inbox (address never verified, delivers nothing)"
+        named(&[off]).as_deref(),
+        Some("pager (disabled, delivers nothing)")
     );
-    assert_eq!(named(&[dead]), "ops-webhook (recent alerts did not arrive)");
+    assert_eq!(
+        named(&[unverified]).as_deref(),
+        Some("on-call inbox (address never verified, delivers nothing)")
+    );
+    assert_eq!(
+        named(&[dead]).as_deref(),
+        Some("ops-webhook (recent alerts did not arrive)")
+    );
     // A binding whose channel is gone is named, not dropped: a shorter list
     // would read as one fewer channel losing its alerts.
-    assert_eq!(named(&[gone]), format!("a deleted channel ({gone})"));
+    assert_eq!(
+        named(&[gone]).as_deref(),
+        Some(format!("a deleted channel ({gone})").as_str())
+    );
+}
+
+/// A monitor covered only by a channel's tag rule is paged, so a confirmation
+/// that called it unreachable would talk the operator out of a working setup.
+#[test]
+fn a_tag_rule_names_the_channel_it_covers_a_monitor_through() {
+    let id = Uuid::now_v7();
+    let mut by_rule = test_channel(id, "ops");
+    by_rule.auto_bind_tags = vec!["db".into()];
+    let channels = vec![by_rule];
+    let rule_only = channel_names(&TargetAlerts::default(), &["db".to_string()], &channels, 3);
+    assert_eq!(rule_only.as_deref(), Some("ops (by tag)"));
+    // Bound and matching: named once, as the binding.
+    let both = channel_names(
+        &TargetAlerts(vec![AlertBinding { channel_id: id }]),
+        &["db".to_string()],
+        &channels,
+        3,
+    );
+    assert_eq!(both.as_deref(), Some("ops"));
+    // A rule nothing carries leaves the monitor unreachable.
+    assert_eq!(
+        channel_names(&TargetAlerts::default(), &["web".to_string()], &channels, 3),
+        None
+    );
 }
 
 #[test]

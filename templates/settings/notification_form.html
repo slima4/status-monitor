@@ -122,6 +122,22 @@
                class="underline decoration-dotted hover:text-body">api.slack.com/messaging/webhooks</a>.
           </span>
         </label>
+        <label class="field-outline">
+          <span class="field-outline__label">Ping on alert (optional)</span>
+          <input name="slack_mention" type="text" value="{{ form.config.slack_mention }}"
+                 placeholder="@here S01ABC234"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Leads the message so it wakes someone: <code>@here</code>, <code>@channel</code>,
+            a user-group id (<code>S…</code>, from the group's Slack admin page) or a member id
+            (<code>U…</code>, or <code>W…</code> on Enterprise Grid). Space or comma separated,
+            up to 5. A plain <code>@handle</code> is not pingable from a webhook, so the id is
+            what Slack needs. Recovery messages never ping, and a test send drops
+            <code>@here</code>/<code>@channel</code> so trying your config out stays quiet.
+            Changing this later goes through <em>replace transport config</em>, so keep the
+            webhook URL to hand.
+          </span>
+        </label>
       </div>
 
       <div data-variant="discord" class="space-y-4{% if form.kind != "discord" %} hidden{% endif %}">
@@ -721,6 +737,27 @@
       <legend>{% if form.mode == "create" %}bind to monitors{% else %}used by{% endif %}</legend>
       <div class="clear-both space-y-3 p-5" data-bind-root data-channel-id="{{ form.channel_id }}" data-bind-mode="{{ form.mode }}">
         <noscript><p class="font-mono text-xs text-quiet"># scripts are off — bind this channel from a monitor's own edit form instead</p></noscript>
+        <div>
+          <span class="mb-1.5 block text-xs text-muted">Route by tag (optional)</span>
+          <div class="flex flex-wrap items-center gap-1.5" data-tag-chips="rule" role="group" aria-label="Route by tag">
+            {% for t in form.tag_options %}
+            <label class="scope-token">
+              <input type="checkbox" data-tag-pick value="{{ t }}" class="sr-only"{% if form.auto_bind_tags.contains(t) %} checked{% endif %}>
+              {{ t }}
+            </label>
+            {% endfor %}
+            <input type="text" data-tag-new aria-label="New tag" spellcheck="false" autocomplete="off"
+                   maxlength="{{ self.max_tag_len() }}" data-tag-max="{{ self.max_tags() }}"
+                   data-tag-cap-label="A rule takes at most"
+                   placeholder="new tag…" class="hidden chip-new-input">
+            <button type="button" class="scope-token" data-tag-add aria-label="Add tag">+</button>
+          </div>
+          <p class="mt-1 text-xs text-muted">
+            This channel also pages any monitor carrying one of these tags, including ones added
+            later. Matched at alert time, so retagging a monitor moves its coverage with it.
+            <span data-rule-match class="font-mono"></span>
+          </p>
+        </div>
         <p data-used-by-note class="font-mono text-xs text-quiet{% if !form.used_by.is_empty() %} hidden{% endif %}">
           {% if form.mode == "create" %}# none picked yet — monitors picked below are bound right after create{% else %}# not bound to any monitor yet — add one below{% endif %}
         </p>
@@ -729,7 +766,7 @@
         {% endif %}
         <div class="grid grid-cols-1 gap-3 sm:grid-cols-2" data-used-by-grid>
           {% for m in form.used_by %}
-          <div class="relative min-w-0" data-bound-card data-target-id="{{ m.id }}" data-enabled="{{ m.enabled }}" data-tags="{{ m.tags }}">
+          <div class="relative min-w-0" data-bound-card data-target-id="{{ m.id }}" data-enabled="{{ m.enabled }}" data-tags="{{ m.tags }}" data-tags-json="{{ m.tags_json }}">
             <a href="/targets/{{ m.id }}/edit" class="check-type-card h-full min-w-0{% if !m.enabled %} opacity-50{% endif %}">
               {% call monitor_card_body(m) %}{% endcall %}
             </a>
@@ -767,6 +804,7 @@
             {% for m in form.bindable %}
             <button type="button" data-bind-monitor data-target-id="{{ m.id }}" data-enabled="{{ m.enabled }}"
                     data-tags="{{ m.tags }}"
+                    data-tags-json="{{ m.tags_json }}"
                     class="check-type-card min-w-0 text-left{% if !m.enabled %} opacity-50{% endif %}">
               {% call monitor_card_body(m) %}{% endcall %}
             </button>
@@ -825,5 +863,6 @@
 <script defer src="{{ "js/qrcode.min.js"|asset }}"></script>
 <script defer src="{{ "js/ui/qr.js"|asset }}"></script>
 <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+<script defer src="{{ "js/ui/tag_chip_input.js"|asset }}"></script>
 <script defer src="{{ "js/ui/notification_channels.js"|asset }}"></script>
 {% endblock %}

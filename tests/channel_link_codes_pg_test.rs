@@ -189,6 +189,7 @@ async fn status_poll_is_org_scoped_and_transitions() {
                 name: "Ops Telegram".into(),
                 config: app_config("-100123"),
                 enabled: true,
+                auto_bind_tags: Vec::new(),
             },
             WriteSource::Ui,
             10,

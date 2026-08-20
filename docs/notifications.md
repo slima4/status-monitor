@@ -18,7 +18,7 @@ The point of the split is blast radius. A noisy marketing-site monitor and your 
 
 | Type | What you provide | Notes |
 |---|---|---|
-| Slack, Discord, Teams, Google Chat | An incoming webhook URL | Discord, Teams and Google Chat URLs are host-checked, so a wrong-vendor paste is refused up front. A Slack URL is only checked for `https`, so verify it with a test send |
+| Slack, Discord, Teams, Google Chat | An incoming webhook URL | Discord, Teams and Google Chat URLs are host-checked, so a wrong-vendor paste is refused up front. A Slack URL is only checked for `https`, so verify it with a test send. Slack also takes an optional group ping, see below |
 | Telegram | One-tap link, or your own bot token and chat id | The one-tap flow is available where the platform runs a central bot |
 | WhatsApp | One-tap link, or Business Cloud API credentials and a template | Bring-your-own needs an approved one-parameter template |
 | SMS | Credentials for your own gateway: Twilio, Vonage, Telnyx, Plivo, or Sinch | One message per alert, trimmed to bound per-segment cost |
@@ -44,6 +44,12 @@ Two types need a second step:
 
 Secrets are sealed at rest and never shown again. On edit they stay masked behind a replace toggle, and leaving the toggle off keeps the stored value untouched.
 
+### Pinging a group in Slack
+
+A message in a busy channel is easy to miss, so a Slack channel takes an optional **ping on alert** that leads the text: `@here`, `@channel`, a user-group id (`S…`) or a member id (`U…`, or `W…` on Enterprise Grid), space or comma separated, up to five. A plain `@sre` handle is inert in a webhook message, which is why the id is what the field wants; you find a group's id on its page under **Slack → People → User groups**, and a member's under their profile's **Copy member ID**. Only the events that need a human carry the ping: opened, reopened, escalated, and monitoring interrupted. Recovery and resumed messages stay silent, and a **test now** send drops `@here`/`@channel` so checking your config does not wake the room — a group or member ping still rides along, so a wrong id shows up as dead text on the test.
+
+Changing the ping goes through the same replace-config toggle as the webhook URL, so re-enter the webhook when you edit it.
+
 ### Delegating the connect step
 
 When the credentials belong to someone outside the org, say the Slack workspace admin or the person who owns the shared inbox, you do not need to chase them for secrets. **Settings → Notifications → delegate the connect step** mints a single-use `/c/{code}` link. Whoever opens it can connect exactly one channel to your workspace and nothing else, with no account needed; the link expires after 7 days and can be revoked before use. The same flow is scriptable through the delegate endpoints in the [REST API](api.md#notification-channels).
@@ -51,6 +57,14 @@ When the credentials belong to someone outside the org, say the Slack workspace 
 ## Binding a monitor
 
 The monitor form has a **Notifications** section listing your channels with a checkbox each. It only appears once the org has at least one channel, so create the channel first. When the org has exactly one, a new monitor ticks it for you; with several the form leaves the choice alone rather than guessing.
+
+### Routing by tag
+
+Ticking a box per monitor stops scaling once one team owns a dozen of them, so a channel can carry a **route by tag** rule instead: it also pages any monitor carrying one of those tags. One tag in common is enough. Tags are picked as chips from the org's own vocabulary, the same control the monitor form uses, and the rule sits outside the replace-config toggle, so it can be changed without re-entering the webhook.
+
+The rule is resolved when an alert fires, not written into the monitors. Retag a monitor and its coverage moves with it; create a monitor already tagged `db` and the `db` channel pages it from its first check, with nothing to remember. A monitor covered only by a rule shows the channel marked **by tag** in its own form, and no longer warns that it alerts nobody.
+
+Explicit bindings still work and stack with rules: a channel bound to a monitor and matching its tags pages once. Where an escalation policy applies to a monitor, the policy's own rungs decide who is paged, and both bindings and tag rules stand aside.
 
 Alongside the bindings sit the controls that decide when they fire:
 

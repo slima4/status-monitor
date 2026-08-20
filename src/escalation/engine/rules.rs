@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::domain::{IncidentState, NotificationReason, Target, UserId};
+use crate::domain::{IncidentState, NotificationReason, UserId};
 
 use super::PageTarget;
 
@@ -109,11 +109,6 @@ pub(super) fn push_target(out: &mut Vec<PageTarget>, channel_id: Uuid, user_id: 
         channel_id,
         user_id,
     });
-}
-
-/// The channel ids bound directly to a monitor (the pre-policy fallback path).
-pub(super) fn binding_channels(target: &Target) -> Vec<Uuid> {
-    target.alerts.iter().map(|b| b.channel_id).collect()
 }
 
 /// What one round of paging produced. `recorded` counts rows written, which a

@@ -13,7 +13,7 @@ use crate::storage::{Actor, DueIncident, EmergencyAck};
 
 use super::rules::{
     DAMPED_TRANSPORT, Damper, FlapState, RELEASED_TRANSPORT, UNREACHABLE_TRANSPORT,
-    binding_channels, channel_targets, flap_state, open_episode_active, resolvable_channels,
+    channel_targets, flap_state, open_episode_active, resolvable_channels,
 };
 use super::{SWEEP_CONCURRENCY, Worker};
 
@@ -309,7 +309,14 @@ impl Worker {
                 }
             }
             None => {
-                let targets = channel_targets(binding_channels(target));
+                let targets = channel_targets(
+                    crate::storage::notification_channels::paging_channel_ids(
+                        self.channels.as_ref(),
+                        org,
+                        target,
+                    )
+                    .await?,
+                );
                 let paged = self
                     .page_channels(org, incident.id, &notice, reason, 0, &targets)
                     .await?;

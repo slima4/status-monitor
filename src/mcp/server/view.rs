@@ -47,28 +47,35 @@ pub(super) fn check_diagnostic(result: &CheckResult) -> Option<CheckDiagnosticVi
         })
 }
 
-/// Bindings as the names a human approves, flagging any that deliver nothing.
-/// A binding whose channel is gone is named as deleted rather than dropped from
-/// the line, which would read as one fewer channel losing its alerts.
+/// Who a page would reach, as the names a human approves: the bound channels,
+/// then any whose tag rule covers `tags`, flagging the ones that deliver
+/// nothing. A binding whose channel is gone is named as deleted rather than
+/// dropped from the line, which would read as one fewer channel losing its
+/// alerts. `None` means nothing pages.
 pub(super) fn channel_names(
     alerts: &TargetAlerts,
+    tags: &[String],
     channels: &[NotificationChannel],
     failure_limit: u32,
-) -> String {
-    if alerts.is_empty() {
-        return "nobody".to_string();
-    }
-    alerts
+) -> Option<String> {
+    let named = |c: &NotificationChannel| match undeliverable_reason(c, failure_limit) {
+        Some(why) => format!("{} ({why})", sanitize_data(&c.name)),
+        None => sanitize_data(&c.name),
+    };
+    let mut out: Vec<String> = alerts
         .iter()
         .map(|b| match channels.iter().find(|c| c.id == b.channel_id) {
-            Some(c) => match undeliverable_reason(c, failure_limit) {
-                Some(why) => format!("{} ({why})", sanitize_data(&c.name)),
-                None => sanitize_data(&c.name),
-            },
+            Some(c) => named(c),
             None => format!("a deleted channel ({})", b.channel_id),
         })
-        .collect::<Vec<_>>()
-        .join(", ")
+        .collect();
+    for c in channels
+        .iter()
+        .filter(|c| c.auto_binds(tags) && !alerts.iter().any(|b| b.channel_id == c.id))
+    {
+        out.push(format!("{} (by tag)", named(c)));
+    }
+    (!out.is_empty()).then(|| out.join(", "))
 }
 
 /// Why a channel would deliver nothing if a monitor were bound to it. One

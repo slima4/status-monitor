@@ -109,9 +109,11 @@ pub fn build_notifier(
             c.headers.clone(),
             c.secret.clone(),
         )) as Arc<dyn Notifier>,
-        ChannelConfig::Slack(c) => {
-            Arc::new(SlackNotifier::new(http.clone(), parse(&c.webhook_url)?)) as Arc<dyn Notifier>
-        }
+        ChannelConfig::Slack(c) => Arc::new(SlackNotifier::new(
+            http.clone(),
+            parse(&c.webhook_url)?,
+            c.mention_markup(),
+        )) as Arc<dyn Notifier>,
         ChannelConfig::Telegram(c) => Arc::new(TelegramNotifier::new(
             http.clone(),
             &c.bot_token,

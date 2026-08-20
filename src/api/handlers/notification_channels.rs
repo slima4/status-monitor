@@ -75,13 +75,14 @@ pub async fn create(
     Authorized(org, _): Authorized<ChannelsWrite>,
     CurrentUser(user): CurrentUser,
     RequestSource(source): RequestSource,
-    Json(new): Json<NewNotificationChannel>,
+    Json(mut new): Json<NewNotificationChannel>,
 ) -> Result<(
     StatusCode,
     AppendHeaders<[(axum::http::HeaderName, HeaderValue); 1]>,
     Redacted<NotificationChannel>,
 )> {
     validate_name(&new.name)?;
+    new.auto_bind_tags = normalize_rule_tags(&new.auto_bind_tags)?;
     reject_managed_kind(&new.config)?;
     validate_config(&new.config)?;
     check_channel_abuse(&state, org, &new.config)?;
@@ -179,10 +180,13 @@ pub async fn update(
     CurrentUser(user): CurrentUser,
     RequestSource(source): RequestSource,
     Path(id): Path<Uuid>,
-    Json(update): Json<NotificationChannelUpdate>,
+    Json(mut update): Json<NotificationChannelUpdate>,
 ) -> Result<Redacted<NotificationChannel>> {
     if let Some(name) = &update.name {
         validate_name(name)?;
+    }
+    if let Some(tags) = &update.auto_bind_tags {
+        update.auto_bind_tags = Some(normalize_rule_tags(tags)?);
     }
     let config_replaced = update.config.is_some();
     if let Some(cfg) = &update.config {
@@ -1046,8 +1050,14 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
         .whatsapp_app
         .enabled()
         .then_some(&state.cfg.whatsapp_app);
+    // Targeted pings ride along so a wrong id shows; broadcasts do not, so
+    // trying a config out never wakes the channel.
+    let quieted = match config {
+        ChannelConfig::Slack(c) => Some(ChannelConfig::Slack(c.without_broadcast_mention())),
+        _ => None,
+    };
     let notifier = build_notifier(
-        config,
+        quieted.as_ref().unwrap_or(config),
         &state.outbound_http,
         central,
         whatsapp,
@@ -1127,6 +1137,17 @@ pub(crate) fn reject_managed_kind(cfg: &ChannelConfig) -> Result<()> {
 pub(crate) fn validate_name(name: &str) -> Result<()> {
     validate_channel_name(name)
         .map_err(|m| AppError::bad_request_field(codes::CHANNEL_NAME_INVALID, m, "name"))
+}
+
+/// Monitor-tag rules and bounds — a rule that cannot name a legal tag would
+/// match nothing — reported against the field this request sent.
+fn normalize_rule_tags(tags: &[String]) -> Result<Vec<String>> {
+    crate::api::handlers::targets::normalize_tags(tags).map_err(|e| match e {
+        AppError::BadRequest { code, message, .. } => {
+            AppError::bad_request_field(code, message, "auto_bind_tags")
+        }
+        other => other,
+    })
 }
 
 /// Redaction-sentinel guard first (so a `GET → PATCH` round-trip or a

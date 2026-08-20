@@ -7,6 +7,29 @@ use super::*;
 use crate::api::redaction::REDACTED;
 use crate::domain::{CheckSpec, ExpectedStatus, HttpMethod, Target};
 
+/// The chip that says a channel already covers this monitor is decided in the
+/// browser from the tags being edited, so the rule has to reach the markup.
+#[test]
+fn a_channels_tag_rule_reaches_the_form_for_the_client_to_match_on() {
+    let mut form = empty_create_form();
+    form.channels = vec![ChannelChoice {
+        id: "c1".into(),
+        name: "db team".into(),
+        kind: "slack",
+        selected: false,
+        rule_tags: r#"["db","us east"]"#.into(),
+    }];
+    let html = FormPage {
+        active_tab: "targets",
+        form,
+    }
+    .render()
+    .unwrap();
+    // Escaped by the template, so the browser hands JSON.parse the real tags.
+    assert!(html.contains(r#"data-rule-tags="[&#34;db&#34;,&#34;us east&#34;]""#));
+    assert!(html.contains("data-rule-chip"));
+}
+
 #[test]
 fn new_form_renders_empty_create() {
     let page = FormPage {

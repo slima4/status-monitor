@@ -17,6 +17,10 @@ pub struct ChannelChoice {
     pub name: String,
     pub kind: &'static str,
     pub selected: bool,
+    /// The channel's tag rule as a JSON array. Whether it covers this monitor
+    /// is decided in the browser, since the tags are edited on this page, and
+    /// a tag may contain a space, so no joined form survives the round trip.
+    pub rule_tags: String,
 }
 
 pub struct FormModel {

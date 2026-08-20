@@ -78,6 +78,7 @@ async fn slack_channel_posts_text_payload() {
     let (addr, store) = spawn_capture_server().await;
     let cfg = ChannelConfig::Slack(SlackConfig {
         webhook_url: format!("http://{addr}/hook"),
+        mention: None,
     });
     let notifier = build_notifier(
         &cfg,
@@ -104,11 +105,43 @@ async fn slack_channel_posts_text_payload() {
     assert!(text.contains("demo"));
 }
 
+/// The stored mention is a raw token; only the factory turns it into markup,
+/// so a wiring slip would deliver inert text instead of a ping.
+#[tokio::test]
+async fn slack_mention_reaches_the_wire_as_ping_markup() {
+    let (addr, store) = spawn_capture_server().await;
+    let cfg = ChannelConfig::Slack(SlackConfig {
+        webhook_url: format!("http://{addr}/hook"),
+        mention: Some("@here, S01ABC234".into()),
+    });
+    let notifier = build_notifier(
+        &cfg,
+        &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("notifier");
+    notifier
+        .notify_incident(&make_notice())
+        .await
+        .expect("notify");
+
+    let captured = store.lock().clone();
+    let text = captured[0].body["text"].as_str().unwrap().to_string();
+    assert!(
+        text.starts_with("<!here> <!subteam^S01ABC234> "),
+        "mention missing: {text}"
+    );
+}
+
 #[tokio::test]
 async fn slack_multi_region_includes_breakdown() {
     let (addr, store) = spawn_capture_server().await;
     let cfg = ChannelConfig::Slack(SlackConfig {
         webhook_url: format!("http://{addr}/hook"),
+        mention: None,
     });
     let notifier = build_notifier(
         &cfg,
@@ -135,6 +168,7 @@ async fn slack_single_region_omits_breakdown() {
     let (addr, store) = spawn_capture_server().await;
     let cfg = ChannelConfig::Slack(SlackConfig {
         webhook_url: format!("http://{addr}/hook"),
+        mention: None,
     });
     let notifier = build_notifier(
         &cfg,
@@ -259,6 +293,7 @@ async fn build_notifier_constructs_each_kind() {
         build_notifier(
             &ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
+                mention: None,
             }),
             &http,
             None,
@@ -276,6 +311,7 @@ async fn build_notifier_rejects_unparseable_url() {
     let err = build_notifier(
         &ChannelConfig::Slack(SlackConfig {
             webhook_url: "not a url".into(),
+            mention: None,
         }),
         &http,
         None,

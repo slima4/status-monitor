@@ -165,8 +165,10 @@ async fn seed_channel(pool: &PgPool, org: OrgId, name: &str) -> Uuid {
                 name: name.to_string(),
                 config: ChannelConfig::Slack(SlackConfig {
                     webhook_url: "https://hooks.slack.example/T/B/x".into(),
+                    mention: None,
                 }),
                 enabled: true,
+                auto_bind_tags: Vec::new(),
             },
             WriteSource::Ui,
             i64::MAX,

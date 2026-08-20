@@ -47,6 +47,7 @@ pub async fn callback(
             Ok((
                 ChannelConfig::Slack(SlackConfig {
                     webhook_url: webhook.url,
+                    mention: None,
                 }),
                 name,
             ))

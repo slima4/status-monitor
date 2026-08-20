@@ -263,6 +263,11 @@ pub struct NotificationChannel {
     /// Last delivery that landed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_delivered_at: Option<DateTime<Utc>>,
+    /// Tag rule: also pages any monitor carrying one of these tags, on top
+    /// of the ones bound explicitly. Resolved at alert time, so a retagged
+    /// monitor needs no rewrite here.
+    #[serde(default)]
+    pub auto_bind_tags: Vec<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Where this channel was last changed from (UI, API, or Terraform).
@@ -274,6 +279,18 @@ impl NotificationChannel {
     /// verification link; every other kind is unaffected.
     pub fn awaiting_verification(&self) -> bool {
         self.kind == ChannelKind::Email && self.verified_at.is_none()
+    }
+
+    /// Whether a page aimed here would be attempted at all: a disabled
+    /// channel and an unconfirmed address both swallow every delivery.
+    pub fn can_deliver(&self) -> bool {
+        self.enabled && !self.awaiting_verification()
+    }
+
+    /// One tag in common is enough: a team owns a set of resources, not an
+    /// intersection of labels.
+    pub fn auto_binds(&self, tags: &[String]) -> bool {
+        self.auto_bind_tags.iter().any(|r| tags.contains(r))
     }
 
     /// Enabled, able to deliver at all, and nothing has landed for `limit`
@@ -302,6 +319,10 @@ pub struct NewNotificationChannel {
     pub config: ChannelConfig,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Tag rule; see [`NotificationChannel::auto_bind_tags`].
+    #[serde(default)]
+    #[schema(example = json!(["db"]))]
+    pub auto_bind_tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -309,6 +330,8 @@ pub struct NotificationChannelUpdate {
     pub name: Option<String>,
     pub config: Option<ChannelConfig>,
     pub enabled: Option<bool>,
+    /// Replaces the whole rule; `[]` clears it.
+    pub auto_bind_tags: Option<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -367,6 +390,7 @@ mod tests {
             }),
             ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
+                mention: None,
             }),
             ChannelConfig::Telegram(TelegramConfig {
                 bot_token: "t".into(),
@@ -471,7 +495,8 @@ mod tests {
     fn validate_rejects_non_https_and_empty() {
         assert!(
             ChannelConfig::Slack(SlackConfig {
-                webhook_url: "http://insecure".into()
+                webhook_url: "http://insecure".into(),
+                mention: None,
             })
             .validate()
             .is_err()
@@ -509,6 +534,7 @@ mod tests {
     fn abuse_url_only_for_customer_destinations() {
         let slack = ChannelConfig::Slack(SlackConfig {
             webhook_url: "https://hooks.slack.com/x".into(),
+            mention: None,
         });
         assert_eq!(slack.abuse_url(), Some("https://hooks.slack.com/x"));
         let tg = ChannelConfig::Telegram(TelegramConfig {
@@ -675,10 +701,9 @@ mod tests {
         assert!(bad("a+tag@sub.example.co").is_ok());
     }
 
-    #[test]
-    fn awaiting_verification_only_for_unverified_email() {
+    fn sample_channel(kind_email: bool, verified: bool) -> NotificationChannel {
         use chrono::Utc;
-        let ch = |kind_email: bool, verified: bool| NotificationChannel {
+        NotificationChannel {
             id: Uuid::nil(),
             name: "n".into(),
             kind: if kind_email {
@@ -693,6 +718,7 @@ mod tests {
             } else {
                 ChannelConfig::Slack(SlackConfig {
                     webhook_url: "https://hooks.slack.com/x".into(),
+                    mention: None,
                 })
             },
             enabled: true,
@@ -701,13 +727,42 @@ mod tests {
             consecutive_failures: 0,
             failing_since: None,
             last_delivered_at: None,
+            auto_bind_tags: Vec::new(),
             write_source: WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        };
-        assert!(ch(true, false).awaiting_verification());
-        assert!(!ch(true, true).awaiting_verification());
-        assert!(!ch(false, false).awaiting_verification());
+        }
+    }
+
+    #[test]
+    fn a_tag_rule_needs_one_tag_in_common_not_all_of_them() {
+        let mut ch = sample_channel(false, false);
+        ch.auto_bind_tags = vec!["db".into(), "cache".into()];
+        assert!(ch.auto_binds(&["db".to_string()]));
+        assert!(ch.auto_binds(&["eu".to_string(), "cache".to_string()]));
+        assert!(!ch.auto_binds(&["web".to_string()]));
+        assert!(!ch.auto_binds(&[]));
+        // Tags are stored as typed, so a case difference is a different tag.
+        assert!(!ch.auto_binds(&["DB".to_string()]));
+        // An empty rule matches nothing, however the monitor is tagged.
+        assert!(!sample_channel(false, false).auto_binds(&["db".to_string()]));
+    }
+
+    #[test]
+    fn a_channel_nothing_can_land_on_does_not_count_as_reaching_someone() {
+        assert!(sample_channel(true, true).can_deliver());
+        // Unconfirmed address: every send fails by design.
+        assert!(!sample_channel(true, false).can_deliver());
+        let mut off = sample_channel(true, true);
+        off.enabled = false;
+        assert!(!off.can_deliver());
+    }
+
+    #[test]
+    fn awaiting_verification_only_for_unverified_email() {
+        assert!(sample_channel(true, false).awaiting_verification());
+        assert!(!sample_channel(true, true).awaiting_verification());
+        assert!(!sample_channel(false, false).awaiting_verification());
     }
 
     #[test]

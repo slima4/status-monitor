@@ -1045,4 +1045,27 @@
         if (!name) return null;
         return form.querySelector(`[name="${name}"]`);
     }
+
+    // The chip tracks the tags being edited here, not the saved ones.
+    const tagChips = form.querySelector("[data-tag-chips]");
+    function syncRuleChips() {
+        const tags = (window.smCollectTags && window.smCollectTags()) || [];
+        for (const row of form.querySelectorAll("[data-channel-row]")) {
+            const chip = row.querySelector("[data-rule-chip]");
+            if (!chip) continue;
+            let rule = [];
+            try {
+                rule = JSON.parse(row.dataset.ruleTags || "[]");
+            } catch {
+                rule = [];
+            }
+            chip.hidden = !rule.some((t) => tags.includes(t));
+        }
+    }
+    if (tagChips) {
+        tagChips.addEventListener("change", syncRuleChips);
+        // A tag added through the input never fires change on the container.
+        new MutationObserver(syncRuleChips).observe(tagChips, { childList: true });
+    }
+    syncRuleChips();
 })();

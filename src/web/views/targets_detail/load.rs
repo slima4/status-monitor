@@ -95,7 +95,7 @@ impl UnconfirmedFailures {
 /// A store error reads as "someone is reachable" so a failed lookup never
 /// accuses a monitor that in fact alerts fine.
 pub(super) async fn alerts_nobody(state: &AppState, org: OrgId, target: &Target) -> bool {
-    if !target.alerts.is_empty() {
+    if binds_a_live_channel(state, org, target).await {
         return false;
     }
     state
@@ -104,6 +104,29 @@ pub(super) async fn alerts_nobody(state: &AppState, org: OrgId, target: &Target)
         .await
         .map(|policy| policy.is_none())
         .unwrap_or(false)
+}
+
+/// A channel pages only while it is there and able to deliver; the sweep
+/// skips the rest, so counting a dead one as coverage would hide the very
+/// monitor this warning exists for.
+async fn binds_a_live_channel(state: &AppState, org: OrgId, target: &Target) -> bool {
+    let Ok(ids) = crate::storage::notification_channels::paging_channel_ids(
+        state.notification_channel_store.as_ref(),
+        org,
+        target,
+    )
+    .await
+    else {
+        return true;
+    };
+    for id in ids {
+        match state.notification_channel_store.get(org, id).await {
+            Ok(Some(channel)) if channel.can_deliver() => return true,
+            Ok(_) => {}
+            Err(_) => return true,
+        }
+    }
+    false
 }
 
 /// Best-effort: a failed read costs the flap column, never the page.

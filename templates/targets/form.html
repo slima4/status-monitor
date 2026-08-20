@@ -582,13 +582,13 @@
       <span class="mb-1.5 block text-xs text-muted">Channels to notify</span>
       <div class="flex flex-wrap gap-1.5">
         {% for c in form.channels %}
-        <label data-channel-row class="scope-token">
+        <label data-channel-row data-rule-tags="{{ c.rule_tags }}" class="scope-token">
           <input type="checkbox" data-channel-select value="{{ c.id }}" class="sr-only"{% if c.selected %} checked{% endif %}>
-          {{ c.kind }}:{{ c.name }}
+          {{ c.kind }}:{{ c.name }}<span data-rule-chip hidden class="cli-brackets ml-1 font-normal">by tag</span>
         </label>
         {% endfor %}
       </div>
-      <span class="mt-1 block text-xs text-muted">Notified when this monitor opens or resolves an incident.</span>
+      <span class="mt-1 block text-xs text-muted">Notified when this monitor opens or resolves an incident. A channel marked <span class="cli-brackets">by tag</span> already covers this monitor through its own tag rule, ticked or not.</span>
       {% endif %}
       </div>
     </fieldset>
@@ -599,7 +599,7 @@
         <div class="grid gap-3 sm:grid-cols-2">
           <div>
             <span class="mb-1.5 block text-xs text-muted">Tags</span>
-            <div class="flex flex-wrap items-center gap-1.5" data-tag-chips role="group" aria-label="Tags">
+            <div class="flex flex-wrap items-center gap-1.5" data-tag-chips="monitor" role="group" aria-label="Tags">
               {% for t in form.tag_options %}
               <label class="scope-token">
                 <input type="checkbox" data-tag-pick value="{{ t }}" class="sr-only"{% if form.tags.contains(t) %} checked{% endif %}>

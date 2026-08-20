@@ -17,8 +17,10 @@ fn slack(name: &str) -> NewNotificationChannel {
         name: name.into(),
         config: ChannelConfig::Slack(SlackConfig {
             webhook_url: "https://hooks.slack.com/services/T/B/x".into(),
+            mention: None,
         }),
         enabled: true,
+        auto_bind_tags: Vec::new(),
     }
 }
 

@@ -175,6 +175,27 @@ pub trait NotificationChannelStore: Send + Sync {
     /// link is the authority. Clears verification so it cannot silently resume.
     /// Idempotent.
     async fn disable_self_service(&self, channel_id: Uuid, reason: &str) -> Result<bool>;
+    /// Ids of the channels whose tag rule covers a monitor carrying `tags`.
+    /// Reads no config, so paging never unseals a secret to learn who to
+    /// page. Empty `tags` matches nothing.
+    async fn auto_bound_ids(&self, org: OrgId, tags: &[String]) -> Result<Vec<Uuid>>;
+}
+
+/// Every channel that should hear about `target`: bound first, then rule
+/// matches, deduped. One funnel, so the paging path, the silence notifier and
+/// the console's reachability warning cannot disagree.
+pub async fn paging_channel_ids(
+    store: &dyn NotificationChannelStore,
+    org: OrgId,
+    target: &crate::domain::Target,
+) -> Result<Vec<Uuid>> {
+    let mut ids: Vec<Uuid> = target.alerts.iter().map(|b| b.channel_id).collect();
+    for id in store.auto_bound_ids(org, &target.tags).await? {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 
 /// One-click stop proof: HMAC of the channel id, scoped to that channel so a
@@ -227,6 +248,7 @@ struct ChannelRow {
     consecutive_failures: i32,
     failing_since: Option<DateTime<Utc>>,
     last_delivered_at: Option<DateTime<Utc>>,
+    auto_bind_tags: Vec<String>,
     write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -248,6 +270,7 @@ impl ChannelRow {
             consecutive_failures: self.consecutive_failures,
             failing_since: self.failing_since,
             last_delivered_at: self.last_delivered_at,
+            auto_bind_tags: self.auto_bind_tags,
             write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
             updated_at: self.updated_at,
@@ -285,10 +308,10 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .await
             .map_err(|e| AppError::Other(anyhow!("advisory lock: {e}")))?;
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"INSERT INTO notification_channels (org_id, name, kind, config, external_ref, enabled, write_source)
-               SELECT $1, $2, $3, $4, $5, $6, $8
+            r#"INSERT INTO notification_channels (org_id, name, kind, config, external_ref, enabled, write_source, auto_bind_tags)
+               SELECT $1, $2, $3, $4, $5, $6, $8, $9
                WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $7
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&new.name)
@@ -298,6 +321,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(new.enabled)
         .bind(max_channels)
         .bind(source.as_str())
+        .bind(&new.auto_bind_tags)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -361,7 +385,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                SELECT $1, $2, 'email', $3, $2, true, now(), 'ui'
                WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $4
                ON CONFLICT (org_id, name) DO NOTHING
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&address)
@@ -390,7 +414,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn list(&self, org: OrgId) -> Result<Vec<NotificationChannel>> {
         let rows: Vec<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at
                FROM notification_channels
                WHERE org_id = $1
                ORDER BY name"#,
@@ -406,7 +430,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<NotificationChannel>> {
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at
+            r#"SELECT id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at
                FROM notification_channels WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -416,6 +440,23 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .map_err(|e| AppError::Other(anyhow!("get notification channel: {e}")))?;
         row.map(|r| r.into_channel(self.cipher.as_deref()))
             .transpose()
+    }
+
+    async fn auto_bound_ids(&self, org: OrgId, tags: &[String]) -> Result<Vec<Uuid>> {
+        if tags.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids: Vec<(Uuid,)> = sqlx::query_as(
+            r#"SELECT id FROM notification_channels
+               WHERE org_id = $1 AND auto_bind_tags && $2
+               ORDER BY created_at"#,
+        )
+        .bind(org.0)
+        .bind(tags)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::Other(anyhow!("auto-bound channels: {e}")))?;
+        Ok(ids.into_iter().map(|(id,)| id).collect())
     }
 
     async fn update(
@@ -466,10 +507,11 @@ impl NotificationChannelStore for PgNotificationChannelStore {
                    -- A replaced config must re-verify its address.
                    verified_at = CASE WHEN $4::jsonb IS NOT NULL THEN NULL ELSE verified_at END,
                    external_ref = CASE WHEN $4::jsonb IS NOT NULL THEN $8 ELSE external_ref END,
+                   auto_bind_tags = COALESCE($9, auto_bind_tags),
                    write_source = $7,
                    updated_at  = now()
                WHERE id = $1 AND org_id = $6
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.name.as_ref())
@@ -479,6 +521,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(org.0)
         .bind(source.as_str())
         .bind(config.as_ref().and_then(|c| c.lifecycle_ref()))
+        .bind(update.auto_bind_tags.as_ref())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -772,6 +815,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             consecutive_failures: 0,
             failing_since: None,
             last_delivered_at: None,
+            auto_bind_tags: new.auto_bind_tags,
             write_source: source,
             created_at: now,
             updated_at: now,
@@ -811,6 +855,7 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             consecutive_failures: 0,
             failing_since: None,
             last_delivered_at: None,
+            auto_bind_tags: Vec::new(),
             write_source: WriteSource::Ui,
             created_at: now,
             updated_at: now,
@@ -845,6 +890,16 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             .map(|e| e.ch.clone()))
     }
 
+    async fn auto_bound_ids(&self, org: OrgId, tags: &[String]) -> Result<Vec<Uuid>> {
+        Ok(self
+            .inner
+            .lock()
+            .iter()
+            .filter(|e| e.org == org && e.ch.auto_binds(tags))
+            .map(|e| e.ch.id)
+            .collect())
+    }
+
     async fn update(
         &self,
         org: OrgId,
@@ -876,6 +931,9 @@ impl NotificationChannelStore for InMemoryNotificationChannelStore {
             entry.ch.kind = cfg.kind();
             entry.ch.config = cfg;
             entry.ch.verified_at = None;
+        }
+        if let Some(tags) = update.auto_bind_tags {
+            entry.ch.auto_bind_tags = tags;
         }
         if let Some(enabled) = update.enabled {
             let was_disabled = !entry.ch.enabled;
@@ -1049,9 +1107,109 @@ mod tests {
             name: name.into(),
             config: ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
+                mention: None,
             }),
             enabled: true,
+            auto_bind_tags: Vec::new(),
         }
+    }
+
+    fn tagged_target(tags: Vec<String>) -> crate::domain::Target {
+        crate::domain::Target {
+            id: Uuid::from_u128(7),
+            name: "api".into(),
+            check: crate::domain::CheckSpec::Tcp(crate::domain::check::TcpCheck {
+                host: "db.example.test".into(),
+                port: 5432,
+                timeout: std::time::Duration::from_secs(3),
+            }),
+            interval: std::time::Duration::from_secs(60),
+            enabled: true,
+            tags,
+            alerts: crate::domain::TargetAlerts::default(),
+            alert_confirmations: 1,
+            notify_recovery: true,
+            renotify_interval_secs: 0,
+            region_policy: Default::default(),
+            group_name: None,
+            owner_user_id: None,
+            write_source: WriteSource::Ui,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_tag_rule_covers_a_monitor_nothing_is_bound_to() {
+        use crate::domain::{AlertBinding, TargetAlerts};
+        let store = InMemoryNotificationChannelStore::new();
+        let mut rule = slack("db team");
+        rule.auto_bind_tags = vec!["db".into()];
+        let by_rule = store
+            .create(org(), rule, WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+        let bound = store
+            .create(org(), slack("ops"), WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+        // Another org's identical rule must never leak in.
+        let mut theirs = slack("their db team");
+        theirs.auto_bind_tags = vec!["db".into()];
+        store
+            .create(other_org(), theirs, WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+
+        let mut target = tagged_target(vec!["db".into(), "prod".into()]);
+        target.alerts = TargetAlerts(vec![AlertBinding {
+            channel_id: bound.id,
+        }]);
+
+        let ids = paging_channel_ids(&store, org(), &target).await.unwrap();
+        assert_eq!(ids, vec![bound.id, by_rule.id]);
+
+        // Retagging moves coverage with no write to the channel.
+        target.tags = vec!["web".into()];
+        assert_eq!(
+            paging_channel_ids(&store, org(), &target).await.unwrap(),
+            vec![bound.id]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rule_is_replaced_whole_and_an_empty_list_clears_it() {
+        let store = InMemoryNotificationChannelStore::new();
+        let mut rule = slack("db team");
+        rule.auto_bind_tags = vec!["db".into()];
+        let ch = store
+            .create(org(), rule, WriteSource::Ui, 10, None)
+            .await
+            .unwrap();
+        let patch = |tags: Option<Vec<String>>| NotificationChannelUpdate {
+            auto_bind_tags: tags,
+            ..Default::default()
+        };
+        // Omitted: the rule stands.
+        let kept = store
+            .update(org(), ch.id, patch(None), WriteSource::Ui, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(kept.auto_bind_tags, vec!["db".to_string()]);
+        let cleared = store
+            .update(org(), ch.id, patch(Some(Vec::new())), WriteSource::Ui, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(cleared.auto_bind_tags.is_empty());
+        assert!(
+            store
+                .auto_bound_ids(org(), &["db".to_string()])
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -1155,6 +1313,7 @@ mod tests {
                 chat_title: None,
             }),
             enabled: true,
+            auto_bind_tags: Vec::new(),
         };
         // Two orgs linked the same chat; a third channel points elsewhere.
         let a = store
@@ -1503,6 +1662,7 @@ mod tests {
             kind: ChannelKind::Slack,
             config: ChannelConfig::Slack(crate::domain::SlackConfig {
                 webhook_url: "https://hooks.slack.com/services/x".into(),
+                mention: None,
             }),
             enabled: true,
             disabled_reason: None,
@@ -1513,6 +1673,7 @@ mod tests {
             write_source: WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            auto_bind_tags: Vec::new(),
         };
         assert!(!ch.is_failing(3));
         ch.consecutive_failures = 3;
@@ -1598,6 +1759,7 @@ mod tests {
         let sealed = seal(
             &ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
+                mention: None,
             }),
             Some(&c),
         )
@@ -1615,6 +1777,7 @@ mod tests {
         let plaintext = seal(
             &ChannelConfig::Slack(SlackConfig {
                 webhook_url: "https://hooks.slack.com/x".into(),
+                mention: None,
             }),
             None,
         )

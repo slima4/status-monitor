@@ -775,6 +775,8 @@
         const payload = {
             name,
             enabled: data.get("enabled") === "on",
+            // Always sent: an emptied field is how a rule is cleared.
+            auto_bind_tags: ruleTags(),
         };
 
         // Edit + "replace config" unchecked: omit config so the stored
@@ -787,12 +789,61 @@
         return { payload };
     }
 
+    // Chips, not a delimited field: a tag may contain a space or a comma.
+    // Read from the DOM rather than the chip script, so a rule survives a save
+    // even where that script never ran.
+    const ruleChips = form.querySelector('[data-tag-chips="rule"]');
+    function ruleTags() {
+        if (!ruleChips) return [];
+        return Array.from(ruleChips.querySelectorAll("[data-tag-pick]"))
+            .filter((c) => c.checked)
+            .map((c) => c.value);
+    }
+
+    function monitorTags(card) {
+        try {
+            return JSON.parse(card.dataset.tagsJson || "[]");
+        } catch {
+            return [];
+        }
+    }
+
+    // A tag nothing carries otherwise reads as a working rule that pages nobody.
+    const ruleMatch = form.querySelector("[data-rule-match]");
+    if (ruleChips && ruleMatch) {
+        const showMatches = () => {
+            const rule = ruleTags();
+            if (!rule.length) {
+                ruleMatch.textContent = "";
+                return;
+            }
+            let hits = 0;
+            for (const card of form.querySelectorAll("[data-bound-card], [data-bind-monitor]")) {
+                const tags = monitorTags(card);
+                if (rule.some((t) => tags.includes(t))) hits += 1;
+            }
+            ruleMatch.textContent = hits === 1 ? "# matches 1 monitor" : `# matches ${hits} monitors`;
+        };
+        ruleChips.addEventListener("change", showMatches);
+        new MutationObserver(showMatches).observe(ruleChips, { childList: true });
+        showMatches();
+    }
+
     // The transport config exactly as the API expects it, from the current
     // form values. Shared by save and "test now".
     function buildConfig() {
         const data = new FormData(form);
         const kind = currentKind();
-        if (kind === "slack" || kind === "discord" || kind === "msteams" || kind === "google_chat") {
+        if (kind === "slack") {
+            const config = {
+                type: "slack",
+                webhook_url: (data.get("slack_webhook_url") || "").trim(),
+            };
+            const mention = (data.get("slack_mention") || "").trim();
+            if (mention) config.mention = mention;
+            return { config };
+        }
+        if (kind === "discord" || kind === "msteams" || kind === "google_chat") {
             return {
                 config: {
                     type: kind,

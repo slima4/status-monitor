@@ -85,11 +85,20 @@ impl SilenceDelivery for SilenceNotifier {
         };
         let central = self.central_bot.as_ref().map(|c| c.as_central());
         let mut delivered = false;
-        for binding in target.alerts.iter() {
-            let Ok(Some(channel)) = self.channels.get(org, binding.channel_id).await else {
+        // A failed rule lookup costs the rule's channels, never the bound ones:
+        // a transient database error must not silence the whole notice.
+        let channel_ids = crate::storage::notification_channels::paging_channel_ids(
+            self.channels.as_ref(),
+            org,
+            &target,
+        )
+        .await
+        .unwrap_or_else(|_| target.alerts.iter().map(|b| b.channel_id).collect());
+        for channel_id in channel_ids {
+            let Ok(Some(channel)) = self.channels.get(org, channel_id).await else {
                 continue;
             };
-            if !channel.enabled || channel.awaiting_verification() {
+            if !channel.can_deliver() {
                 continue;
             }
             let email_alert = crate::notifier::email_alert_for(

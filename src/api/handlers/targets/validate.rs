@@ -316,7 +316,7 @@ pub(crate) fn normalize_tags(tags: &[String]) -> Result<Vec<String>> {
     if out.len() > MAX_TAGS_PER_TARGET {
         return Err(AppError::bad_request_field(
             codes::TOO_MANY_TAGS,
-            format!("a monitor takes at most {MAX_TAGS_PER_TARGET} tags"),
+            format!("at most {MAX_TAGS_PER_TARGET} tags"),
             "tags",
         ));
     }
