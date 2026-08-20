@@ -105,6 +105,42 @@ async fn slack_channel_posts_text_payload() {
     assert!(text.contains("demo"));
 }
 
+/// The channel gets a laid-out card, not a wall of text: the fallback line
+/// stays for push notifications, the blocks carry the layout.
+#[tokio::test]
+async fn slack_channel_posts_block_kit_layout() {
+    let (addr, store) = spawn_capture_server().await;
+    let cfg = ChannelConfig::Slack(SlackConfig {
+        webhook_url: format!("http://{addr}/hook"),
+        mention: None,
+    });
+    let notifier = build_notifier(
+        &cfg,
+        &build_outbound_client(uptimepage::security::SsrfGuard::relaxed_for_tests()),
+        None,
+        None,
+        None,
+        None,
+    )
+    .expect("notifier");
+    let mut notice = make_notice();
+    notice.url = Some("https://app.test/i/1".into());
+    notifier.notify_incident(&notice).await.expect("notify");
+
+    let captured = store.lock().clone();
+    let blocks = captured[0].body["blocks"].as_array().expect("blocks");
+    assert_eq!(blocks[0]["type"], "header");
+    assert!(
+        blocks[0]["text"]["text"].as_str().unwrap().contains("demo"),
+        "{blocks:?}"
+    );
+    let button = blocks
+        .iter()
+        .find(|b| b["type"] == "actions")
+        .expect("link button");
+    assert_eq!(button["elements"][0]["url"], "https://app.test/i/1");
+}
+
 /// The stored mention is a raw token; only the factory turns it into markup,
 /// so a wiring slip would deliver inert text instead of a ping.
 #[tokio::test]

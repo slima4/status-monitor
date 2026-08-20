@@ -1,3 +1,6 @@
+mod blocks;
+mod template;
+
 use async_trait::async_trait;
 use serde::Serialize;
 use url::Url;
@@ -7,6 +10,10 @@ use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
 use crate::notifier::event::IncidentNotice;
+use crate::text::truncate_chars;
+
+use blocks::{Block, escape};
+use template::{MAX_ERROR_CHARS, SlackTemplate};
 
 pub struct SlackNotifier {
     client: OutboundHttpClient,
@@ -15,9 +22,12 @@ pub struct SlackNotifier {
     mention: Option<String>,
 }
 
+/// `text` is what a push notification and a client that cannot render blocks
+/// show, so it carries the whole alert on its own.
 #[derive(Serialize)]
 struct SlackPayload<'a> {
     text: &'a str,
+    blocks: Vec<Block>,
 }
 
 impl SlackNotifier {
@@ -29,12 +39,16 @@ impl SlackNotifier {
         }
     }
 
+    fn ping<'a>(mention: Option<&'a str>, n: &IncidentNotice) -> Option<&'a str> {
+        mention.filter(|_| pings_someone(n.reason))
+    }
+
     fn render_incident(mention: Option<&str>, n: &IncidentNotice) -> String {
         let body = match &n.note {
-            Some(note) => format!("{}\n{}", Self::incident_line(n), mrkdwn_escape(note)),
+            Some(note) => format!("{}\n{}", Self::incident_line(n), escape(note)),
             None => Self::incident_line(n),
         };
-        match mention.filter(|_| pings_someone(n.reason)) {
+        match Self::ping(mention, n) {
             Some(m) => format!("{m} {body}"),
             None => body,
         }
@@ -52,7 +66,7 @@ impl SlackNotifier {
         // Customer-supplied monitor name + error text must not inject Slack
         // markup (live `<url|text>` links, `@channel` mentions) into the
         // responders' channel.
-        let label = mrkdwn_escape(n.label());
+        let label = escape(n.label());
         match n.reason {
             NotificationReason::Opened
             | NotificationReason::Escalated
@@ -63,7 +77,7 @@ impl SlackNotifier {
                 err = n
                     .error_sample
                     .as_deref()
-                    .map(|e| format!(": {}", mrkdwn_escape(e)))
+                    .map(|e| format!(": {}", escape(&truncate_chars(e, MAX_ERROR_CHARS))))
                     .unwrap_or_default(),
                 regions = region_line(n),
             ),
@@ -93,17 +107,9 @@ fn pings_someone(reason: NotificationReason) -> bool {
     )
 }
 
-/// Escape the three characters Slack mrkdwn treats specially, so customer text
-/// renders literally rather than as live links or control sequences.
-fn mrkdwn_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
 /// Per-region breakdown line, escaped for mrkdwn; empty for single-region.
 fn region_line(n: &IncidentNotice) -> String {
-    n.region_summary(mrkdwn_escape, " • ")
+    n.region_summary(escape, " • ")
         .map(|s| format!("\n• {s}"))
         .unwrap_or_default()
 }
@@ -111,11 +117,16 @@ fn region_line(n: &IncidentNotice) -> String {
 #[async_trait]
 impl Notifier for SlackNotifier {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
-        let text = Self::render_incident(self.mention.as_deref(), notice);
+        let mention = self.mention.as_deref();
+        let text = Self::render_incident(mention, notice);
+        let blocks = SlackTemplate::for_reason(notice.reason).render(notice, mention);
         post_json(
             &self.client,
             &self.webhook_url,
-            &SlackPayload { text: &text },
+            &SlackPayload {
+                text: &text,
+                blocks,
+            },
         )
         .await
     }
@@ -164,5 +175,31 @@ mod tests {
         let resolved =
             SlackNotifier::render_incident(Some("<!here>"), &notice(NotificationReason::Resolved));
         assert!(!resolved.contains("<!here>"), "{resolved}");
+    }
+
+    /// The ping rule is one decision for both halves of the message; a block
+    /// layout that pinged on recovery would wake the room the text spared.
+    #[test]
+    fn the_blocks_ping_exactly_when_the_text_does() {
+        for reason in [
+            NotificationReason::Opened,
+            NotificationReason::Reopened,
+            NotificationReason::Escalated,
+            NotificationReason::NoData,
+            NotificationReason::Resolved,
+            NotificationReason::DataResumed,
+        ] {
+            let n = notice(reason);
+            let text = SlackNotifier::render_incident(Some("<!here>"), &n);
+            let blocks = serde_json::to_string(
+                &SlackTemplate::for_reason(reason).render(&n, Some("<!here>")),
+            )
+            .unwrap();
+            assert_eq!(
+                text.contains("<!here>"),
+                blocks.contains("<!here>"),
+                "{reason:?}"
+            );
+        }
     }
 }

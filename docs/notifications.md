@@ -50,6 +50,10 @@ A message in a busy channel is easy to miss, so a Slack channel takes an optiona
 
 Changing the ping goes through the same replace-config toggle as the webhook URL, so re-enter the webhook when you edit it.
 
+### What a Slack alert looks like
+
+Slack gets a laid-out card rather than one line of text. The header names the monitor, and under it sit the severity and state, the start time rendered in each reader's own timezone, and, for a monitor watched from several regions, which ones are down and which are still up. An open incident also carries the error the check saw, and one you declared by hand says so instead of claiming a detection. A resolved message reports how long the incident ran, and an interrupted one how long it has been quiet. The card ends in a button to the incident wherever the app knows its own public address, which self-hosters set in config. The layout is fixed, so there is nothing to configure, and the one-line version still rides along as the text a phone shows in its notification preview.
+
 ### Delegating the connect step
 
 When the credentials belong to someone outside the org, say the Slack workspace admin or the person who owns the shared inbox, you do not need to chase them for secrets. **Settings → Notifications → delegate the connect step** mints a single-use `/c/{code}` link. Whoever opens it can connect exactly one channel to your workspace and nothing else, with no account needed; the link expires after 7 days and can be revoked before use. The same flow is scriptable through the delegate endpoints in the [REST API](api.md#notification-channels).
