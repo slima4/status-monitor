@@ -1,8 +1,8 @@
 {# Shared header for the Monitor and Incidents sub-tabs. Inputs (all
    fields exist on both `DetailPage` and `IncidentsPage`): id, name,
    kind, address, interval_s, enabled, tags, managed_by, last_status,
-   last_at_iso. Kept in sync because both views populate the same shape
-   from `target_store.get` + the most-recent check row. #}
+   last_at_iso, alerts_nobody. Kept in sync because both views populate the
+   same shape from `target_store.get` + the most-recent check row. #}
 {% import "targets/partials/_status_badge.html" as sb %}
 <a href="/targets" class="inline-block text-sm text-muted hover:text-body">← monitors</a>
 <div class="flex flex-wrap items-center gap-3">
@@ -10,6 +10,11 @@
   {% call sb::show(last_status, enabled, false) %}{% endcall %}
   {% if !enabled %}<span class="status-badge status-badge--disabled">disabled</span>{% endif %}
   {% if let Some(m) = managed_by %}<span class="managed-chip">{{ m }}</span>{% endif %}
+  {% if alerts_nobody %}
+  <a href="/targets/{{ id }}/edit"
+     class="btn-ghost px-1.5 py-0.5 font-mono text-xs text-state-warn-strong"
+     aria-label="This monitor alerts nobody. Bind a notification channel.">[ alerts:none ]</a>
+  {% endif %}
   {% if share_count > 0 %}
   <button type="button"
           data-share-open data-target-id="{{ id }}" data-target-name="{{ name }}"
@@ -77,6 +82,14 @@
        class="status-badge status-badge--tag mr-1 hover:bg-[color:var(--theme-surface-sunk)]">{{ tag }}</a>
   {% endfor %}
 </div>
+{% if alerts_nobody %}
+<div class="alert-card alert-card--warn" role="note">
+  <strong>This monitor alerts nobody.</strong> It has no notification channel bound and no
+  escalation policy applies, so an outage is detected and recorded here but never sent anywhere.
+  <a href="/targets/{{ id }}/edit" class="underline decoration-dotted underline-offset-2">Bind a channel</a>,
+  or <a href="/settings/notifications" class="underline decoration-dotted underline-offset-2">create one first</a>.
+</div>
+{% endif %}
 {% if let Some(m) = managed_by %}
 <div class="alert-card alert-card--muted" role="note">
   Managed by <strong>{{ m }}</strong> — edits made here may be overwritten the next time it's applied from code.

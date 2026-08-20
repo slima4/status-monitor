@@ -92,6 +92,7 @@ fn sample_page() -> DetailPage {
         active_tab: "targets",
         subtab: SUBTAB_MONITOR,
         ongoing_count: 0,
+        alerts_nobody: false,
         id: "00000000-0000-0000-0000-000000000001".into(),
         name: "api".into(),
         kind: "HTTP",
@@ -627,6 +628,22 @@ fn detail_header_shows_shared_chip_only_when_links_exist() {
 }
 
 #[test]
+fn detail_header_warns_when_the_monitor_reaches_nobody() {
+    // Routed somewhere: no chip, no banner, no noise.
+    let html = sample_page().render().unwrap();
+    assert!(!html.contains("[ alerts:none ]"));
+    assert!(!html.contains("alerts nobody"));
+
+    let mut p = sample_page();
+    p.alerts_nobody = true;
+    let html = p.render().unwrap();
+    assert!(html.contains("[ alerts:none ]"));
+    assert!(html.contains("This monitor alerts nobody."));
+    // A warning with nowhere to go is just an accusation.
+    assert!(html.contains("/settings/notifications"));
+}
+
+#[test]
 fn range_options_mark_active() {
     let opts = build_range_options("7d", &RANGE_KEYS);
     assert!(opts.iter().any(|o| o.key == "7d" && o.selected));
@@ -836,6 +853,34 @@ fn incidents_page_explains_failures_that_never_opened_one() {
     assert!(html.contains("eu-helsinki, us-east"));
     assert!(html.contains("2 of the 2 regions reporting"));
     assert!(html.contains("/docs/hosted/regions"));
+}
+
+#[test]
+fn one_failing_region_is_not_reported_as_every_region() {
+    let page = |flaps: &[crate::storage::traits::RegionFlaps]| {
+        let mut p = sample_incidents_page(vec![], 0);
+        p.unconfirmed =
+            UnconfirmedFailures::new(flaps, &[], 2, crate::domain::RegionIncidentPolicy::Majority);
+        p.render().unwrap()
+    };
+
+    // One of three failing: blaming "every region" contradicts the line above it.
+    let html = page(&[
+        flaps("eu-helsinki", 3, 6),
+        flaps("apac-sg", 0, 0),
+        flaps("us-east", 0, 0),
+    ]);
+    assert!(html.contains("Failing region:"));
+    assert!(!html.contains("from every region"));
+    assert!(html.contains("One region failing"));
+
+    // All three failing: the original wording is the accurate one, so it stays.
+    let html = page(&[
+        flaps("eu-helsinki", 3, 6),
+        flaps("apac-sg", 2, 4),
+        flaps("us-east", 1, 2),
+    ]);
+    assert!(html.contains("from every region"));
 }
 
 #[test]
@@ -1102,6 +1147,7 @@ fn sample_incidents_page(incidents: Vec<IncidentRow>, ongoing_count: usize) -> I
         active_tab: "targets",
         subtab: SUBTAB_INCIDENTS,
         ongoing_count,
+        alerts_nobody: false,
         id: "00000000-0000-0000-0000-000000000001".into(),
         name: "api".into(),
         kind: "HTTP",

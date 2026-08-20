@@ -25,7 +25,11 @@
     {% if u.transitions > 0 %}{{ u.transitions }} state change{% if u.transitions != 1 %}s{% endif %} in that time.{% endif %}
   </p>
   <p class="text-xs">
+    {% if u.regions.len() == u.region_count %}
     Scattered failures from every region, on a host that answers fine when you open it yourself, usually mean it is refusing our probes rather than being down.
+    {% else %}
+    {% if u.regions.len() == 1 %}One region failing while the others pass usually points at the network path from there, not at the host.{% else %}Failures in some regions but not the others usually point at the network path from those regions, not at the host.{% endif %}
+    {% endif %}
     <a href="{{ "/hosted/regions"|docs_url }}" target="_blank" rel="noopener"
        class="underline decoration-dotted hover:text-body">What our probes cannot reach</a>
   </p>

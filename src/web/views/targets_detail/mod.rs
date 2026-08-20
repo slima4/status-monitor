@@ -21,7 +21,9 @@ use crate::web::views::region_display::{LabeledRegion, labeled_regions};
 use crate::web::views::{RangeOption, build_range_options, describe_check, resolve_range_key};
 use crate::web::{AuthedBrowser, CurrentOrg};
 
-use load::{FLAP_WINDOW_HOURS, LAST_RESULT_WINDOW_DAYS, flaps_by_region, load_flaps};
+use load::{
+    FLAP_WINDOW_HOURS, LAST_RESULT_WINDOW_DAYS, alerts_nobody, flaps_by_region, load_flaps,
+};
 use rows::FLOW_RUNS_SHOWN;
 
 mod charts;
@@ -84,6 +86,9 @@ pub struct IncidentsPage {
     pub managed_by: Option<&'static str>,
     /// Count of live (non-revoked) share links; drives the header "shared" chip.
     pub share_count: usize,
+    /// No bound channel and no effective escalation policy: this monitor
+    /// detects outages and tells no one. Drives the header warning.
+    pub alerts_nobody: bool,
     pub last_status: &'static str,
     pub last_at_iso: String,
     pub incidents: Vec<IncidentRow>,
@@ -125,6 +130,9 @@ pub struct DetailPage {
     pub managed_by: Option<&'static str>,
     /// Count of live (non-revoked) share links; drives the header "shared" chip.
     pub share_count: usize,
+    /// No bound channel and no effective escalation policy: this monitor
+    /// detects outages and tells no one. Drives the header warning.
+    pub alerts_nobody: bool,
     /// Opens counted in the flap window when the monitor is over the
     /// threshold; `None` when it is not flapping. Drives the banner that
     /// explains why repeat alerts have gone quiet.
@@ -299,6 +307,8 @@ pub async fn index(
         }
     };
 
+    let reaches_nobody = alerts_nobody(&state, org, &target).await;
+
     // Passive kinds have no probe region, so no region selector.
     let regions = if target.check.is_passive() {
         Vec::new()
@@ -319,6 +329,7 @@ pub async fn index(
         tags: target.tags,
         managed_by: target.write_source.managed_label(),
         share_count,
+        alerts_nobody: reaches_nobody,
         flapping_opens,
         flap_hold_minutes: state.cfg.escalation.flap_hold_secs.div_ceil(60),
         last_status: live.last_status,
@@ -593,6 +604,7 @@ pub async fn incidents(
         .monitor_share_store
         .count_active_for_target(org, target.id)
         .await? as usize;
+    let reaches_nobody = alerts_nobody(&state, org, &target).await;
 
     Ok(IncidentsPage {
         active_tab: "targets",
@@ -607,6 +619,7 @@ pub async fn incidents(
         tags: target.tags,
         managed_by: target.write_source.managed_label(),
         share_count,
+        alerts_nobody: reaches_nobody,
         last_status: data.last_status,
         last_at_iso: data.last_at_iso,
         incidents: data.rows,

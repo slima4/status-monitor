@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::domain::{Incident, OrgId, confirmed_downtime_secs, uptime_pct_from_downtime};
+use crate::domain::{Incident, OrgId, Target, confirmed_downtime_secs, uptime_pct_from_downtime};
 use crate::storage::{ClampedRange, TimeRange};
 use crate::web::error::{WebError, WebResult};
 use crate::web::views::fmt_ts;
@@ -87,6 +87,23 @@ impl UnconfirmedFailures {
             region_count,
         })
     }
+}
+
+/// Whether an incident on this monitor would reach anybody. Mirrors the paging
+/// path in `escalation::engine`: an effective policy (the monitor's own or the
+/// org default) wins, and without one the bound channels are the only route.
+/// A store error reads as "someone is reachable" so a failed lookup never
+/// accuses a monitor that in fact alerts fine.
+pub(super) async fn alerts_nobody(state: &AppState, org: OrgId, target: &Target) -> bool {
+    if !target.alerts.is_empty() {
+        return false;
+    }
+    state
+        .escalation_policy_store
+        .resolve_for_target(org, target.id)
+        .await
+        .map(|policy| policy.is_none())
+        .unwrap_or(false)
 }
 
 /// Best-effort: a failed read costs the flap column, never the page.
