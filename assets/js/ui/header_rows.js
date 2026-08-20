@@ -6,27 +6,14 @@
 (function () {
     const container = document.querySelector("[data-header-rows]");
     const addBtn = document.querySelector("[data-header-add]");
+    const tmpl = document.getElementById("header-row-template");
     if (!container || !addBtn) return;
 
-    function rowHtml() {
-        return `
-            <input type="text" name="http_header_key"
-                   placeholder="Header name"
-                   class="flex-1 min-w-[10rem] field font-mono">
-            <input type="text" name="http_header_value"
-                   placeholder="Value"
-                   class="flex-[2] min-w-[14rem] field font-mono">
-            <button type="button" data-header-remove
-                    class="row-remove" aria-label="Remove header"></button>
-        `;
-    }
-
     function addRow(focus) {
-        const row = document.createElement("div");
-        row.dataset.headerRow = "";
-        row.className = "flex flex-wrap items-center gap-2";
-        row.innerHTML = rowHtml();
-        container.appendChild(row);
+        if (!tmpl) return null;
+        const frag = tmpl.content.cloneNode(true);
+        const row = frag.querySelector("[data-header-row]");
+        container.appendChild(frag);
         if (focus) row.querySelector("input").focus();
         return row;
     }

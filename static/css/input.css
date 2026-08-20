@@ -1236,7 +1236,8 @@
         border-color: var(--theme-line);
         font-family: var(--font-mono);
         box-shadow: var(--theme-shadow-btn);
-        transition: background-color 120ms ease, border-color 120ms ease, scale 90ms ease;
+        transition: background-color 120ms ease, border-color 120ms ease, translate 120ms ease,
+                    scale 90ms ease;
     }
     .sticker-btn:not(:disabled):active { scale: 0.96; }
     .sticker-btn--primary::before,
@@ -1291,9 +1292,10 @@
         background: var(--theme-surface-sunk);
         border-color: var(--theme-ink);
     }
-    .btn-ghost:active { scale: 0.96; }
+    .btn-ghost:not(:disabled):active { scale: 0.96; }
     @media (prefers-reduced-motion: reduce) {
-        .sticker-btn:active, .btn-ghost:active { scale: 1; }
+        .sticker-btn:not(:disabled):active,
+        .btn-ghost:not(:disabled):active { scale: 1; }
     }
     .btn-ghost--danger {
         border-color: var(--theme-state-bad-line-soft);
@@ -1306,7 +1308,7 @@
 
     /* Remove a repeatable form row; square box matches .field height, × in CSS. */
     .row-remove {
-        @apply relative shrink-0 rounded-sm border;
+        @apply relative inline-flex shrink-0 items-center justify-center rounded-sm border;
         width: 2rem;
         height: 2rem;
         border-color: var(--theme-line);
@@ -1314,19 +1316,13 @@
         cursor: pointer;
         transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, scale 90ms ease;
     }
-    .row-remove::before,
+    /* Pads the target to 40px; the box stays 32px so it matches a .field, and
+       4px fits inside the gap-2 between controls so targets never overlap. */
     .row-remove::after {
         content: "";
         position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 0.7rem;
-        height: 1.5px;
-        border-radius: 1px;
-        background: currentColor;
+        inset: -4px;
     }
-    .row-remove::before { transform: translate(-50%, -50%) rotate(45deg); }
-    .row-remove::after  { transform: translate(-50%, -50%) rotate(-45deg); }
     .row-remove:hover {
         border-color: var(--theme-state-bad-line);
         background: var(--theme-state-bad-bg);
@@ -2288,6 +2284,7 @@
         color: var(--theme-text);
         font-family: var(--font-mono);
         font-weight: 600;
+        text-wrap: balance;
         letter-spacing: -0.02em;
         line-height: 1.1;
     }
@@ -2954,8 +2951,9 @@
         color: var(--theme-text-muted);
     }
 
-    /* Monitor-form section header: numbered disc + label + filling rule. */
-    #check-form { counter-reset: formsec; }
+    /* Form section header: numbered disc + label + filling rule. The counter
+       scopes to the grid, not one form, or each legend restarts at 1. */
+    .form-grid { counter-reset: formsec; }
     .form-legend {
         @apply flex w-full items-center gap-2.5 font-mono;
         counter-increment: formsec;
@@ -2979,7 +2977,7 @@
         background: var(--theme-line);
     }
     /* Multi-line helper hints: drop last-line orphans without markup churn. */
-    #check-form .text-muted { text-wrap: pretty; }
+    .form-grid .text-muted { text-wrap: pretty; }
     /* Card register for choosing a kind: the radio-backed choosers on the
        monitor and channel forms, and radio-less link cards elsewhere. Selection
        state comes from :has(input:checked), so a link card simply never has it. */
@@ -3006,7 +3004,7 @@
     }
     /* Corner mark on a chooser card, tucked inside its top-right padding. */
     .card-badge {
-        @apply pointer-events-none absolute top-2 right-2 rounded-md border px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none tracking-tight;
+        @apply pointer-events-none absolute top-2 right-2 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] font-medium leading-none tracking-tight;
     }
     .card-badge--ok {
         border-color: var(--theme-state-ok-line);
@@ -3033,9 +3031,11 @@
         transition-duration: 120ms;
         transition-timing-function: ease;
     }
-    .check-type-card:not(:has(input:disabled)):active { scale: 0.96; }
+    /* Press feedback belongs to a card you can choose; the reset has to match
+       the guards above it or it loses on specificity and never applies. */
+    .check-type-card:not(:has(input:disabled)):not(.check-type-card--static):active { scale: 0.96; }
     @media (prefers-reduced-motion: reduce) {
-        .check-type-card:active { scale: 1; }
+        .check-type-card:not(:has(input:disabled)):not(.check-type-card--static):active { scale: 1; }
     }
     .check-type-card:not(:has(input:disabled)):not(:has(input:checked)):not(.check-type-card--static):hover {
         background: var(--theme-surface-sunk);
@@ -3057,7 +3057,6 @@
     .check-type-card--static:has(.card-badge) { opacity: 1; }
     .check-type-card--static:has(.card-badge) .check-type-card__name,
     .check-type-card--static:has(.card-badge) .check-type-card__desc { opacity: 0.5; }
-    .check-type-card--static:active { scale: 1; }
     .check-type-card:has(input:checked),
     .check-type-card--on {
         background: var(--theme-ink);
@@ -3616,7 +3615,7 @@
     /* Stretch the rail across its row; segments share the width equally but
        keep the segmented pill look. */
     .sm-rail--wide { @apply flex; width: 100%; }
-    .sm-rail--wide .sm-rail__seg { @apply flex-1 justify-center; }
+    .sm-rail--wide .sm-rail__seg { @apply flex-1 justify-center; min-height: 2.5rem; }
     /* Flush rail: segments stretch evenly and stand as tall as a .field input
        so the rail reads as a control of equal stature (sits beside one). */
     .sm-rail--fill {

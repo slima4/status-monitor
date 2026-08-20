@@ -253,8 +253,13 @@ fn headers_render_as_row_inputs() {
     .unwrap();
     // Container has `data-header-rows` (plural); each row has `data-header-row`
     // (no value, followed by class). Count the row attr with trailing space
-    // to avoid matching the container.
-    assert_eq!(html.matches("data-header-row ").count(), 2);
+    // to avoid matching the container, and split off the clone <template>,
+    // which holds a blank row of the same shape.
+    let (rows, tmpl) = html
+        .split_once(r#"<template id="header-row-template""#)
+        .expect("header-row-template must exist; the JS repeater clones it");
+    assert_eq!(rows.matches("data-header-row ").count(), 2);
+    assert_eq!(tmpl.matches("data-header-row ").count(), 1);
     assert!(html.contains(r#"name="http_header_key""#));
     assert!(html.contains(r#"name="http_header_value""#));
     assert!(html.contains(r#"value="Accept""#));

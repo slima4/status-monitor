@@ -12,13 +12,17 @@
       <span class="form-legend">who reads it</span>
       <div class="check-type-cards check-type-cards--rail mt-3" role="group" aria-label="Postmortem visibility">
         {% call reg::chooser_card_static(!published, "draft", "yours alone, nothing is shown to customers") %}{% endcall %}
+        {% if exists %}
         {% call reg::chooser_card_static(published, "published", "on the public incident page, owners stay hidden") %}{% endcall %}
+        {% else %}
+        {% call reg::chooser_card_locked("published", "on the public incident page, owners stay hidden", "save first", "warn") %}{% endcall %}
+        {% endif %}
       </div>
       <p class="mt-2 font-mono text-xs text-quiet">
         {% if exists %}
         # publish and unpublish both land on the incident timeline
         {% else %}
-        # save it first, then you can publish
+        # save the write-up first, then you can publish it
         {% endif %}
       </p>
     </aside>
@@ -70,21 +74,7 @@
       <div class="clear-both space-y-3">
         <div id="action-items" class="space-y-2">
           {% for a in action_items %}
-          <div data-action-item class="flex flex-wrap items-center gap-2">
-            <input type="text" data-ai-text maxlength="2000" value="{{ a.text }}"
-                   aria-label="action item description"
-                   class="min-w-48 flex-1 field" placeholder="the change that stops this happening again">
-            <select data-ai-owner data-sm-combobox class="field" aria-label="action item owner">
-              <option value="">unassigned</option>
-              {% for m in members %}
-              <option value="{{ m.id }}"{% if m.id == a.owner_user_id %} selected{% endif %}>{{ m.email }}</option>
-              {% endfor %}
-            </select>
-            <label class="inline-flex min-h-9 items-center gap-2 text-sm text-muted">
-              <input type="checkbox" data-ai-done{% if a.done %} checked{% endif %}> done
-            </label>
-            <button type="button" data-ai-remove class="row-remove" aria-label="Remove action item"></button>
-          </div>
+          {% call reg::action_item_row(a.text, a.owner_user_id, a.done, members) %}{% endcall %}
           {% endfor %}
         </div>
         <button type="button" id="add-action-item"
@@ -103,7 +93,7 @@
     <aside class="action-rail lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6">
       <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
         <button type="submit"
-                class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
+                class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium motion-safe:hover:-translate-y-0.5">
           save postmortem
         </button>
         {% if exists %}
@@ -130,20 +120,7 @@
   </form>
 
   <template id="action-item-template">
-    <div data-action-item class="flex flex-wrap items-center gap-2">
-      <input type="text" data-ai-text maxlength="2000" value="" aria-label="action item description"
-             class="min-w-48 flex-1 field" placeholder="the change that stops this happening again">
-      <select data-ai-owner class="field" aria-label="action item owner">
-        <option value="">unassigned</option>
-        {% for m in members %}
-        <option value="{{ m.id }}">{{ m.email }}</option>
-        {% endfor %}
-      </select>
-      <label class="inline-flex min-h-9 items-center gap-2 text-sm text-muted">
-        <input type="checkbox" data-ai-done> done
-      </label>
-      <button type="button" data-ai-remove class="row-remove" aria-label="Remove action item"></button>
-    </div>
+    {% call reg::action_item_row("", "", false, members) %}{% endcall %}
   </template>
 </section>
 

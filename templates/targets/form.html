@@ -164,18 +164,10 @@
             <span class="block text-xs text-muted">Extra request headers, e.g. <code>Accept: application/json</code> or an API key.</span>
             <div data-header-rows class="space-y-2">
               {% for h in form.http.headers %}
-              <div data-header-row class="flex flex-wrap items-center gap-2">
-                <input type="text" name="http_header_key" value="{{ h.name }}"
-                       placeholder="Header name" aria-label="Header name"
-                       autocomplete="off" spellcheck="false" class="flex-1 min-w-[10rem] field font-mono">
-                <input type="text" name="http_header_value" value="{{ h.value }}"
-                       placeholder="Value" aria-label="Header value"
-                       autocomplete="off" spellcheck="false" class="flex-[2] min-w-[14rem] field font-mono">
-                <button type="button" data-header-remove
-                        class="row-remove" aria-label="Remove header"></button>
-              </div>
+              {% call reg::header_row(h.name, h.value) %}{% endcall %}
               {% endfor %}
             </div>
+            <template id="header-row-template">{% call reg::header_row("", "") %}{% endcall %}</template>
             <button type="button" data-header-add
                     class="scope-token">+ add header</button>
             <p data-header-secret-hint hidden class="mt-1 text-xs text-state-warn-strong"></p>
@@ -804,7 +796,7 @@
     <aside class="action-rail lg:col-span-2 xl:col-span-1 xl:sticky xl:top-6">
       <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
         <button type="submit"
-                class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
+                class="sticker-btn sticker-btn--primary px-4 py-2 text-sm font-medium motion-safe:hover:-translate-y-0.5">
           {% if form.mode == "create" %}create{% else %}save changes{% endif %}
         </button>
         <button type="button" data-test-now title="Runs the check once without saving"

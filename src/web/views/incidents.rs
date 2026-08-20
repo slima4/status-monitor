@@ -1894,10 +1894,13 @@ mod tests {
         // A draft that reads as published is the expensive mistake here.
         assert!(html.contains("check-type-card--on"), "{html}");
         assert!(html.contains("yours alone"), "{html}");
+        // The saved row and the clone <template> render from one macro, so a
+        // row the operator adds gets the same combobox as the ones on load.
+        assert_eq!(html.matches("data-ai-owner data-sm-combobox").count(), 2);
     }
 
     /// It cannot be published before it exists, so the button must be absent
-    /// rather than fail on click.
+    /// rather than fail on click, and the card must say why it is out of reach.
     #[test]
     fn postmortem_form_offers_publish_only_once_there_is_something_to_publish() {
         let page = PostmortemFormPage {
@@ -1914,6 +1917,6 @@ mod tests {
         };
         let html = page.render().unwrap();
         assert!(!html.contains("data-postmortem-publish"), "{html}");
-        assert!(html.contains("save it first"), "{html}");
+        assert!(html.contains(r#"card-badge--warn">save first"#), "{html}");
     }
 }

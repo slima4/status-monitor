@@ -26,9 +26,51 @@
 </span>
 {% endmacro %}
 
+{# Remove-row control: one currentColor glyph, states via CSS. #}
+{% macro row_remove(data_attr, label) %}
+<button type="button" {{ data_attr }} class="row-remove" aria-label="{{ label }}">
+  <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor"
+       stroke-width="1.5" stroke-linecap="round" aria-hidden="true" focusable="false">
+    <path d="M2.75 2.75 9.25 9.25M9.25 2.75 2.75 9.25"/>
+  </svg>
+</button>
+{% endmacro %}
+
 {% macro loading(text) %}
 {# Mirror of loadingPlaceholder() in htmx_loader.js — keep in step. #}
 <p class="px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
+{% endmacro %}
+
+{# One postmortem action item, shared by the prefill loop and the clone <template>. #}
+{% macro action_item_row(text, owner_user_id, done, members) %}
+<div data-action-item class="flex flex-wrap items-center gap-2">
+  <input type="text" data-ai-text maxlength="2000" value="{{ text }}"
+         aria-label="action item description"
+         class="min-w-48 flex-1 field" placeholder="the change that stops this happening again">
+  <select data-ai-owner data-sm-combobox class="field" aria-label="action item owner">
+    <option value="">unassigned</option>
+    {% for m in members %}
+    <option value="{{ m.id }}"{% if m.id == owner_user_id %} selected{% endif %}>{{ m.email }}</option>
+    {% endfor %}
+  </select>
+  <label class="inline-flex min-h-9 items-center gap-2 text-sm text-muted">
+    <input type="checkbox" data-ai-done{% if done %} checked{% endif %}> done
+  </label>
+  {% call row_remove("data-ai-remove", "Remove action item") %}{% endcall %}
+</div>
+{% endmacro %}
+
+{# One header key/value row, shared by the prefill loop and the clone <template>. #}
+{% macro header_row(name, value) %}
+<div data-header-row class="flex flex-wrap items-center gap-2">
+  <input type="text" name="http_header_key" value="{{ name }}"
+         placeholder="Header name" aria-label="Header name"
+         autocomplete="off" spellcheck="false" class="flex-1 min-w-[10rem] field font-mono">
+  <input type="text" name="http_header_value" value="{{ value }}"
+         placeholder="Value" aria-label="Header value"
+         autocomplete="off" spellcheck="false" class="flex-[2] min-w-[14rem] field font-mono">
+  {% call row_remove("data-header-remove", "Remove header") %}{% endcall %}
+</div>
 {% endmacro %}
 
 {# One flow step row, shared by the prefill loop and the clone <template>.
@@ -61,7 +103,7 @@
     <p data-flow-reason class="flow-step__reason hidden"></p>
   </div>
   <span data-flow-status class="flow-step__status" aria-hidden="true"></span>
-  <button type="button" data-flow-remove class="row-remove" aria-label="Remove step"></button>
+  {% call row_remove("data-flow-remove", "Remove step") %}{% endcall %}
 </div>
 {% endmacro %}
 

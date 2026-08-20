@@ -10,7 +10,7 @@
     <span class="form-legend">how bad</span>
     {% call reg::severity_rail(severity, false) %}{% endcall %}
 
-    <span class="form-legend mt-6 block">where it stands</span>
+    <span class="form-legend mt-6">where it stands</span>
     {% call reg::incident_state_rail(state) %}{% endcall %}
 
     <p class="mt-2 font-mono text-xs text-quiet">
@@ -229,7 +229,7 @@
           </div>
         </div>
         <button type="submit"
-                class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">post update</button>
+                class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium motion-safe:hover:-translate-y-0.5">post update</button>
       </div>
       <p class="font-mono text-xs text-quiet"># closing it is <span class="text-body">resolve</span>, which posts the final update for you</p>
     </form>
@@ -241,7 +241,7 @@
     <div class="flex flex-wrap items-center gap-3 xl:flex-col xl:items-stretch">
       {% if state == "triggered" %}
       <button type="button" data-incident-action="acknowledge" data-incident-id="{{ id }}"
-              class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium transition-transform hover:-translate-y-0.5">
+              class="sticker-btn sticker-btn--primary min-h-10 px-4 py-2 text-sm font-medium motion-safe:hover:-translate-y-0.5">
         acknowledge
       </button>
       {% endif %}
