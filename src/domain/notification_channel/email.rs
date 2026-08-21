@@ -63,6 +63,8 @@ impl TransportConfig for EmailConfig {
         false
     }
 
+    fn quiet_broadcast_mention(&mut self) {}
+
     /// The address itself: a provider bounce/complaint must find and
     /// disable every channel pointed at it.
     fn lifecycle_ref(&self) -> Option<&str> {

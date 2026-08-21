@@ -1052,12 +1052,9 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
         .then_some(&state.cfg.whatsapp_app);
     // Targeted pings ride along so a wrong id shows; broadcasts do not, so
     // trying a config out never wakes the channel.
-    let quieted = match config {
-        ChannelConfig::Slack(c) => Some(ChannelConfig::Slack(c.without_broadcast_mention())),
-        _ => None,
-    };
+    let quieted = config.quieted_for_test();
     let notifier = build_notifier(
-        quieted.as_ref().unwrap_or(config),
+        &quieted,
         &state.outbound_http,
         central,
         whatsapp,

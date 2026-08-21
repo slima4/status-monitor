@@ -18,7 +18,7 @@ The point of the split is blast radius. A noisy marketing-site monitor and your 
 
 | Type | What you provide | Notes |
 |---|---|---|
-| Slack, Discord, Teams, Google Chat | An incoming webhook URL | Discord, Teams and Google Chat URLs are host-checked, so a wrong-vendor paste is refused up front. A Slack URL is only checked for `https`, so verify it with a test send. Slack also takes an optional group ping, see below |
+| Slack, Discord, Teams, Google Chat | An incoming webhook URL | Discord, Teams and Google Chat URLs are host-checked, so a wrong-vendor paste is refused up front. A Slack URL is only checked for `https`, so verify it with a test send. Slack and Discord also take an optional group ping, see below |
 | Telegram | One-tap link, or your own bot token and chat id | The one-tap flow is available where the platform runs a central bot |
 | WhatsApp | One-tap link, or Business Cloud API credentials and a template | Bring-your-own needs an approved one-parameter template |
 | SMS | Credentials for your own gateway: Twilio, Vonage, Telnyx, Plivo, or Sinch | One message per alert, trimmed to bound per-segment cost |
@@ -44,9 +44,11 @@ Two types need a second step:
 
 Secrets are sealed at rest and never shown again. On edit they stay masked behind a replace toggle, and leaving the toggle off keeps the stored value untouched.
 
-### Pinging a group in Slack
+### Pinging a group in Slack or Discord
 
 A message in a busy channel is easy to miss, so a Slack channel takes an optional **ping on alert** that leads the text: `@here`, `@channel`, a user-group id (`S…`) or a member id (`U…`, or `W…` on Enterprise Grid), space or comma separated, up to five. A plain `@sre` handle is inert in a webhook message, which is why the id is what the field wants; you find a group's id on its page under **Slack → People → User groups**, and a member's under their profile's **Copy member ID**. Only the events that need a human carry the ping: opened, reopened, escalated, and monitoring interrupted. Recovery and resumed messages stay silent, and a **test now** send drops `@here`/`@channel` so checking your config does not wake the room — a group or member ping still rides along, so a wrong id shows up as dead text on the test.
+
+Discord takes the same field with its own tokens: `@everyone`, `@here`, a role id (`&123…`) or a member id (`123…`), which you copy after turning on **Advanced → Developer Mode** in Discord. Discord copies a role id and a member id in the same shape, so a role's has to be typed with the leading `&`; without it the message pings a member that does not exist, which shows up as dead text. Discord resolves no mention inside a card, so the ping rides the line above it, and the message allows exactly the roles and members you listed. Nothing else in it can ping, whatever a monitor happens to be named.
 
 Changing the ping goes through the same replace-config toggle as the webhook URL, so re-enter the webhook when you edit it.
 

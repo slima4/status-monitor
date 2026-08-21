@@ -41,6 +41,12 @@ pub trait TransportConfig {
     /// No default on purpose, like [`Self::abuse_url`].
     fn operator_managed(&self) -> bool;
 
+    /// Drop the pings that wake a whole room, keeping the targeted ones, so a
+    /// config test proves the routing without paging everybody. No default on
+    /// purpose, like [`Self::abuse_url`]: a transport that grows a ping field
+    /// must decide here, not inherit silence.
+    fn quiet_broadcast_mention(&mut self);
+
     /// Non-secret destination id mirrored into the plaintext `external_ref`
     /// column so provider lifecycle events (bot kicked, address bounced)
     /// can find channels without opening sealed configs. `None` = this

@@ -171,6 +171,24 @@
                class="underline decoration-dotted hover:text-body">intro to webhooks</a>.
           </span>
         </label>
+        <label class="field-outline">
+          <span class="field-outline__label">Ping on alert (optional)</span>
+          <input name="discord_mention" type="text" value="{{ form.config.discord_mention }}"
+                 placeholder="@here &amp;123456789012345678"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Leads the message so it wakes someone: <code>@everyone</code>, <code>@here</code>,
+            a role id (<code>&amp;123…</code>) or a member id (<code>123…</code>). Turn on
+            <em>Advanced → Developer Mode</em> in Discord, then right-click a role or member and
+            copy its id. Discord copies both in the same shape, so a role needs the leading
+            <code>&amp;</code> typed in or it pings nobody. Space or comma separated, up to 5. A plain <code>@handle</code> is not
+            pingable from a webhook, so the id is what Discord needs. Only what you list here can
+            be pinged, recovery messages never ping, and a test send drops
+            <code>@everyone</code>/<code>@here</code> so trying your config out stays quiet.
+            Changing this later goes through <em>replace transport config</em>, so keep the
+            webhook URL to hand.
+          </span>
+        </label>
       </div>
 
       <div data-variant="msteams"{% if form.kind != "msteams" %} class="hidden"{% endif %}>

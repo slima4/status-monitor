@@ -156,10 +156,11 @@ pub fn build_notifier(
             };
             Arc::new(WhatsAppNotifier::new(http.clone(), &synthesized)?) as Arc<dyn Notifier>
         }
-        ChannelConfig::Discord(c) => {
-            Arc::new(DiscordNotifier::new(http.clone(), parse(&c.webhook_url)?))
-                as Arc<dyn Notifier>
-        }
+        ChannelConfig::Discord(c) => Arc::new(DiscordNotifier::new(
+            http.clone(),
+            parse(&c.webhook_url)?,
+            c.mention_targets(),
+        )) as Arc<dyn Notifier>,
         ChannelConfig::MsTeams(c) => {
             Arc::new(MsTeamsNotifier::new(http.clone(), parse(&c.webhook_url)?))
                 as Arc<dyn Notifier>

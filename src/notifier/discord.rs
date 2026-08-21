@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use url::Url;
 
+use crate::domain::DiscordMention;
 use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
@@ -28,11 +29,36 @@ const _: () = assert!(
 pub struct DiscordNotifier {
     client: OutboundHttpClient,
     webhook_url: Url,
+    ping: Option<Ping>,
+}
+
+struct Ping {
+    content: String,
+    allowed: AllowedMentions,
 }
 
 #[derive(Serialize)]
-struct DiscordPayload {
+struct DiscordPayload<'a> {
+    /// Discord resolves no mention inside an embed, so the ping rides here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<&'a str>,
     embeds: [Embed; 1],
+    /// Sent even when empty: without it Discord resolves whatever looks like a
+    /// mention anywhere in the message, monitor names included.
+    allowed_mentions: &'a AllowedMentions,
+}
+
+static SILENT: AllowedMentions = AllowedMentions {
+    parse: Vec::new(),
+    roles: Vec::new(),
+    users: Vec::new(),
+};
+
+#[derive(Serialize)]
+struct AllowedMentions {
+    parse: Vec<&'static str>,
+    roles: Vec<String>,
+    users: Vec<String>,
 }
 
 #[derive(Serialize)]
@@ -54,13 +80,30 @@ struct EmbedField {
 }
 
 impl DiscordNotifier {
-    pub fn new(client: OutboundHttpClient, mut webhook_url: Url) -> Self {
+    pub fn new(
+        client: OutboundHttpClient,
+        mut webhook_url: Url,
+        mention: Option<DiscordMention>,
+    ) -> Self {
         // Without `wait=true` Discord answers 204 before delivering, hiding
         // failures from the retry loop.
         webhook_url.query_pairs_mut().append_pair("wait", "true");
         Self {
             client,
             webhook_url,
+            ping: mention.map(|m| Ping {
+                content: m.markup.clone(),
+                allowed: allowed(&m),
+            }),
+        }
+    }
+
+    fn payload(&self, card: &AlertCard) -> DiscordPayload<'_> {
+        let ping = card.ping(self.ping.as_ref());
+        DiscordPayload {
+            content: ping.map(|p| p.content.as_str()),
+            embeds: [Self::embed(card)],
+            allowed_mentions: ping.map_or(&SILENT, |p| &p.allowed),
         }
     }
 
@@ -119,16 +162,24 @@ fn fenced(error: &str) -> String {
     error.replace('`', "'")
 }
 
+/// Exactly what the operator configured, so a ping cannot widen on the way out.
+fn allowed(mention: &DiscordMention) -> AllowedMentions {
+    AllowedMentions {
+        parse: if mention.everyone {
+            vec!["everyone"]
+        } else {
+            Vec::new()
+        },
+        roles: mention.roles.clone(),
+        users: mention.users.clone(),
+    }
+}
+
 #[async_trait]
 impl Notifier for DiscordNotifier {
     async fn notify_incident(&self, notice: &IncidentNotice) -> Result<()> {
-        let embed = Self::embed(&AlertCard::for_notice(notice));
-        post_json(
-            &self.client,
-            &self.webhook_url,
-            &DiscordPayload { embeds: [embed] },
-        )
-        .await
+        let payload = self.payload(&AlertCard::for_notice(notice));
+        post_json(&self.client, &self.webhook_url, &payload).await
     }
 }
 
@@ -144,7 +195,23 @@ mod tests {
                 crate::security::SsrfGuard::relaxed_for_tests(),
             ),
             url.parse().unwrap(),
+            None,
         )
+    }
+
+    fn payload(mention: Option<&str>, n: &IncidentNotice) -> serde_json::Value {
+        let cfg = crate::domain::DiscordConfig {
+            webhook_url: "https://discord.com/api/webhooks/123/tok".into(),
+            mention: mention.map(str::to_string),
+        };
+        let sender = DiscordNotifier::new(
+            crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::relaxed_for_tests(),
+            ),
+            "https://discord.com/api/webhooks/123/tok".parse().unwrap(),
+            cfg.mention_targets(),
+        );
+        serde_json::to_value(sender.payload(&AlertCard::for_notice(n))).unwrap()
     }
 
     fn embed(n: &IncidentNotice) -> serde_json::Value {
@@ -212,6 +279,41 @@ mod tests {
         let v = embed(&n);
         assert!(v["title"].as_str().unwrap().chars().count() <= TITLE_MAX);
         assert!(v["description"].as_str().unwrap().chars().count() <= DESCRIPTION_MAX);
+    }
+
+    #[test]
+    fn a_ping_rides_the_content_line_under_an_allow_list() {
+        let v = payload(
+            Some("@here &123456789012345678"),
+            &notice(NotificationReason::Opened),
+        );
+        assert_eq!(v["content"], "@here <@&123456789012345678>");
+        assert_eq!(v["allowed_mentions"]["parse"][0], "everyone");
+        assert_eq!(v["allowed_mentions"]["roles"][0], "123456789012345678");
+    }
+
+    #[test]
+    fn recovery_carries_no_ping_and_still_forbids_every_mention() {
+        let v = payload(Some("@everyone"), &notice(NotificationReason::Resolved));
+        assert!(v.get("content").is_none(), "{v}");
+        assert_eq!(v["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert_eq!(v["allowed_mentions"]["roles"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn a_monitor_name_cannot_ping_the_server() {
+        let mut n = notice(NotificationReason::Opened);
+        n.monitor_name = Some("@everyone".into());
+        let v = payload(None, &n);
+        assert!(v.get("content").is_none(), "{v}");
+        assert_eq!(v["allowed_mentions"]["parse"].as_array().unwrap().len(), 0);
+        assert!(
+            v["embeds"][0]["title"]
+                .as_str()
+                .unwrap()
+                .contains("everyone"),
+            "the name is still reported: {v}"
+        );
     }
 
     /// The embed title renders markdown too, so a monitor name cannot format

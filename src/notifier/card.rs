@@ -208,7 +208,7 @@ impl AlertCard {
 
     /// The one owner of who gets woken: transports that carry a ping ask here
     /// rather than deciding for themselves.
-    pub fn ping<'a>(&self, mention: Option<&'a str>) -> Option<&'a str> {
+    pub fn ping<'a, T: ?Sized>(&self, mention: Option<&'a T>) -> Option<&'a T> {
         mention.filter(|_| self.pings)
     }
 }

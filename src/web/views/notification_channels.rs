@@ -72,6 +72,7 @@ pub struct ConfigFields {
     pub slack_webhook_url: String,
     pub slack_mention: String,
     pub discord_webhook_url: String,
+    pub discord_mention: String,
     pub msteams_webhook_url: String,
     pub google_chat_webhook_url: String,
     pub email_to: String,
@@ -123,6 +124,7 @@ impl Default for ConfigFields {
             slack_webhook_url: String::new(),
             slack_mention: String::new(),
             discord_webhook_url: String::new(),
+            discord_mention: String::new(),
             msteams_webhook_url: String::new(),
             google_chat_webhook_url: String::new(),
             email_to: String::new(),
@@ -347,7 +349,6 @@ pub async fn new_form(
     .into_response())
 }
 
-/// All org monitors as cards, split by alert binding to `channel`:
 /// The tag chips a rule can be built from: the org's inventory, with any tag
 /// the rule already holds appended — the inventory is capped, and a rule tag
 /// missing from the list would be silently dropped on the next save.
@@ -371,6 +372,7 @@ async fn rule_tag_options(
     Ok(options)
 }
 
+/// All org monitors as cards, split by alert binding to `channel`:
 /// `(used_by, bindable)`. With no channel everything is bindable.
 async fn org_monitor_cards(
     state: &AppState,
@@ -477,7 +479,10 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.slack_webhook_url = c.webhook_url;
             config.slack_mention = c.mention.unwrap_or_default();
         }
-        ChannelConfig::Discord(c) => config.discord_webhook_url = c.webhook_url,
+        ChannelConfig::Discord(c) => {
+            config.discord_webhook_url = c.webhook_url;
+            config.discord_mention = c.mention.unwrap_or_default();
+        }
         ChannelConfig::MsTeams(c) => config.msteams_webhook_url = c.webhook_url,
         ChannelConfig::GoogleChat(c) => config.google_chat_webhook_url = c.webhook_url,
         ChannelConfig::Email(c) => config.email_to = c.to,
@@ -939,6 +944,33 @@ mod tests {
         // The real webhook never reaches the browser — only the `***` mask.
         assert!(!html.contains("zzUNIQUESECRETzz"));
         assert!(html.contains(r#"value="***""#));
+    }
+
+    /// An empty box would let a save with replace-config on wipe a routing rule
+    /// the operator never saw.
+    #[test]
+    fn edit_form_keeps_the_discord_ping_beside_the_masked_webhook() {
+        let mut ch = slack_channel("https://discord.com/api/webhooks/1/zzUNIQUESECRETzz");
+        ch.kind = crate::domain::ChannelKind::Discord;
+        ch.config = ChannelConfig::Discord(crate::domain::DiscordConfig {
+            webhook_url: "https://discord.com/api/webhooks/1/zzUNIQUESECRETzz".into(),
+            mention: Some("@here &123456789012345678".into()),
+        });
+        let form = form_from_channel(ch);
+        assert_eq!(form.config.discord_webhook_url, "***");
+        assert_eq!(form.config.discord_mention, "@here &123456789012345678");
+
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(
+            html.contains("&amp;123456789012345678"),
+            "ping is prefilled"
+        );
+        assert!(!html.contains("zzUNIQUESECRETzz"));
     }
 
     #[test]

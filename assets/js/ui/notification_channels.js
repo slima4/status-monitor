@@ -834,22 +834,14 @@
     function buildConfig() {
         const data = new FormData(form);
         const kind = currentKind();
-        if (kind === "slack") {
+        if (["slack", "discord", "msteams", "google_chat"].includes(kind)) {
             const config = {
-                type: "slack",
-                webhook_url: (data.get("slack_webhook_url") || "").trim(),
+                type: kind,
+                webhook_url: (data.get(`${kind}_webhook_url`) || "").trim(),
             };
-            const mention = (data.get("slack_mention") || "").trim();
+            const mention = (data.get(`${kind}_mention`) || "").trim();
             if (mention) config.mention = mention;
             return { config };
-        }
-        if (kind === "discord" || kind === "msteams" || kind === "google_chat") {
-            return {
-                config: {
-                    type: kind,
-                    webhook_url: (data.get(`${kind}_webhook_url`) || "").trim(),
-                },
-            };
         }
         if (kind === "webhook") {
             let headers;

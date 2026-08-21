@@ -22,6 +22,7 @@
 mod discord;
 mod email;
 mod google_chat;
+mod mention;
 mod msteams;
 mod ntfy;
 mod pagerduty;
@@ -35,7 +36,7 @@ mod webhook;
 mod whatsapp;
 mod whatsapp_app;
 
-pub use discord::DiscordConfig;
+pub use discord::{DiscordConfig, DiscordMention};
 pub use email::EmailConfig;
 pub use google_chat::GoogleChatConfig;
 pub use msteams::MsTeamsConfig;
@@ -211,6 +212,13 @@ impl ChannelConfig {
     /// See [`TransportConfig::operator_managed`].
     pub fn operator_managed(&self) -> bool {
         with_transport!(self, |c| c.operator_managed())
+    }
+
+    /// See [`TransportConfig::quiet_broadcast_mention`].
+    pub fn quieted_for_test(&self) -> Self {
+        let mut quieted = self.clone();
+        with_transport!(&mut quieted, |c| c.quiet_broadcast_mention());
+        quieted
     }
 
     /// See [`TransportConfig::lifecycle_ref`].
@@ -413,6 +421,7 @@ mod tests {
             }),
             ChannelConfig::Discord(DiscordConfig {
                 webhook_url: "https://discord.com/api/webhooks/1/x".into(),
+                mention: None,
             }),
             ChannelConfig::MsTeams(MsTeamsConfig {
                 webhook_url: "https://prod-77.westus.logic.azure.com/workflows/x".into(),
@@ -618,6 +627,7 @@ mod tests {
         let discord = |url: &str| {
             ChannelConfig::Discord(DiscordConfig {
                 webhook_url: url.into(),
+                mention: None,
             })
             .validate()
         };
@@ -660,6 +670,7 @@ mod tests {
         // Whole-URL masking, same policy as slack.
         let mut c = ChannelConfig::Discord(DiscordConfig {
             webhook_url: "https://discord.com/api/webhooks/123/tok".into(),
+            mention: None,
         });
         assert_eq!(
             c.abuse_url(),

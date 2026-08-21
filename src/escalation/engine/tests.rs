@@ -801,6 +801,27 @@ fn retry_after_hint_reads_telegram_429_body() {
     assert_eq!(retry_after_hint(Some(r#"{"retry_after":"x"}"#)), None);
 }
 
+/// A fraction that failed to parse would take the deferred classification with
+/// it and log a rate limit as a broken transport.
+#[test]
+fn retry_after_hint_reads_discords_fractional_wait() {
+    let body = r#"endpoint returned 429 Too Many Requests: {"message": "You are being rate limited.", "retry_after": 0.671, "global": false}"#;
+    assert_eq!(
+        retry_after_hint(Some(body)),
+        Some(chrono::Duration::zero()),
+        "sub-second floors to zero; the retry backoff supplies the real wait"
+    );
+    assert_eq!(
+        retry_after_hint(Some(r#"{"retry_after":5}"#)),
+        Some(chrono::Duration::seconds(5))
+    );
+    // A tenant-controlled body must not overflow the worker's arithmetic.
+    assert_eq!(
+        retry_after_hint(Some(r#"{"retry_after":9223372036854775807.5}"#)),
+        Some(chrono::Duration::seconds(3600))
+    );
+}
+
 #[test]
 fn retry_after_hint_survives_redaction() {
     // The hint is parsed AFTER redact_secrets; this pins that the

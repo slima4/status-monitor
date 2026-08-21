@@ -136,13 +136,15 @@ impl Worker {
             Err(err) => (redact_secrets(&err.to_string()), None),
         };
         let snippet = log_error_snippet(&error);
-        // A telegram throttle hint means the send was deferred, not broken —
-        // info keeps the warn stream meaningful during a paging burst. Only
-        // telegram transports get the downgrade: a webhook body echoing
-        // "retry_after" is tenant-controlled and must not mute the warn.
+        // A throttle hint means deferred, not broken, so the warn stream stays
+        // meaningful during a paging burst. Only host-pinned transports get the
+        // downgrade: a generic webhook body echoing "retry_after" is
+        // tenant-controlled and must not mute the warn.
         let deferred = matches!(
             channel.kind,
-            crate::domain::ChannelKind::Telegram | crate::domain::ChannelKind::TelegramApp
+            crate::domain::ChannelKind::Telegram
+                | crate::domain::ChannelKind::TelegramApp
+                | crate::domain::ChannelKind::Discord
         ) && retry_after_hint(Some(&error)).is_some();
         note_send(
             transport,

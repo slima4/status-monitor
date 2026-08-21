@@ -44,6 +44,8 @@ impl TransportConfig for TelegramAppConfig {
         true
     }
 
+    fn quiet_broadcast_mention(&mut self) {}
+
     /// The chat id: a kick/stop on the Telegram side severs every org
     /// linked to the chat.
     fn lifecycle_ref(&self) -> Option<&str> {

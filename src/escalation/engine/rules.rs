@@ -71,19 +71,17 @@ pub(super) fn retry_delay_secs(
     Some(base.saturating_mul(1u64 << shift).min(cap_secs.max(base)))
 }
 
-/// `"retry_after":N` seconds from a delivery error (Telegram 429 bodies);
-/// string-scanned because the error is already flattened, capped so a
+/// `"retry_after":N` seconds from a delivery error (Telegram and Discord 429
+/// bodies); string-scanned because the error is already flattened, capped so a
 /// hostile body can't park a retry for days.
 pub(super) fn retry_after_hint(error: Option<&str>) -> Option<chrono::Duration> {
     const MAX_HINT_SECS: i64 = 3600;
     let err = error?;
-    let rest = &err[err.find("\"retry_after\":")? + "\"retry_after\":".len()..];
-    let digits: String = rest
-        .trim_start()
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect();
+    let rest = err[err.find("\"retry_after\":")? + "\"retry_after\":".len()..].trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     let secs: i64 = digits.parse().ok()?;
+    // Discord's sub-second hints floor to zero, which costs nothing: the value
+    // only ever raises a backoff that has a floor of its own.
     Some(chrono::Duration::seconds(secs.min(MAX_HINT_SECS)))
 }
 

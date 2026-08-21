@@ -53,6 +53,7 @@ pub async fn callback(
             Ok((
                 ChannelConfig::Discord(DiscordConfig {
                     webhook_url: webhook.url,
+                    mention: None,
                 }),
                 name,
             ))

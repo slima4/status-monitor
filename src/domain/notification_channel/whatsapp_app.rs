@@ -47,6 +47,8 @@ impl TransportConfig for WhatsAppAppConfig {
         true
     }
 
+    fn quiet_broadcast_mention(&mut self) {}
+
     /// The phone: an inbound `stop` severs every org linked to the number.
     fn lifecycle_ref(&self) -> Option<&str> {
         Some(&self.phone)

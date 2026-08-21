@@ -2,11 +2,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
+use super::mention::{tokens, validate as validate_mention, without_broadcast};
 use super::transport::{MASK, TransportConfig, require_https};
-
-/// Enough to page a group plus a fallback, few enough that a paste of the
-/// whole member list can't turn one alert into a workspace-wide ping.
-const MAX_MENTIONS: usize = 5;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SlackConfig {
@@ -21,38 +18,16 @@ pub struct SlackConfig {
 }
 
 impl SlackConfig {
-    /// A copy without the workspace-wide pings: a config test should prove
-    /// the routing, not wake everybody in the channel.
-    pub fn without_broadcast_mention(&self) -> Self {
-        let mention = self
-            .mention
-            .as_deref()
-            .map(|raw| {
-                mention_tokens(raw)
-                    .filter(|t| !is_broadcast(t))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .filter(|m| !m.is_empty());
-        Self {
-            webhook_url: self.webhook_url.clone(),
-            mention,
-        }
-    }
-
+    /// A typo drops out alone rather than costing the on-call ping beside it.
     pub fn mention_markup(&self) -> Option<String> {
-        let raw = self.mention.as_deref()?;
-        let markup = mention_tokens(raw)
-            .filter_map(token_markup)
-            .collect::<Vec<_>>()
-            .join(" ");
-        (!markup.is_empty()).then_some(markup)
+        let mut markup: Vec<String> = Vec::new();
+        for token in tokens(self.mention.as_deref()?).filter_map(token_markup) {
+            if !markup.contains(&token) {
+                markup.push(token);
+            }
+        }
+        (!markup.is_empty()).then(|| markup.join(" "))
     }
-}
-
-fn mention_tokens(raw: &str) -> impl Iterator<Item = &str> {
-    raw.split([',', ' ', '\t', '\n', '\r'])
-        .filter(|t| !t.is_empty())
 }
 
 /// `@here` / `@channel`: everyone in the channel, not a named responder.
@@ -98,24 +73,20 @@ impl TransportConfig for SlackConfig {
 
     fn validate(&self) -> Result<(), String> {
         require_https(&self.webhook_url, "webhook_url")?;
-        if let Some(raw) = &self.mention {
-            let tokens: Vec<&str> = mention_tokens(raw).collect();
-            if tokens.is_empty() {
-                return Err("mention is blank — leave it unset to ping nobody".into());
-            }
-            if tokens.len() > MAX_MENTIONS {
-                return Err(format!("mention takes at most {MAX_MENTIONS} entries"));
-            }
-            for t in tokens {
-                if token_markup(t).is_none() {
-                    return Err(format!(
-                        "Slack cannot ping \"{t}\" — use @here, @channel, a user-group id (S…) \
-                         or a member id (U… / W… on Enterprise Grid)"
-                    ));
-                }
-            }
-        }
-        Ok(())
+        validate_mention(
+            self.mention.as_deref(),
+            |t| token_markup(t).is_some(),
+            |t| {
+                format!(
+                    "Slack cannot ping \"{t}\" — use @here, @channel, a user-group id (S…) \
+                     or a member id (U… / W… on Enterprise Grid)"
+                )
+            },
+        )
+    }
+
+    fn quiet_broadcast_mention(&mut self) {
+        self.mention = without_broadcast(self.mention.as_deref(), is_broadcast);
     }
 
     fn abuse_url(&self) -> Option<&str> {
@@ -136,6 +107,11 @@ mod tests {
             webhook_url: "https://hooks.slack.com/services/T/B/x".into(),
             mention: mention.map(str::to_string),
         }
+    }
+
+    fn quieted(mut c: SlackConfig) -> SlackConfig {
+        c.quiet_broadcast_mention();
+        c
     }
 
     #[test]
@@ -176,13 +152,10 @@ mod tests {
 
     #[test]
     fn a_test_send_keeps_the_group_ping_and_drops_the_broadcast() {
-        let quiet = cfg(Some("@here S01ABC234, channel")).without_broadcast_mention();
+        let quiet = quieted(cfg(Some("@here S01ABC234, channel")));
         assert_eq!(quiet.mention_markup().unwrap(), "<!subteam^S01ABC234>");
-        assert_eq!(
-            cfg(Some("@channel")).without_broadcast_mention().mention,
-            None
-        );
-        assert_eq!(cfg(None).without_broadcast_mention().mention, None);
+        assert_eq!(quieted(cfg(Some("@channel"))).mention, None);
+        assert_eq!(quieted(cfg(None)).mention, None);
     }
 
     #[test]
