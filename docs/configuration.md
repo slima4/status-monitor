@@ -51,6 +51,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `auth.session` | `idle_timeout_days`, `absolute_timeout_days`, `cookie_name`, `cookie_secure`, `cookie_domain`, `renew_on_use` | Session cookie shape + lifetime. `cookie_secure = true` in production |
 | `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes` | GitHub OAuth client. The button renders on `/login` only when client_id, client_secret, and redirect_url are all set |
 | `auth.google` | `client_id`, `client_secret`, `redirect_url`, `scopes` | Google OAuth client, same gating as `auth.github`. Email is trusted only with Google's `email_verified` attestation |
+| `auth.microsoft` | `client_id`, `client_secret`, `redirect_url`, `scopes`, `tenant` | Microsoft (Entra ID + personal accounts) OAuth client, same gating as `auth.github`. `tenant` picks which accounts may sign in: `common`, `organizations`, `consumers`, or one tenant GUID / domain — an unaddressable value fails the boot rather than falling back to `common`. Email is trusted only with the `xms_edov` optional claim, or on a Microsoft-owned domain in the personal tenant |
 | `auth.api_tokens` | `prefix_visible_chars` | Indexed prefix length for token lookup. The per-user token cap is a plan quota (`plans.max_api_tokens_per_user`), not a config key |
 | `auth.invitations` | `expiry_hours` | Invitation lifetime. The per-org pending cap is a plan quota (`plans.max_pending_invitations`), not a config key |
 | `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
@@ -90,7 +91,7 @@ See [Multi-tenancy](multi-tenancy.md) for the full model, slug rules, and the st
 
 ```toml
 [auth]
-enabled_methods = ["github_oauth", "google_oauth", "magic_link"]
+enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "magic_link"]
 fingerprint_salt = ""                # HMAC salt for IP/UA hashes; rotate-aware
 public_base_url = "https://status.example.test"
 
@@ -113,6 +114,13 @@ client_id = ""                       # Google Cloud Console OAuth web client
 client_secret = ""
 redirect_url = "https://status.example.test/auth/google/callback"
 scopes = ["openid", "email", "profile"]
+
+[auth.microsoft]
+client_id = ""                       # Entra app registration (portal.azure.com)
+client_secret = ""
+redirect_url = "https://status.example.test/auth/microsoft/callback"
+scopes = ["openid", "email", "profile"]
+tenant = "common"                    # common | organizations | consumers | <tenant GUID or domain>
 
 [auth.invitations]
 expiry_hours = 168                   # 7 days; pending-invite cap is plans.max_pending_invitations

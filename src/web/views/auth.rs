@@ -36,12 +36,15 @@ pub struct LoginPage {
     pub github_url: String,
     pub google_enabled: bool,
     pub google_url: String,
+    pub microsoft_enabled: bool,
+    pub microsoft_url: String,
     pub magic_link_enabled: bool,
     pub magic_link_expiry_minutes: u32,
     /// Marks the provider this browser used last (a returning-visitor cue, not
     /// an auth signal). At most one is true; the cookie carries the method.
     pub last_github: bool,
     pub last_google: bool,
+    pub last_microsoft: bool,
     pub last_magic: bool,
     pub invitation_hint: Option<String>,
     /// Cached, timeout-bounded `target_store.ping()` — same dependency check
@@ -98,12 +101,15 @@ pub async fn login(
         github_url: login_url("/auth/github/login", &params),
         google_enabled: state.cfg.auth.google_login_enabled(),
         google_url: login_url("/auth/google/login", &params),
+        microsoft_enabled: state.cfg.auth.microsoft_login_enabled(),
+        microsoft_url: login_url("/auth/microsoft/login", &params),
         // DB-gated too: without Postgres the request handler can only 500,
         // so a self-host/in-mem deployment must not render the form.
         magic_link_enabled: state.cfg.auth.magic_link_enabled() && state.db.is_some(),
         magic_link_expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
         last_github: last == Some(LoginMethod::GithubOauth.as_db_str()),
         last_google: last == Some(LoginMethod::GoogleOauth.as_db_str()),
+        last_microsoft: last == Some(LoginMethod::MicrosoftOauth.as_db_str()),
         last_magic: last == Some(LoginMethod::MagicLink.as_db_str()),
         invitation_hint: q.invitation,
         ready: login_ready(&state).await,
@@ -817,17 +823,20 @@ pub mod settings {
 mod tests {
     use super::*;
 
-    fn login_page(github: bool, google: bool, magic: bool) -> LoginPage {
+    fn login_page(github: bool, google: bool, microsoft: bool, magic: bool) -> LoginPage {
         LoginPage {
             active_tab: TAB_LOGIN,
             github_enabled: github,
             github_url: "/auth/github/login".into(),
             google_enabled: google,
             google_url: "/auth/google/login".into(),
+            microsoft_enabled: microsoft,
+            microsoft_url: "/auth/microsoft/login".into(),
             magic_link_enabled: magic,
             magic_link_expiry_minutes: 15,
             last_github: false,
             last_google: false,
+            last_microsoft: false,
             last_magic: false,
             invitation_hint: None,
             ready: true,
@@ -837,11 +846,13 @@ mod tests {
 
     #[test]
     fn login_page_renders_all_methods_when_enabled() {
-        let html = login_page(true, true, true).render().unwrap();
+        let html = login_page(true, true, true, true).render().unwrap();
         assert!(html.contains("continue with github"));
         assert!(html.contains(r#"href="/auth/github/login""#));
         assert!(html.contains("continue with google"));
         assert!(html.contains(r#"href="/auth/google/login""#));
+        assert!(html.contains("continue with microsoft"));
+        assert!(html.contains(r#"href="/auth/microsoft/login""#));
         assert!(html.contains(r#"id="magic-link-form""#));
         assert!(html.contains("login_magic_link.js"));
         assert!(!html.contains("No sign-in method is configured"));
@@ -852,11 +863,12 @@ mod tests {
 
     #[test]
     fn login_page_tags_every_method_for_the_funnel() {
-        let mut page = login_page(true, true, true);
+        let mut page = login_page(true, true, true, true);
         page.last_google = true;
         let html = page.render().unwrap();
         assert!(html.contains(r#"data-umami-event-method="github""#));
         assert!(html.contains(r#"data-umami-event-method="google""#));
+        assert!(html.contains(r#"data-umami-event-method="microsoft""#));
         // The email form has no attribute event; its script reads this instead.
         assert!(html.contains(r#"data-last-used="false""#));
         assert!(html.contains(r#"data-umami-event-last-used="true""#));
@@ -865,12 +877,12 @@ mod tests {
     #[test]
     fn login_page_loads_the_tracker_only_when_analytics_is_on() {
         assert!(
-            !login_page(true, true, true)
+            !login_page(true, true, true, true)
                 .render()
                 .unwrap()
                 .contains("analytics.uptimepage.dev")
         );
-        let mut page = login_page(true, true, true);
+        let mut page = login_page(true, true, true, true);
         page.analytics = Some("website-id");
         let html = page.render().unwrap();
         assert!(html.contains(r#"data-website-id="website-id""#));
@@ -881,7 +893,7 @@ mod tests {
 
     #[test]
     fn login_page_marks_last_used_method_only() {
-        let mut page = login_page(true, true, true);
+        let mut page = login_page(true, true, true, true);
         page.last_google = true;
         let html = page.render().unwrap();
         assert_eq!(html.matches("last used").count(), 1);
@@ -894,26 +906,33 @@ mod tests {
 
     #[test]
     fn login_page_shows_no_badge_for_first_visit() {
-        let html = login_page(true, true, true).render().unwrap();
+        let html = login_page(true, true, true, true).render().unwrap();
         assert!(!html.contains("last used"));
     }
 
     #[test]
     fn login_page_hides_disabled_methods() {
-        let html = login_page(true, false, false).render().unwrap();
+        let html = login_page(true, false, false, false).render().unwrap();
         assert!(html.contains("continue with github"));
         assert!(!html.contains("continue with google"));
         assert!(!html.contains(r#"id="magic-link-form""#));
     }
 
     #[test]
+    fn login_page_renders_microsoft_on_its_own() {
+        let html = login_page(false, false, true, false).render().unwrap();
+        assert!(html.contains("continue with microsoft"));
+        assert!(!html.contains("No sign-in method is configured"));
+    }
+
+    #[test]
     fn login_page_warns_only_when_no_method_available() {
-        let html = login_page(false, false, false).render().unwrap();
+        let html = login_page(false, false, false, false).render().unwrap();
         assert!(html.contains("No sign-in method is configured"));
         assert!(!html.contains("continue with github"));
         assert!(!html.contains("continue with google"));
 
-        let html = login_page(false, false, true).render().unwrap();
+        let html = login_page(false, false, false, true).render().unwrap();
         assert!(!html.contains("No sign-in method is configured"));
         assert!(html.contains(r#"id="magic-link-form""#));
         // No oauth button → no "or" divider above the form.
@@ -922,7 +941,7 @@ mod tests {
 
     #[test]
     fn login_page_shows_invitation_hint() {
-        let mut page = login_page(true, false, false);
+        let mut page = login_page(true, false, false, false);
         page.github_url = "/auth/github/login?invitation=abc".into();
         page.invitation_hint = Some("abc".into());
         let html = page.render().unwrap();

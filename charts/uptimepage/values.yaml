@@ -107,7 +107,7 @@ bootstrap:
 
 auth:
   # auth.enabled_methods is list-valued and the app parses no list keys from the
-  # environment, so all three stay on. A provider without credentials is inert.
+  # environment, so all of them stay on. A provider without credentials is inert.
   github:
     clientId: ""
     clientSecret: ""
@@ -117,6 +117,13 @@ auth:
     clientId: ""
     clientSecret: ""
     redirectUrl: ""
+  microsoft:
+    clientId: ""
+    clientSecret: ""
+    redirectUrl: ""
+    # "common" (work, school and personal), "organizations", "consumers", or a
+    # tenant GUID / domain.
+    tenant: common
 
 email:
   # `log` writes action URLs to the pod log rather than sending anything.

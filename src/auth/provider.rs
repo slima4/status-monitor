@@ -11,13 +11,14 @@ use serde::{Deserialize, Serialize};
 pub enum OauthProvider {
     Github,
     Google,
+    Microsoft,
 }
 
 impl OauthProvider {
     /// Every variant in declaration order. Used by the enum-drift integration
     /// test to compare against the live Postgres CHECK constraint; keep in
     /// lockstep with the enum body.
-    pub const ALL: &'static [Self] = &[Self::Github, Self::Google];
+    pub const ALL: &'static [Self] = &[Self::Github, Self::Google, Self::Microsoft];
 
     /// Stable string used in the Postgres CHECK constraints and bound as the
     /// `provider` parameter at every INSERT / WHERE site. Routing through this
@@ -27,6 +28,7 @@ impl OauthProvider {
         match self {
             Self::Github => "github",
             Self::Google => "google",
+            Self::Microsoft => "microsoft",
         }
     }
 }

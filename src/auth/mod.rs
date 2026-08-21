@@ -19,6 +19,7 @@ pub mod invitations;
 pub mod login_audit;
 pub mod mac;
 pub mod magic_link;
+pub mod microsoft;
 pub mod oauth_login;
 pub mod oauth_state;
 pub mod provider;

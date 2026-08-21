@@ -28,30 +28,62 @@ const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 pub(crate) const UA: &str = "uptimepage/auth";
 
 #[derive(Debug, serde::Deserialize)]
-struct TokenResponse {
-    access_token: Option<String>,
+pub(crate) struct TokenResponse {
+    pub(crate) access_token: Option<String>,
+    /// OIDC providers return the identity claims alongside the access token.
+    pub(crate) id_token: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
 }
 
-/// Parse an OAuth token-endpoint response body shared by every provider:
-/// surface the endpoint's own error pair, then require a non-empty token.
-pub(crate) fn parse_access_token(body: &[u8], what: &'static str) -> Result<String> {
+/// Parse an OAuth token-endpoint response body shared by every provider,
+/// surfacing the endpoint's own error pair rather than a bare parse failure.
+pub(crate) fn parse_token_response(body: &[u8], what: &'static str) -> Result<TokenResponse> {
     let parsed: TokenResponse = serde_json::from_slice(body)
         .map_err(|e| AppError::Other(anyhow::anyhow!("{what} parse: {e}")))?;
     if let Some(err) = parsed.error {
         let desc = parsed.error_description.unwrap_or_default();
         return Err(AppError::Other(anyhow::anyhow!("{what}: {err} ({desc})")));
     }
-    parsed
+    Ok(parsed)
+}
+
+/// [`parse_token_response`] narrowed to the access token most providers want.
+pub(crate) fn parse_access_token(body: &[u8], what: &'static str) -> Result<String> {
+    parse_token_response(body, what)?
         .access_token
         .filter(|t| !t.is_empty())
         .ok_or_else(|| AppError::Other(anyhow::anyhow!("{what}: empty token")))
 }
 
+/// A strict bool would reject the string "true" some providers send. An
+/// unrecognised shape reads as "not attested": these flags only widen trust,
+/// so a surprise must cost one link, not the claim set it travels in.
+pub(crate) fn de_bool_loose<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> std::result::Result<Option<bool>, D::Error> {
+    use serde::Deserialize;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Loose {
+        B(bool),
+        S(String),
+        Other(serde::de::IgnoredAny),
+    }
+    Ok(match Option::<Loose>::deserialize(d)? {
+        Some(Loose::B(b)) => Some(b),
+        Some(Loose::S(s)) if s.eq_ignore_ascii_case("true") => Some(true),
+        Some(Loose::S(_) | Loose::Other(_)) | None => None,
+    })
+}
+
 /// Signup-slug retry budget. `generate_signup_slug` collides at p≈1e-9 per
 /// pair; 5 retries covers the 99.9999... case without spinning.
 const SIGNUP_SLUG_RETRIES: u32 = 5;
+
+/// No attested address and no identity match: nothing to open, nothing that
+/// may be created. The callback routes it back to the login page.
+pub const NO_VERIFIED_EMAIL: &str = "NO_VERIFIED_EMAIL";
 
 /// Aggregated upstream result of Phase B. `verified_email` must be None
 /// unless the provider attested ownership — the email-link guard against
@@ -155,9 +187,10 @@ pub async fn upsert_identity_and_signup_org(
     // 2. Email-based recovery. CITEXT comparison is the load-bearing reason
     //    invitations + users share the same column type.
     let Some(email) = identity.verified_email.as_ref() else {
-        return Err(AppError::Other(anyhow::anyhow!(
-            "{provider:?} callback: no verified email and no identity match"
-        )));
+        return Err(AppError::bad_request(
+            NO_VERIFIED_EMAIL,
+            format!("{provider:?} callback: no verified email and no identity match"),
+        ));
     };
 
     // ::citext cast is load-bearing — sqlx binds &str as TEXT, which would

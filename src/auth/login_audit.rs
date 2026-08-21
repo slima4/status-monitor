@@ -14,6 +14,7 @@ use crate::error::Result;
 pub enum LoginMethod {
     GithubOauth,
     GoogleOauth,
+    MicrosoftOauth,
     ApiToken,
     MagicLink,
 }
@@ -23,6 +24,7 @@ impl LoginMethod {
         match self {
             Self::GithubOauth => "github_oauth",
             Self::GoogleOauth => "google_oauth",
+            Self::MicrosoftOauth => "microsoft_oauth",
             Self::ApiToken => "api_token",
             Self::MagicLink => "magic_link",
         }

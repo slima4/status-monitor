@@ -193,3 +193,86 @@ fn bootstrap_disabled_by_default_and_org_name_survives_a_partial_table() {
         .unwrap();
     assert_eq!(partial.org_name, "My Org");
 }
+
+/// `[auth.microsoft]` flattens the shared client fields onto the section, so
+/// TOML and env must both land on them rather than on a nested `client` table.
+#[test]
+fn microsoft_section_reads_the_flattened_client_fields() {
+    let cfg: MicrosoftOauthConfig = Config::builder()
+        .add_source(File::from_str(
+            r#"
+client_id = "cid"
+client_secret = "sec"
+redirect_url = "https://app.example.test/auth/microsoft/callback"
+tenant = "organizations"
+"#,
+            FileFormat::Toml,
+        ))
+        .build()
+        .unwrap()
+        .try_deserialize()
+        .unwrap();
+    assert!(cfg.client.is_configured());
+    assert_eq!(cfg.tenant, "organizations");
+}
+
+#[test]
+fn microsoft_env_keys_reach_the_flattened_client() {
+    let env = std::collections::HashMap::from([
+        (
+            "UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_ID".to_string(),
+            "cid".to_string(),
+        ),
+        (
+            "UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_SECRET".to_string(),
+            "sec".to_string(),
+        ),
+        (
+            "UPTIMEPAGE_AUTH__MICROSOFT__REDIRECT_URL".to_string(),
+            "https://app.example.test/auth/microsoft/callback".to_string(),
+        ),
+        (
+            "UPTIMEPAGE_AUTH__MICROSOFT__TENANT".to_string(),
+            "organizations".to_string(),
+        ),
+    ]);
+    let cfg: AppConfig = Config::builder()
+        .add_source(File::with_name(DEFAULT_CONFIG_PATH))
+        .add_source(
+            Environment::with_prefix(ENV_PREFIX)
+                .prefix_separator("_")
+                .separator(ENV_SEPARATOR)
+                .try_parsing(true)
+                .source(Some(env)),
+        )
+        .build()
+        .unwrap()
+        .try_deserialize()
+        .unwrap();
+    assert!(cfg.auth.microsoft.client.is_configured());
+    assert_eq!(cfg.auth.microsoft.tenant, "organizations");
+    assert!(cfg.auth.microsoft_login_enabled());
+}
+
+/// A mistyped single-tenant lock stops the boot rather than widening.
+#[test]
+fn an_unaddressable_microsoft_tenant_fails_the_boot() {
+    let mut cfg: AppConfig = Config::builder()
+        .add_source(File::with_name(DEFAULT_CONFIG_PATH))
+        .build()
+        .unwrap()
+        .try_deserialize()
+        .unwrap();
+    cfg.auth.microsoft.client.client_id = "cid".into();
+    cfg.auth.microsoft.client.client_secret = "sec".to_string().into();
+    cfg.auth.microsoft.client.redirect_url = "https://app.example.test/cb".into();
+
+    cfg.auth.microsoft.tenant = "contoso.com".into();
+    assert!(cfg.validate_microsoft_oauth().is_ok());
+
+    cfg.auth.microsoft.tenant = "contoso.com/".into();
+    assert!(cfg.validate_microsoft_oauth().is_err());
+
+    cfg.auth.microsoft.client.client_id = String::new();
+    assert!(cfg.validate_microsoft_oauth().is_ok());
+}

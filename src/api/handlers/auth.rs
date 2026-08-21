@@ -1,6 +1,6 @@
-//! `/auth/*` endpoints: GitHub/Google OAuth login + callback, logout.
+//! `/auth/*` endpoints: GitHub/Google/Microsoft OAuth login + callback, logout.
 //!
-//! Both providers share one start/finish runner; only Phase B (the upstream
+//! Every provider shares one start/finish runner; only Phase B (the upstream
 //! identity fetch) dispatches per provider. The callback follows a strict
 //! three-phase rule — no DB transaction held across upstream HTTP calls. New
 //! users get a signup org auto-created in the same Phase C transaction that
@@ -18,7 +18,7 @@ use crate::app::AppState;
 use crate::auth::{
     OauthProvider, fingerprint, github, google,
     login_audit::{self, LoginAttempt, LoginMethod},
-    oauth_login, oauth_state, session as session_store,
+    microsoft, oauth_login, oauth_state, session as session_store,
     url::safe_redirect_target,
 };
 use crate::config::OauthClientConfig;
@@ -54,6 +54,11 @@ fn provider_parts(state: &AppState, provider: OauthProvider) -> ProviderParts<'_
             cfg: &auth.google,
             method: LoginMethod::GoogleOauth,
             enabled: auth.google_login_enabled(),
+        },
+        OauthProvider::Microsoft => ProviderParts {
+            cfg: &auth.microsoft.client,
+            method: LoginMethod::MicrosoftOauth,
+            enabled: auth.microsoft_login_enabled(),
         },
     }
 }
@@ -121,6 +126,10 @@ pub async fn google_login(state: State<AppState>, q: Query<LoginQuery>) -> Resul
     start_login(state, q, OauthProvider::Google).await
 }
 
+pub async fn microsoft_login(state: State<AppState>, q: Query<LoginQuery>) -> Result<Redirect> {
+    start_login(state, q, OauthProvider::Microsoft).await
+}
+
 async fn start_login(
     State(state): State<AppState>,
     Query(q): Query<LoginQuery>,
@@ -162,6 +171,8 @@ async fn start_login(
     let url = match provider {
         OauthProvider::Github => github::authorize_url(cfg, &s),
         OauthProvider::Google => google::authorize_url(cfg, &s),
+        // Tenant sits beside the credentials, so this arm needs the whole section.
+        OauthProvider::Microsoft => microsoft::authorize_url(&state.cfg.auth.microsoft, &s),
     };
     Ok(Redirect::to(&url))
 }
@@ -192,6 +203,16 @@ pub async fn google_callback(
     cookies: Cookies,
 ) -> Result<axum::response::Response> {
     finish_login(state, q, ip, headers, cookies, OauthProvider::Google).await
+}
+
+pub async fn microsoft_callback(
+    state: State<AppState>,
+    q: Query<CallbackQuery>,
+    ip: crate::web::client_ip::ClientIp,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<axum::response::Response> {
+    finish_login(state, q, ip, headers, cookies, OauthProvider::Microsoft).await
 }
 
 async fn finish_login(
@@ -263,6 +284,9 @@ async fn finish_login(
     let fetched = match provider {
         OauthProvider::Github => github::fetch_identity(&state.outbound_http, cfg, code).await,
         OauthProvider::Google => google::fetch_identity(&state.outbound_http, cfg, code).await,
+        OauthProvider::Microsoft => {
+            microsoft::fetch_identity(&state.outbound_http, &state.cfg.auth.microsoft, code).await
+        }
     };
     let identity = match fetched {
         Ok(id) => id,
@@ -285,12 +309,31 @@ async fn finish_login(
     // Phase C: materialise user + identity, auto-create signup org for new
     // users, and resolve their default-org id for the session row. Fresh
     // transaction; no upstream calls.
-    let resolved = oauth_login::upsert_identity_and_signup_org(pool, provider, &identity)
+    let resolved = match oauth_login::upsert_identity_and_signup_org(pool, provider, &identity)
         .await
-        .map_err(|e| {
+    {
+        Ok(resolved) => resolved,
+        // Provider setup, not a server fault — a 500 here would read as an outage.
+        Err(AppError::BadRequest { code, .. }) if code == oauth_login::NO_VERIFIED_EMAIL => {
+            tracing::warn!(
+                provider = provider.as_db_str(),
+                "oauth callback: provider attested no email and no identity matched"
+            );
+            login_audit::record_failure_anon(
+                pool,
+                method,
+                ip_hash.as_deref(),
+                ua_hash.as_deref(),
+                "no_verified_email",
+            )
+            .await;
+            return Ok(Redirect::to("/login").into_response());
+        }
+        Err(e) => {
             tracing::warn!(error = %e, provider = provider.as_db_str(), "oauth callback: phase C failed");
-            e
-        })?;
+            return Err(e);
+        }
+    };
     if let Some(deleted_at) = resolved.pending_deletion {
         tracing::info!(
             user_id = %resolved.user_id.0,

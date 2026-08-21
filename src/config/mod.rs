@@ -28,7 +28,7 @@ mod validate;
 
 pub use auth::{
     ApiTokensConfig, AuthConfig, BootstrapConfig, InvitationsConfig, MagicLinkConfig,
-    OauthClientConfig, SessionConfig,
+    MicrosoftOauthConfig, OauthClientConfig, SessionConfig,
 };
 pub use limits::{
     AbuseConfig, ApiConfig, CorsConfig, PerIpRateLimits, QuotasConfig, RateLimitJanitorConfig,

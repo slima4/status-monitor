@@ -36,6 +36,7 @@ pub struct AuthConfig {
     pub session: SessionConfig,
     pub github: OauthClientConfig,
     pub google: OauthClientConfig,
+    pub microsoft: MicrosoftOauthConfig,
     pub invitations: InvitationsConfig,
     pub api_tokens: ApiTokensConfig,
     pub magic_link: MagicLinkConfig,
@@ -47,6 +48,7 @@ impl Default for AuthConfig {
             enabled_methods: vec![
                 "github_oauth".into(),
                 "google_oauth".into(),
+                "microsoft_oauth".into(),
                 "magic_link".into(),
             ],
             fingerprint_salt: String::new(),
@@ -55,6 +57,7 @@ impl Default for AuthConfig {
             // Scopes empty: default.toml + provider DEFAULT_SCOPES own them.
             github: OauthClientConfig::default(),
             google: OauthClientConfig::default(),
+            microsoft: MicrosoftOauthConfig::default(),
             invitations: InvitationsConfig::default(),
             api_tokens: ApiTokensConfig::default(),
             magic_link: MagicLinkConfig::default(),
@@ -80,6 +83,10 @@ impl AuthConfig {
 
     pub fn google_login_enabled(&self) -> bool {
         self.method_enabled("google_oauth") && self.google.is_configured()
+    }
+
+    pub fn microsoft_login_enabled(&self) -> bool {
+        self.method_enabled("microsoft_oauth") && self.microsoft.client.is_configured()
     }
 }
 
@@ -137,6 +144,26 @@ impl OauthClientConfig {
         !self.client_id.is_empty()
             && !self.client_secret.expose_secret().is_empty()
             && !self.redirect_url.is_empty()
+    }
+}
+
+/// Microsoft's client credentials plus the tenant its endpoints are addressed
+/// to. `common` admits work, school and personal accounts; `organizations`
+/// drops personal ones; a tenant GUID or domain locks sign-in to one tenant.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct MicrosoftOauthConfig {
+    #[serde(flatten)]
+    pub client: OauthClientConfig,
+    pub tenant: String,
+}
+
+impl Default for MicrosoftOauthConfig {
+    fn default() -> Self {
+        Self {
+            client: OauthClientConfig::default(),
+            tenant: "common".into(),
+        }
     }
 }
 

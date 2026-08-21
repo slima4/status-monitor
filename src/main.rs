@@ -145,6 +145,7 @@ async fn main() -> Result<()> {
     // Transactional mail: provider = "resend" without key/sender fails here,
     // not on the first verification mail.
     cfg.validate_email()?;
+    cfg.validate_microsoft_oauth()?;
     // Operator WhatsApp number: a flipped flag with missing creds fails
     // here, not as a dead webhook or a broken first send.
     cfg.validate_whatsapp_app()?;

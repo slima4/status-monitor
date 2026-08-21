@@ -282,6 +282,23 @@ impl AppConfig {
         Ok(())
     }
 
+    /// The URL builder has no fallback on purpose: defaulting a mistyped
+    /// single-tenant lock to `common` would admit every Microsoft account on
+    /// earth without a word in the log.
+    pub fn validate_microsoft_oauth(&self) -> Result<()> {
+        let m = &self.auth.microsoft;
+        if !m.client.is_configured() {
+            return Ok(());
+        }
+        if !crate::auth::microsoft::tenant_is_valid(&m.tenant) {
+            return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                "auth.microsoft.tenant {:?} is not addressable — use \"common\", \"organizations\", \"consumers\", a tenant GUID, or a domain",
+                m.tenant
+            )));
+        }
+        Ok(())
+    }
+
     /// A half-configured operator WhatsApp number is a clean startup error,
     /// not a dead webhook or a failing send after the flag flip.
     pub fn validate_whatsapp_app(&self) -> Result<()> {

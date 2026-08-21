@@ -119,6 +119,7 @@ fn method_prop(method: LoginMethod) -> Option<&'static str> {
     match method {
         LoginMethod::GithubOauth => Some("github"),
         LoginMethod::GoogleOauth => Some("google"),
+        LoginMethod::MicrosoftOauth => Some("microsoft"),
         LoginMethod::MagicLink => Some("magic-link"),
         LoginMethod::ApiToken => None,
     }

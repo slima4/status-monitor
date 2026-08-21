@@ -1,7 +1,7 @@
 # Authentication
 
-uptimepage ships with an in-binary auth stack: GitHub and Google OAuth
-for the operator UI, opaque per-user API tokens for the REST surface, and
+uptimepage ships with an in-binary auth stack: GitHub, Google and Microsoft
+OAuth for the operator UI, opaque per-user API tokens for the REST surface, and
 magic-link sign-in (enabled by default) for users without an OAuth identity. The
 binary always runs as multi-tenant SaaS — single-tenant deployments are
 just SaaS with one signed-up user; see [Multi-tenancy](multi-tenancy.md)
@@ -28,9 +28,9 @@ for the full model.
 
 ## Flows
 
-### OAuth sign-in (GitHub, Google)
+### OAuth sign-in (GitHub, Google, Microsoft)
 
-Both providers share one callback runner; only the upstream identity
+Every provider shares one callback runner; only the upstream identity
 fetch differs. The callback is split into three strict phases:
 
 1. **Phase A** — `DELETE … RETURNING` consumes the `oauth_states` row in
@@ -39,7 +39,8 @@ fetch differs. The callback is split into three strict phases:
    the DB connection is released before any HTTP.
 2. **Phase B** — exchange `code` for an access token, then fetch the
    profile: GitHub `/user` + `/user/emails` (verified primary only),
-   Google OIDC userinfo (email accepted only with `email_verified`).
+   Google OIDC userinfo (email accepted only with `email_verified`),
+   Microsoft's id_token claims (see [Microsoft email trust](#microsoft-email-trust)).
    No DB connection is held.
 3. **Phase C** — a fresh transaction materialises the user + identity,
    links a new provider to an existing account on verified-email match
@@ -66,6 +67,43 @@ deliberate `POST /api/v1/me/restore`. Failure modes:
 - Disabled (`enabled_methods`) or incompletely configured provider →
   404 `AUTH_METHOD_UNAVAILABLE` on both start and callback; the
   listed-but-misconfigured case logs a warning.
+
+### Microsoft email trust
+
+Entra's `email` claim is a directory attribute a tenant admin can set to
+any string, including an address they do not own. Phase C links a new
+provider onto an existing account by verified email, so trusting that
+claim blindly would hand any admin a takeover path. Microsoft is
+therefore read from the id_token the token endpoint returns, and an
+address only becomes a verified email when one of these holds:
+
+- `xms_edov` is `true` — the tenant proved it owns the address's domain.
+- The token's `tid` is the personal-account tenant
+  (`9188040d-6c67-4c5b-b112-36a304b66dad`) **and** the domain is one
+  Microsoft owns (`outlook.com`, `hotmail.com`, `live.com`, `msn.com`,
+  `passport.com`, `windowslive.com`). Country variants such as
+  `hotmail.co.uk` are not on the list: matching them needs a prefix rule
+  that `hotmail.attacker.test` would satisfy too.
+
+Anything else still signs in against an already-linked identity but can
+neither link to an existing account nor create a new one — that callback
+bounces back to `/login` and writes a `no_verified_email` row to
+`login_attempts`, rather than erroring.
+
+`xms_edov` is an **optional claim**: add both `email` and `xms_edov` to
+the app registration's ID-token optional claims, or no work account can
+sign up. The callback logs a warning naming the claim whenever it sees an
+unattested address. A tenant that emits the claim in an unexpected shape
+costs that one link, never the whole sign-in.
+
+The identity key is `{tid}/{oid}`, falling back to `sub`. `sub` alone is
+pairwise per app, so the pair survives a change of app registration and
+keeps a guest in another tenant distinct from the same person at home.
+
+The signature on the id_token is not verified: the bytes came straight
+back from Microsoft's token endpoint over TLS, so a JWKS fetch would only
+re-prove what the channel already proved. Nothing accepts a token that
+arrived any other way.
 
 ### API token auth
 
@@ -173,6 +211,8 @@ with the same argon2id parameters as API tokens).
 | `GET`  | `/auth/magic-link/verify`      | none    | Verify magic-link token (gated) |
 | `GET`  | `/auth/google/login`           | none    | Initiate Google OAuth |
 | `GET`  | `/auth/google/callback`        | none    | Handle Google OAuth callback |
+| `GET`  | `/auth/microsoft/login`        | none    | Initiate Microsoft OAuth |
+| `GET`  | `/auth/microsoft/callback`     | none    | Handle Microsoft OAuth callback |
 | `GET`  | `/invitations/accept`          | optional session | Emailed accept link (HTML; redeems with session, else login bounce) |
 | `GET`  | `/invitations/decline`         | none    | Emailed decline link (HTML confirm page; POST does the decline) |
 | `GET`  | `/api/v1/me`                   | session/token | Current user info |

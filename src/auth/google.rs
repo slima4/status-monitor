@@ -12,7 +12,9 @@ use hyper::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, USER_AGENT};
 use secrecy::ExposeSecret;
 use serde::Deserialize;
 
-use crate::auth::oauth_login::{RemoteIdentity, UA, fetch_limited, parse_access_token};
+use crate::auth::oauth_login::{
+    RemoteIdentity, UA, de_bool_loose, fetch_limited, parse_access_token,
+};
 use crate::auth::url::url_encode;
 use crate::config::OauthClientConfig;
 use crate::error::{AppError, Result};
@@ -33,22 +35,6 @@ struct UserInfo {
     #[serde(default, deserialize_with = "de_bool_loose")]
     email_verified: Option<bool>,
     name: Option<String>,
-}
-
-/// Legacy Google surfaces emit `email_verified` as the string "true"; a
-/// strict bool would fail the whole parse and lock out sub-match logins.
-fn de_bool_loose<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<bool>, D::Error> {
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Loose {
-        B(bool),
-        S(String),
-    }
-    Ok(match Option::<Loose>::deserialize(d)? {
-        Some(Loose::B(b)) => Some(b),
-        Some(Loose::S(s)) if s.eq_ignore_ascii_case("true") => Some(true),
-        Some(Loose::S(_)) | None => None,
-    })
 }
 
 fn map_userinfo(info: UserInfo) -> RemoteIdentity {

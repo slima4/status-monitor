@@ -435,6 +435,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/auth/google/callback",
             get(handlers::auth::google_callback),
         )
+        .route(
+            "/auth/microsoft/login",
+            get(handlers::auth::microsoft_login),
+        )
+        .route(
+            "/auth/microsoft/callback",
+            get(handlers::auth::microsoft_callback),
+        )
         .route("/auth/logout", post(handlers::auth::logout))
         .route("/auth/logout-all", post(handlers::auth::logout_all));
 

@@ -208,6 +208,19 @@ spec:
                   name: {{ $core }}
                   key: google-client-secret
             {{- end }}
+            {{- with .Values.auth.microsoft.clientId }}
+            - name: UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_ID
+              value: {{ . | quote }}
+            - name: UPTIMEPAGE_AUTH__MICROSOFT__REDIRECT_URL
+              value: {{ default (printf "%s/auth/microsoft/callback" (include "uptimepage.publicBaseUrl" $)) $.Values.auth.microsoft.redirectUrl | quote }}
+            - name: UPTIMEPAGE_AUTH__MICROSOFT__TENANT
+              value: {{ $.Values.auth.microsoft.tenant | default "common" | quote }}
+            - name: UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: microsoft-client-secret
+            {{- end }}
             {{- with .Values.bootstrap.email }}
             - name: UPTIMEPAGE_BOOTSTRAP__EMAIL
               value: {{ . | quote }}

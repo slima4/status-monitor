@@ -225,7 +225,7 @@ api_key = ""
 # Policy switch per sign-in method. OAuth providers additionally need their
 # client credentials + redirect_url set below (list = policy, creds =
 # capability); magic_link gates its request/verify routes + purge ticker.
-enabled_methods = ["github_oauth", "google_oauth", "magic_link"]
+enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "magic_link"]
 # Salt for hashing IPs / user-agents in login_attempts + sessions.
 # GENERATE WITH: openssl rand -base64 32
 # LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The
@@ -252,6 +252,16 @@ client_id = ""
 client_secret = ""
 redirect_url = ""
 scopes = ["openid", "email", "profile"]
+
+[auth.microsoft]
+client_id = ""
+client_secret = ""
+redirect_url = ""
+scopes = ["openid", "email", "profile"]
+# Which Microsoft accounts may sign in: "common" (work, school and personal),
+# "organizations" (work and school only), "consumers" (personal only), or a
+# tenant GUID / domain to admit exactly one tenant.
+tenant = "common"
 
 [auth.invitations]
 expiry_hours = 168

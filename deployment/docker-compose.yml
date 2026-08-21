@@ -169,6 +169,12 @@ services:
       UPTIMEPAGE_AUTH__GOOGLE__CLIENT_ID: ${UPTIMEPAGE_AUTH_GOOGLE_CLIENT_ID:-}
       UPTIMEPAGE_AUTH__GOOGLE__CLIENT_SECRET: ${UPTIMEPAGE_AUTH_GOOGLE_CLIENT_SECRET:-}
       UPTIMEPAGE_AUTH__GOOGLE__REDIRECT_URL: ${UPTIMEPAGE_AUTH_GOOGLE_REDIRECT_URL:-}
+      # Microsoft OAuth login — same contract, plus the tenant the endpoints
+      # are addressed to (defaults to "common": work, school and personal).
+      UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_ID: ${UPTIMEPAGE_AUTH_MICROSOFT_CLIENT_ID:-}
+      UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_SECRET: ${UPTIMEPAGE_AUTH_MICROSOFT_CLIENT_SECRET:-}
+      UPTIMEPAGE_AUTH__MICROSOFT__REDIRECT_URL: ${UPTIMEPAGE_AUTH_MICROSOFT_REDIRECT_URL:-}
+      UPTIMEPAGE_AUTH__MICROSOFT__TENANT: ${UPTIMEPAGE_AUTH_MICROSOFT_TENANT:-common}
       UPTIMEPAGE_AUTH__PUBLIC_BASE_URL: ${UPTIMEPAGE_AUTH_PUBLIC_BASE_URL:-}
       # Marketing site (apex + www). Disabled by default — the binary
       # serves only the operator + tenant surfaces unless this is true.

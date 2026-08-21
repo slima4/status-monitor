@@ -44,7 +44,7 @@ You can pass everything through `--set` instead, and the chart will build the Se
 Releases are signed with cosign keyless signing, so there is no public key to distribute:
 
 ```bash
-cosign verify ghcr.io/uptimepage/charts/uptimepage:0.2.0 \
+cosign verify ghcr.io/uptimepage/charts/uptimepage:0.3.0 \
   --certificate-identity-regexp '^https://github.com/uptimepage/uptimepage/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
@@ -107,6 +107,7 @@ Set `secrets.existingSecret` to manage them yourself with External Secrets, Vaul
 | `operator-admin-token` | no | empty makes `/operator/*` return 404 |
 | `github-client-secret` | with GitHub OAuth | |
 | `google-client-secret` | with Google OAuth | |
+| `microsoft-client-secret` | with Microsoft OAuth | |
 | `resend-api-key` | with `email.provider=resend` | |
 
 Database credentials are separate: `postgresql.existingSecret` holds the whole DSN under `postgres-url`, and `clickhouse.existingSecret` holds the password under `clickhouse-password`. All three settings can point at the same Secret, since none of the keys collide.
