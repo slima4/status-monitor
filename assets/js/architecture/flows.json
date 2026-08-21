@@ -977,7 +977,7 @@
     {
       "id": "login",
       "name": "OAuth login → session",
-      "desc": "A user signs in with GitHub or Google",
+      "desc": "A user signs in with GitHub, GitLab, Google or Microsoft",
       "steps": [
         {
           "f": "op-ui",

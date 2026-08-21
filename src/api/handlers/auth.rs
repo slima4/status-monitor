@@ -1,4 +1,5 @@
-//! `/auth/*` endpoints: GitHub/Google/Microsoft OAuth login + callback, logout.
+//! `/auth/*` endpoints: GitHub/Google/Microsoft/GitLab OAuth login + callback,
+//! logout.
 //!
 //! Every provider shares one start/finish runner; only Phase B (the upstream
 //! identity fetch) dispatches per provider. The callback follows a strict
@@ -16,7 +17,7 @@ use tower_cookies::Cookies;
 
 use crate::app::AppState;
 use crate::auth::{
-    OauthProvider, fingerprint, github, google,
+    OauthProvider, fingerprint, github, gitlab, google,
     login_audit::{self, LoginAttempt, LoginMethod},
     microsoft, oauth_login, oauth_state, session as session_store,
     url::safe_redirect_target,
@@ -59,6 +60,11 @@ fn provider_parts(state: &AppState, provider: OauthProvider) -> ProviderParts<'_
             cfg: &auth.microsoft.client,
             method: LoginMethod::MicrosoftOauth,
             enabled: auth.microsoft_login_enabled(),
+        },
+        OauthProvider::Gitlab => ProviderParts {
+            cfg: &auth.gitlab.client,
+            method: LoginMethod::GitlabOauth,
+            enabled: auth.gitlab_login_enabled(),
         },
     }
 }
@@ -130,6 +136,10 @@ pub async fn microsoft_login(state: State<AppState>, q: Query<LoginQuery>) -> Re
     start_login(state, q, OauthProvider::Microsoft).await
 }
 
+pub async fn gitlab_login(state: State<AppState>, q: Query<LoginQuery>) -> Result<Redirect> {
+    start_login(state, q, OauthProvider::Gitlab).await
+}
+
 async fn start_login(
     State(state): State<AppState>,
     Query(q): Query<LoginQuery>,
@@ -173,6 +183,7 @@ async fn start_login(
         OauthProvider::Google => google::authorize_url(cfg, &s),
         // Tenant sits beside the credentials, so this arm needs the whole section.
         OauthProvider::Microsoft => microsoft::authorize_url(&state.cfg.auth.microsoft, &s),
+        OauthProvider::Gitlab => gitlab::authorize_url(&state.cfg.auth.gitlab, &s),
     };
     Ok(Redirect::to(&url))
 }
@@ -213,6 +224,16 @@ pub async fn microsoft_callback(
     cookies: Cookies,
 ) -> Result<axum::response::Response> {
     finish_login(state, q, ip, headers, cookies, OauthProvider::Microsoft).await
+}
+
+pub async fn gitlab_callback(
+    state: State<AppState>,
+    q: Query<CallbackQuery>,
+    ip: crate::web::client_ip::ClientIp,
+    headers: HeaderMap,
+    cookies: Cookies,
+) -> Result<axum::response::Response> {
+    finish_login(state, q, ip, headers, cookies, OauthProvider::Gitlab).await
 }
 
 async fn finish_login(
@@ -282,10 +303,13 @@ async fn finish_login(
 
     // Phase B: upstream HTTP. NO DB connection held here.
     let fetched = match provider {
-        OauthProvider::Github => github::fetch_identity(&state.outbound_http, cfg, code).await,
-        OauthProvider::Google => google::fetch_identity(&state.outbound_http, cfg, code).await,
+        OauthProvider::Github => github::fetch_identity(&state.oauth_http, cfg, code).await,
+        OauthProvider::Google => google::fetch_identity(&state.oauth_http, cfg, code).await,
         OauthProvider::Microsoft => {
-            microsoft::fetch_identity(&state.outbound_http, &state.cfg.auth.microsoft, code).await
+            microsoft::fetch_identity(&state.oauth_http, &state.cfg.auth.microsoft, code).await
+        }
+        OauthProvider::Gitlab => {
+            gitlab::fetch_identity(&state.oauth_http, &state.cfg.auth.gitlab, code).await
         }
     };
     let identity = match fetched {

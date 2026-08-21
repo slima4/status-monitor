@@ -135,11 +135,11 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "getting-started",
         title: "Getting started",
-        description: "Sign in with GitHub or Google, add your first monitor, pick an interval and regions, route an alert to Slack or email, and publish a status page in ten minutes.",
+        description: "Sign in with GitHub, GitLab, Google or Microsoft, add a monitor, pick an interval and regions, route an alert to Slack or email, and publish a status page.",
         blurb: "Sign in, add a monitor, get alerted, and publish a status page in about ten minutes.",
         section: Section::Start,
         scope: Scope::Everyone,
-        lastmod: "2026-07-25",
+        lastmod: "2026-08-21",
         source: include_str!("../../docs/getting-started.md"),
         dir: "",
     },
@@ -267,7 +267,7 @@ pub const DOCS: &[DocPage] = &[
     DocPage {
         slug: "authentication",
         title: "Authentication",
-        description: "GitHub, Google and Microsoft sign-in, magic links, org-bound API tokens and the scopes that bound them, and how a session or token is checked per request.",
+        description: "GitHub, Google, Microsoft and GitLab sign-in, magic links, org-bound API tokens and the scopes that bound them, and how a session is checked per request.",
         blurb: "OAuth sign-in, magic links, API tokens, and the scopes that bound them.",
         section: Section::Reference,
         scope: Scope::Everyone,

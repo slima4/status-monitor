@@ -300,9 +300,14 @@ pub struct AppState {
     /// `session_debounce` so the Bearer middleware can lazily refresh
     /// without N writes-per-second per token.
     pub api_token_debounce: Arc<ApiTokenLastUsedDebounce>,
-    /// Shared outbound HTTPS client used by GitHub OAuth + transactional
-    /// email. Not the per-target check client.
+    /// Shared outbound HTTPS client used by transactional email and every
+    /// user-supplied destination. Not the per-target check client.
     pub outbound_http: OutboundHttpClient,
+    /// OAuth token exchange only. Skips the SSRF guard, since the origin is
+    /// operator config rather than user input — see
+    /// [`SsrfGuard::operator_configured_target`]. Never reuse it for a
+    /// destination that came from a request.
+    pub oauth_http: OutboundHttpClient,
     /// Transactional email sender (invitations, magic-link). Provider selected
     /// by `email.provider`.
     pub email_sender: Arc<dyn EmailSender>,
@@ -581,6 +586,9 @@ impl AppState {
             session_debounce: Arc::new(build_debounce_cache()),
             api_token_debounce: Arc::new(build_api_token_debounce()),
             outbound_http,
+            oauth_http: crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::operator_configured_target(),
+            ),
             email_sender,
             quotas,
             rate_limits,

@@ -14,6 +14,7 @@ pub mod discord;
 pub mod email_norm;
 pub mod fingerprint;
 pub mod github;
+pub mod gitlab;
 pub mod google;
 pub mod invitations;
 pub mod login_audit;

@@ -254,6 +254,90 @@ fn microsoft_env_keys_reach_the_flattened_client() {
     assert!(cfg.auth.microsoft_login_enabled());
 }
 
+/// `[auth.gitlab]` flattens the shared client fields onto the section, so TOML
+/// and env must both land on them rather than on a nested `client` table.
+#[test]
+fn gitlab_section_reads_the_flattened_client_fields() {
+    let cfg: GitlabOauthConfig = Config::builder()
+        .add_source(File::from_str(
+            r#"
+client_id = "cid"
+client_secret = "sec"
+redirect_url = "https://app.example.test/auth/gitlab/callback"
+base_url = "https://git.corp.test"
+"#,
+            FileFormat::Toml,
+        ))
+        .build()
+        .unwrap()
+        .try_deserialize()
+        .unwrap();
+    assert!(cfg.client.is_configured());
+    assert_eq!(cfg.base_url, "https://git.corp.test");
+}
+
+#[test]
+fn gitlab_env_keys_reach_the_flattened_client() {
+    let env = std::collections::HashMap::from([
+        (
+            "UPTIMEPAGE_AUTH__GITLAB__CLIENT_ID".to_string(),
+            "cid".to_string(),
+        ),
+        (
+            "UPTIMEPAGE_AUTH__GITLAB__CLIENT_SECRET".to_string(),
+            "sec".to_string(),
+        ),
+        (
+            "UPTIMEPAGE_AUTH__GITLAB__REDIRECT_URL".to_string(),
+            "https://app.example.test/auth/gitlab/callback".to_string(),
+        ),
+        (
+            "UPTIMEPAGE_AUTH__GITLAB__BASE_URL".to_string(),
+            "https://git.corp.test".to_string(),
+        ),
+    ]);
+    let cfg: AppConfig = Config::builder()
+        .add_source(File::with_name(DEFAULT_CONFIG_PATH))
+        .add_source(
+            Environment::with_prefix(ENV_PREFIX)
+                .prefix_separator("_")
+                .separator(ENV_SEPARATOR)
+                .try_parsing(true)
+                .source(Some(env)),
+        )
+        .build()
+        .unwrap()
+        .try_deserialize()
+        .unwrap();
+    assert!(cfg.auth.gitlab.client.is_configured());
+    assert_eq!(cfg.auth.gitlab.base_url, "https://git.corp.test");
+    assert!(cfg.auth.gitlab_login_enabled());
+}
+
+/// An unaddressable instance stops the boot rather than signing users in
+/// against the wrong GitLab.
+#[test]
+fn an_unaddressable_gitlab_instance_fails_the_boot() {
+    let mut cfg: AppConfig = Config::builder()
+        .add_source(File::with_name(DEFAULT_CONFIG_PATH))
+        .build()
+        .unwrap()
+        .try_deserialize()
+        .unwrap();
+    cfg.auth.gitlab.client.client_id = "cid".into();
+    cfg.auth.gitlab.client.client_secret = "sec".to_string().into();
+    cfg.auth.gitlab.client.redirect_url = "https://app.example.test/cb".into();
+
+    cfg.auth.gitlab.base_url = "https://git.corp.test".into();
+    assert!(cfg.validate_gitlab_oauth().is_ok());
+
+    cfg.auth.gitlab.base_url = "http://git.corp.test".into();
+    assert!(cfg.validate_gitlab_oauth().is_err());
+
+    cfg.auth.gitlab.client.client_id = String::new();
+    assert!(cfg.validate_gitlab_oauth().is_ok());
+}
+
 /// A mistyped single-tenant lock stops the boot rather than widening.
 #[test]
 fn an_unaddressable_microsoft_tenant_fails_the_boot() {

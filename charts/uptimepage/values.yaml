@@ -124,6 +124,13 @@ auth:
     # "common" (work, school and personal), "organizations", "consumers", or a
     # tenant GUID / domain.
     tenant: common
+  gitlab:
+    clientId: ""
+    clientSecret: ""
+    redirectUrl: ""
+    # gitlab.com, or a self-managed instance's own https origin. Half the
+    # identity key: changing it after sign-ups orphans those accounts.
+    baseUrl: https://gitlab.com
 
 email:
   # `log` writes action URLs to the pod log rather than sending anything.

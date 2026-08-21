@@ -1,7 +1,7 @@
 # Authentication
 
-uptimepage ships with an in-binary auth stack: GitHub, Google and Microsoft
-OAuth for the operator UI, opaque per-user API tokens for the REST surface, and
+uptimepage ships with an in-binary auth stack: GitHub, Google, Microsoft and
+GitLab OAuth for the operator UI, opaque per-user API tokens for the REST surface, and
 magic-link sign-in (enabled by default) for users without an OAuth identity. The
 binary always runs as multi-tenant SaaS — single-tenant deployments are
 just SaaS with one signed-up user; see [Multi-tenancy](multi-tenancy.md)
@@ -28,7 +28,7 @@ for the full model.
 
 ## Flows
 
-### OAuth sign-in (GitHub, Google, Microsoft)
+### OAuth sign-in (GitHub, Google, Microsoft, GitLab)
 
 Every provider shares one callback runner; only the upstream identity
 fetch differs. The callback is split into three strict phases:
@@ -40,7 +40,8 @@ fetch differs. The callback is split into three strict phases:
 2. **Phase B** — exchange `code` for an access token, then fetch the
    profile: GitHub `/user` + `/user/emails` (verified primary only),
    Google OIDC userinfo (email accepted only with `email_verified`),
-   Microsoft's id_token claims (see [Microsoft email trust](#microsoft-email-trust)).
+   Microsoft's id_token claims (see [Microsoft email trust](#microsoft-email-trust)),
+   GitLab's id_token claims (see [GitLab instances](#gitlab-instances)).
    No DB connection is held.
 3. **Phase C** — a fresh transaction materialises the user + identity,
    links a new provider to an existing account on verified-email match
@@ -104,6 +105,42 @@ The signature on the id_token is not verified: the bytes came straight
 back from Microsoft's token endpoint over TLS, so a JWKS fetch would only
 re-prove what the channel already proved. Nothing accepts a token that
 arrived any other way.
+
+### GitLab instances
+
+GitLab speaks OIDC, so the identity rides the id_token and no profile call
+follows. `auth.gitlab.base_url` names the instance the OAuth application is
+registered on: `https://gitlab.com`, or a self-managed instance's own https
+origin. Plain HTTP is refused at boot — the client secret rides that origin in
+a POST body.
+
+An instance on a private address (RFC1918, loopback) works without touching
+`security.allow_private_targets`: the OAuth token exchange runs on a client
+that skips the SSRF guard, because the origin comes from operator config
+rather than from a request. That flag stays off, so user-created monitors and
+webhooks still cannot reach the private range.
+
+A GitLab user id is unique only within the instance that issued it, so the
+identity key is `{iss}/{sub}` rather than `sub` alone. The token's `iss` is
+compared against the configured base URL before anything else and a mismatch
+fails the callback: taken on trust, a self-managed instance could mint ids
+that collide with gitlab.com's and land its users on someone else's account.
+Because the issuer is half the key, changing `base_url` after sign-ups orphans
+every account created against the old one.
+
+`email` becomes a verified email only when `email_verified` is `true`. On
+gitlab.com that always holds; a self-managed instance can be configured to
+skip confirmation, and those addresses can neither link to an existing
+account nor create a new one. The callback logs a warning and bounces to
+`/login` with a `no_verified_email` row, same as the Microsoft path.
+
+Register the application under **User settings → Applications** (or the group
+/ instance admin equivalent) with the `openid`, `email` and `profile` scopes,
+the redirect URI set to `<public base>/auth/gitlab/callback`, and **Confidential**
+left checked — the flow authenticates with the client secret, not PKCE.
+
+The id_token signature is unverified for the same reason it is on the
+Microsoft path: the bytes came straight back from the token endpoint over TLS.
 
 ### API token auth
 
@@ -213,6 +250,8 @@ with the same argon2id parameters as API tokens).
 | `GET`  | `/auth/google/callback`        | none    | Handle Google OAuth callback |
 | `GET`  | `/auth/microsoft/login`        | none    | Initiate Microsoft OAuth |
 | `GET`  | `/auth/microsoft/callback`     | none    | Handle Microsoft OAuth callback |
+| `GET`  | `/auth/gitlab/login`           | none    | Initiate GitLab OAuth |
+| `GET`  | `/auth/gitlab/callback`        | none    | Handle GitLab OAuth callback |
 | `GET`  | `/invitations/accept`          | optional session | Emailed accept link (HTML; redeems with session, else login bounce) |
 | `GET`  | `/invitations/decline`         | none    | Emailed decline link (HTML confirm page; POST does the decline) |
 | `GET`  | `/api/v1/me`                   | session/token | Current user info |
@@ -274,7 +313,8 @@ with the same argon2id parameters as API tokens).
 Every authentication attempt — success or failure — writes a row to
 `login_attempts`:
 
-- `method` ∈ `'github_oauth' | 'api_token' | 'magic_link'`
+- `method` ∈ `'github_oauth' | 'google_oauth' | 'microsoft_oauth' |
+  'gitlab_oauth' | 'api_token' | 'magic_link'`
 - `success` boolean
 - `failure_reason` text (`'invalid_state'`, `'token_expired'`,
   `'invalid_token'`, …)

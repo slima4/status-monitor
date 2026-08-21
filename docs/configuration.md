@@ -52,6 +52,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `auth.github` | `client_id`, `client_secret`, `redirect_url`, `scopes` | GitHub OAuth client. The button renders on `/login` only when client_id, client_secret, and redirect_url are all set |
 | `auth.google` | `client_id`, `client_secret`, `redirect_url`, `scopes` | Google OAuth client, same gating as `auth.github`. Email is trusted only with Google's `email_verified` attestation |
 | `auth.microsoft` | `client_id`, `client_secret`, `redirect_url`, `scopes`, `tenant` | Microsoft (Entra ID + personal accounts) OAuth client, same gating as `auth.github`. `tenant` picks which accounts may sign in: `common`, `organizations`, `consumers`, or one tenant GUID / domain — an unaddressable value fails the boot rather than falling back to `common`. Email is trusted only with the `xms_edov` optional claim, or on a Microsoft-owned domain in the personal tenant |
+| `auth.gitlab` | `client_id`, `client_secret`, `redirect_url`, `scopes`, `base_url` | GitLab OAuth client, same gating as `auth.github`. `base_url` names the instance the application is registered on — gitlab.com or a self-managed https origin; a non-https or malformed value fails the boot. It is half the identity key (`{iss}/{sub}`), so changing it after sign-ups orphans those accounts. Email is trusted only with GitLab's `email_verified` claim |
 | `auth.api_tokens` | `prefix_visible_chars` | Indexed prefix length for token lookup. The per-user token cap is a plan quota (`plans.max_api_tokens_per_user`), not a config key |
 | `auth.invitations` | `expiry_hours` | Invitation lifetime. The per-org pending cap is a plan quota (`plans.max_pending_invitations`), not a config key |
 | `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
@@ -91,7 +92,7 @@ See [Multi-tenancy](multi-tenancy.md) for the full model, slug rules, and the st
 
 ```toml
 [auth]
-enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "magic_link"]
+enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "gitlab_oauth", "magic_link"]
 fingerprint_salt = ""                # HMAC salt for IP/UA hashes; rotate-aware
 public_base_url = "https://status.example.test"
 
@@ -121,6 +122,13 @@ client_secret = ""
 redirect_url = "https://status.example.test/auth/microsoft/callback"
 scopes = ["openid", "email", "profile"]
 tenant = "common"                    # common | organizations | consumers | <tenant GUID or domain>
+
+[auth.gitlab]
+client_id = ""                       # GitLab application (User settings -> Applications)
+client_secret = ""
+redirect_url = "https://status.example.test/auth/gitlab/callback"
+scopes = ["openid", "email", "profile"]
+base_url = "https://gitlab.com"      # or a self-managed instance's https origin
 
 [auth.invitations]
 expiry_hours = 168                   # 7 days; pending-invite cap is plans.max_pending_invitations

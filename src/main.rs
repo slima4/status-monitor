@@ -146,6 +146,7 @@ async fn main() -> Result<()> {
     // not on the first verification mail.
     cfg.validate_email()?;
     cfg.validate_microsoft_oauth()?;
+    cfg.validate_gitlab_oauth()?;
     // Operator WhatsApp number: a flipped flag with missing creds fails
     // here, not as a dead webhook or a broken first send.
     cfg.validate_whatsapp_app()?;

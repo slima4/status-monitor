@@ -134,8 +134,8 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- end }}
 {{- if .Values.secrets.existingSecret }}
-{{- if or .Values.auth.github.clientSecret .Values.auth.google.clientSecret .Values.auth.microsoft.clientSecret .Values.email.resend.apiKey }}
-{{- fail "uptimepage: secrets.existingSecret owns every core key - put github-client-secret / google-client-secret / microsoft-client-secret / resend-api-key in that Secret rather than in values" }}
+{{- if or .Values.auth.github.clientSecret .Values.auth.google.clientSecret .Values.auth.microsoft.clientSecret .Values.auth.gitlab.clientSecret .Values.email.resend.apiKey }}
+{{- fail "uptimepage: secrets.existingSecret owns every core key - put github-client-secret / google-client-secret / microsoft-client-secret / gitlab-client-secret / resend-api-key in that Secret rather than in values" }}
 {{- end }}
 {{- else }}
 {{- if and .Values.auth.github.clientId (not .Values.auth.github.clientSecret) }}
@@ -146,6 +146,9 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 {{- if and .Values.auth.microsoft.clientId (not .Values.auth.microsoft.clientSecret) }}
 {{- fail "uptimepage: auth.microsoft.clientId is set without auth.microsoft.clientSecret" }}
+{{- end }}
+{{- if and .Values.auth.gitlab.clientId (not .Values.auth.gitlab.clientSecret) }}
+{{- fail "uptimepage: auth.gitlab.clientId is set without auth.gitlab.clientSecret" }}
 {{- end }}
 {{- if and (eq .Values.email.provider "resend") (not .Values.email.resend.apiKey) }}
 {{- fail "uptimepage: email.provider=resend needs email.resend.apiKey" }}

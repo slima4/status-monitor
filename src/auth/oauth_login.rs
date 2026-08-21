@@ -9,6 +9,8 @@
 //!    for new users, all inside a fresh tx (here).
 
 use anyhow::Context;
+use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::Request;
@@ -30,7 +32,6 @@ pub(crate) const UA: &str = "uptimepage/auth";
 #[derive(Debug, serde::Deserialize)]
 pub(crate) struct TokenResponse {
     pub(crate) access_token: Option<String>,
-    /// OIDC providers return the identity claims alongside the access token.
     pub(crate) id_token: Option<String>,
     error: Option<String>,
     error_description: Option<String>,
@@ -54,6 +55,35 @@ pub(crate) fn parse_access_token(body: &[u8], what: &'static str) -> Result<Stri
         .access_token
         .filter(|t| !t.is_empty())
         .ok_or_else(|| AppError::Other(anyhow::anyhow!("{what}: empty token")))
+}
+
+/// [`parse_token_response`] narrowed to the OIDC id_token.
+pub(crate) fn parse_id_token(body: &[u8], what: &'static str) -> Result<String> {
+    parse_token_response(body, what)?
+        .id_token
+        .filter(|t| !t.is_empty())
+        .ok_or_else(|| {
+            AppError::Other(anyhow::anyhow!(
+                "{what}: no id_token — the openid scope is missing"
+            ))
+        })
+}
+
+/// Payload only; the signature is deliberately unchecked. The token came back
+/// over TLS from the provider's own token endpoint, so a JWKS fetch would
+/// re-prove what the channel proves. Nothing reads a token from anywhere else.
+pub(crate) fn decode_id_token_claims<T: serde::de::DeserializeOwned>(
+    id_token: &str,
+    what: &'static str,
+) -> Result<T> {
+    let payload = id_token
+        .split('.')
+        .nth(1)
+        .ok_or_else(|| AppError::Other(anyhow::anyhow!("{what}: not a JWT")))?;
+    let raw = URL_SAFE_NO_PAD
+        .decode(payload.trim_end_matches('='))
+        .map_err(|e| AppError::Other(anyhow::anyhow!("{what} decode: {e}")))?;
+    serde_json::from_slice(&raw).map_err(|e| AppError::Other(anyhow::anyhow!("{what} parse: {e}")))
 }
 
 /// A strict bool would reject the string "true" some providers send. An

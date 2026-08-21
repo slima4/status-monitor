@@ -25,7 +25,7 @@ API, or Terraform. Self-host the single binary or use the hosted service.
 
 Hosted, no install:
 
-1. Sign up at **[uptimepage.dev](https://uptimepage.dev)** with GitHub or Google — no card.
+1. Sign up at **[uptimepage.dev](https://uptimepage.dev)** with GitHub, GitLab, Google or Microsoft — no card.
 2. Add a monitor: paste a URL, pick a check type and interval, save.
 3. Bind a notification channel (Slack, email, PagerDuty, …) so failures reach you.
 4. Turn on a public status page and share the link.
@@ -77,7 +77,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 | **Automation** | REST API, scoped API tokens, Terraform provider, MCP server for LLM clients |
 | **Built on** | Rust 1.95 / Tokio / Axum, Postgres + ClickHouse, one ~23 MB self-contained binary |
 
-**Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub or Google.
+**Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub, GitLab, Google or Microsoft.
 **Full docs: <https://uptimepage.dev/docs>**
 
 <div align="center">
@@ -241,7 +241,7 @@ To stop: `docker compose down`, or `docker compose down -v` to delete the data t
 
 **On an ARM host?** Release tags are `linux/amd64` and `linux/arm64`. `latest`, which tracks the newest commit on `main`, is amd64 only, so pin a release on ARM.
 
-**Signing in later.** The bootstrap link works once. For repeat sign-in, and to invite a team, set up GitHub or Google OAuth, or an email provider for magic links (`[auth.github]`, `[auth.google]`, `[email]` in `config/default.toml`, or the matching env vars). See [docs/authentication.md](docs/authentication.md).
+**Signing in later.** The bootstrap link works once. For repeat sign-in, and to invite a team, set up OAuth with GitHub, GitLab, Google or Microsoft, or an email provider for magic links (`[auth.github]`, `[auth.gitlab]`, `[auth.google]`, `[auth.microsoft]`, `[email]` in `config/default.toml`, or the matching env vars). See [docs/authentication.md](docs/authentication.md).
 
 **Packaging this for an app store?** Step 2 needs a terminal. Set `UPTIMEPAGE_BOOTSTRAP__EMAIL` instead and the first boot seeds that owner and logs a sign-in link, no shell required. See [First-run owner](docs/configuration.md#first-run-owner).
 

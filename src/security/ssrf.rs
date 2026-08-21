@@ -33,6 +33,16 @@ impl SsrfGuard {
         Self::new(true)
     }
 
+    /// For destinations an operator wrote into the config, never a user. The
+    /// guard answers a user aiming our client somewhere they cannot reach, and
+    /// nobody is confused when the origin came from whoever set the database
+    /// URL. The alternative for a self-managed GitLab on RFC1918 is
+    /// `allow_private_targets`, which opens the private range to every
+    /// user-created monitor and webhook.
+    pub fn operator_configured_target() -> Self {
+        Self::new(true)
+    }
+
     /// Build from the same `SecurityConfig` flag the check-path reads, so all
     /// production paths agree on what "private" means without each call site
     /// hard-coding the field name.

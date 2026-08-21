@@ -15,6 +15,7 @@ pub enum LoginMethod {
     GithubOauth,
     GoogleOauth,
     MicrosoftOauth,
+    GitlabOauth,
     ApiToken,
     MagicLink,
 }
@@ -25,6 +26,7 @@ impl LoginMethod {
             Self::GithubOauth => "github_oauth",
             Self::GoogleOauth => "google_oauth",
             Self::MicrosoftOauth => "microsoft_oauth",
+            Self::GitlabOauth => "gitlab_oauth",
             Self::ApiToken => "api_token",
             Self::MagicLink => "magic_link",
         }

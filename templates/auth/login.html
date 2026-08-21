@@ -65,7 +65,7 @@
           style="font-family: var(--font-mono); font-weight: 600; letter-spacing: -0.01em;">
         sign in to uptimepage
       </h2>
-      <p class="text-sm text-muted">First sign-in with GitHub, Google or Microsoft creates your account &mdash; free.</p>
+      <p class="text-sm text-muted">First sign-in with GitHub, GitLab, Google or Microsoft creates your account &mdash; free.</p>
     </header>
 
     {% if github_enabled %}
@@ -107,8 +107,21 @@
     </a>
     {% endif %}
 
+    {% if gitlab_enabled %}
+    <a href="{{ gitlab_url }}"
+       class="sticker-btn sticker-btn--accent relative inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium"
+       data-umami-event="login-method" data-umami-event-method="gitlab"
+       data-umami-event-last-used="{{ last_gitlab }}">
+      <svg aria-hidden="true" viewBox="0 0 24 24" class="h-5 w-5 fill-current">
+        <path d="M23.6 9.593l-.034-.086L20.3.981a.851.851 0 0 0-.336-.405.875.875 0 0 0-1 .054.875.875 0 0 0-.29.44l-2.205 6.748H7.537L5.332 1.07a.857.857 0 0 0-.29-.441.875.875 0 0 0-1-.054.859.859 0 0 0-.336.405L.433 9.502l-.033.086a6.066 6.066 0 0 0 2.012 7.01l.011.01.03.021 4.976 3.726 2.462 1.864 1.5 1.132a1.009 1.009 0 0 0 1.22 0l1.5-1.132 2.461-1.864 5.006-3.748.013-.01a6.068 6.068 0 0 0 2.007-7.004z"/>
+      </svg>
+      <span>continue with gitlab</span>
+      {% if last_gitlab %}{% include "auth/_last_used.html" %}{% endif %}
+    </a>
+    {% endif %}
+
     {% if magic_link_enabled %}
-    {% if github_enabled || google_enabled || microsoft_enabled %}
+    {% if github_enabled || google_enabled || microsoft_enabled || gitlab_enabled %}
     {# Email sign-in only redeems existing or invited accounts, so it hides
        behind a disclosure and OAuth stays the new-account path. Open by
        default when it was the last method used. #}
@@ -126,11 +139,11 @@
     <script defer src="{{ "js/ui/login_magic_link.js"|asset }}"></script>
     {% endif %}
 
-    {% if !github_enabled && !google_enabled && !microsoft_enabled && !magic_link_enabled %}
+    {% if !github_enabled && !google_enabled && !microsoft_enabled && !gitlab_enabled && !magic_link_enabled %}
     <p class="alert-card alert-card--warn">
       No sign-in method is configured. Ask your operator to set OAuth client
       credentials (<code>auth.github</code> / <code>auth.google</code> /
-      <code>auth.microsoft</code>) or
+      <code>auth.microsoft</code> / <code>auth.gitlab</code>) or
       enable <code>magic_link</code> in <code>auth.enabled_methods</code>.
     </p>
     {% endif %}

@@ -225,7 +225,7 @@ api_key = ""
 # Policy switch per sign-in method. OAuth providers additionally need their
 # client credentials + redirect_url set below (list = policy, creds =
 # capability); magic_link gates its request/verify routes + purge ticker.
-enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "magic_link"]
+enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "gitlab_oauth", "magic_link"]
 # Salt for hashing IPs / user-agents in login_attempts + sessions.
 # GENERATE WITH: openssl rand -base64 32
 # LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The
@@ -262,6 +262,16 @@ scopes = ["openid", "email", "profile"]
 # "organizations" (work and school only), "consumers" (personal only), or a
 # tenant GUID / domain to admit exactly one tenant.
 tenant = "common"
+
+[auth.gitlab]
+client_id = ""
+client_secret = ""
+redirect_url = ""
+scopes = ["openid", "email", "profile"]
+# Which GitLab issues the identity: gitlab.com, or a self-managed instance's
+# own https origin. It is half the identity key, so changing it after sign-ups
+# orphans every account created against the old one.
+base_url = "https://gitlab.com"
 
 [auth.invitations]
 expiry_hours = 168

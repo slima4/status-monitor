@@ -221,6 +221,19 @@ spec:
                   name: {{ $core }}
                   key: microsoft-client-secret
             {{- end }}
+            {{- with .Values.auth.gitlab.clientId }}
+            - name: UPTIMEPAGE_AUTH__GITLAB__CLIENT_ID
+              value: {{ . | quote }}
+            - name: UPTIMEPAGE_AUTH__GITLAB__REDIRECT_URL
+              value: {{ default (printf "%s/auth/gitlab/callback" (include "uptimepage.publicBaseUrl" $)) $.Values.auth.gitlab.redirectUrl | quote }}
+            - name: UPTIMEPAGE_AUTH__GITLAB__BASE_URL
+              value: {{ $.Values.auth.gitlab.baseUrl | default "https://gitlab.com" | quote }}
+            - name: UPTIMEPAGE_AUTH__GITLAB__CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $core }}
+                  key: gitlab-client-secret
+            {{- end }}
             {{- with .Values.bootstrap.email }}
             - name: UPTIMEPAGE_BOOTSTRAP__EMAIL
               value: {{ . | quote }}

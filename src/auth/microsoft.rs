@@ -2,16 +2,10 @@
 //! Phase B (code exchange + id_token claim read into a [`RemoteIdentity`]).
 //! Phase A/C live in [`crate::auth::oauth_login`].
 //!
-//! Claims come from the id_token the token endpoint handed back over TLS, so a
-//! JWKS check would only re-prove what the channel proves. Nothing here trusts
-//! a token that arrived any other way.
-//!
 //! Entra's `email` claim is a directory attribute a tenant admin can set to an
 //! address they do not own. Trusting it would hand that admin the Phase C
 //! email-recovery path, so it passes [`email_is_attested`] first.
 
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use http_body_util::Full;
 use hyper::Request;
 use hyper::body::Bytes;
@@ -20,7 +14,7 @@ use secrecy::ExposeSecret;
 use serde::Deserialize;
 
 use crate::auth::oauth_login::{
-    RemoteIdentity, UA, de_bool_loose, fetch_limited, parse_token_response,
+    RemoteIdentity, UA, de_bool_loose, decode_id_token_claims, fetch_limited, parse_id_token,
 };
 use crate::auth::url::url_encode;
 use crate::config::MicrosoftOauthConfig;
@@ -156,28 +150,8 @@ pub async fn fetch_identity(
         .body(Full::new(Bytes::from(payload)))
         .map_err(|e| AppError::Other(anyhow::anyhow!("microsoft token request: {e}")))?;
     let body = fetch_limited(http, req, "microsoft token").await?;
-    let id_token = parse_token_response(&body, "microsoft token endpoint")?
-        .id_token
-        .filter(|t| !t.is_empty())
-        .ok_or_else(|| {
-            AppError::Other(anyhow::anyhow!(
-                "microsoft token endpoint: no id_token — the openid scope is missing"
-            ))
-        })?;
-    map_claims(decode_claims(&id_token)?)
-}
-
-/// Payload only; the signature is deliberately unchecked, see the module note.
-fn decode_claims(id_token: &str) -> Result<IdClaims> {
-    let payload = id_token
-        .split('.')
-        .nth(1)
-        .ok_or_else(|| AppError::Other(anyhow::anyhow!("microsoft id_token: not a JWT")))?;
-    let raw = URL_SAFE_NO_PAD
-        .decode(payload.trim_end_matches('='))
-        .map_err(|e| AppError::Other(anyhow::anyhow!("microsoft id_token decode: {e}")))?;
-    serde_json::from_slice(&raw)
-        .map_err(|e| AppError::Other(anyhow::anyhow!("microsoft id_token parse: {e}")))
+    let id_token = parse_id_token(&body, "microsoft token endpoint")?;
+    map_claims(decode_id_token_claims(&id_token, "microsoft id_token")?)
 }
 
 #[cfg(test)]
@@ -312,9 +286,12 @@ mod tests {
 
     #[test]
     fn decode_claims_reads_an_unpadded_jwt_payload() {
+        use base64::Engine;
+        use base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let payload = URL_SAFE_NO_PAD.encode(br#"{"oid":"o1","tid":"t1","name":"A"}"#);
-        let claims = decode_claims(&format!("header.{payload}.signature")).unwrap();
+        let claims: IdClaims =
+            decode_id_token_claims(&format!("header.{payload}.signature"), "t").unwrap();
         assert_eq!(claims.oid.as_deref(), Some("o1"));
-        assert!(decode_claims("not-a-jwt").is_err());
+        assert!(decode_id_token_claims::<IdClaims>("not-a-jwt", "t").is_err());
     }
 }

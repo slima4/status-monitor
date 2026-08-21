@@ -299,6 +299,22 @@ impl AppConfig {
         Ok(())
     }
 
+    /// The URL builder has no fallback on purpose: defaulting a mistyped
+    /// instance to gitlab.com would orphan every identity minted so far.
+    pub fn validate_gitlab_oauth(&self) -> Result<()> {
+        let g = &self.auth.gitlab;
+        if !g.client.is_configured() {
+            return Ok(());
+        }
+        if !crate::auth::gitlab::base_url_is_valid(&g.base_url) {
+            return Err(crate::error::AppError::Other(anyhow::anyhow!(
+                "auth.gitlab.base_url {:?} is not an https origin — use \"https://gitlab.com\" or your instance's own https URL",
+                g.base_url
+            )));
+        }
+        Ok(())
+    }
+
     /// A half-configured operator WhatsApp number is a clean startup error,
     /// not a dead webhook or a failing send after the flag flip.
     pub fn validate_whatsapp_app(&self) -> Result<()> {

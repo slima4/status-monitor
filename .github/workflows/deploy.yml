@@ -60,6 +60,8 @@ name: deploy
 #     GOOGLE_OAUTH_CLIENT_SECRET  Google Cloud OAuth client secret (sensitive)
 #     MICROSOFT_OAUTH_CLIENT_ID     Entra app registration (application) id
 #     MICROSOFT_OAUTH_CLIENT_SECRET Entra client secret value (sensitive, expires)
+#     GITLAB_OAUTH_CLIENT_ID        GitLab application id
+#     GITLAB_OAUTH_CLIENT_SECRET    GitLab application secret (sensitive)
 #   Operator WhatsApp number (one-tap linking; sextet all-or-nothing,
 #   enable flag separate — sends are operator-paid):
 #     WHATSAPP_APP_ACCESS_TOKEN    Meta Cloud API token (sensitive)
@@ -211,6 +213,8 @@ jobs:
           GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
           MICROSOFT_OAUTH_CLIENT_ID: ${{ secrets.MICROSOFT_OAUTH_CLIENT_ID }}
           MICROSOFT_OAUTH_CLIENT_SECRET: ${{ secrets.MICROSOFT_OAUTH_CLIENT_SECRET }}
+          GITLAB_OAUTH_CLIENT_ID: ${{ secrets.GITLAB_OAUTH_CLIENT_ID }}
+          GITLAB_OAUTH_CLIENT_SECRET: ${{ secrets.GITLAB_OAUTH_CLIENT_SECRET }}
           # Operator WhatsApp number — creds via secrets, spend gate via var.
           WHATSAPP_APP_ACCESS_TOKEN: ${{ secrets.WHATSAPP_APP_ACCESS_TOKEN }}
           WHATSAPP_APP_PHONE_NUMBER_ID: ${{ secrets.WHATSAPP_APP_PHONE_NUMBER_ID }}
@@ -276,6 +280,8 @@ jobs:
                GOOGLE_OAUTH_CLIENT_SECRET='${GOOGLE_OAUTH_CLIENT_SECRET}' \
                MICROSOFT_OAUTH_CLIENT_ID='${MICROSOFT_OAUTH_CLIENT_ID}' \
                MICROSOFT_OAUTH_CLIENT_SECRET='${MICROSOFT_OAUTH_CLIENT_SECRET}' \
+               GITLAB_OAUTH_CLIENT_ID='${GITLAB_OAUTH_CLIENT_ID}' \
+               GITLAB_OAUTH_CLIENT_SECRET='${GITLAB_OAUTH_CLIENT_SECRET}' \
                WHATSAPP_APP_ACCESS_TOKEN='${WHATSAPP_APP_ACCESS_TOKEN}' \
                WHATSAPP_APP_PHONE_NUMBER_ID='${WHATSAPP_APP_PHONE_NUMBER_ID}' \
                WHATSAPP_APP_PUBLIC_NUMBER='${WHATSAPP_APP_PUBLIC_NUMBER}' \
@@ -830,6 +836,42 @@ jobs:
             for pair in \
               "UPTIMEPAGE_AUTH_MICROSOFT_CLIENT_ID=$(printenv MICROSOFT_OAUTH_CLIENT_ID)" \
               "UPTIMEPAGE_AUTH_MICROSOFT_CLIENT_SECRET=$(printenv MICROSOFT_OAUTH_CLIENT_SECRET)"; do
+              n=$(grep -cxF "$pair" .env || true)
+              [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
+            done
+          fi
+
+          # --- GitLab OAuth login (optional) ----------------------------------
+          # Same write contract and all-or-nothing rule as the Google block.
+          # REDIRECT_URL and BASE_URL stay manually managed in the server .env,
+          # same as the GitHub, Google and Microsoft login trios.
+          if [ -n "${GITLAB_OAUTH_CLIENT_ID:-}" ]; then
+            if [ -z "${GITLAB_OAUTH_CLIENT_SECRET:-}" ]; then
+              echo "::error::GITLAB_OAUTH_CLIENT_ID is set but GITLAB_OAUTH_CLIENT_SECRET is empty"
+              exit 1
+            fi
+            cp .env ".env.bak.$(date +%s).gitlab"
+            before=$(awk 'END { print NR }' .env)
+            awk '
+              BEGIN {
+                m["UPTIMEPAGE_AUTH_GITLAB_CLIENT_ID"]     = ENVIRON["GITLAB_OAUTH_CLIENT_ID"]
+                m["UPTIMEPAGE_AUTH_GITLAB_CLIENT_SECRET"] = ENVIRON["GITLAB_OAUTH_CLIENT_SECRET"]
+              }
+              {
+                for (k in m) if ($0 ~ ("^" k "=")) { print k "=" m[k]; seen[k] = 1; next }
+                print
+              }
+              END { for (k in m) if (!seen[k]) print k "=" m[k] }
+            ' .env > .env.next && mv .env.next .env
+            after=$(awk 'END { print NR }' .env)
+            # 0..+2: appended only for keys absent before.
+            if [ "$after" -lt "$before" ] || [ "$after" -gt "$((before + 2))" ]; then
+              echo "::error::.env line count out of range after gitlab upsert (${before} -> ${after})"
+              exit 1
+            fi
+            for pair in \
+              "UPTIMEPAGE_AUTH_GITLAB_CLIENT_ID=$(printenv GITLAB_OAUTH_CLIENT_ID)" \
+              "UPTIMEPAGE_AUTH_GITLAB_CLIENT_SECRET=$(printenv GITLAB_OAUTH_CLIENT_SECRET)"; do
               n=$(grep -cxF "$pair" .env || true)
               [ "$n" = 1 ] || { echo "::error::${pair%%=*} not written exactly once to .env (count=${n})"; exit 1; }
             done

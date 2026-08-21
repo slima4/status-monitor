@@ -175,6 +175,12 @@ services:
       UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_SECRET: ${UPTIMEPAGE_AUTH_MICROSOFT_CLIENT_SECRET:-}
       UPTIMEPAGE_AUTH__MICROSOFT__REDIRECT_URL: ${UPTIMEPAGE_AUTH_MICROSOFT_REDIRECT_URL:-}
       UPTIMEPAGE_AUTH__MICROSOFT__TENANT: ${UPTIMEPAGE_AUTH_MICROSOFT_TENANT:-common}
+      # GitLab OAuth login — same contract, plus the instance the app is
+      # registered on (defaults to gitlab.com).
+      UPTIMEPAGE_AUTH__GITLAB__CLIENT_ID: ${UPTIMEPAGE_AUTH_GITLAB_CLIENT_ID:-}
+      UPTIMEPAGE_AUTH__GITLAB__CLIENT_SECRET: ${UPTIMEPAGE_AUTH_GITLAB_CLIENT_SECRET:-}
+      UPTIMEPAGE_AUTH__GITLAB__REDIRECT_URL: ${UPTIMEPAGE_AUTH_GITLAB_REDIRECT_URL:-}
+      UPTIMEPAGE_AUTH__GITLAB__BASE_URL: ${UPTIMEPAGE_AUTH_GITLAB_BASE_URL:-https://gitlab.com}
       UPTIMEPAGE_AUTH__PUBLIC_BASE_URL: ${UPTIMEPAGE_AUTH_PUBLIC_BASE_URL:-}
       # Marketing site (apex + www). Disabled by default — the binary
       # serves only the operator + tenant surfaces unless this is true.

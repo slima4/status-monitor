@@ -6,9 +6,9 @@ This walks through the hosted service at <https://app.uptimepage.dev>. Running y
 
 ## 1. Sign in
 
-Sign in with GitHub or Google. There is no password to choose and no email opt-in.
+Sign in with GitHub, GitLab, Google or Microsoft. There is no password to choose and no email opt-in.
 
-The email sign-in link on the login page is for accounts that already exist or have been invited, so a brand new account starts with GitHub or Google.
+The email sign-in link on the login page is for accounts that already exist or have been invited, so a brand new account starts with GitHub, GitLab, Google or Microsoft.
 
 Signing in for the first time creates your organization, makes you its owner, and gives you a slug based on your name. Everything you create from here belongs to that org, and teammates you invite later share it.
 

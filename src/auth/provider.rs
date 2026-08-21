@@ -12,13 +12,14 @@ pub enum OauthProvider {
     Github,
     Google,
     Microsoft,
+    Gitlab,
 }
 
 impl OauthProvider {
     /// Every variant in declaration order. Used by the enum-drift integration
     /// test to compare against the live Postgres CHECK constraint; keep in
     /// lockstep with the enum body.
-    pub const ALL: &'static [Self] = &[Self::Github, Self::Google, Self::Microsoft];
+    pub const ALL: &'static [Self] = &[Self::Github, Self::Google, Self::Microsoft, Self::Gitlab];
 
     /// Stable string used in the Postgres CHECK constraints and bound as the
     /// `provider` parameter at every INSERT / WHERE site. Routing through this
@@ -29,6 +30,7 @@ impl OauthProvider {
             Self::Github => "github",
             Self::Google => "google",
             Self::Microsoft => "microsoft",
+            Self::Gitlab => "gitlab",
         }
     }
 }

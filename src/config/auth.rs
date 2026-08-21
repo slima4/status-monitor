@@ -37,6 +37,7 @@ pub struct AuthConfig {
     pub github: OauthClientConfig,
     pub google: OauthClientConfig,
     pub microsoft: MicrosoftOauthConfig,
+    pub gitlab: GitlabOauthConfig,
     pub invitations: InvitationsConfig,
     pub api_tokens: ApiTokensConfig,
     pub magic_link: MagicLinkConfig,
@@ -49,6 +50,7 @@ impl Default for AuthConfig {
                 "github_oauth".into(),
                 "google_oauth".into(),
                 "microsoft_oauth".into(),
+                "gitlab_oauth".into(),
                 "magic_link".into(),
             ],
             fingerprint_salt: String::new(),
@@ -58,6 +60,7 @@ impl Default for AuthConfig {
             github: OauthClientConfig::default(),
             google: OauthClientConfig::default(),
             microsoft: MicrosoftOauthConfig::default(),
+            gitlab: GitlabOauthConfig::default(),
             invitations: InvitationsConfig::default(),
             api_tokens: ApiTokensConfig::default(),
             magic_link: MagicLinkConfig::default(),
@@ -87,6 +90,10 @@ impl AuthConfig {
 
     pub fn microsoft_login_enabled(&self) -> bool {
         self.method_enabled("microsoft_oauth") && self.microsoft.client.is_configured()
+    }
+
+    pub fn gitlab_login_enabled(&self) -> bool {
+        self.method_enabled("gitlab_oauth") && self.gitlab.client.is_configured()
     }
 }
 
@@ -163,6 +170,25 @@ impl Default for MicrosoftOauthConfig {
         Self {
             client: OauthClientConfig::default(),
             tenant: "common".into(),
+        }
+    }
+}
+
+/// The instance is the issuer half of the identity key, so changing it after
+/// sign-ups orphans every identity minted under the old one.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct GitlabOauthConfig {
+    #[serde(flatten)]
+    pub client: OauthClientConfig,
+    pub base_url: String,
+}
+
+impl Default for GitlabOauthConfig {
+    fn default() -> Self {
+        Self {
+            client: OauthClientConfig::default(),
+            base_url: "https://gitlab.com".into(),
         }
     }
 }
