@@ -179,7 +179,7 @@ pub async fn create(
     State(state): State<AppState>,
     ClientIp(client_ip): ClientIp,
     Path(code): Path<String>,
-    Json(req): Json<DelegateCreateRequest>,
+    Json(mut req): Json<DelegateCreateRequest>,
 ) -> Result<Json<serde_json::Value>> {
     let Some(link) = live_link(&state, &code).await? else {
         return Err(AppError::not_found(
@@ -196,6 +196,7 @@ pub async fn create(
         ));
     }
     reject_managed_kind(&req.config)?;
+    req.config.normalize();
     validate_config(&req.config)?;
     check_channel_abuse(&state, link.org_id, &req.config)?;
     if let Some(name) = req.name.as_deref().filter(|n| !n.trim().is_empty()) {

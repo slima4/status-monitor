@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::TransportConfig;
+use super::transport::{TransportConfig, trim_in_place};
 
 /// Destination linked through the central operator-owned Telegram bot.
 /// Secretless (delivery uses the operator token) and created exclusively by
@@ -22,6 +22,10 @@ impl TransportConfig for TelegramAppConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         false
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.chat_id);
     }
 
     fn validate(&self) -> Result<(), String> {

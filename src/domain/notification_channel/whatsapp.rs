@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig};
+use super::transport::{MASK, TransportConfig, strip_phone_separators, trim_in_place};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct WhatsAppConfig {
@@ -37,6 +37,16 @@ impl TransportConfig for WhatsAppConfig {
     /// Values are validated raw, not on a trimmed copy — they are sent to
     /// the API verbatim, so stray whitespace must fail here, not at the
     /// first delivery.
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.access_token);
+        trim_in_place(&mut self.phone_number_id);
+        trim_in_place(&mut self.template_name);
+        if let Some(l) = &mut self.language_code {
+            trim_in_place(l);
+        }
+        self.to = strip_phone_separators(self.to.trim());
+    }
+
     fn validate(&self) -> Result<(), String> {
         if self.access_token.is_empty() || !self.access_token.chars().all(|c| c.is_ascii_graphic())
         {

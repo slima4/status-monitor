@@ -3,7 +3,7 @@ use utoipa::ToSchema;
 
 use super::ChannelKind;
 use super::mention::{tokens, validate as validate_mention, without_broadcast};
-use super::transport::{MASK, TransportConfig, require_provider_webhook};
+use super::transport::{MASK, TransportConfig, require_provider_webhook, trim_in_place};
 
 /// Discord snowflakes are 17 to 20 digits; shorter is a typo, not an id.
 const ID_DIGITS: std::ops::RangeInclusive<usize> = 17..=20;
@@ -134,6 +134,13 @@ impl TransportConfig for DiscordConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         self.webhook_url == MASK
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.webhook_url);
+        if let Some(m) = &mut self.mention {
+            trim_in_place(m);
+        }
     }
 
     fn validate(&self) -> Result<(), String> {

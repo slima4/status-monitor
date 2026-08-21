@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig, require_https};
+use super::transport::{MASK, TransportConfig, require_https, trim_in_place};
 
 fn default_server_url() -> String {
     "https://ntfy.sh".to_string()
@@ -33,6 +33,14 @@ impl TransportConfig for NtfyConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         self.access_token.as_deref() == Some(MASK)
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.server_url);
+        trim_in_place(&mut self.topic);
+        if let Some(t) = &mut self.access_token {
+            trim_in_place(t);
+        }
     }
 
     fn validate(&self) -> Result<(), String> {

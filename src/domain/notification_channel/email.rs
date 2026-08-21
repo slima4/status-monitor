@@ -23,6 +23,12 @@ impl TransportConfig for EmailConfig {
         false
     }
 
+    /// Lowercased like signup already stores an owner address, so the two
+    /// paths stop disagreeing about one mailbox.
+    fn normalize(&mut self) {
+        self.to = self.to.trim().to_ascii_lowercase();
+    }
+
     fn validate(&self) -> Result<(), String> {
         let a = &self.to;
         if a.is_empty() {

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig};
+use super::transport::{MASK, TransportConfig, trim_in_place};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PagerDutyConfig {
@@ -20,6 +20,10 @@ impl TransportConfig for PagerDutyConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         self.routing_key == MASK
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.routing_key);
     }
 
     fn validate(&self) -> Result<(), String> {

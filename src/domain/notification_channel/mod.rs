@@ -214,6 +214,11 @@ impl ChannelConfig {
         with_transport!(self, |c| c.operator_managed())
     }
 
+    /// See [`TransportConfig::normalize`].
+    pub fn normalize(&mut self) {
+        with_transport!(self, |c| c.normalize())
+    }
+
     /// See [`TransportConfig::quiet_broadcast_mention`].
     pub fn quieted_for_test(&self) -> Self {
         let mut quieted = self.clone();
@@ -1030,5 +1035,67 @@ mod tests {
         assert!(validate_channel_name("  ").is_err());
         assert!(validate_channel_name(&"x".repeat(MAX_CHANNEL_NAME_LEN + 1)).is_err());
         assert!(validate_channel_name("Ops Slack").is_ok());
+    }
+}
+
+#[cfg(test)]
+mod normalize_tests {
+    use super::*;
+
+    /// The console trims in the browser, so these reach the store only over
+    /// the API, MCP or Terraform.
+    #[test]
+    fn a_pasted_value_is_cleaned_before_its_shape_is_judged() {
+        let mut telegram = ChannelConfig::Telegram(TelegramConfig {
+            bot_token: "123456:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw ".into(),
+            chat_id: " -1001234567890\n".into(),
+        });
+        telegram.normalize();
+        assert!(telegram.validate().is_ok());
+        let ChannelConfig::Telegram(t) = &telegram else {
+            unreachable!()
+        };
+        // Stored raw, this builds a URL ending `...aw%20/sendMessage`, which
+        // validates, saves, and 404s on the first alert.
+        assert_eq!(t.bot_token, "123456:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw");
+        assert_eq!(t.chat_id, "-1001234567890");
+
+        let mut pd = ChannelConfig::PagerDuty(PagerDutyConfig {
+            routing_key: "R0ABCDEF1234567890ABCDEF12345678\n".into(),
+        });
+        assert!(pd.validate().is_err(), "33 chars until it is trimmed");
+        pd.normalize();
+        assert!(pd.validate().is_ok());
+    }
+
+    #[test]
+    fn an_address_is_stored_the_way_signup_already_stores_one() {
+        let mut email = ChannelConfig::Email(EmailConfig {
+            to: "  Ops.Team@Example.COM ".into(),
+        });
+        email.normalize();
+        assert!(email.validate().is_ok());
+        let ChannelConfig::Email(e) = &email else {
+            unreachable!()
+        };
+        assert_eq!(e.to, "ops.team@example.com");
+    }
+
+    #[test]
+    fn a_recipient_is_stripped_to_digits_but_a_sender_id_is_left_alone() {
+        let mut sms = ChannelConfig::Sms(SmsConfig::Twilio {
+            to: "+1 (555) 123-4567".into(),
+            from: "ACME-SMS ".into(),
+            account_sid: format!("AC{}", "0".repeat(32)),
+            auth_token: " tok ".into(),
+        });
+        sms.normalize();
+        assert!(sms.validate().is_ok());
+        let ChannelConfig::Sms(s) = &sms else {
+            unreachable!()
+        };
+        assert_eq!(s.to(), "+15551234567");
+        // The dash is part of the name it sends from, not punctuation.
+        assert_eq!(s.from(), "ACME-SMS");
     }
 }

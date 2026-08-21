@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::TransportConfig;
+use super::transport::{TransportConfig, strip_phone_separators};
 
 /// Destination linked through the operator-owned WhatsApp business number.
 /// Secretless (delivery uses the operator's Cloud API credentials) and
@@ -24,6 +24,12 @@ impl TransportConfig for WhatsAppAppConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         false
+    }
+
+    /// Digits only here, so a pasted number's leading `+` goes too.
+    fn normalize(&mut self) {
+        let phone = strip_phone_separators(self.phone.trim());
+        self.phone = phone.strip_prefix('+').unwrap_or(&phone).to_string();
     }
 
     fn validate(&self) -> Result<(), String> {

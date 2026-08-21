@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig};
+use super::transport::{MASK, TransportConfig, trim_in_place};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PushoverConfig {
@@ -34,6 +34,14 @@ impl TransportConfig for PushoverConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         self.token == MASK || self.user == MASK
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.token);
+        trim_in_place(&mut self.user);
+        if let Some(d) = &mut self.device {
+            trim_in_place(d);
+        }
     }
 
     fn validate(&self) -> Result<(), String> {

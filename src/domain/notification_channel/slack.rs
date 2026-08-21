@@ -3,7 +3,7 @@ use utoipa::ToSchema;
 
 use super::ChannelKind;
 use super::mention::{tokens, validate as validate_mention, without_broadcast};
-use super::transport::{MASK, TransportConfig, require_https};
+use super::transport::{MASK, TransportConfig, require_https, trim_in_place};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct SlackConfig {
@@ -32,13 +32,27 @@ impl SlackConfig {
 
 /// `@here` / `@channel`: everyone in the channel, not a named responder.
 fn is_broadcast(token: &str) -> bool {
-    let t = token.strip_prefix('@').unwrap_or(token);
+    let t = unwrap_markup(token);
+    let t = t.strip_prefix('@').unwrap_or(t);
     t.eq_ignore_ascii_case("here") || t.eq_ignore_ascii_case("channel")
+}
+
+/// A mention copied out of a message body, reduced to the id inside it.
+fn unwrap_markup(token: &str) -> &str {
+    let Some(inner) = token.strip_prefix('<').and_then(|t| t.strip_suffix('>')) else {
+        return token;
+    };
+    // Everything after `|` is the label Slack renders, not the id.
+    let inner = inner.split('|').next().unwrap_or(inner);
+    let inner = inner.strip_prefix("!subteam^").unwrap_or(inner);
+    let inner = inner.strip_prefix('!').unwrap_or(inner);
+    inner.strip_prefix('@').unwrap_or(inner)
 }
 
 /// One token as Slack markup; `None` where Slack would render inert text.
 fn token_markup(token: &str) -> Option<String> {
-    let t = token.strip_prefix('@').unwrap_or(token);
+    let t = unwrap_markup(token);
+    let t = t.strip_prefix('@').unwrap_or(t);
     // Slack ids are uppercase alphanumeric and at least 9 long. The floor is
     // what separates an id from a shouted handle like `@SRE`, which would
     // otherwise render as a ping that silently reaches nobody.
@@ -69,6 +83,13 @@ impl TransportConfig for SlackConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         self.webhook_url == MASK
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.webhook_url);
+        if let Some(m) = &mut self.mention {
+            trim_in_place(m);
+        }
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -139,7 +160,12 @@ mod tests {
         // Shouted, so it looks like an id until Slack renders it as dead text.
         assert!(cfg(Some("@SRE")).validate().is_err());
         assert!(cfg(Some("@DBTEAM")).validate().is_err());
-        assert!(cfg(Some("<!subteam^S01ABC234>")).validate().is_err());
+        // A pasted mention carries its id, so it is accepted like Discord's.
+        assert!(cfg(Some("<!subteam^S01ABC234>")).validate().is_ok());
+        assert!(cfg(Some("<!subteam^S01ABC234|@sre>")).validate().is_ok());
+        assert!(cfg(Some("<@U01ABC234>")).validate().is_ok());
+        // Wrapped, but still a handle with no id behind it.
+        assert!(cfg(Some("<@sre>")).validate().is_err());
         assert!(cfg(Some("  ")).validate().is_err());
         assert!(
             cfg(Some("here channel S01ABC234 U01ABC234 U05XYZ678 U09QRS012"))
@@ -148,6 +174,23 @@ mod tests {
         );
         assert!(cfg(Some("@here S01ABC234")).validate().is_ok());
         assert!(cfg(None).validate().is_ok());
+    }
+
+    /// Slack copies a group id wrapped, so every form has to land on the same
+    /// markup or one ping is stored and printed twice.
+    #[test]
+    fn a_pasted_mention_folds_onto_the_bare_id() {
+        let markup = |m: &str| cfg(Some(m)).mention_markup().unwrap();
+        assert_eq!(markup("<!subteam^S01ABC234>"), "<!subteam^S01ABC234>");
+        assert_eq!(markup("<!subteam^S01ABC234|@sre>"), "<!subteam^S01ABC234>");
+        assert_eq!(markup("<@U01ABC234>"), "<@U01ABC234>");
+        assert_eq!(markup("<!here>"), "<!here>");
+        assert_eq!(
+            markup("S01ABC234 <!subteam^S01ABC234|@sre>"),
+            "<!subteam^S01ABC234>"
+        );
+        // A pasted broadcast is still a broadcast a test send must drop.
+        assert_eq!(quieted(cfg(Some("<!channel>"))).mention, None);
     }
 
     #[test]

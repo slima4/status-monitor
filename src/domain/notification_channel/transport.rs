@@ -41,6 +41,12 @@ pub trait TransportConfig {
     /// No default on purpose, like [`Self::abuse_url`].
     fn operator_managed(&self) -> bool;
 
+    /// Clean up what a paste carries in, before [`Self::validate`] judges the
+    /// shape. No default on purpose, like [`Self::abuse_url`]: the console
+    /// trims in the browser, so a transport that skips this is broken only for
+    /// the API, MCP and Terraform, where nobody would notice.
+    fn normalize(&mut self);
+
     /// Drop the pings that wake a whole room, keeping the targeted ones, so a
     /// config test proves the routing without paging everybody. No default on
     /// purpose, like [`Self::abuse_url`]: a transport that grows a ping field
@@ -53,6 +59,22 @@ pub trait TransportConfig {
     /// transport has no provider-side lifecycle.
     fn lifecycle_ref(&self) -> Option<&str> {
         None
+    }
+}
+
+/// Not a phone-number parser: no country is inferred and nothing is
+/// reformatted, so a wrong number still reads back as the one that was typed.
+/// Only for a field that can be nothing else — a sender id may carry a dash.
+pub(super) fn strip_phone_separators(s: &str) -> String {
+    s.chars()
+        .filter(|c| !matches!(c, ' ' | '\u{a0}' | '-' | '(' | ')' | '.'))
+        .collect()
+}
+
+pub(super) fn trim_in_place(s: &mut String) {
+    let t = s.trim();
+    if t.len() != s.len() {
+        *s = t.to_string();
     }
 }
 

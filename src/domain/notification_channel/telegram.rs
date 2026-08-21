@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig};
+use super::transport::{MASK, TransportConfig, trim_in_place};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct TelegramConfig {
@@ -19,6 +19,11 @@ impl TransportConfig for TelegramConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         self.bot_token == MASK
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.bot_token);
+        trim_in_place(&mut self.chat_id);
     }
 
     fn validate(&self) -> Result<(), String> {

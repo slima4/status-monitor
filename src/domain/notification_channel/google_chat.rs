@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig, require_provider_webhook};
+use super::transport::{MASK, TransportConfig, require_provider_webhook, trim_in_place};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct GoogleChatConfig {
@@ -20,6 +20,10 @@ impl TransportConfig for GoogleChatConfig {
 
     fn has_redaction_sentinel(&self) -> bool {
         self.webhook_url == MASK
+    }
+
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.webhook_url);
     }
 
     fn validate(&self) -> Result<(), String> {

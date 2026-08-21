@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig, require_https};
+use super::transport::{MASK, TransportConfig, require_https, trim_in_place};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct WebhookConfig {
@@ -37,6 +37,12 @@ impl TransportConfig for WebhookConfig {
         self.url == MASK
             || self.headers.values().any(|v| v == MASK)
             || self.secret.as_deref() == Some(MASK)
+    }
+
+    /// The URL only: the secret and the headers are set identically on the
+    /// receiving end, where trimming ours would break the match.
+    fn normalize(&mut self) {
+        trim_in_place(&mut self.url);
     }
 
     fn validate(&self) -> Result<(), String> {

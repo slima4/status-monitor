@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::transport::{MASK, TransportConfig};
+use super::transport::{MASK, TransportConfig, strip_phone_separators, trim_in_place};
 
 /// BYO-token SMS. One channel kind, many gateways: each variant carries that
 /// gateway's own credentials, so a future operator-billed pool is an
@@ -133,6 +133,77 @@ impl TransportConfig for SmsConfig {
             Self::Telnyx { api_key, .. } => api_key == MASK,
             Self::Vonage { api_secret, .. } => api_secret == MASK,
             Self::Sinch { api_token, .. } => api_token == MASK,
+        }
+    }
+
+    /// The sender is left alone: an alphanumeric sender id may carry a dash,
+    /// and stripping it would send from the wrong name.
+    fn normalize(&mut self) {
+        match self {
+            Self::Twilio {
+                to,
+                from,
+                account_sid,
+                auth_token,
+            } => {
+                for f in [&mut *from, &mut *account_sid, &mut *auth_token] {
+                    trim_in_place(f);
+                }
+                *to = strip_phone_separators(to.trim());
+            }
+            Self::Telnyx {
+                to,
+                from,
+                api_key,
+                messaging_profile_id,
+            } => {
+                for f in [&mut *from, &mut *api_key] {
+                    trim_in_place(f);
+                }
+                if let Some(id) = messaging_profile_id {
+                    trim_in_place(id);
+                }
+                *to = strip_phone_separators(to.trim());
+            }
+            Self::Vonage {
+                to,
+                from,
+                api_key,
+                api_secret,
+            } => {
+                for f in [&mut *from, &mut *api_key, &mut *api_secret] {
+                    trim_in_place(f);
+                }
+                *to = strip_phone_separators(to.trim());
+            }
+            Self::Plivo {
+                to,
+                from,
+                auth_id,
+                auth_token,
+            } => {
+                for f in [&mut *from, &mut *auth_id, &mut *auth_token] {
+                    trim_in_place(f);
+                }
+                *to = strip_phone_separators(to.trim());
+            }
+            Self::Sinch {
+                to,
+                from,
+                service_plan_id,
+                api_token,
+                region,
+            } => {
+                for f in [
+                    &mut *from,
+                    &mut *service_plan_id,
+                    &mut *api_token,
+                    &mut *region,
+                ] {
+                    trim_in_place(f);
+                }
+                *to = strip_phone_separators(to.trim());
+            }
         }
     }
 

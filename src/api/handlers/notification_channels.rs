@@ -84,6 +84,9 @@ pub async fn create(
     validate_name(&new.name)?;
     new.auto_bind_tags = normalize_rule_tags(&new.auto_bind_tags)?;
     reject_managed_kind(&new.config)?;
+    // The console trims in the browser, so without this the same paste that
+    // works in the app is refused over the API.
+    new.config.normalize();
     validate_config(&new.config)?;
     check_channel_abuse(&state, org, &new.config)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically
@@ -189,8 +192,9 @@ pub async fn update(
         update.auto_bind_tags = Some(normalize_rule_tags(tags)?);
     }
     let config_replaced = update.config.is_some();
-    if let Some(cfg) = &update.config {
+    if let Some(cfg) = &mut update.config {
         reject_managed_kind(cfg)?;
+        cfg.normalize();
         validate_config(cfg)?;
         check_channel_abuse(&state, org, cfg)?;
     }
@@ -368,11 +372,13 @@ pub struct TestChannelConfigRequest {
 pub async fn test_config(
     State(state): State<AppState>,
     Authorized(org, _): Authorized<ChannelsExecute>,
-    Json(req): Json<TestChannelConfigRequest>,
+    Json(mut req): Json<TestChannelConfigRequest>,
 ) -> Result<Json<TestNotificationResponse>> {
     // Same spam vector as create: the test would message a caller-supplied
     // chat id with the operator bot.
     reject_managed_kind(&req.config)?;
+    // Same cleaning a save would do, or a paste that saves fine fails its test.
+    req.config.normalize();
     validate_config(&req.config)?;
     check_channel_abuse(&state, org, &req.config)?;
     // An unsaved email config can never have proven its inbox — testing it
