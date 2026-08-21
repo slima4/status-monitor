@@ -298,7 +298,7 @@ impl NotificationChannel {
     /// One tag in common is enough: a team owns a set of resources, not an
     /// intersection of labels.
     pub fn auto_binds(&self, tags: &[String]) -> bool {
-        self.auto_bind_tags.iter().any(|r| tags.contains(r))
+        tag_rule_matches(&self.auto_bind_tags, tags)
     }
 
     /// Enabled, able to deliver at all, and nothing has landed for `limit`
@@ -312,6 +312,21 @@ impl NotificationChannel {
 }
 
 /// The threshold alone, for callers holding a fresh count; `0` never flags.
+/// Whether a tag rule covers a monitor. The one owner of that decision: the
+/// paging query, the console badges and the MCP coverage view all ask here, so
+/// none of them can disagree about who gets woken.
+///
+/// Folds case, unlike the monitor-tag filter. A filter that matches nothing
+/// says so on screen; a rule that matches nothing stays silent until an outage
+/// nobody is told about.
+pub fn tag_rule_matches(rule: &[String], monitor_tags: &[String]) -> bool {
+    if rule.is_empty() || monitor_tags.is_empty() {
+        return false;
+    }
+    let folded: Vec<String> = monitor_tags.iter().map(|t| t.to_lowercase()).collect();
+    rule.iter().any(|r| folded.contains(&r.to_lowercase()))
+}
+
 pub fn failure_run_reached(consecutive_failures: i32, limit: u32) -> bool {
     limit > 0 && consecutive_failures >= i32::try_from(limit).unwrap_or(i32::MAX)
 }
@@ -753,8 +768,10 @@ mod tests {
         assert!(ch.auto_binds(&["eu".to_string(), "cache".to_string()]));
         assert!(!ch.auto_binds(&["web".to_string()]));
         assert!(!ch.auto_binds(&[]));
-        // Tags are stored as typed, so a case difference is a different tag.
-        assert!(!ch.auto_binds(&["DB".to_string()]));
+        // A rule spelled in another case still pages: the operator who typed
+        // it would otherwise learn of the mismatch from an outage.
+        assert!(ch.auto_binds(&["DB".to_string()]));
+        assert!(ch.auto_binds(&["Cache".to_string()]));
         // An empty rule matches nothing, however the monitor is tagged.
         assert!(!sample_channel(false, false).auto_binds(&["db".to_string()]));
     }

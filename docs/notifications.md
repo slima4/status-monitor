@@ -68,7 +68,7 @@ The monitor form has a **Notifications** section listing your channels with a ch
 
 ### Routing by tag
 
-Ticking a box per monitor stops scaling once one team owns a dozen of them, so a channel can carry a **route by tag** rule instead: it also pages any monitor carrying one of those tags. One tag in common is enough. Tags are picked as chips from the org's own vocabulary, the same control the monitor form uses, and the rule sits outside the replace-config toggle, so it can be changed without re-entering the webhook.
+Ticking a box per monitor stops scaling once one team owns a dozen of them, so a channel can carry a **route by tag** rule instead: it also pages any monitor carrying one of those tags. One tag in common is enough, and case does not have to match. Tags are picked as chips from the org's own vocabulary, the same control the monitor form uses, and the rule sits outside the replace-config toggle, so it can be changed without re-entering the webhook.
 
 The rule is resolved when an alert fires, not written into the monitors. Retag a monitor and its coverage moves with it; create a monitor already tagged `db` and the `db` channel pages it from its first check, with nothing to remember. A monitor covered only by a rule shows the channel marked **by tag** in its own form, and no longer warns that it alerts nobody.
 

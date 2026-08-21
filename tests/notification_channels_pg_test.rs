@@ -139,8 +139,9 @@ async fn channels_isolated_across_orgs_live_pg() {
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
 
-/// The rule lookup is a Postgres array-overlap query behind a partial GIN
-/// index; only live SQL proves the operator, the bind type, and the org scope.
+/// The rule lookup reads the org's rule-carrying channels off the org index
+/// and folds case in Rust; only live SQL proves the org scope and that the
+/// text[] column round-trips.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn tag_rule_lookup_is_org_scoped_live_pg() {
@@ -193,6 +194,29 @@ async fn tag_rule_lookup_is_org_scoped_live_pg() {
     );
     // An untagged monitor matches nothing rather than everything.
     assert!(store.auto_bound_ids(org_a, &[]).await.unwrap().is_empty());
+
+    // Case must not decide who is paged: the rule and the monitor tag are
+    // typed on different screens, and a near-miss is silent until an outage.
+    assert_eq!(
+        store
+            .auto_bound_ids(org_a, &["CACHE".to_string()])
+            .await
+            .unwrap(),
+        vec![by_rule.id]
+    );
+    let mut shouty = slack("A shouty rule", "T/B/shouty");
+    shouty.auto_bind_tags = vec!["Prod".into()];
+    let by_shouty = store
+        .create(org_a, shouty, WriteSource::Ui, 10, Some(user_a))
+        .await
+        .unwrap();
+    assert_eq!(
+        store
+            .auto_bound_ids(org_a, &["prod".to_string()])
+            .await
+            .unwrap(),
+        vec![by_shouty.id]
+    );
 
     // The rule survives a round-trip and a PATCH replaces it whole.
     assert_eq!(

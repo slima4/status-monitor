@@ -340,7 +340,9 @@ pub async fn new_form(
     form.central_whatsapp = state.cfg.whatsapp_app.enabled();
     form.slack_oauth = state.cfg.slack_oauth.enabled();
     form.discord_oauth = state.cfg.discord_oauth.enabled();
-    form.tag_options = rule_tag_options(&state, org, &form.auto_bind_tags).await?;
+    let (options, picked) = rule_tag_options(&state, org, &form.auto_bind_tags).await?;
+    form.tag_options = options;
+    form.auto_bind_tags = picked;
     (_, form.bindable) = org_monitor_cards(&state, org, None).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -349,14 +351,15 @@ pub async fn new_form(
     .into_response())
 }
 
-/// The tag chips a rule can be built from: the org's inventory, with any tag
-/// the rule already holds appended — the inventory is capped, and a rule tag
-/// missing from the list would be silently dropped on the next save.
+/// The tag chips a rule can be built from, and the rule restated in the
+/// spellings those chips carry. Matching folds case, so a rule reading `DB`
+/// ticks the org's own `db` chip instead of adding a second one — and a chip
+/// left unticked is one the next save would clear.
 async fn rule_tag_options(
     state: &AppState,
     org: crate::domain::OrgId,
     rule: &[String],
-) -> Result<Vec<String>, AppError> {
+) -> Result<(Vec<String>, Vec<String>), AppError> {
     let mut options: Vec<String> = state
         .target_store
         .list_tags(org, None, 200)
@@ -364,12 +367,20 @@ async fn rule_tag_options(
         .into_iter()
         .map(|t| t.name)
         .collect();
+    let mut picked: Vec<String> = Vec::with_capacity(rule.len());
     for t in rule {
-        if !options.contains(t) {
-            options.push(t.clone());
+        match options
+            .iter()
+            .find(|o| o.to_lowercase() == t.to_lowercase())
+        {
+            Some(chip) => picked.push(chip.clone()),
+            None => {
+                options.push(t.clone());
+                picked.push(t.clone());
+            }
         }
     }
-    Ok(options)
+    Ok((options, picked))
 }
 
 /// All org monitors as cards, split by alert binding to `channel`:
@@ -435,7 +446,9 @@ pub async fn edit_form(
     let mut form = form_from_channel(channel);
     form.central_telegram = state.cfg.telegram.enabled();
     form.central_whatsapp = state.cfg.whatsapp_app.enabled();
-    form.tag_options = rule_tag_options(&state, org, &form.auto_bind_tags).await?;
+    let (options, picked) = rule_tag_options(&state, org, &form.auto_bind_tags).await?;
+    form.tag_options = options;
+    form.auto_bind_tags = picked;
     (form.used_by, form.bindable) = org_monitor_cards(&state, org, Some(id)).await?;
     Ok(ChannelFormPage {
         active_tab: TAB_NOTIFICATIONS,
@@ -823,6 +836,49 @@ mod tests {
         // to add a tag, and clears the rule on the next save.
         assert!(html.contains("js/ui/tag_chip_input"));
         assert!(html.contains(r#"value="us east" class="sr-only" checked"#));
+        assert!(html.contains(r#"value="web" class="sr-only">"#));
+    }
+
+    /// A rule stored in another case must tick the org's own chip. Rendering
+    /// it unticked reads as "no rule", and the next save PATCHes an empty
+    /// list, dropping a routing rule the operator never touched.
+    #[test]
+    fn a_rule_spelled_in_another_case_ticks_the_orgs_own_chip() {
+        let inventory = ["db".to_string(), "web".to_string()];
+        let rule = ["DB".to_string()];
+
+        // What rule_tag_options settles on for these two lists.
+        let mut options = inventory.to_vec();
+        let mut picked: Vec<String> = Vec::new();
+        for t in &rule {
+            match options
+                .iter()
+                .find(|o| o.to_lowercase() == t.to_lowercase())
+            {
+                Some(chip) => picked.push(chip.clone()),
+                None => {
+                    options.push(t.clone());
+                    picked.push(t.clone());
+                }
+            }
+        }
+        assert_eq!(options, ["db", "web"], "no second chip for the same tag");
+        assert_eq!(
+            picked,
+            ["db"],
+            "the rule is restated in the chip's spelling"
+        );
+
+        let mut form = form_from_channel(slack_channel("https://hooks.slack.com/services/T/B/x"));
+        form.tag_options = options;
+        form.auto_bind_tags = picked;
+        let html = ChannelFormPage {
+            active_tab: TAB_NOTIFICATIONS,
+            form,
+        }
+        .render()
+        .unwrap();
+        assert!(html.contains(r#"value="db" class="sr-only" checked"#));
         assert!(html.contains(r#"value="web" class="sr-only">"#));
     }
 

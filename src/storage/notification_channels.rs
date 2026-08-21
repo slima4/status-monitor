@@ -446,17 +446,23 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         if tags.is_empty() {
             return Ok(Vec::new());
         }
-        let ids: Vec<(Uuid,)> = sqlx::query_as(
-            r#"SELECT id FROM notification_channels
-               WHERE org_id = $1 AND auto_bind_tags && $2
+        // Matching folds case, and one Rust comparison owns that fold, so the
+        // database's collation can never page a different set than the console
+        // shows. Bounded by the org, which is a handful of rows.
+        let rows: Vec<(Uuid, Vec<String>)> = sqlx::query_as(
+            r#"SELECT id, auto_bind_tags FROM notification_channels
+               WHERE org_id = $1 AND auto_bind_tags <> '{}'
                ORDER BY created_at"#,
         )
         .bind(org.0)
-        .bind(tags)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::Other(anyhow!("auto-bound channels: {e}")))?;
-        Ok(ids.into_iter().map(|(id,)| id).collect())
+        Ok(rows
+            .into_iter()
+            .filter(|(_, rule)| crate::domain::tag_rule_matches(rule, tags))
+            .map(|(id, _)| id)
+            .collect())
     }
 
     async fn update(

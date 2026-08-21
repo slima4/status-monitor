@@ -820,7 +820,7 @@
             let hits = 0;
             for (const card of form.querySelectorAll("[data-bound-card], [data-bind-monitor]")) {
                 const tags = monitorTags(card);
-                if (rule.some((t) => tags.includes(t))) hits += 1;
+                if (window.smTagRuleCovers(rule, tags)) hits += 1;
             }
             ruleMatch.textContent = hits === 1 ? "# matches 1 monitor" : `# matches ${hits} monitors`;
         };

@@ -1139,12 +1139,40 @@ pub(crate) fn validate_name(name: &str) -> Result<()> {
 /// Monitor-tag rules and bounds — a rule that cannot name a legal tag would
 /// match nothing — reported against the field this request sent.
 fn normalize_rule_tags(tags: &[String]) -> Result<Vec<String>> {
-    crate::api::handlers::targets::normalize_tags(tags).map_err(|e| match e {
+    let field = |e| match e {
         AppError::BadRequest { code, message, .. } => {
             AppError::bad_request_field(code, message, "auto_bind_tags")
         }
         other => other,
-    })
+    };
+    // The list the client sent, so a positional fault names the tag they typed.
+    match crate::api::handlers::targets::normalize_tags(tags) {
+        Ok(valid) => Ok(fold_spellings(&valid)),
+        // Matching folds case, so spellings that collapse into one entry must
+        // not spend the cap twice.
+        Err(AppError::BadRequest { code, .. }) if code == codes::TOO_MANY_TAGS => {
+            crate::api::handlers::targets::normalize_tags(&fold_spellings(tags))
+                .map(|v| fold_spellings(&v))
+                .map_err(field)
+        }
+        Err(e) => Err(field(e)),
+    }
+}
+
+/// One entry per tag, first spelling kept: it is what the operator typed and
+/// what the chips show.
+fn fold_spellings(tags: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(tags.len());
+    for tag in tags {
+        let tag = tag.trim();
+        if !out
+            .iter()
+            .any(|kept: &String| kept.to_lowercase() == tag.to_lowercase())
+        {
+            out.push(tag.to_string());
+        }
+    }
+    out
 }
 
 /// Redaction-sentinel guard first (so a `GET → PATCH` round-trip or a
@@ -1213,4 +1241,27 @@ pub(crate) fn check_channel_abuse(
         None,
     );
     Err(hit.into_app_error())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_rule_tags;
+
+    /// Matching folds case, so storing both spellings would spend two of the
+    /// tag budget on one rule and show the operator a duplicate chip.
+    #[test]
+    fn a_rule_tag_repeated_in_another_case_is_stored_once() {
+        assert_eq!(
+            normalize_rule_tags(&["DB".into(), "db".into(), "cache".into()]).unwrap(),
+            vec!["DB".to_string(), "cache".to_string()],
+            "the first spelling is kept for display"
+        );
+        // Folded before the cap: these fit once folded, so the cap must not
+        // count spellings the store will never hold.
+        let over_cap: Vec<String> = (0..crate::domain::target::MAX_TAGS_PER_TARGET)
+            .map(|i| format!("tag{i}"))
+            .chain(["TAG0".to_string()])
+            .collect();
+        assert!(normalize_rule_tags(&over_cap).is_ok());
+    }
 }

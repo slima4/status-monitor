@@ -450,7 +450,7 @@ never read, mutate, or test another's channels.
 }
 ```
 
-`auto_bind_tags` is the channel's tag rule: on top of the monitors bound to it, the channel pages any monitor carrying at least one of these tags, resolved when the alert fires. Optional on create, replaced whole on `PATCH`, and `[]` clears it. Tags obey the same rules as monitor tags.
+`auto_bind_tags` is the channel's tag rule: on top of the monitors bound to it, the channel pages any monitor carrying at least one of these tags, resolved when the alert fires. Optional on create, replaced whole on `PATCH`, and `[]` clears it. Tags obey the same rules as monitor tags, except that matching ignores case: a rule reading `DB` covers a monitor tagged `db`, and two spellings of one tag are stored once. Tag *filters* elsewhere in the API stay exact.
 
 `config` is `type`-tagged. Supported transports:
 

@@ -3,8 +3,17 @@
 // the set of checked chips, read back through the container's own collect() —
 // chips, never a delimited string, because a tag may itself contain a space or
 // a comma. window.smCollectTags is the monitor form's container.
+//
+// window.smTagRuleCovers mirrors the server's tag_rule_matches so the console's
+// coverage badges cannot claim a rule pages a monitor the engine will not, or
+// the reverse. Folds case, as the server does.
 
 (function () {
+    window.smTagRuleCovers = (rule, tags) =>
+        Array.isArray(rule) &&
+        Array.isArray(tags) &&
+        rule.some((r) => tags.some((t) => String(t).toLowerCase() === String(r).toLowerCase()));
+
     for (const container of document.querySelectorAll("[data-tag-chips]")) {
         wire(container);
     }
