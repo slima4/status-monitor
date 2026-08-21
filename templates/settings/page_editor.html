@@ -391,7 +391,10 @@
         const v = slugEl.value.trim().toLowerCase();
         const problem = slugChanged() && v ? slugShapeError(v) : '';
         slugStatus.textContent = problem;
-        slugStatus.className = 'font-mono text-xs text-[color:var(--theme-state-bad-fg)]';
+        // Colour follows the message, or an empty span still reads as a fault.
+        slugStatus.className = problem
+          ? 'font-mono text-xs text-[color:var(--theme-state-bad-fg)]'
+          : 'font-mono text-xs text-muted';
       }
       slugEl.addEventListener('input', refreshSlugShape);
 

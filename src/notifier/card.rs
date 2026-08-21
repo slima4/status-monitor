@@ -18,6 +18,10 @@ pub const MAX_ERROR_CHARS: usize = 500;
 /// budget, so it is bounded here instead of at each renderer.
 pub const MAX_NOTE_CHARS: usize = 300;
 
+/// A monitor name has no length limit anywhere in the product, and a vendor
+/// refuses an over-long payload rather than trimming it.
+pub const MAX_TITLE_CHARS: usize = 200;
+
 /// How loud the card should look. Each transport maps this to what it has:
 /// an emoji, a colour bar, a themed text block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -116,7 +120,7 @@ impl CardTemplate {
     pub fn card(self, n: &IncidentNotice) -> AlertCard {
         let mut card = AlertCard {
             tone: self.tone(n),
-            title: n.label().to_string(),
+            title: truncate_chars(n.label(), MAX_TITLE_CHARS),
             headline: self.headline(n),
             fields: Vec::new(),
             error: None,

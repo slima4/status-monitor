@@ -43,14 +43,16 @@ impl SlackNotifier {
     /// the line a push notification shows.
     fn compose(mention: Option<&str>, n: &IncidentNotice) -> (String, Vec<Block>) {
         let card = AlertCard::for_notice(n);
-        let text = Self::render_incident(card.ping(mention), n, card.link.as_deref());
+        let text = Self::render_incident(card.ping(mention), &card, n);
         (text, render(&card, mention))
     }
 
-    fn render_incident(mention: Option<&str>, n: &IncidentNotice, link: Option<&str>) -> String {
-        let body = match &n.note {
-            Some(note) => format!("{}\n{}", Self::incident_line(n, link), escape(note)),
-            None => Self::incident_line(n, link),
+    /// From the card's values, not the notice's: they are bounded there, and
+    /// Slack refuses an over-long payload rather than trimming it.
+    fn render_incident(mention: Option<&str>, card: &AlertCard, n: &IncidentNotice) -> String {
+        let body = match &card.note {
+            Some(note) => format!("{}\n{}", Self::incident_line(card, n), escape(note)),
+            None => Self::incident_line(card, n),
         };
         match mention {
             Some(m) => format!("{m} {body}"),
@@ -58,19 +60,20 @@ impl SlackNotifier {
         }
     }
 
-    /// Slack builds its own text rather than using
-    /// [`IncidentNotice::plain_text`], so anything added to the shared renderer
-    /// has to be added here too.
-    fn incident_line(n: &IncidentNotice, link: Option<&str>) -> String {
+    /// One line for a push notification, so it stays terser than the card
+    /// rather than reusing it. A field added to the card does not reach here.
+    fn incident_line(card: &AlertCard, n: &IncidentNotice) -> String {
         // The card's link, not the raw one: a base URL without a scheme has no
         // button on the card, so it must not have a dead link here either.
-        let link = link
+        let link = card
+            .link
+            .as_deref()
             .map(|u| format!(" <{u}|view incident>"))
             .unwrap_or_default();
         // Customer-supplied monitor name + error text must not inject Slack
         // markup (live `<url|text>` links, `@channel` mentions) into the
         // responders' channel.
-        let label = escape(n.label());
+        let label = escape(&card.title);
         match n.reason {
             NotificationReason::Opened
             | NotificationReason::Escalated
@@ -127,6 +130,25 @@ impl Notifier for SlackNotifier {
 mod tests {
     use super::*;
     use crate::notifier::card::tests::notice;
+
+    /// Slack refuses an over-long payload, so an unbounded fallback line
+    /// loses the whole alert while every block around it renders fine.
+    #[test]
+    fn a_huge_monitor_name_cannot_bloat_the_fallback_line() {
+        let mut n = notice(NotificationReason::Opened);
+        n.monitor_name = Some("A".repeat(60_000));
+        n.note = Some("N".repeat(60_000));
+        let (text, _) = SlackNotifier::compose(None, &n);
+        assert!(
+            text.chars().count() < 2_000,
+            "fallback text ran to {} chars",
+            text.chars().count()
+        );
+        assert!(
+            text.contains('…'),
+            "the name is trimmed, not dropped: {text}"
+        );
+    }
 
     /// Slack does not use the shared body renderer, so a note added there
     /// reaches it only because this transport appends it too.

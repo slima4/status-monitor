@@ -8,11 +8,17 @@
     const addBtn = document.querySelector("[data-header-add]");
     const tmpl = document.getElementById("header-row-template");
     if (!container || !addBtn) return;
+    // Without the template the button could only ever do nothing. Its one
+    // caller already tests for smAddHeaderRow before calling it.
+    if (!tmpl) {
+        addBtn.hidden = true;
+        return;
+    }
 
     function addRow(focus) {
-        if (!tmpl) return null;
         const frag = tmpl.content.cloneNode(true);
         const row = frag.querySelector("[data-header-row]");
+        if (!row) return null;
         container.appendChild(frag);
         if (focus) row.querySelector("input").focus();
         return row;

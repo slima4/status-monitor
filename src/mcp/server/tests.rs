@@ -1124,6 +1124,53 @@ fn a_channel_that_delivers_nothing_says_so_where_it_is_named() {
     );
 }
 
+/// A retag alone can hand paging from one channel to another. A confirmation
+/// that listed only the tags would have the human approve that unseen.
+#[test]
+fn a_retag_that_moves_coverage_says_so_without_any_binding_change() {
+    let mut by_rule = test_channel(Uuid::now_v7(), "db team");
+    by_rule.auto_bind_tags = vec!["payments".into()];
+    let channels = vec![by_rule];
+
+    let args = UpdateMonitorArgs {
+        tags: Some(vec!["web".into()]),
+        ..patch_args()
+    };
+    let (update, changes) = build_monitor_patch(&args, &stored_monitor(), &channels, 3).unwrap();
+    let alerts = changes
+        .iter()
+        .find(|c| c.field == "alerts")
+        .expect("a retag that drops the only covering channel is a change");
+    assert_eq!(alerts.from, "db team (by tag)");
+    assert_eq!(alerts.to, "nobody");
+    // Nothing was rebound, so the patch must not write an alerts list.
+    assert!(update.alerts.is_none());
+}
+
+/// Reading coverage off the tags being replaced shows the human a paging set
+/// the patch does not produce, and they approve the wrong one.
+#[test]
+fn the_alerts_diff_reads_coverage_off_the_tags_the_same_call_sets() {
+    let bound = Uuid::now_v7();
+    let mut by_rule = test_channel(Uuid::now_v7(), "db team");
+    by_rule.auto_bind_tags = vec!["payments".into()];
+    let channels = vec![test_channel(bound, "ops-slack"), by_rule];
+
+    // Stored tag `payments` is covered by the rule; `web` is not.
+    let args = UpdateMonitorArgs {
+        tags: Some(vec!["web".into()]),
+        channel_ids: Some(vec![bound.to_string()]),
+        ..patch_args()
+    };
+    let (_, changes) = build_monitor_patch(&args, &stored_monitor(), &channels, 3).unwrap();
+    let alerts = changes.iter().find(|c| c.field == "alerts").unwrap();
+    assert_eq!(alerts.from, "db team (by tag)");
+    assert_eq!(
+        alerts.to, "ops-slack",
+        "the rule stops covering it, so the after side must not name it"
+    );
+}
+
 /// A monitor covered only by a channel's tag rule is paged, so a confirmation
 /// that called it unreachable would talk the operator out of a working setup.
 #[test]

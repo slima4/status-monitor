@@ -119,18 +119,34 @@ pub(super) fn build_monitor_patch(
             update.region_policy = Some(policy);
         }
     }
-    if let Some(ids) = args.channel_ids.as_ref() {
-        let alerts = resolve_bindings(ids, channels)?;
-        // A set, not a sequence: the same channels in another order alert the
-        // same people, and calling that a change spends a confirmation on one.
-        if bound_ids(&alerts) != bound_ids(&target.alerts) {
-            let names = |a: &TargetAlerts| {
-                channel_names(a, &target.tags, channels, failure_limit)
-                    .unwrap_or_else(|| "nobody".to_string())
-            };
-            moved("alerts", names(&target.alerts), names(&alerts));
-            update.alerts = Some(alerts);
-        }
+    let rebound = match args.channel_ids.as_ref() {
+        Some(ids) => Some(resolve_bindings(ids, channels)?),
+        None => None,
+    };
+    // A set, not a sequence: the same channels in another order alert the same
+    // people, and calling that a change spends a confirmation on one.
+    let rebinds = rebound
+        .as_ref()
+        .is_some_and(|a| bound_ids(a) != bound_ids(&target.alerts));
+    // Who pages this monitor after the patch, however it moved: a retag alone
+    // hands coverage from one channel to another, and a confirmation that
+    // showed only the tags would have the human approve that unseen.
+    let names = |a: &TargetAlerts, tags: &[String]| {
+        channel_names(a, tags, channels, failure_limit).unwrap_or_else(|| "nobody".to_string())
+    };
+    let before = names(&target.alerts, &target.tags);
+    let after = names(
+        rebound
+            .as_ref()
+            .filter(|_| rebinds)
+            .unwrap_or(&target.alerts),
+        update.tags.as_deref().unwrap_or(&target.tags),
+    );
+    if before != after {
+        moved("alerts", before, after);
+    }
+    if rebinds {
+        update.alerts = rebound;
     }
     Ok((update, changes))
 }

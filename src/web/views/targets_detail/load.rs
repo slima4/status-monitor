@@ -95,38 +95,32 @@ impl UnconfirmedFailures {
 /// A store error reads as "someone is reachable" so a failed lookup never
 /// accuses a monitor that in fact alerts fine.
 pub(super) async fn alerts_nobody(state: &AppState, org: OrgId, target: &Target) -> bool {
-    if binds_a_live_channel(state, org, target).await {
-        return false;
-    }
-    state
+    // Settling this first is one indexed lookup against a read of every
+    // channel in the org.
+    match state
         .escalation_policy_store
         .resolve_for_target(org, target.id)
         .await
-        .map(|policy| policy.is_none())
-        .unwrap_or(false)
+    {
+        Ok(Some(_)) | Err(_) => return false,
+        Ok(None) => {}
+    }
+    !binds_a_live_channel(state, org, target).await
 }
 
 /// A channel pages only while it is there and able to deliver; the sweep
 /// skips the rest, so counting a dead one as coverage would hide the very
 /// monitor this warning exists for.
 async fn binds_a_live_channel(state: &AppState, org: OrgId, target: &Target) -> bool {
-    let Ok(ids) = crate::storage::notification_channels::paging_channel_ids(
-        state.notification_channel_store.as_ref(),
-        org,
-        target,
-    )
-    .await
-    else {
+    // One read, not one per candidate: the binding and the tag rule are both
+    // answered from the same rows.
+    let Ok(channels) = state.notification_channel_store.list(org).await else {
         return true;
     };
-    for id in ids {
-        match state.notification_channel_store.get(org, id).await {
-            Ok(Some(channel)) if channel.can_deliver() => return true,
-            Ok(_) => {}
-            Err(_) => return true,
-        }
-    }
-    false
+    channels.iter().any(|c| {
+        c.can_deliver()
+            && (target.alerts.iter().any(|b| b.channel_id == c.id) || c.auto_binds(&target.tags))
+    })
 }
 
 /// Best-effort: a failed read costs the flap column, never the page.

@@ -86,8 +86,19 @@ impl DiscordNotifier {
         mention: Option<DiscordMention>,
     ) -> Self {
         // Without `wait=true` Discord answers 204 before delivering, hiding
-        // failures from the retry loop.
-        webhook_url.query_pairs_mut().append_pair("wait", "true");
+        // failures from the retry loop. Replaced, not appended: a pasted URL
+        // already carrying `wait` would leave two, and which one Discord
+        // honours is not specified.
+        let kept: Vec<(String, String)> = webhook_url
+            .query_pairs()
+            .filter(|(k, _)| k != "wait")
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        webhook_url
+            .query_pairs_mut()
+            .clear()
+            .extend_pairs(kept)
+            .append_pair("wait", "true");
         Self {
             client,
             webhook_url,
@@ -212,6 +223,24 @@ mod tests {
             cfg.mention_targets(),
         );
         serde_json::to_value(sender.payload(&AlertCard::for_notice(n))).unwrap()
+    }
+
+    /// A second `wait` pair leaves the retry loop blind to a failed send.
+    #[test]
+    fn an_existing_wait_pair_is_replaced_not_doubled() {
+        let sender = notifier("https://discord.com/api/webhooks/1/tok?wait=false&thread_id=7");
+        let pairs: Vec<(String, String)> = sender
+            .webhook_url
+            .query_pairs()
+            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("thread_id".to_string(), "7".to_string()),
+                ("wait".to_string(), "true".to_string())
+            ]
+        );
     }
 
     fn embed(n: &IncidentNotice) -> serde_json::Value {

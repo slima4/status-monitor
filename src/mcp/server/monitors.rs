@@ -188,14 +188,21 @@ impl McpServer {
             .channel_ids
             .as_deref()
             .is_some_and(|ids| !ids.is_empty());
-        let channels = self.channels_for_binding(auth, wants_channels).await?;
+        let tags = args.tags.as_deref().unwrap_or_default();
+        // A tag rule covers a monitor nothing is bound to. Best-effort for
+        // tags: the caller did not name those channels, so reporting them
+        // must not demand a scope.
+        let reads_channels = auth.scopes.allows(Scope::ChannelsRead);
+        let channels = self
+            .channels_for_binding(auth, wants_channels || (!tags.is_empty() && reads_channels))
+            .await?;
         let alerts = match args.channel_ids.as_deref() {
             Some(ids) if wants_channels => resolve_bindings(ids, &channels)?,
             _ => TargetAlerts::default(),
         };
         let channel_summary = channel_names(
             &alerts,
-            args.tags.as_deref().unwrap_or_default(),
+            tags,
             &channels,
             self.state.cfg.escalation.channel_failure_limit,
         );
@@ -268,7 +275,14 @@ impl McpServer {
             address: sanitize_data(&address),
             interval_secs: created.interval.as_secs(),
             probe,
-            alerts: channel_summary.unwrap_or_else(|| "nobody".to_string()),
+            alerts: match &channel_summary {
+                Some(s) => s.clone(),
+                // Unread inventory would call a tag-covered monitor unmonitored.
+                None if !tags.is_empty() && !reads_channels => {
+                    "unknown: a channel tag rule may cover it".to_string()
+                }
+                None => "nobody".to_string(),
+            },
         }))
     }
 
@@ -343,8 +357,12 @@ impl McpServer {
         // Read once and handed to every diff: the patch is rebuilt after the
         // confirmation and the two must agree field for field, so channels
         // cannot be diffed outside it.
+        // Tags alone can move who pages this monitor, so they need the
+        // inventory as much as a binding change does. Best-effort there: a
+        // retag must not start demanding a scope it never needed.
+        let retags = args.tags.is_some() && auth.scopes.allows(Scope::ChannelsRead);
         let channels = self
-            .channels_for_binding(auth, args.channel_ids.is_some())
+            .channels_for_binding(auth, args.channel_ids.is_some() || retags)
             .await?;
 
         let (update, changes) = build_monitor_patch(

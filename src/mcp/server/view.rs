@@ -73,7 +73,12 @@ pub(super) fn channel_names(
         .iter()
         .filter(|c| c.auto_binds(tags) && !alerts.iter().any(|b| b.channel_id == c.id))
     {
-        out.push(format!("{} (by tag)", named(c)));
+        // One parenthetical: stacking the health note behind the routing note
+        // leaves the reader to work out which is which.
+        out.push(match undeliverable_reason(c, failure_limit) {
+            Some(why) => format!("{} (by tag, {why})", sanitize_data(&c.name)),
+            None => format!("{} (by tag)", sanitize_data(&c.name)),
+        });
     }
     (!out.is_empty()).then(|| out.join(", "))
 }
