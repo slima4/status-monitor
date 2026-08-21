@@ -25,6 +25,13 @@ const EMBED_MAX: usize = 6000;
 const _: () = assert!(
     TITLE_MAX + DESCRIPTION_MAX + MAX_FIELDS * (FIELD_NAME_MAX + FIELD_VALUE_MAX) <= EMBED_MAX
 );
+/// The description is trimmed after its code fence is closed, so a headline,
+/// an error and a note have to fit whole. Over the cap the cut lands inside
+/// the fence and the unterminated backticks swallow the rest of the embed.
+const _: () = assert!(
+    crate::notifier::card::MAX_ERROR_CHARS + crate::notifier::card::MAX_NOTE_CHARS + 256
+        <= DESCRIPTION_MAX
+);
 
 pub struct DiscordNotifier {
     client: OutboundHttpClient,

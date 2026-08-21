@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::ChannelKind;
-use super::mention::{tokens, validate as validate_mention, without_broadcast};
+use super::mention::{cleared_when_empty, tokens, validate as validate_mention, without_broadcast};
 use super::transport::{MASK, TransportConfig, require_provider_webhook, trim_in_place};
 
 /// Discord snowflakes are 17 to 20 digits; shorter is a typo, not an id.
@@ -138,13 +138,7 @@ impl TransportConfig for DiscordConfig {
 
     fn normalize(&mut self) {
         trim_in_place(&mut self.webhook_url);
-        // Emptied, not blank: an API client clears a ping by sending "",
-        // which validation would otherwise refuse as a blank mention.
-        self.mention = self
-            .mention
-            .take()
-            .map(|m| m.trim().to_string())
-            .filter(|m| !m.is_empty());
+        self.mention = cleared_when_empty(self.mention.take());
     }
 
     fn validate(&self) -> Result<(), String> {

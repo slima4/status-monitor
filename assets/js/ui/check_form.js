@@ -1059,7 +1059,7 @@
             } catch {
                 rule = [];
             }
-            chip.hidden = !window.smTagRuleCovers(rule, tags);
+            chip.hidden = !(window.smTagRuleCovers && window.smTagRuleCovers(rule, tags));
         }
     }
     if (tagChips) {

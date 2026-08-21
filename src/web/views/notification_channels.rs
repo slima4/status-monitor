@@ -360,13 +360,19 @@ async fn rule_tag_options(
     org: crate::domain::OrgId,
     rule: &[String],
 ) -> Result<(Vec<String>, Vec<String>), AppError> {
-    let mut options: Vec<String> = state
+    let options: Vec<String> = state
         .target_store
         .list_tags(org, None, 200)
         .await?
         .into_iter()
         .map(|t| t.name)
         .collect();
+    Ok(fold_rule_into_options(options, rule))
+}
+
+/// The pure half of [`rule_tag_options`]: the org's inventory and a stored rule
+/// in, the chips to show and the ones to tick out.
+fn fold_rule_into_options(mut options: Vec<String>, rule: &[String]) -> (Vec<String>, Vec<String>) {
     let mut picked: Vec<String> = Vec::with_capacity(rule.len());
     for t in rule {
         match options
@@ -380,7 +386,7 @@ async fn rule_tag_options(
             }
         }
     }
-    Ok((options, picked))
+    (options, picked)
 }
 
 /// All org monitors as cards, split by alert binding to `channel`:
@@ -844,24 +850,10 @@ mod tests {
     /// list, dropping a routing rule the operator never touched.
     #[test]
     fn a_rule_spelled_in_another_case_ticks_the_orgs_own_chip() {
-        let inventory = ["db".to_string(), "web".to_string()];
-        let rule = ["DB".to_string()];
-
-        // What rule_tag_options settles on for these two lists.
-        let mut options = inventory.to_vec();
-        let mut picked: Vec<String> = Vec::new();
-        for t in &rule {
-            match options
-                .iter()
-                .find(|o| o.to_lowercase() == t.to_lowercase())
-            {
-                Some(chip) => picked.push(chip.clone()),
-                None => {
-                    options.push(t.clone());
-                    picked.push(t.clone());
-                }
-            }
-        }
+        let (options, picked) = fold_rule_into_options(
+            vec!["db".to_string(), "web".to_string()],
+            &["DB".to_string()],
+        );
         assert_eq!(options, ["db", "web"], "no second chip for the same tag");
         assert_eq!(
             picked,

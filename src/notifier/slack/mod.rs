@@ -9,9 +9,8 @@ use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, post_json};
 use crate::notifier::Notifier;
 use crate::notifier::event::IncidentNotice;
-use crate::text::truncate_chars;
 
-use crate::notifier::card::{AlertCard, MAX_ERROR_CHARS};
+use crate::notifier::card::AlertCard;
 
 use blocks::{Block, escape, render};
 
@@ -81,10 +80,10 @@ impl SlackNotifier {
                 "*{label}* — {sev} incident {state}{err}{regions}{link}",
                 sev = n.severity.as_db_str(),
                 state = n.open_state(),
-                err = n
-                    .error_sample
+                err = card
+                    .error
                     .as_deref()
-                    .map(|e| format!(": {}", escape(&truncate_chars(e, MAX_ERROR_CHARS))))
+                    .map(|e| format!(": {}", escape(e)))
                     .unwrap_or_default(),
                 regions = region_line(n),
             ),

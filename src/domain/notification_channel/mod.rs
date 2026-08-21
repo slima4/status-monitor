@@ -316,7 +316,6 @@ impl NotificationChannel {
     }
 }
 
-/// The threshold alone, for callers holding a fresh count; `0` never flags.
 /// Whether a tag rule covers a monitor. The one owner of that decision: the
 /// paging query, the console badges and the MCP coverage view all ask here, so
 /// none of them can disagree about who gets woken.
@@ -333,11 +332,13 @@ pub fn tag_rule_matches(rule: &[String], monitor_tags: &[String]) -> bool {
 }
 
 /// [`tag_rule_matches`] against tags already folded, for a caller checking many
-/// rules against one monitor.
+/// rules against one monitor. Folded with `to_lowercase`, not an ASCII fold: a
+/// tag may be written in any script.
 pub fn matches_folded(rule: &[String], folded_tags: &[String]) -> bool {
     rule.iter().any(|r| folded_tags.contains(&r.to_lowercase()))
 }
 
+/// The threshold alone, for callers holding a fresh count; `0` never flags.
 pub fn failure_run_reached(consecutive_failures: i32, limit: u32) -> bool {
     limit > 0 && consecutive_failures >= i32::try_from(limit).unwrap_or(i32::MAX)
 }

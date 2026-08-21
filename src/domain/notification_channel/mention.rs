@@ -10,6 +10,14 @@ pub(super) fn tokens(raw: &str) -> impl Iterator<Item = &str> {
         .filter(|t| !t.is_empty())
 }
 
+/// An API client clears an optional string by sending it empty, so an emptied
+/// ping means "stop pinging" rather than a blank one validation should refuse.
+pub(super) fn cleared_when_empty(mention: Option<String>) -> Option<String> {
+    mention
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+}
+
 /// Refuse at save time what the operator would otherwise discover from an
 /// alert that woke nobody.
 pub(super) fn validate(

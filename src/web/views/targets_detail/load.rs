@@ -117,9 +117,11 @@ async fn binds_a_live_channel(state: &AppState, org: OrgId, target: &Target) -> 
     let Ok(channels) = state.notification_channel_store.list(org).await else {
         return true;
     };
+    let folded: Vec<String> = target.tags.iter().map(|t| t.to_lowercase()).collect();
     channels.iter().any(|c| {
         c.can_deliver()
-            && (target.alerts.iter().any(|b| b.channel_id == c.id) || c.auto_binds(&target.tags))
+            && (target.alerts.iter().any(|b| b.channel_id == c.id)
+                || crate::domain::matches_folded(&c.auto_bind_tags, &folded))
     })
 }
 

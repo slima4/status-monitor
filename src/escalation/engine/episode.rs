@@ -309,6 +309,11 @@ impl Worker {
                 }
             }
             None => {
+                // Propagated on purpose: nothing is written, so the reconcile
+                // scan retries this episode whole. Falling back to the bound
+                // channels would record rows, and a recorded episode is one
+                // that scan never revisits — the rule's channels would then
+                // miss the outage entirely rather than be paged a tick late.
                 let targets = channel_targets(
                     crate::storage::notification_channels::paging_channel_ids(
                         self.channels.as_ref(),

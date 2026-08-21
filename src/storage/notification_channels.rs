@@ -182,8 +182,13 @@ pub trait NotificationChannelStore: Send + Sync {
 }
 
 /// Every channel that should hear about `target`: bound first, then rule
-/// matches, deduped. One funnel, so the paging path, the silence notifier and
-/// the console's reachability warning cannot disagree.
+/// matches, deduped.
+///
+/// Who, not what to do when the lookup fails — that is the caller's, because
+/// their second chances differ. A page that errors here writes no notification
+/// row at all, so the reconcile scan picks the episode up and retries it whole;
+/// a silence notice has no such scan behind it and falls back to the bound
+/// channels rather than saying nothing.
 pub async fn paging_channel_ids(
     store: &dyn NotificationChannelStore,
     org: OrgId,
