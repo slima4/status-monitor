@@ -495,12 +495,24 @@ async fn email_channel_starts_unverified_and_blocks_tests() {
     assert_eq!(st, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
     assert_eq!(body["error"]["code"], "CHANNEL_UNVERIFIED");
 
-    // Address-shape validation runs like every transport's.
+    // A case difference is not a bad address: it is normalized on the way in,
+    // the same as the owner address signup stores.
     let (st, body) = send(
         &app,
         "POST",
         "/api/v1/notification-channels",
-        json!({ "name": "bad-mail", "config": { "type": "email", "to": "Not-Lower@example.com" } }),
+        json!({ "name": "shouty-mail", "config": { "type": "email", "to": " Not-Lower@Example.COM " } }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{body}");
+    assert_eq!(body["config"]["to"], "not-lower@example.com", "{body}");
+
+    // Address-shape validation still runs like every transport's.
+    let (st, body) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({ "name": "bad-mail", "config": { "type": "email", "to": "no-at-sign.example.com" } }),
     )
     .await;
     assert_eq!(st, StatusCode::BAD_REQUEST, "{body}");
