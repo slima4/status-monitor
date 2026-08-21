@@ -329,7 +329,13 @@ pub fn tag_rule_matches(rule: &[String], monitor_tags: &[String]) -> bool {
         return false;
     }
     let folded: Vec<String> = monitor_tags.iter().map(|t| t.to_lowercase()).collect();
-    rule.iter().any(|r| folded.contains(&r.to_lowercase()))
+    matches_folded(rule, &folded)
+}
+
+/// [`tag_rule_matches`] against tags already folded, for a caller checking many
+/// rules against one monitor.
+pub fn matches_folded(rule: &[String], folded_tags: &[String]) -> bool {
+    rule.iter().any(|r| folded_tags.contains(&r.to_lowercase()))
 }
 
 pub fn failure_run_reached(consecutive_failures: i32, limit: u32) -> bool {
@@ -1044,6 +1050,34 @@ mod normalize_tests {
 
     /// The console trims in the browser, so these reach the store only over
     /// the API, MCP or Terraform.
+    /// An API client clears an optional string by sending it empty. Left as
+    /// `Some("")` the save is refused as blank and the old ping stays live,
+    /// so there is no way to stop pinging except through the console.
+    #[test]
+    fn an_emptied_ping_clears_rather_than_failing_the_save() {
+        let mut slack = ChannelConfig::Slack(SlackConfig {
+            webhook_url: "https://hooks.slack.com/services/T/B/x".into(),
+            mention: Some("  ".into()),
+        });
+        slack.normalize();
+        assert!(slack.validate().is_ok());
+        let ChannelConfig::Slack(c) = &slack else {
+            unreachable!()
+        };
+        assert_eq!(c.mention, None);
+
+        let mut discord = ChannelConfig::Discord(DiscordConfig {
+            webhook_url: "https://discord.com/api/webhooks/1/tok".into(),
+            mention: Some(String::new()),
+        });
+        discord.normalize();
+        assert!(discord.validate().is_ok());
+        let ChannelConfig::Discord(c) = &discord else {
+            unreachable!()
+        };
+        assert_eq!(c.mention, None);
+    }
+
     #[test]
     fn a_pasted_value_is_cleaned_before_its_shape_is_judged() {
         let mut telegram = ChannelConfig::Telegram(TelegramConfig {

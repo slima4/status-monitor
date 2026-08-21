@@ -1099,6 +1099,9 @@
             wrap.dataset.targetId = id;
             wrap.dataset.enabled = btn.dataset.enabled;
             wrap.dataset.tags = btn.dataset.tags || "";
+            // The rule counter reads this one; dropping it on a rebuild makes
+            // a bound monitor look untagged and undercounts the rule.
+            wrap.dataset.tagsJson = btn.dataset.tagsJson || "[]";
             // On create the card must not navigate away mid-form; once the
             // binding is live (edit) it links to the monitor.
             let card;
@@ -1135,6 +1138,7 @@
             btn.dataset.targetId = wrap.dataset.targetId;
             btn.dataset.enabled = wrap.dataset.enabled;
             btn.dataset.tags = wrap.dataset.tags || "";
+            btn.dataset.tagsJson = wrap.dataset.tagsJson || "[]";
             btn.className = card.className;
             btn.classList.remove("h-full");
             btn.classList.add("text-left");

@@ -458,9 +458,10 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::Other(anyhow!("auto-bound channels: {e}")))?;
+        let folded: Vec<String> = tags.iter().map(|t| t.to_lowercase()).collect();
         Ok(rows
             .into_iter()
-            .filter(|(_, rule)| crate::domain::tag_rule_matches(rule, tags))
+            .filter(|(_, rule)| crate::domain::matches_folded(rule, &folded))
             .map(|(id, _)| id)
             .collect())
     }

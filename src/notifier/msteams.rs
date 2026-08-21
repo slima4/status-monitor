@@ -189,15 +189,33 @@ fn theme(tone: CardTone) -> &'static str {
     }
 }
 
-/// A text block renders a markdown subset, and Teams interpolates `{{DATE()}}`
-/// anywhere it appears, so customer text is neutralized before it can format
-/// itself or fabricate a timestamp. Teams has no per-field limit but does cap
-/// the whole card, so every block is bounded here.
+/// A text block renders a markdown subset, so customer text is escaped before
+/// it can format itself. Braces are not escaped but broken, and `#` is left
+/// alone: headers are not in the supported subset, and a backslash before a
+/// character the subset does not know is consumed rather than kept.
+/// Teams has no per-field limit but does cap the whole card, so every block is
+/// bounded here.
 fn cap(s: &str, max: usize) -> String {
     truncate_chars(
-        &escape_markdown(s, &['\\', '`', '*', '_', '[', ']', '#', '{', '}']),
+        &escape_markdown(&defuse_date_functions(s), &['\\', '`', '*', '_', '[', ']']),
         max,
     )
+}
+
+/// Teams evaluates `{{DATE(…)}}` wherever it appears in a text block. Escaping
+/// the braces does not stop it — the backslash is eaten as a markdown escape
+/// and the pair closes up again — so the pair is split by a space, which the
+/// date syntax forbids between its braces, leaving the text to render as the
+/// name it is.
+fn defuse_date_functions(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if c == '{' && out.ends_with('{') {
+            out.push(' ');
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[async_trait]
@@ -271,12 +289,26 @@ mod tests {
 
     /// Teams interpolates its date templating anywhere in a text block, so a
     /// monitor name must not be able to show the responder a made-up time.
+    /// The brace pair has to be broken by something markdown will not eat:
+    /// a backslash before a brace is consumed and the pair closes up again.
     #[test]
     fn a_monitor_name_cannot_fabricate_a_timestamp() {
         let mut n = notice(NotificationReason::Opened);
         n.monitor_name = Some("{{DATE(2001-09-11T00:00:00Z, SHORT)}}".into());
         let heading = card(&n)["body"][0]["text"].as_str().unwrap().to_string();
-        assert!(!heading.contains("{{DATE("), "{heading}");
+        assert!(!heading.contains("{{"), "{heading}");
+        assert!(
+            !heading.contains("\\{"),
+            "no backslash to be eaten: {heading}"
+        );
+        assert!(
+            heading.contains("{ {DATE("),
+            "the name still reads back: {heading}"
+        );
+        // Repeats must not close up into a fresh pair.
+        n.monitor_name = Some("{{{{DATE(2001-09-11T00:00:00Z, SHORT)}}}}".into());
+        let heading = card(&n)["body"][0]["text"].as_str().unwrap().to_string();
+        assert!(!heading.contains("{{"), "{heading}");
     }
 
     /// Teams caps the whole card, and a monitor name has no length limit

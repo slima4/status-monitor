@@ -87,9 +87,13 @@ impl TransportConfig for SlackConfig {
 
     fn normalize(&mut self) {
         trim_in_place(&mut self.webhook_url);
-        if let Some(m) = &mut self.mention {
-            trim_in_place(m);
-        }
+        // Emptied, not blank: an API client clears a ping by sending "",
+        // which validation would otherwise refuse as a blank mention.
+        self.mention = self
+            .mention
+            .take()
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty());
     }
 
     fn validate(&self) -> Result<(), String> {

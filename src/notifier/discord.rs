@@ -127,7 +127,9 @@ impl DiscordNotifier {
             description.push_str(&format!("\n{}", escape(note)));
         }
         Embed {
-            title: truncate_chars(&escape(&card.heading()), TITLE_MAX),
+            // Discord renders no markdown in an embed title, so escaping it
+            // would only print the backslashes.
+            title: truncate_chars(&card.heading(), TITLE_MAX),
             description: truncate_chars(&description, DESCRIPTION_MAX),
             color: color(card.tone),
             url: card.link.clone(),
@@ -345,12 +347,12 @@ mod tests {
         );
     }
 
-    /// The embed title renders markdown too, so a monitor name cannot format
-    /// itself into the loudest line on the card.
+    /// Discord renders no markdown in an embed title, so escaping one only
+    /// prints the backslashes — and `_` is ordinary in a monitor name.
     #[test]
-    fn a_monitor_name_cannot_format_the_title() {
+    fn a_monitor_name_reaches_the_title_unescaped() {
         let mut n = notice(NotificationReason::Opened);
-        n.monitor_name = Some("**PROD** ~~down~~".into());
-        assert_eq!(embed(&n)["title"], r"🔴 \*\*PROD\*\* \~\~down\~\~");
+        n.monitor_name = Some("api_prod **PROD** ~~down~~".into());
+        assert_eq!(embed(&n)["title"], "🔴 api_prod **PROD** ~~down~~");
     }
 }

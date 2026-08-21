@@ -34,9 +34,6 @@ impl TransportConfig for WhatsAppConfig {
         self.access_token == MASK
     }
 
-    /// Values are validated raw, not on a trimmed copy — they are sent to
-    /// the API verbatim, so stray whitespace must fail here, not at the
-    /// first delivery.
     fn normalize(&mut self) {
         trim_in_place(&mut self.access_token);
         trim_in_place(&mut self.phone_number_id);
@@ -47,6 +44,9 @@ impl TransportConfig for WhatsAppConfig {
         self.to = strip_phone_separators(self.to.trim());
     }
 
+    /// Judged on the normalized value, but still strictly: what survives here
+    /// is sent to the API verbatim, so stray whitespace inside a token has to
+    /// fail now rather than at the first delivery.
     fn validate(&self) -> Result<(), String> {
         if self.access_token.is_empty() || !self.access_token.chars().all(|c| c.is_ascii_graphic())
         {
