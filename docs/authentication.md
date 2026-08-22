@@ -1,7 +1,8 @@
 # Authentication
 
 uptimepage ships with an in-binary auth stack: GitHub, Google, Microsoft and
-GitLab OAuth for the operator UI, opaque per-user API tokens for the REST surface, and
+GitLab OAuth for the operator UI (the hosted service currently offers GitHub
+and Google; the other two are for deployments that configure them), opaque per-user API tokens for the REST surface, and
 magic-link sign-in (enabled by default) for users without an OAuth identity. The
 binary always runs as multi-tenant SaaS — single-tenant deployments are
 just SaaS with one signed-up user; see [Multi-tenancy](multi-tenancy.md)

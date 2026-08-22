@@ -19,8 +19,8 @@ We do not have a designated Data Protection Officer as we do not meet the thresh
 We collect data in three ways:
 
 **You provide:**
-- Email address (via GitHub, GitLab, Google or Microsoft OAuth, or magic-link sign-in)
-- Display name (via GitHub, GitLab, Google or Microsoft OAuth)
+- Email address (via GitHub or Google OAuth, or magic-link sign-in)
+- Display name (via GitHub or Google OAuth)
 - Organisation names, slugs, branding (display name, about text, logo)
 - Target configurations (URLs, intervals, headers, optional credentials)
 - Status-page customisation (incident narration, maintenance windows)
@@ -40,7 +40,7 @@ We collect data in three ways:
 
 **Analytics (public marketing and sign-in pages only):** We run self-hosted, cookieless analytics (Umami) on our own EU infrastructure. It records aggregate page views, referrer, browser, operating system, device type, and coarse location (country and region). Visits are grouped by a hash of your IP address and user agent mixed with a secret value that rotates every month, so within one month repeat visits from the same network and browser count as one returning visitor. It sets no cookies, never stores your raw IP, cannot tell us who you are, and cannot follow you to other websites. The data stays on our infrastructure and is never sent to a third party.
 
-On the sign-in page this also records which sign-in method you chose (GitHub, GitLab, Google, Microsoft, or email link) and whether signing in succeeded, so we can tell how many people who set out to sign in actually got in. Once you are signed in, no page of the product is tracked: there is no analytics on your dashboard, monitors, incidents, or settings.
+On the sign-in page this also records which sign-in method you chose (GitHub, Google, or email link) and whether signing in succeeded, so we can tell how many people who set out to sign in actually got in. Once you are signed in, no page of the product is tracked: there is no analytics on your dashboard, monitors, incidents, or settings.
 
 We do **not** use third-party analytics services that export your data (no Google Analytics, no Mixpanel, no tracking pixels).
 
@@ -100,9 +100,7 @@ We use these third-party processors:
 | Hetzner Online GmbH | Hosting and DNS | Finland (data centre); Germany (HQ) | DPA in place |
 | Resend | Transactional emails | USA | Standard Contractual Clauses |
 | GitHub | OAuth authentication | USA | Standard Contractual Clauses |
-| GitLab | OAuth authentication | USA | Standard Contractual Clauses |
 | Google | OAuth authentication | USA | Standard Contractual Clauses |
-| Microsoft | OAuth authentication | USA | Standard Contractual Clauses |
 | Fly.io | Probe infrastructure for non-EU check regions | USA | Standard Contractual Clauses |
 
 We do **not** sell or rent your data. We do not share it for marketing.
@@ -114,7 +112,7 @@ We may disclose data:
 
 ## 6. International Transfers
 
-Data is primarily stored in Finland (Hetzner data centre, Helsinki). Resend, GitHub, GitLab, Google, Microsoft, and Fly.io are based in the United States; transfers to them are protected by Standard Contractual Clauses adopted by the European Commission.
+Data is primarily stored in Finland (Hetzner data centre, Helsinki). Resend, GitHub, Google, and Fly.io are based in the United States; transfers to them are protected by Standard Contractual Clauses adopted by the European Commission.
 
 An AI assistant you connect over MCP (see §3) reads your monitoring wherever that assistant runs, which may be outside the EU. You choose that client and its operator, and it retrieves only what it asks for on your instruction, so we do not treat it as a processor acting for us. If that matters to you, the connector is optional and revoking it in Settings stops it.
 

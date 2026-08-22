@@ -25,7 +25,7 @@ API, or Terraform. Self-host the single binary or use the hosted service.
 
 Hosted, no install:
 
-1. Sign up at **[uptimepage.dev](https://uptimepage.dev)** with GitHub, GitLab, Google or Microsoft — no card.
+1. Sign up at **[uptimepage.dev](https://uptimepage.dev)** with GitHub or Google — no card.
 2. Add a monitor: paste a URL, pick a check type and interval, save.
 3. Bind a notification channel (Slack, email, PagerDuty, …) so failures reach you.
 4. Turn on a public status page and share the link.
@@ -77,7 +77,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 | **Automation** | REST API, scoped API tokens, Terraform provider, MCP server for LLM clients |
 | **Built on** | Rust 1.95 / Tokio / Axum, Postgres + ClickHouse, one ~23 MB self-contained binary |
 
-**Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub, GitLab, Google or Microsoft.
+**Live service: <https://uptimepage.dev>** — hosted, free, sign in with GitHub or Google.
 **Full docs: <https://uptimepage.dev/docs>**
 
 <div align="center">

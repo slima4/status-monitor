@@ -99,7 +99,7 @@ const LLMS_FACTS: &[(&str, &str)] = &[
     ),
     ("Source code", SOURCE_URL),
     ("License", "AGPL-3.0"),
-    ("Sign-in", "GitHub, GitLab, Google, Microsoft or magic link"),
+    ("Sign-in", "GitHub, Google or magic link"),
 ];
 
 const DEFAULT_OG_CARD: &str = "/static/marketing/og.png";
