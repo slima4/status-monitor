@@ -44,6 +44,7 @@ pub struct UserDataExport {
     pub owned_orgs: Vec<OwnedOrgExport>,
     pub memberships: Vec<MembershipExport>,
     pub login_history: Vec<LoginAttemptExport>,
+    pub credential_changes: Vec<CredentialEventExport>,
     pub audit_entries: Vec<AuditEntryExport>,
     pub mcp_write_actions: Vec<McpAuditExport>,
 }
@@ -188,6 +189,20 @@ pub struct LoginAttemptExport {
     pub ip_hash: Option<String>,
     pub user_agent_hash: Option<String>,
     pub failure_reason: Option<String>,
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// When a sign-in method was added or removed. Outlives the identity row, so
+/// a removal is still answerable for after the credential is gone.
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct CredentialEventExport {
+    pub provider: String,
+    pub provider_user_id: String,
+    pub action: String,
+    /// `email_match` means nobody clicked add.
+    pub origin: String,
+    pub ip_hash: Option<String>,
+    pub user_agent_hash: Option<String>,
     pub occurred_at: DateTime<Utc>,
 }
 
@@ -365,6 +380,17 @@ async fn build_export(pool: &sqlx::PgPool, user_id: UserId) -> Result<UserDataEx
     .await
     .map_err(db_err("login_history"))?;
 
+    let credential_changes: Vec<CredentialEventExport> = sqlx::query_as(&format!(
+        "SELECT provider, provider_user_id, action, origin, ip_hash, user_agent_hash, occurred_at \
+         FROM credential_events \
+         WHERE user_id = $1 AND occurred_at > now() - INTERVAL '{EXPORT_ACTIVITY_DAYS} days' \
+         ORDER BY occurred_at DESC"
+    ))
+    .bind(user_id.0)
+    .fetch_all(pool)
+    .await
+    .map_err(db_err("credential_changes"))?;
+
     let audit_entries: Vec<AuditEntryExport> = sqlx::query_as(&format!(
         "SELECT org_id, action, metadata, occurred_at \
          FROM org_audit_log \
@@ -396,6 +422,7 @@ async fn build_export(pool: &sqlx::PgPool, user_id: UserId) -> Result<UserDataEx
         owned_orgs,
         memberships,
         login_history,
+        credential_changes,
         audit_entries,
         mcp_write_actions,
     })
@@ -628,9 +655,10 @@ pub async fn restore_account(
 
     crate::web::flash::set(
         &cookies,
-        crate::web::flash::Flash {
+        &crate::web::flash::Flash {
             restored: true,
             invite_missed: false,
+            ..Default::default()
         },
         state.cfg.auth.session.cookie_secure,
         &state.cfg.auth.session.cookie_domain,

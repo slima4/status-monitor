@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** 2026-08-21
+**Last updated:** 2026-08-22
 
 This Privacy Policy explains how the uptimepage service ("we", "us") collects and processes personal data. It is intended to satisfy our obligations under the EU General Data Protection Regulation (GDPR) and similar laws.
 
@@ -30,6 +30,7 @@ We collect data in three ways:
 - API tokens (you create; we store hashed)
 - Check results (technical metrics: status codes, latencies, error codes)
 - Login attempts (success/failure, method, hashed IP, hashed user agent)
+- Sign-in method changes (which provider was added or removed, whether you asked for it or it was matched on your verified address, hashed IP, hashed user agent)
 - Audit events (organisation membership changes, target changes)
 - MCP write actions (which tool ran, what it acted on, and whether it succeeded or was refused)
 
@@ -53,6 +54,7 @@ We do **not** use third-party analytics services that export your data (no Googl
 | Heartbeat pings and the output your job sends with them | Show when a scheduled job ran and why it failed | Contract |
 | Sessions, API tokens | Authenticate API requests | Contract |
 | Hashed IP, login attempts | Detect security threats | Legitimate interest |
+| Sign-in method changes | Let you see, and challenge, every credential that opens your account | Legitimate interest |
 | Audit log | Compliance and accountability | Legitimate interest |
 | MCP write actions | Account for changes an AI assistant made on your behalf | Legitimate interest |
 | Aggregate analytics (marketing and sign-in pages) | Understand site usage and improve content and sign-in | Legitimate interest |
@@ -79,6 +81,7 @@ We do not engage in automated decision-making with significant effects on you (n
 | Heartbeat pings (when each signal arrived, its exit status, how long the run took) | 30 days |
 | Output posted with a heartbeat ping | 7 days |
 | Login attempts | 180 days |
+| Sign-in method changes | 180 days |
 | Audit log | 2 years |
 | MCP write actions (tool, what it acted on, outcome, and the person and token behind it) | 2 years |
 | Quota events | 90 days |
@@ -157,7 +160,7 @@ Two channels — use whichever is convenient:
 
 **Self-service (recommended):**
 
-- **Export:** Visit /settings/account → "Export My Data". You receive a JSON file with the data associated with your account. Activity logs (sign-ins, audit events, MCP write actions) cover the last 90 days; ask us by email if you need the full retained history.
+- **Export:** Visit /settings/account → "Export My Data". You receive a JSON file with the data associated with your account. Activity logs (sign-ins, sign-in method changes, audit events, MCP write actions) cover the last 90 days; ask us by email if you need the full retained history.
 - **Deletion:** Visit /settings/account → "Delete My Account". The account is immediately suspended and permanently purged after 30 days.
 
 **Email:** Send a request to hello@uptimepage.dev. We will:

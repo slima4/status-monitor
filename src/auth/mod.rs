@@ -31,7 +31,7 @@ pub mod token_hash;
 pub mod url;
 
 pub use fingerprint::{ensure_fingerprint_salt, hash_fingerprint};
-pub use provider::OauthProvider;
+pub use provider::{CredentialAction, CredentialOrigin, OauthProvider};
 
 use sha2::{Digest, Sha256};
 

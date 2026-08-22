@@ -454,9 +454,10 @@ pub async fn verify_confirm(
     let invite_missed = joined.is_none() && row.invitation_id.is_some();
     crate::web::flash::set(
         &cookies,
-        crate::web::flash::Flash {
+        &crate::web::flash::Flash {
             restored: false,
             invite_missed,
+            ..Default::default()
         },
         state.cfg.auth.session.cookie_secure,
         &state.cfg.auth.session.cookie_domain,

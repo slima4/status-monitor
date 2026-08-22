@@ -99,10 +99,11 @@ pub async fn mint_start_response(
         pool,
         &s,
         p.state_provider,
-        None,
-        None,
-        Some(org.0),
-        link_code_id,
+        oauth_state::StateBinding {
+            org_id: Some(org.0),
+            link_code_id,
+            ..Default::default()
+        },
     )
     .await?;
     let url = (p.authorize_url)((p.cfg)(&state.cfg), &callback_uri(state, p), &s);

@@ -10,6 +10,7 @@
 mod common;
 
 use chrono::{Duration as ChronoDuration, Utc};
+use uptimepage::auth::OauthProvider as P;
 use uptimepage::auth::{
     OauthProvider, fingerprint,
     login_audit::{self, LoginAttempt, LoginMethod},
@@ -18,9 +19,28 @@ use uptimepage::auth::{
 };
 use uptimepage::config::SessionConfig;
 use uptimepage::domain::UserId;
+use uptimepage::error::AppError;
+use uptimepage::storage::oauth_identities::{self, WaysIn};
 use uuid::Uuid;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
+
+/// Every provider works, but the address is not a way back — the shape a
+/// deployment takes with magic link off, or with no deliverable mail sender.
+fn no_email_back() -> WaysIn {
+    WaysIn {
+        enabled_providers: P::ALL.to_vec(),
+        email_is_a_way_back: false,
+    }
+}
+
+/// Magic link on and mail actually deliverable, so the last provider may go.
+fn email_is_back() -> WaysIn {
+    WaysIn {
+        enabled_providers: P::ALL.to_vec(),
+        email_is_a_way_back: true,
+    }
+}
 
 async fn fresh_pg() -> Option<(String, String)> {
     common::fresh_test_db("auth_session").await
@@ -49,10 +69,11 @@ async fn oauth_state_insert_consume_round_trip() {
         &pool,
         &s,
         "github",
-        Some("/after"),
-        Some(inv_id),
-        None,
-        None,
+        oauth_state::StateBinding {
+            redirect_after: Some("/after"),
+            invitation_id: Some(inv_id),
+            ..Default::default()
+        },
     )
     .await
     .expect("insert");
@@ -261,7 +282,7 @@ async fn upsert_reports_pending_deletion_without_restoring_on_reauth() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn upsert_links_google_identity_to_github_user_on_same_email() {
+async fn upsert_links_a_second_provider_and_reports_it_for_the_notice() {
     let Some((db_url, name)) = fresh_pg().await else {
         return;
     };
@@ -280,8 +301,9 @@ async fn upsert_links_google_identity_to_github_user_on_same_email() {
             .expect("github signup");
     assert!(first.is_new_user);
 
-    // Same verified email arriving via Google must land on the SAME user —
-    // one account, two identity rows.
+    // Same verified email arriving via Google lands on the SAME user — one
+    // account, two identity rows. `newly_linked` is what the callback turns
+    // into mail, so a credential can never appear without the owner hearing.
     let google_id = RemoteIdentity {
         provider_user_id: "g-sub-1".into(),
         provider_username: Some("dora@example.test".into()),
@@ -293,6 +315,7 @@ async fn upsert_links_google_identity_to_github_user_on_same_email() {
             .await
             .expect("google link");
     assert!(!second.is_new_user);
+    assert!(second.newly_linked, "the account must be told");
     assert_eq!(second.user_id.0, first.user_id.0);
     assert_eq!(second.signup_org_id, first.signup_org_id);
 
@@ -303,6 +326,78 @@ async fn upsert_links_google_identity_to_github_user_on_same_email() {
             .await
             .unwrap();
     assert_eq!(identities, 2);
+
+    // Signing in again with a provider already on file is not a new link, so
+    // it must not send mail every time.
+    let again =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &google_id)
+            .await
+            .expect("google re-auth");
+    assert!(!again.newly_linked);
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn an_identity_on_file_outranks_a_matching_address() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    // Two accounts. `owner` holds the Google identity; `claimant` merely has
+    // the address Google now attests — a provider that changed the email on an
+    // existing account, or an address that moved hands.
+    let owner = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Google,
+        &RemoteIdentity {
+            provider_user_id: "g-owner".into(),
+            provider_username: None,
+            verified_email: Some("first@example.test".into()),
+            display_name: None,
+        },
+    )
+    .await
+    .expect("owner signup");
+    let (claimant,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ('second@example.test', 'v1', 'v1') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seed claimant");
+
+    // The identity is the key, not the address: this must open `owner`, and
+    // must not hand `claimant`'s account to a provider account it never had.
+    let resolved = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Google,
+        &RemoteIdentity {
+            provider_user_id: "g-owner".into(),
+            provider_username: None,
+            verified_email: Some("second@example.test".into()),
+            display_name: None,
+        },
+    )
+    .await
+    .expect("identity match");
+    assert_eq!(resolved.user_id.0, owner.user_id.0);
+    assert!(
+        !resolved.newly_linked,
+        "nothing was linked, it was already ours"
+    );
+
+    assert!(
+        oauth_identities::list_for_user(&pool, UserId(claimant))
+            .await
+            .unwrap()
+            .is_empty(),
+        "the address alone must not have attached anything"
+    );
 
     pool.close().await;
     drop_pg(&name).await;
@@ -358,6 +453,326 @@ async fn upsert_matches_tombstoned_user_by_email_on_new_provider() {
             .await
             .unwrap();
     assert_eq!(user_count, 1, "no duplicate user row");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn link_adds_a_second_provider_to_a_signed_in_account() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let github_id = RemoteIdentity {
+        provider_user_id: "901".into(),
+        provider_username: Some("ivy".into()),
+        verified_email: Some("ivy@example.test".into()),
+        display_name: None,
+    };
+    let owner =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
+            .await
+            .expect("github signup");
+
+    // Whatever address the second provider attests is irrelevant here: the
+    // session already proved who this is, which is what makes a link safe.
+    let gitlab_id = RemoteIdentity {
+        provider_user_id: "https://gitlab.com/42".into(),
+        provider_username: Some("ivy-at-work".into()),
+        verified_email: Some("ivy@work.test".into()),
+        display_name: None,
+    };
+    let outcome =
+        oauth_login::link_identity_to_user(&pool, OauthProvider::Gitlab, &gitlab_id, owner.user_id)
+            .await
+            .expect("link");
+    assert_eq!(outcome, oauth_login::LinkOutcome::Linked);
+
+    // Replaying the same dance is benign, not a second row.
+    let again =
+        oauth_login::link_identity_to_user(&pool, OauthProvider::Gitlab, &gitlab_id, owner.user_id)
+            .await
+            .expect("relink");
+    assert_eq!(again, oauth_login::LinkOutcome::AlreadyLinked);
+
+    let (identities,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM oauth_identities WHERE user_id = $1")
+            .bind(owner.user_id.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(identities, 2);
+
+    // Signing in with the linked provider now opens the account it was
+    // attached to, without touching the email path at all.
+    let resolved =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Gitlab, &gitlab_id)
+            .await
+            .expect("gitlab sign-in");
+    assert_eq!(resolved.user_id.0, owner.user_id.0);
+    assert!(!resolved.is_new_user);
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn link_refuses_a_provider_account_that_opens_someone_else() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let mk = |id: &str, email: &str| RemoteIdentity {
+        provider_user_id: id.into(),
+        provider_username: None,
+        verified_email: Some(email.into()),
+        display_name: None,
+    };
+    let a = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &mk("a-1", "a@example.test"),
+    )
+    .await
+    .expect("a signup");
+    let b = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &mk("b-1", "b@example.test"),
+    )
+    .await
+    .expect("b signup");
+
+    let err = oauth_login::link_identity_to_user(
+        &pool,
+        OauthProvider::Github,
+        &mk("a-1", "a@example.test"),
+        b.user_id,
+    )
+    .await
+    .expect_err("a-1 is already a's credential");
+    assert!(
+        matches!(err, AppError::BadRequest { code, .. } if code == oauth_login::IDENTITY_TAKEN)
+    );
+
+    let (owner,): (Uuid,) = sqlx::query_as(
+        "SELECT user_id FROM oauth_identities WHERE provider = 'github' AND provider_user_id = 'a-1'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(owner, a.user_id.0, "ownership never moved");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn unlink_holds_the_last_way_in_only_when_email_cannot_open_it() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let github_id = RemoteIdentity {
+        provider_user_id: "777".into(),
+        provider_username: Some("finn".into()),
+        verified_email: Some("finn@example.test".into()),
+        display_name: None,
+    };
+    let owner =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
+            .await
+            .expect("github signup");
+
+    // Magic link off: this row is the only way in, so it stays.
+    let err = oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Github,
+        Some("777"),
+        &no_email_back(),
+        Default::default(),
+    )
+    .await
+    .expect_err("the only method must survive");
+    assert!(matches!(err, AppError::BadRequest { code, .. } if code == "LAST_SIGN_IN_METHOD"));
+
+    // Magic link on: the address itself opens the account, so a user whose
+    // provider is compromised can drop it without first handing another
+    // provider a credential on the account they are locking down.
+    oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Github,
+        Some("777"),
+        &email_is_back(),
+        Default::default(),
+    )
+    .await
+    .expect("email is a way back");
+    assert!(
+        oauth_identities::list_for_user(&pool, owner.user_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    oauth_login::link_identity_to_user(&pool, OauthProvider::Github, &github_id, owner.user_id)
+        .await
+        .expect("relink github");
+
+    let gitlab_id = RemoteIdentity {
+        provider_user_id: "https://gitlab.com/7".into(),
+        provider_username: None,
+        verified_email: None,
+        display_name: None,
+    };
+    oauth_login::link_identity_to_user(&pool, OauthProvider::Gitlab, &gitlab_id, owner.user_id)
+        .await
+        .expect("link second");
+
+    oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Github,
+        Some("777"),
+        &no_email_back(),
+        Default::default(),
+    )
+    .await
+    .expect("removable once a second exists");
+
+    let rows = oauth_identities::list_for_user(&pool, owner.user_id)
+        .await
+        .expect("list");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].provider, "gitlab");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn unlink_without_a_subject_cannot_empty_the_account() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    // Two accounts at the same vendor, which the API's own
+    // `?provider_user_id=` parameter exists to tell apart.
+    let first = RemoteIdentity {
+        provider_user_id: "gh-a".into(),
+        provider_username: Some("work".into()),
+        verified_email: Some("two@example.test".into()),
+        display_name: None,
+    };
+    let owner = oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &first)
+        .await
+        .expect("github signup");
+    let second = RemoteIdentity {
+        provider_user_id: "gh-b".into(),
+        provider_username: Some("personal".into()),
+        verified_email: None,
+        display_name: None,
+    };
+    oauth_login::link_identity_to_user(&pool, OauthProvider::Github, &second, owner.user_id)
+        .await
+        .expect("second github");
+
+    // Omitting the subject removes BOTH, so the guard has to weigh what would
+    // remain, not what is there now — counting rows before the delete lets
+    // this call empty the account and lock it out.
+    let err = oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Github,
+        None,
+        &no_email_back(),
+        Default::default(),
+    )
+    .await
+    .expect_err("that would leave nothing");
+    assert!(matches!(err, AppError::BadRequest { code, .. } if code == "LAST_SIGN_IN_METHOD"));
+    assert_eq!(
+        oauth_identities::list_for_user(&pool, owner.user_id)
+            .await
+            .unwrap()
+            .len(),
+        2,
+        "the refusal must not have deleted anything"
+    );
+
+    // Naming one leaves the other, so it goes through.
+    oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Github,
+        Some("gh-a"),
+        &no_email_back(),
+        Default::default(),
+    )
+    .await
+    .expect("one of two is removable");
+
+    let (events,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM credential_events \
+          WHERE user_id = $1 AND action = 'unlinked' AND origin = 'session'",
+    )
+    .bind(owner.user_id.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(events, 1, "removal leaves a trail the mail cannot");
+
+    pool.close().await;
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn unlink_reports_a_method_that_is_not_on_the_account() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let github_id = RemoteIdentity {
+        provider_user_id: "601".into(),
+        provider_username: None,
+        verified_email: Some("nan@example.test".into()),
+        display_name: None,
+    };
+    let owner =
+        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
+            .await
+            .expect("github signup");
+
+    // Not "you would lock yourself out" — this method was never here.
+    let err = oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Gitlab,
+        Some("nope"),
+        &no_email_back(),
+        Default::default(),
+    )
+    .await
+    .expect_err("gitlab was never linked");
+    assert!(matches!(err, AppError::NotFound { code, .. } if code == "SIGN_IN_METHOD_NOT_FOUND"));
 
     pool.close().await;
     drop_pg(&name).await;
@@ -768,6 +1183,191 @@ async fn session_fixation_pattern_destroys_pre_login_session() {
         matches!(pre_lookup, session_store::LookupOutcome::Missing),
         "old session must not be revivable"
     );
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_disabled_provider_is_a_row_not_a_way_in() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let owner = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &RemoteIdentity {
+            provider_user_id: "gh-off".into(),
+            provider_username: None,
+            verified_email: Some("off@example.test".into()),
+            display_name: None,
+        },
+    )
+    .await
+    .expect("signup");
+    oauth_login::link_identity_to_user(
+        &pool,
+        OauthProvider::Gitlab,
+        &RemoteIdentity {
+            provider_user_id: "gl-on".into(),
+            provider_username: None,
+            verified_email: None,
+            display_name: None,
+        },
+        owner.user_id,
+    )
+    .await
+    .expect("link gitlab");
+
+    // GitHub is switched off, so `/auth/github/login` answers 404. Counting it
+    // as a way in would let the account drop its only working method.
+    let gitlab_only = WaysIn {
+        enabled_providers: vec![OauthProvider::Gitlab],
+        email_is_a_way_back: false,
+    };
+    let err = oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Gitlab,
+        Some("gl-on"),
+        &gitlab_only,
+        Default::default(),
+    )
+    .await
+    .expect_err("github cannot be signed in with");
+    assert!(matches!(err, AppError::BadRequest { code, .. } if code == "LAST_SIGN_IN_METHOD"));
+
+    // The one that does not work is free to go.
+    oauth_identities::unlink(
+        &pool,
+        owner.user_id,
+        OauthProvider::Github,
+        Some("gh-off"),
+        &gitlab_only,
+        Default::default(),
+    )
+    .await
+    .expect("a method nothing can use is not what keeps the account reachable");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn signup_and_a_later_link_both_leave_a_trail() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+    MIGRATOR.run(&pool).await.expect("migrate");
+
+    let owner = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &RemoteIdentity {
+            provider_user_id: "gh-first".into(),
+            provider_username: None,
+            verified_email: Some("trail@example.test".into()),
+            display_name: None,
+        },
+    )
+    .await
+    .expect("signup");
+    assert!(owner.is_new_user);
+
+    // The runbook tells operators every credential is in this table. An account
+    // whose only method is the signup one must not read as "nothing was ever
+    // added" — that is the answer that ends an investigation early.
+    oauth_identities::record_event(
+        &pool,
+        owner.user_id,
+        oauth_identities::CredentialEvent {
+            provider: OauthProvider::Github,
+            provider_user_id: "gh-first",
+            action: uptimepage::auth::CredentialAction::Linked,
+            origin: uptimepage::auth::CredentialOrigin::Signup,
+            ip_hash: None,
+            user_agent_hash: None,
+        },
+    )
+    .await;
+
+    let (origin,): (String,) =
+        sqlx::query_as("SELECT origin FROM credential_events WHERE user_id = $1")
+            .bind(owner.user_id.0)
+            .fetch_one(&pool)
+            .await
+            .expect("the first credential is on record");
+    assert_eq!(origin, "signup");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_migration_gives_older_identities_their_signup_row() {
+    let Some((db_url, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db_url).await;
+
+    // Everything up to and including 043, then an identity as it would exist
+    // on a database that predates the credential trail.
+    sqlx::migrate::Migrator::new(std::path::Path::new("./migrations/postgres"))
+        .await
+        .expect("load")
+        .undo(&pool, 0)
+        .await
+        .ok();
+    MIGRATOR.run(&pool).await.expect("migrate");
+    sqlx::query("DELETE FROM credential_events")
+        .execute(&pool)
+        .await
+        .expect("clear");
+
+    let (user_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO users (email, terms_version, privacy_version) \
+         VALUES ('old@example.test', 'v1', 'v1') RETURNING id",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("seed user");
+    sqlx::query(
+        "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
+         VALUES ($1, 'github', 'gh-old', 'old')",
+    )
+    .bind(user_id)
+    .execute(&pool)
+    .await
+    .expect("seed identity");
+
+    // Re-run just the backfill statement the migration carries.
+    sqlx::query(
+        "INSERT INTO credential_events \
+             (user_id, provider, provider_user_id, action, origin, occurred_at) \
+         SELECT user_id, provider, provider_user_id, 'linked', 'signup', created_at \
+           FROM oauth_identities",
+    )
+    .execute(&pool)
+    .await
+    .expect("backfill");
+
+    // Without this, the runbook's query answers "nothing was ever added" for
+    // every account that existed before the table did.
+    let (provider, origin): (String, String) =
+        sqlx::query_as("SELECT provider, origin FROM credential_events WHERE user_id = $1")
+            .bind(user_id)
+            .fetch_one(&pool)
+            .await
+            .expect("an account older than the table still has provenance");
+    assert_eq!(provider, "github");
+    assert_eq!(origin, "signup");
 
     pool.close().await;
     drop_pg(&name).await;

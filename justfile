@@ -169,6 +169,39 @@ check-db:
 dev-login:
     bash scripts/seed-dev-session.sh
 
+# Native run with every OAuth provider switched on, so all four sign-in
+# buttons and all four "add" buttons render. The credentials are placeholders:
+# the dance starts and mints state, then the provider rejects the client_id —
+# enough to exercise our half without registering four real apps. Email stays
+# "log", so the "sign-in method added/removed" mails print here.
+#
+# Mirrors compose.dev.yml's auth env, so it shares the dev stack's session
+# cookies and fingerprint salt (the boot guard refuses a different one).
+# Needs port 8080: `docker compose -f compose.dev.yml stop uptimepage` first.
+# Then `just dev-login` and `just dev-sign-in-methods` in another shell.
+run-oauth:
+    UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
+    UPTIMEPAGE_AUTH__FINGERPRINT_SALT="dev-only-fingerprint-salt-not-for-prod" \
+    UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE=false \
+    UPTIMEPAGE_TENANCY__PATH_BASED_PUBLIC_ROUTES=false \
+    UPTIMEPAGE_TENANCY__SUBDOMAIN_PUBLIC_ROUTES=true \
+    UPTIMEPAGE_PUBLIC_STATUS__BASE_DOMAIN=lvh.me \
+    UPTIMEPAGE_AUTH__GITHUB__CLIENT_ID=dev UPTIMEPAGE_AUTH__GITHUB__CLIENT_SECRET=dev \
+    UPTIMEPAGE_AUTH__GITHUB__REDIRECT_URL=http://app.lvh.me:8080/auth/github/callback \
+    UPTIMEPAGE_AUTH__GOOGLE__CLIENT_ID=dev UPTIMEPAGE_AUTH__GOOGLE__CLIENT_SECRET=dev \
+    UPTIMEPAGE_AUTH__GOOGLE__REDIRECT_URL=http://app.lvh.me:8080/auth/google/callback \
+    UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_ID=dev UPTIMEPAGE_AUTH__MICROSOFT__CLIENT_SECRET=dev \
+    UPTIMEPAGE_AUTH__MICROSOFT__REDIRECT_URL=http://app.lvh.me:8080/auth/microsoft/callback \
+    UPTIMEPAGE_AUTH__GITLAB__CLIENT_ID=dev UPTIMEPAGE_AUTH__GITLAB__CLIENT_SECRET=dev \
+    UPTIMEPAGE_AUTH__GITLAB__REDIRECT_URL=http://app.lvh.me:8080/auth/gitlab/callback \
+    RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
+        cargo run --bin uptimepage
+
+# Give the dev operator three linked sign-in methods and a credential trail,
+# so /settings/account has something to show. Needs `just dev-login` first.
+dev-sign-in-methods:
+    bash scripts/seed-sign-in-methods.sh
+
 # Seed a substantial fixture set: 14 monitors (8 public + 6 internal with
 # varied check_spec) + 161 incidents (150 resolved across 87d, 10 active in
 # mixed phases, 1 adversarial-title) + 90d ClickHouse history (per-target

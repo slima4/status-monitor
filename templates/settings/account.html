@@ -6,7 +6,6 @@
     <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>account</h1>
     <p class="text-sm text-muted">
       Signed in as <span class="font-medium text-body">{{ email }}</span>
-      (via {{ provider }})
     </p>
     <dl class="flex flex-wrap gap-x-8 gap-y-1 pt-1 text-sm">
       <div><dt class="flag-label inline">joined</dt> <dd class="inline text-body">{% if let Some(ts) = joined %}<time datetime="{{ ts|iso_ts }}" data-tz="exact">{{ ts|human_ts }}</time>{% else %}—{% endif %}</dd></div>
@@ -111,6 +110,75 @@
       });
     })();
   </script>
+
+  <section class="sticker-card overflow-hidden" aria-labelledby="signin-heading" data-sign-in-methods>
+    <header class="card-band">
+      <h2 id="signin-heading" class="panel-label">sign-in methods</h2>
+    </header>
+    <div class="divide-y divide-[color:var(--theme-line)]">
+      {% for id in identities %}
+      <div class="flex flex-wrap items-center justify-between gap-3 p-5"
+           data-identity data-provider="{{ id.provider }}" data-subject="{{ id.provider_user_id }}">
+        <div class="space-y-1">
+          <p class="text-sm font-medium text-body">
+            {{ id.label }}{% if let Some(u) = id.username %} <span class="font-mono text-xs text-muted">{{ u }}</span>{% endif %}
+          </p>
+          <p class="text-xs text-muted">
+            added <time datetime="{{ id.added|iso_ts }}" data-tz="exact">{{ id.added|human_ts }}</time>
+            · last used <time datetime="{{ id.last_login|iso_ts }}" data-tz="exact">{{ id.last_login|human_ts }}</time>
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+        <button type="button" class="btn-ghost px-3 py-1.5 text-sm font-medium text-body"
+                data-link-url="{{ id.add_another_url }}">
+          + another
+        </button>
+        {% if id.removable %}
+        <button type="button" data-identity-remove
+                class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm font-medium"
+                data-confirm-modal
+                data-confirm-title="Remove {{ id.label }}?"
+                data-confirm-body="{{ id.label }} will no longer sign in to this account. Your other methods keep working, and you&rsquo;ll be signed out on your other devices, since a session {{ id.label }} opened would outlive it otherwise."
+                data-confirm-label="remove"
+                data-confirm-danger>
+          remove
+        </button>
+        {% else %}
+        <span class="text-xs text-muted">needed to sign in</span>
+        {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if !linkable.is_empty() %}
+      <div class="space-y-2 p-5">
+        <div class="flex flex-wrap gap-2">
+          {% for opt in linkable %}
+          <button type="button" class="btn-ghost px-3 py-1.5 text-sm font-medium text-body"
+                  data-link-url="{{ opt.url }}">
+            add {{ opt.label }}
+          </button>
+          {% endfor %}
+        </div>
+        <p class="text-sm text-muted">
+          Anything you add here can sign in to this account on its own. We email
+          you whenever one is added.
+        </p>
+      </div>
+      {% endif %}
+      {% if let Some(p) = linked %}
+      <p class="px-5 pb-4 text-sm flash-text flash-text--ok" aria-live="polite">{{ p }} was added. We emailed you about it.</p>
+      {% else if taken %}
+      <p class="px-5 pb-4 text-sm flash-text flash-text--bad" aria-live="polite">That account already signs in to a different Uptimepage account.</p>
+      {% else if already_linked %}
+      <p class="px-5 pb-4 text-sm flash-text flash-text--muted" aria-live="polite">That one was already on your account.</p>
+      {% else if link_failed %}
+      <p class="px-5 pb-4 text-sm flash-text flash-text--bad" aria-live="polite">We could not reach that provider. Nothing was changed.</p>
+      {% endif %}
+    </div>
+  </section>
+  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/sign_in_methods.js"|asset }}"></script>
 
   <section class="sticker-card overflow-hidden" aria-labelledby="privacy-heading">
     <header class="card-band">

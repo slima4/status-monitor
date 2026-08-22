@@ -48,7 +48,7 @@ fetch differs. The callback is split into three strict phases:
    (a soft-deleted account matches, and stays deleted), auto-creates a
    signup org if this is a new sign-up, and commits. The user's default
    org (oldest active membership) is resolved after commit for the
-   session row.
+   session row. See [Sign-in methods](#sign-in-methods).
 
 After commit, the previous session cookie (if any) is destroyed for
 session-fixation defence, a fresh session row is INSERTed, the cookie is
@@ -68,6 +68,63 @@ deliberate `POST /api/v1/me/restore`. Failure modes:
 - Disabled (`enabled_methods`) or incompletely configured provider →
   404 `AUTH_METHOD_UNAVAILABLE` on both start and callback; the
   listed-but-misconfigured case logs a warning.
+
+### Sign-in methods
+
+Every linked provider account is a credential that opens the Uptimepage
+account on its own. Signing in with a provider whose attested email
+already belongs to an account links it there rather than creating a
+second account — someone who signed up with GitHub can sign in with
+Google later and land where they expect.
+
+That only holds because the email is *attested*, never merely claimed:
+GitHub's verified primary, Google's `email_verified`, Microsoft's
+`xms_edov` (see [Microsoft email trust](#microsoft-email-trust)),
+GitLab's `email_verified` from the pinned issuer. A provider that cannot
+attest gets `NO_VERIFIED_EMAIL` and links nothing.
+
+And it is never silent. A link that did not exist before sends the
+account mail naming the provider, and `/settings/account` lists every
+credential with when it was added, when it was last used, and a way to
+remove it. Removal sends its own mail. Both write a `credential_events`
+row — mail is best-effort, so the record does not depend on it. The row
+outlives the identity, carries the same salted `ip_hash` /
+`user_agent_hash` as `login_attempts`, and its `origin` says how the
+credential arrived: `signup` (the one the account was created with),
+`email_match` (a provider let itself in on an attested address and
+nobody clicked add), or `session` (the account holder added it while
+signed in) — the first question any investigation asks. It rides the
+GDPR export as `credential_changes`. Both tables are keyed on the user,
+so a hard purge after account deletion takes the credential trail with
+the account; `login_attempts` keeps its rows with a null user.
+
+The one exception is an account inside its deletion grace window: a
+provider can still resolve to the tombstone by attested address, and the
+link is recorded, but no mail is sent — a tombstoned account is signed
+out everywhere else and its address is not ours to write to. The
+`credential_events` row is what answers for it on restore.
+
+Removing a method also revokes the account's other sessions, keeping
+only the one that asked. The credential is not what an attacker holds —
+the session it opened is, and it would otherwise outlive the removal. An address that a provider attests
+wrongly therefore costs a notification the owner can act on, not a quiet
+takeover.
+
+**Adding a method the email cannot reach.** A work GitLab account under
+a different address never matches, so it is added deliberately:
+`POST /auth/{provider}/link` mints a dance carrying
+`oauth_states.link_user_id`. The callback compares that against the live
+session **before** the token exchange and bounces to `/login` on a
+mismatch — the state alone must not authorise a link, because a leaked
+one would otherwise let whoever holds it attach their own provider
+account to somebody else's. It is a POST so the CSRF guard covers it.
+
+**Removing one.** `DELETE /api/v1/me/sign-in-methods/{provider}`
+(optionally `?provider_user_id=…` when the same vendor is linked twice).
+It refuses only when it would leave the account with no way in at all —
+which, on a deployment offering magic-link sign-in, it never does, so a
+user whose only provider is compromised can drop it without first
+granting another provider a credential on the account they are securing.
 
 ### Microsoft email trust
 
@@ -252,11 +309,13 @@ with the same argon2id parameters as API tokens).
 | `GET`  | `/auth/microsoft/callback`     | none    | Handle Microsoft OAuth callback |
 | `GET`  | `/auth/gitlab/login`           | none    | Initiate GitLab OAuth |
 | `GET`  | `/auth/gitlab/callback`        | none    | Handle GitLab OAuth callback |
+| `POST` | `/auth/{provider}/link`        | session | Add that provider to the signed-in account |
 | `GET`  | `/invitations/accept`          | optional session | Emailed accept link (HTML; redeems with session, else login bounce) |
 | `GET`  | `/invitations/decline`         | none    | Emailed decline link (HTML confirm page; POST does the decline) |
 | `GET`  | `/api/v1/me`                   | session/token | Current user info |
 | `DELETE` | `/api/v1/me`                 | session | Delete account (soft, 30-day grace) |
 | `POST` | `/api/v1/me/restore`           | session for a soft-deleted account | Cancel a pending account deletion |
+| `DELETE` | `/api/v1/me/sign-in-methods/{provider}` | session | Remove a linked provider |
 | `GET`  | `/api/v1/me/sessions`          | session | List active sessions |
 | `DELETE` | `/api/v1/me/sessions/{id}`   | session | Revoke a session |
 | `GET`  | `/api/v1/me/api-tokens`        | session | List tokens (prefix only) |

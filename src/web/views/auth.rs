@@ -220,15 +220,6 @@ pub async fn deleted_page(
     }
 }
 
-/// First char upper-cased, the rest unchanged. Empty input → empty string.
-fn capitalize_first(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
-    }
-}
-
 pub mod settings {
     use askama::Template;
     use askama_web::WebTemplate;
@@ -343,13 +334,39 @@ pub mod settings {
         .into_response())
     }
 
+    pub struct IdentityRow {
+        pub provider: &'static str,
+        pub label: &'static str,
+        pub provider_user_id: String,
+        pub username: Option<String>,
+        pub added: chrono::DateTime<chrono::Utc>,
+        pub last_login: chrono::DateTime<chrono::Utc>,
+        /// False when removing it would leave nobody able to sign in.
+        pub removable: bool,
+        /// Starts a dance for a second account at this same vendor.
+        pub add_another_url: String,
+    }
+
+    /// A provider this deployment offers that the account has not linked yet.
+    pub struct LinkOption {
+        pub label: &'static str,
+        pub url: String,
+    }
+
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/account.html")]
     pub struct AccountPage {
         pub active_tab: &'static str,
         pub email: String,
-        /// Identity provider label, e.g. `GitHub`, or `—` if none on file.
-        pub provider: String,
+        pub identities: Vec<IdentityRow>,
+        pub linkable: Vec<LinkOption>,
+        pub linked: Option<&'static str>,
+        /// The provider account offered already opens somebody else's account.
+        pub taken: bool,
+        /// That provider was already on the account.
+        pub already_linked: bool,
+        /// The provider could not be reached, so nothing changed.
+        pub link_failed: bool,
         pub joined: Option<chrono::DateTime<chrono::Utc>>,
         pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
         pub theme: String,
@@ -363,24 +380,53 @@ pub mod settings {
     pub async fn account_page(
         State(state): State<AppState>,
         session: Session,
+        cookies: tower_cookies::Cookies,
     ) -> WebResult<Response> {
         let Some(user) = session.user.clone() else {
             return Ok(crate::web::auth::login_redirect("/settings/account").into_response());
         };
         let pool = state.require_db()?;
-        let (joined, provider, last_seen) = match account::account_facts(pool, user.id).await? {
-            Some(f) => (
-                Some(f.created_at),
-                provider_label(f.provider.as_deref()),
-                f.last_seen_at,
-            ),
-            None => (None, "—".to_string(), None),
+        // No data dependency between the three, so they go together.
+        let (facts, linked, prefs) = tokio::try_join!(
+            account::account_facts(pool, user.id),
+            crate::storage::oauth_identities::list_for_user(pool, user.id),
+            crate::storage::users::get_display_prefs(pool, user.id),
+        )?;
+        let (joined, last_seen) = match facts {
+            Some(f) => (Some(f.created_at), f.last_seen_at),
+            None => (None, None),
         };
-        let prefs = crate::storage::users::get_display_prefs(pool, user.id).await?;
+        // The same question the API will ask. Looser offers a button that
+        // 400s; stricter hides one from a user whose only provider is
+        // compromised.
+        let ways_in = crate::storage::oauth_identities::WaysIn::from_config(&state.cfg);
+        let identities: Vec<IdentityRow> = linked
+            .iter()
+            .filter_map(|row| {
+                let p = crate::auth::OauthProvider::from_db_str(&row.provider)?;
+                Some(IdentityRow {
+                    provider: p.as_db_str(),
+                    label: p.label(),
+                    provider_user_id: row.provider_user_id.clone(),
+                    username: row.provider_username.clone(),
+                    added: row.created_at,
+                    last_login: row.last_login_at,
+                    removable: ways_in.removable(row, &linked),
+                    add_another_url: format!("/auth/{}/link", p.as_db_str()),
+                })
+            })
+            .collect();
+        let linkable = link_options(&state, &identities);
+        let flash = take_link_flash(&cookies, &state);
         Ok(AccountPage {
             active_tab: TAB_ACCOUNT,
             email: user.email,
-            provider,
+            identities,
+            linkable,
+            linked: flash.identity_linked.map(|p| p.label()),
+            taken: flash.identity_taken,
+            already_linked: flash.identity_already_linked,
+            link_failed: flash.link_failed,
             joined,
             last_seen,
             theme: prefs.theme.as_str().to_string(),
@@ -389,13 +435,44 @@ pub mod settings {
         .into_response())
     }
 
-    fn provider_label(p: Option<&str>) -> String {
-        match p {
-            Some("github") => "GitHub".to_string(),
-            Some("gitlab") => "GitLab".to_string(),
-            Some(other) if !other.is_empty() => super::capitalize_first(other),
-            _ => "—".to_string(),
-        }
+    /// `flash::take` clears the whole cookie, so anything this page does not
+    /// render gets staged again — otherwise a `restored` banner bound for the
+    /// dashboard dies on a detour through account settings.
+    fn take_link_flash(
+        cookies: &tower_cookies::Cookies,
+        state: &AppState,
+    ) -> crate::web::flash::Flash {
+        let domain = &state.cfg.auth.session.cookie_domain;
+        let flash = crate::web::flash::take(cookies, domain);
+        let carried = crate::web::flash::Flash {
+            restored: flash.restored,
+            invite_missed: flash.invite_missed,
+            ..Default::default()
+        };
+        crate::web::flash::set(
+            cookies,
+            &carried,
+            state.cfg.auth.session.cookie_secure,
+            domain,
+        );
+        flash
+    }
+
+    /// Only providers with nothing linked yet. A second account at the same
+    /// vendor is reachable too, from that vendor's own row — filtering here
+    /// without that would make it UI-unreachable.
+    fn link_options(state: &AppState, linked: &[IdentityRow]) -> Vec<LinkOption> {
+        state
+            .cfg
+            .auth
+            .enabled_login_providers()
+            .into_iter()
+            .filter(|p| !linked.iter().any(|row| row.provider == p.as_db_str()))
+            .map(|p| LinkOption {
+                label: p.label(),
+                url: format!("/auth/{}/link", p.as_db_str()),
+            })
+            .collect()
     }
 
     pub async fn sessions_partial(
@@ -705,22 +782,110 @@ pub mod settings {
             assert!(html.contains(r#"href="mailto:support@uptimepage.dev""#));
         }
 
-        #[test]
-        fn account_page_renders_privacy_and_sessions_sections() {
-            let html = AccountPage {
+        fn account_page(identities: Vec<IdentityRow>, linkable: Vec<LinkOption>) -> AccountPage {
+            AccountPage {
                 active_tab: super::super::TAB_ACCOUNT,
                 email: "alice@example.com".into(),
-                provider: "GitHub".into(),
+                identities,
+                linkable,
+                linked: None,
+                taken: false,
+                already_linked: false,
+                link_failed: false,
                 joined: Some("2026-02-14T09:00:00Z".parse().unwrap()),
                 last_seen: Some("2026-05-16T12:00:00Z".parse().unwrap()),
                 theme: "default".into(),
                 time_format: "auto".into(),
             }
+        }
+
+        fn identity(provider: &'static str, label: &'static str, removable: bool) -> IdentityRow {
+            IdentityRow {
+                provider,
+                label,
+                provider_user_id: format!("{provider}-1"),
+                username: Some("alice".into()),
+                added: "2026-02-14T09:00:00Z".parse().unwrap(),
+                last_login: "2026-05-16T12:00:00Z".parse().unwrap(),
+                removable,
+                add_another_url: format!("/auth/{provider}/link"),
+            }
+        }
+
+        #[test]
+        fn account_page_lists_every_method_that_opens_the_account() {
+            let html = account_page(
+                vec![
+                    identity("github", "GitHub", true),
+                    identity("gitlab", "GitLab", true),
+                ],
+                vec![LinkOption {
+                    label: "Google",
+                    url: "/auth/google/link".into(),
+                }],
+            )
             .render()
             .unwrap();
+            assert!(html.contains("sign-in methods"));
+            assert!(html.contains(r#"data-provider="github""#));
+            assert!(html.contains(r#"data-provider="gitlab""#));
+            // POST-driven, so the URL rides a data attribute, not an href.
+            assert!(html.contains(r#"data-link-url="/auth/google/link""#));
+            assert!(html.contains("add Google"));
+        }
+
+        #[test]
+        fn removal_warns_about_the_sign_out_it_causes() {
+            // Removing a method revokes the account's other sessions. That is
+            // the point when the provider is compromised and a surprise when it
+            // is not, so the dialog has to say so before the click.
+            let html = account_page(vec![identity("github", "GitHub", true)], Vec::new())
+                .render()
+                .unwrap();
+            assert!(html.contains("signed out on your other devices"));
+        }
+
+        #[test]
+        fn account_page_loads_the_helper_its_script_calls() {
+            // smApiErrorMessage lives in api_form.js, which is loaded per page,
+            // not app-wide — without it the error path throws a TypeError and
+            // the real message never reaches the toast.
+            let html = account_page(vec![identity("github", "GitHub", true)], Vec::new())
+                .render()
+                .unwrap();
+            assert!(html.contains("js/ui/api_form"));
+            assert!(html.contains("js/ui/sign_in_methods"));
+        }
+
+        #[test]
+        fn account_page_offers_removal_of_a_lone_method_when_email_is_a_way_back() {
+            // The API allows it when magic link is on; a UI that hides the
+            // button would force a user whose only provider is compromised to
+            // grant a second one a credential on the account first.
+            let html = account_page(vec![identity("github", "GitHub", true)], Vec::new())
+                .render()
+                .unwrap();
+            assert!(html.contains("data-identity-remove"));
+            assert!(!html.contains("only method"));
+        }
+
+        #[test]
+        fn account_page_offers_no_removal_of_the_last_method() {
+            let html = account_page(vec![identity("github", "GitHub", false)], Vec::new())
+                .render()
+                .unwrap();
+            assert!(html.contains("needed to sign in"));
+            assert!(!html.contains("data-identity-remove"));
+        }
+
+        #[test]
+        fn account_page_renders_privacy_and_sessions_sections() {
+            let html = account_page(vec![identity("github", "GitHub", false)], Vec::new())
+                .render()
+                .unwrap();
             assert!(html.starts_with("<!doctype html>"));
             assert!(html.contains("alice@example.com"));
-            assert!(html.contains("via GitHub"));
+            assert!(html.contains("GitHub"));
             assert!(html.contains("2026-02-14 09:00 UTC"));
             // Export is a real download link to the API, not an HTMX swap.
             assert!(html.contains(r#"href="/api/v1/me/data-export""#));
@@ -731,15 +896,6 @@ pub mod settings {
             // Sessions section reuses the shared partial loader (no dup logic).
             assert!(html.contains(r#"hx-get="/web/partials/settings/sessions""#));
             assert!(html.contains("logout-all"));
-        }
-
-        #[test]
-        fn provider_label_maps_known_and_unknown() {
-            assert_eq!(provider_label(Some("github")), "GitHub");
-            assert_eq!(provider_label(Some("gitlab")), "GitLab");
-            assert_eq!(provider_label(Some("google")), "Google");
-            assert_eq!(provider_label(Some("")), "—");
-            assert_eq!(provider_label(None), "—");
         }
 
         #[test]
@@ -957,6 +1113,58 @@ mod tests {
         assert!(html.contains("continue with gitlab"));
         assert!(html.contains(r#"href="/auth/gitlab/login""#));
         assert!(!html.contains("No sign-in method is configured"));
+    }
+
+    #[test]
+    fn login_page_renders_each_provider_on_its_own() {
+        // The four button blocks are near-identical, so a copy-paste that left
+        // the wrong flag or URL behind only shows up when each renders alone.
+        const BUTTONS: [(&str, &str); 4] = [
+            ("continue with github", "/auth/github/login"),
+            ("continue with google", "/auth/google/login"),
+            ("continue with microsoft", "/auth/microsoft/login"),
+            ("continue with gitlab", "/auth/gitlab/login"),
+        ];
+        for (i, (label, url)) in BUTTONS.iter().enumerate() {
+            let html = login_page(i == 0, i == 1, i == 2, i == 3, false)
+                .render()
+                .unwrap();
+            assert!(html.contains(label), "{label} missing when enabled alone");
+            assert!(html.contains(url), "{url} missing when enabled alone");
+            for (j, (other, _)) in BUTTONS.iter().enumerate() {
+                if i != j {
+                    assert!(
+                        !html.contains(other),
+                        "{other} leaked into the {label} case"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn login_page_never_offers_the_link_dance() {
+        // Adding a method is a signed-in action from settings, and its route is
+        // POST-only. A start URL rendered as a link here would be dead on click
+        // and an invitation to confuse the two flows.
+        let html = login_page(true, true, true, true, true).render().unwrap();
+        assert!(!html.contains("/link"), "no link-dance URL belongs here");
+    }
+
+    #[test]
+    fn login_page_opens_the_email_form_only_when_it_is_the_way_in() {
+        // Email sign-in only redeems an existing account, so it stays behind a
+        // disclosure while OAuth is the path to a new one. With OAuth off it is
+        // the only way in and must render open.
+        let beside_oauth = login_page(true, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(beside_oauth.contains("<details"), "should be tucked away");
+
+        let alone = login_page(false, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(!alone.contains("<details"), "nothing left to hide behind");
     }
 
     #[test]

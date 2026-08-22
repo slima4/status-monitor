@@ -327,18 +327,12 @@ async fn undelete_in_tx(
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AccountFacts {
     pub created_at: DateTime<Utc>,
-    pub provider: Option<String>,
     pub last_seen_at: Option<DateTime<Utc>>,
 }
 
 pub async fn account_facts(pool: &PgPool, user_id: UserId) -> Result<Option<AccountFacts>> {
     Ok(sqlx::query_as::<_, AccountFacts>(
-        "SELECT u.created_at, u.last_seen_at, oi.provider \
-           FROM users u \
-           LEFT JOIN LATERAL ( \
-                SELECT provider FROM oauth_identities \
-                 WHERE user_id = u.id ORDER BY last_login_at DESC LIMIT 1 \
-           ) oi ON true \
+        "SELECT u.created_at, u.last_seen_at FROM users u \
           WHERE u.id = $1 AND u.deleted_at IS NULL",
     )
     .bind(user_id.0)

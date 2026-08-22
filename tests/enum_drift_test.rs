@@ -11,7 +11,7 @@
 
 mod common;
 
-use uptimepage::auth::OauthProvider;
+use uptimepage::auth::{CredentialAction, CredentialOrigin, OauthProvider};
 use uptimepage::domain::{
     ActorType, AppTheme, ChannelKind, IncidentEventKind, IncidentOrigin, IncidentSeverity,
     IncidentState, IncidentStatusPhase, IncidentUrgency, IncidentVisibility, NotificationReason,
@@ -128,6 +128,50 @@ async fn oauth_identities_provider_check_matches_rust_enum() {
     assert_eq!(
         db, rust,
         "oauth_identities.provider CHECK list ({db:?}) drifted from OauthProvider ({rust:?})"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn credential_events_action_check_matches_rust_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "credential_events_action_check")
+        .await
+        .expect("credential_events_action_check missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(
+        CredentialAction::ALL
+            .iter()
+            .map(|a| a.as_db_str().to_string())
+            .collect(),
+    );
+    assert_eq!(
+        db, rust,
+        "credential_events.action CHECK list ({db:?}) drifted from CredentialAction ({rust:?})"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn credential_events_origin_check_matches_rust_enum() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let def = constraint_def(&pool, "credential_events_origin_check")
+        .await
+        .expect("credential_events_origin_check missing");
+    let db = sorted(quoted_tokens(&def));
+    let rust = sorted(
+        CredentialOrigin::ALL
+            .iter()
+            .map(|o| o.as_db_str().to_string())
+            .collect(),
+    );
+    assert_eq!(
+        db, rust,
+        "credential_events.origin CHECK list ({db:?}) drifted from CredentialOrigin ({rust:?})"
     );
 }
 

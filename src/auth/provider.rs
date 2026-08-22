@@ -5,8 +5,9 @@
 //! `tests/enum_drift_test.rs`.
 
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OauthProvider {
     Github,
@@ -31,6 +32,65 @@ impl OauthProvider {
             Self::Google => "google",
             Self::Microsoft => "microsoft",
             Self::Gitlab => "gitlab",
+        }
+    }
+
+    /// Display name, cased the way each vendor writes it.
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Github => "GitHub",
+            Self::Google => "Google",
+            Self::Microsoft => "Microsoft",
+            Self::Gitlab => "GitLab",
+        }
+    }
+
+    pub fn from_db_str(s: &str) -> Option<Self> {
+        Self::ALL.iter().copied().find(|p| p.as_db_str() == s)
+    }
+}
+
+/// What happened to a credential. Closed list: the `credential_events.action`
+/// CHECK is [`CredentialAction::ALL`], tied by `tests/enum_drift_test.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialAction {
+    Linked,
+    Unlinked,
+}
+
+impl CredentialAction {
+    pub const ALL: &'static [Self] = &[Self::Linked, Self::Unlinked];
+
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Linked => "linked",
+            Self::Unlinked => "unlinked",
+        }
+    }
+}
+
+/// How a credential change came about. Closed list: the
+/// `credential_events.origin` CHECK is [`CredentialOrigin::ALL`], tied by
+/// `tests/enum_drift_test.rs`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CredentialOrigin {
+    /// The credential the account was created with.
+    Signup,
+    /// Linked on an attested address, without anyone asking for it.
+    EmailMatch,
+    Session,
+}
+
+impl CredentialOrigin {
+    pub const ALL: &'static [Self] = &[Self::Signup, Self::EmailMatch, Self::Session];
+
+    pub const fn as_db_str(self) -> &'static str {
+        match self {
+            Self::Signup => "signup",
+            Self::EmailMatch => "email_match",
+            Self::Session => "session",
         }
     }
 }

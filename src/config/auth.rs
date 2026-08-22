@@ -92,6 +92,23 @@ impl AuthConfig {
         self.method_enabled("microsoft_oauth") && self.microsoft.client.is_configured()
     }
 
+    /// Providers this deployment will actually complete a sign-in for. One
+    /// switched off or half-configured answers `/auth/{p}/login` with a 404,
+    /// so its identities are rows in the table, not ways in.
+    pub fn enabled_login_providers(&self) -> Vec<crate::auth::OauthProvider> {
+        use crate::auth::OauthProvider as P;
+        P::ALL
+            .iter()
+            .copied()
+            .filter(|p| match p {
+                P::Github => self.github_login_enabled(),
+                P::Google => self.google_login_enabled(),
+                P::Microsoft => self.microsoft_login_enabled(),
+                P::Gitlab => self.gitlab_login_enabled(),
+            })
+            .collect()
+    }
+
     pub fn gitlab_login_enabled(&self) -> bool {
         self.method_enabled("gitlab_oauth") && self.gitlab.client.is_configured()
     }

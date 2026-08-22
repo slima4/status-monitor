@@ -283,6 +283,22 @@ pub async fn destroy_all_for_user(pool: &PgPool, user: UserId) -> Result<u64> {
     Ok(res.rows_affected())
 }
 
+/// Everything except the caller's own. A removed credential is not what an
+/// attacker holds; the session it opened is, and that outlives it otherwise.
+pub async fn destroy_others_for_user(
+    pool: &PgPool,
+    user: UserId,
+    keep_id_hash: &str,
+) -> Result<u64> {
+    let res = sqlx::query("DELETE FROM sessions WHERE user_id = $1 AND id_hash <> $2")
+        .bind(user.0)
+        .bind(keep_id_hash)
+        .execute(pool)
+        .await
+        .context("session::destroy_others_for_user")?;
+    Ok(res.rows_affected())
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct SessionListing {
     /// SHA-256 hex of the cookie value. Safe to expose to the owner — the

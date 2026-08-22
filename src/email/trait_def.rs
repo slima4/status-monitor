@@ -67,6 +67,14 @@ pub enum EmailTemplate {
     AccountDeletion { scheduled_purge_at: DateTime<Utc> },
     /// So an account never comes back without its owner hearing about it.
     AccountRestored,
+    IdentityLinked {
+        provider_label: String,
+        account_url: String,
+    },
+    IdentityUnlinked {
+        provider_label: String,
+        account_url: String,
+    },
     /// Confirms an `email` notification channel's address before any alert
     /// is delivered to it. `org_name` names the org that added the address and
     /// `decline_url` lets the recipient refuse in one click.
@@ -176,6 +184,14 @@ impl EmailTemplate {
                 templates::account_deletion::render(site_name, *scheduled_purge_at)
             }
             EmailTemplate::AccountRestored => templates::account_restored::render(site_name),
+            EmailTemplate::IdentityLinked {
+                provider_label,
+                account_url,
+            } => templates::identity_linked::render(site_name, provider_label, account_url),
+            EmailTemplate::IdentityUnlinked {
+                provider_label,
+                account_url,
+            } => templates::identity_unlinked::render(site_name, provider_label, account_url),
             EmailTemplate::ChannelVerification {
                 channel_name,
                 verify_url,
@@ -292,6 +308,8 @@ impl EmailTemplate {
             EmailTemplate::Invitation { accept_url, .. } => Some(accept_url),
             EmailTemplate::MagicLink { url, .. } => Some(url),
             EmailTemplate::AccountDeletion { .. } | EmailTemplate::AccountRestored => None,
+            EmailTemplate::IdentityLinked { account_url, .. }
+            | EmailTemplate::IdentityUnlinked { account_url, .. } => Some(account_url),
             EmailTemplate::ChannelVerification { verify_url, .. } => Some(verify_url),
             EmailTemplate::ChannelFailing { channel_url, .. } => channel_url.as_deref(),
             EmailTemplate::IncidentAlert(_) => None,

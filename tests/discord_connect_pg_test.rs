@@ -100,10 +100,10 @@ async fn callback_cancel_bounces_to_form_and_burns_state() {
         &pool,
         &s,
         DISCORD_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(org.0),
-        None,
+        oauth_state::StateBinding {
+            org_id: Some(org.0),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -136,10 +136,10 @@ async fn callback_rejects_cross_provider_and_foreign_org_states() {
         &pool,
         &s,
         uptimepage::auth::provider::SLACK_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(org.0),
-        None,
+        oauth_state::StateBinding {
+            org_id: Some(org.0),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -162,10 +162,10 @@ async fn callback_rejects_cross_provider_and_foreign_org_states() {
         &pool,
         &s,
         DISCORD_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(foreign_org),
-        None,
+        oauth_state::StateBinding {
+            org_id: Some(foreign_org),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();

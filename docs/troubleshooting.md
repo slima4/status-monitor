@@ -77,6 +77,42 @@ The supplied key is not 32 bytes after base64 decode, or the string is not valid
 
 A client read the target back (where credentials are returned as `"***"`) and `PATCH`ed the full `check` body without re-supplying the real credential. Either send the real value, or omit `check` entirely from the `PATCH` body if only other fields are changing.
 
+## `uptimepage_credential_link_refused_total` is above zero
+
+A link callback arrived whose state named one account while the live session
+was another, or none. The state alone is not allowed to authorise attaching a
+credential, so the request was turned away and nothing changed. The log line
+carries both ids:
+
+```
+link callback refused: the state names an account the live session is not
+  link_user_id=… session_user_id=… provider=…
+```
+
+`reason=no_session` means the session expired while the user sat on the
+provider's consent screen — benign, and they can simply try again; that series
+is not worth alerting on. `reason=other_user` means a live session for somebody
+else completed a dance minted for this account: a link state is being replayed
+from somewhere it should not be. Correlate against `credential_events` and
+`login_attempts` for that `link_user_id` over the same window.
+
+## Someone reports a sign-in method they did not add
+
+Every add and every removal writes a `credential_events` row that outlives the
+identity itself, so the answer survives even after the credential is gone:
+
+```sql
+SELECT provider, action, origin, ip_hash, occurred_at
+  FROM credential_events WHERE user_id = $1 ORDER BY occurred_at DESC;
+```
+
+`origin = 'signup'` is the credential the account was created with.
+`origin = 'email_match'` means a provider attested an address that already had
+an account and it was linked without anyone clicking add — check whether the
+`ip_hash` matches their usual `login_attempts` rows. `origin = 'session'` means
+someone signed in as them and added it deliberately, which points at the
+session, not the provider.
+
 ## `429 Too Many Requests` on `/api/v1/*`
 
 Per-IP rate limiter is active and the bucket is empty. Read the `Retry-After` header for the wait time, or raise `api.rate_limit.{per_second, burst}`. If every client appears to share one bucket, the service is sitting behind a reverse proxy and the peer IP is the proxy — disable the in-app limiter (`api.rate_limit.enabled = false`) and let the proxy enforce per-client limits instead.

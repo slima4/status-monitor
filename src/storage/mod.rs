@@ -16,6 +16,7 @@ pub mod maintenance;
 pub mod memory;
 pub mod monitor_shares;
 pub mod notification_channels;
+pub mod oauth_identities;
 pub mod on_call;
 pub mod operator;
 pub mod org_ttl;

@@ -23,8 +23,11 @@ use crate::auth::{
     url::safe_redirect_target,
 };
 use crate::config::OauthClientConfig;
+use crate::domain::UserId;
 use crate::error::{AppError, Result};
+use crate::observability::metrics::names;
 use crate::web::CurrentUser;
+use crate::web::auth::Session;
 
 #[derive(Debug, Deserialize)]
 pub struct LoginQuery {
@@ -172,10 +175,11 @@ async fn start_login(
         pool,
         &s,
         provider.as_db_str(),
-        redirect_after,
-        invitation_id,
-        None,
-        None,
+        oauth_state::StateBinding {
+            redirect_after,
+            invitation_id,
+            ..Default::default()
+        },
     )
     .await?;
     let url = match provider {
@@ -236,6 +240,225 @@ pub async fn gitlab_callback(
     finish_login(state, q, ip, headers, cookies, OauthProvider::Gitlab).await
 }
 
+pub const ACCOUNT_PATH: &str = "/settings/account";
+
+#[derive(Debug, Clone, Copy)]
+pub enum CredentialChange {
+    Linked,
+    Unlinked,
+}
+
+/// What makes a provider linking itself in on an email match something the
+/// owner can act on, and the only signal a removal happened at all.
+/// Best-effort: `oauth_identities::record_event` keeps the durable trail.
+pub fn notify_credential_change(
+    state: &AppState,
+    email: &str,
+    provider: OauthProvider,
+    change: CredentialChange,
+) {
+    let account_url = format!(
+        "{}{ACCOUNT_PATH}",
+        state.cfg.auth.public_base_url.trim_end_matches('/')
+    );
+    let provider_label = provider.label().to_string();
+    let template = match change {
+        CredentialChange::Linked => crate::email::EmailTemplate::IdentityLinked {
+            provider_label,
+            account_url,
+        },
+        CredentialChange::Unlinked => crate::email::EmailTemplate::IdentityUnlinked {
+            provider_label,
+            account_url,
+        },
+    };
+    let outgoing = crate::email::TransactionalEmail {
+        from: crate::email::EmailAddress::new(
+            state.cfg.email.from_address.clone(),
+            state.cfg.email.from_name.clone(),
+        ),
+        to: crate::email::EmailAddress::new(email.to_string(), email.to_string()),
+        template,
+    };
+    let sender = state.email_sender.clone();
+    tokio::spawn(async move {
+        if let Err(err) = sender.send(outgoing).await {
+            tracing::warn!(error = %err, ?change, "sign-in-method email send failed");
+        }
+    });
+}
+
+/// Mints a dance bound to the caller, so the callback attaches the identity to
+/// them rather than resolving a user from the provider's email — the only way
+/// to add a provider whose address differs from the account's.
+async fn start_link(
+    State(state): State<AppState>,
+    session: Session,
+    provider: OauthProvider,
+) -> Result<axum::response::Response> {
+    let Some(user) = session.user_id() else {
+        return Err(AppError::Unauthorized);
+    };
+    let parts = provider_parts(&state, provider);
+    if !parts.enabled {
+        return Err(unavailable(&state, provider));
+    }
+    let pool = state.require_db()?;
+    let s = oauth_state::generate_state();
+    oauth_state::insert(
+        pool,
+        &s,
+        provider.as_db_str(),
+        oauth_state::StateBinding {
+            link_user_id: Some(user.0),
+            ..Default::default()
+        },
+    )
+    .await?;
+    let cfg = parts.cfg;
+    let url = match provider {
+        OauthProvider::Github => github::authorize_url(cfg, &s),
+        OauthProvider::Google => google::authorize_url(cfg, &s),
+        OauthProvider::Microsoft => microsoft::authorize_url(&state.cfg.auth.microsoft, &s),
+        OauthProvider::Gitlab => gitlab::authorize_url(&state.cfg.auth.gitlab, &s),
+    };
+    // POST so the CSRF guard covers it, which means the header rides a fetch,
+    // which a 302 would not survive. The page navigates itself.
+    Ok(axum::Json(serde_json::json!({ "url": url })).into_response())
+}
+
+pub async fn github_link(
+    state: State<AppState>,
+    session: Session,
+) -> Result<axum::response::Response> {
+    start_link(state, session, OauthProvider::Github).await
+}
+
+pub async fn google_link(
+    state: State<AppState>,
+    session: Session,
+) -> Result<axum::response::Response> {
+    start_link(state, session, OauthProvider::Google).await
+}
+
+pub async fn microsoft_link(
+    state: State<AppState>,
+    session: Session,
+) -> Result<axum::response::Response> {
+    start_link(state, session, OauthProvider::Microsoft).await
+}
+
+pub async fn gitlab_link(
+    state: State<AppState>,
+    session: Session,
+) -> Result<axum::response::Response> {
+    start_link(state, session, OauthProvider::Gitlab).await
+}
+
+/// Reached only once the live session has been matched against the state's
+/// `link_user_id`. Mints no session: the caller already had one.
+async fn finish_link(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    provider: OauthProvider,
+    identity: &crate::auth::oauth_login::RemoteIdentity,
+    link_user: UserId,
+    cookies: &Cookies,
+    from: crate::storage::oauth_identities::RequestOrigin<'_>,
+) -> Result<axum::response::Response> {
+    let flash = match oauth_login::link_identity_to_user(pool, provider, identity, link_user).await
+    {
+        Ok(oauth_login::LinkOutcome::Linked) => {
+            crate::storage::oauth_identities::record_event(
+                pool,
+                link_user,
+                crate::storage::oauth_identities::CredentialEvent {
+                    provider,
+                    provider_user_id: &identity.provider_user_id,
+                    action: crate::auth::CredentialAction::Linked,
+                    origin: crate::auth::CredentialOrigin::Session,
+                    ip_hash: from.ip_hash,
+                    user_agent_hash: from.user_agent_hash,
+                },
+            )
+            .await;
+            if let Some(email) = account_email(pool, link_user).await {
+                notify_credential_change(state, &email, provider, CredentialChange::Linked);
+            }
+            crate::web::flash::Flash {
+                identity_linked: Some(provider),
+                ..Default::default()
+            }
+        }
+        // Not an empty flash: `set` skips those, leaving a stale banner from
+        // another page to answer for this round trip.
+        Ok(oauth_login::LinkOutcome::AlreadyLinked) => crate::web::flash::Flash {
+            identity_already_linked: true,
+            ..Default::default()
+        },
+        Err(AppError::BadRequest { code, .. }) if code == oauth_login::IDENTITY_TAKEN => {
+            tracing::warn!(
+                provider = provider.as_db_str(),
+                user_id = %link_user.0,
+                "link refused: that provider account already opens a different account"
+            );
+            metrics::counter!(names::CREDENTIAL_LINK_REFUSED, "reason" => "identity_taken")
+                .increment(1);
+            crate::web::flash::Flash {
+                identity_taken: true,
+                ..Default::default()
+            }
+        }
+        Err(e) => return Err(e),
+    };
+    crate::web::flash::set(
+        cookies,
+        &flash,
+        state.cfg.auth.session.cookie_secure,
+        &state.cfg.auth.session.cookie_domain,
+    );
+    Ok(Redirect::to(ACCOUNT_PATH).into_response())
+}
+
+/// Resolved here rather than by the extractor, so an ordinary sign-in does not
+/// pay for a lookup on a row [`finish_login`] destroys a moment later.
+async fn live_session_user(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    cookies: &Cookies,
+) -> Option<UserId> {
+    let raw = cookies
+        .get(state.cfg.auth.session.cookie_name.as_str())
+        .map(|c| c.value().to_string())
+        .filter(|v| !v.is_empty())?;
+    let user = match session_store::lookup(pool, &state.cfg.auth.session, &raw).await {
+        Ok(session_store::LookupOutcome::Active(row)) => row.user_id,
+        _ => return None,
+    };
+    // Filters tombstones, rather than leaving it to `request_deletion` having
+    // dropped their sessions.
+    account_email(pool, user).await.map(|_| user)
+}
+
+/// Tombstoned accounts excluded: signed out everywhere else, and their address
+/// is not ours to write to.
+async fn account_email(pool: &sqlx::PgPool, user: UserId) -> Option<String> {
+    match sqlx::query_scalar::<_, String>(
+        "SELECT email::text FROM users WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(user.0)
+    .fetch_optional(pool)
+    .await
+    {
+        Ok(found) => found,
+        // The mail is the safety story here, so losing it must leave a line.
+        Err(e) => {
+            tracing::warn!(error = %e, user_id = %user.0, "account address lookup failed");
+            None
+        }
+    }
+}
+
 async fn finish_login(
     State(state): State<AppState>,
     Query(q): Query<CallbackQuery>,
@@ -276,6 +499,12 @@ async fn finish_login(
                 "invalid_state",
             )
             .await;
+            // Routine — back button, stale tab, dance past its TTL. Logged so
+            // a "sign-in does nothing" report has something to match against.
+            tracing::debug!(
+                provider = provider.as_db_str(),
+                "oauth callback: state unknown, expired, or minted for another dance"
+            );
             return Err(AppError::bad_request(
                 "INVALID_STATE",
                 "OAuth state is invalid or has expired",
@@ -283,8 +512,42 @@ async fn finish_login(
         }
     };
 
-    // Denied consent / provider error — state already burnt, back to /login.
+    // The state alone must not authorise a link: leaked, it would let whoever
+    // holds it attach their own provider account to someone else's. Decided
+    // before the token exchange, so a state authorising nobody costs no call.
+    let link_user = match consumed.link_user_id {
+        Some(id) => {
+            let id = UserId(id);
+            let live = live_session_user(&state, pool, &cookies).await;
+            if live != Some(id) {
+                // An expired session is routine; somebody else's is not. One
+                // counter holding both cannot be alerted on.
+                let reason = if live.is_none() {
+                    "no_session"
+                } else {
+                    "other_user"
+                };
+                tracing::warn!(
+                    provider = provider.as_db_str(),
+                    link_user_id = %id.0,
+                    session_user_id = ?live.map(|u| u.0),
+                    reason,
+                    "link callback refused: the state names an account the live session is not"
+                );
+                metrics::counter!(names::CREDENTIAL_LINK_REFUSED, "reason" => reason).increment(1);
+                return Ok(crate::web::auth::login_redirect(ACCOUNT_PATH).into_response());
+            }
+            Some(id)
+        }
+        None => None,
+    };
+
+    // Denied consent / provider error — state already burnt. A link dance was
+    // never a sign-in attempt, so it writes no login-failure row.
     let Some(code) = q.code.as_deref().filter(|c| !c.is_empty()) else {
+        if link_user.is_some() {
+            return Ok(Redirect::to(ACCOUNT_PATH).into_response());
+        }
         let reason = if q.error.is_some() {
             "oauth_denied"
         } else {
@@ -315,7 +578,25 @@ async fn finish_login(
     let identity = match fetched {
         Ok(id) => id,
         Err(err) => {
-            tracing::warn!(error = %err, provider = provider.as_db_str(), "oauth callback: phase B failed");
+            tracing::warn!(
+                error = %err,
+                provider = provider.as_db_str(),
+                purpose = if link_user.is_some() { "link" } else { "login" },
+                "oauth callback: phase B failed"
+            );
+            // As above: a link dance belongs back on the settings page.
+            if link_user.is_some() {
+                crate::web::flash::set(
+                    &cookies,
+                    &crate::web::flash::Flash {
+                        link_failed: true,
+                        ..Default::default()
+                    },
+                    state.cfg.auth.session.cookie_secure,
+                    &state.cfg.auth.session.cookie_domain,
+                );
+                return Ok(Redirect::to(ACCOUNT_PATH).into_response());
+            }
             login_audit::record_failure_anon(
                 pool,
                 method,
@@ -329,6 +610,22 @@ async fn finish_login(
             )));
         }
     };
+
+    if let Some(link_user) = link_user {
+        return finish_link(
+            &state,
+            pool,
+            provider,
+            &identity,
+            link_user,
+            &cookies,
+            crate::storage::oauth_identities::RequestOrigin {
+                ip_hash: ip_hash.as_deref(),
+                user_agent_hash: ua_hash.as_deref(),
+            },
+        )
+        .await;
+    }
 
     // Phase C: materialise user + identity, auto-create signup org for new
     // users, and resolve their default-org id for the session row. Fresh
@@ -353,6 +650,23 @@ async fn finish_login(
             .await;
             return Ok(Redirect::to("/login").into_response());
         }
+        // A double-clicked sign-in produces this. Trying again works, so send
+        // them somewhere they can, not to an internal-error page.
+        Err(AppError::BadRequest { code, .. }) if code == oauth_login::IDENTITY_RACED => {
+            tracing::info!(
+                provider = provider.as_db_str(),
+                "oauth callback: another dance claimed this identity first"
+            );
+            login_audit::record_failure_anon(
+                pool,
+                method,
+                ip_hash.as_deref(),
+                ua_hash.as_deref(),
+                "identity_raced",
+            )
+            .await;
+            return Ok(Redirect::to("/login").into_response());
+        }
         Err(e) => {
             tracing::warn!(error = %e, provider = provider.as_db_str(), "oauth callback: phase C failed");
             return Err(e);
@@ -370,6 +684,45 @@ async fn finish_login(
         && let Some(email) = identity.verified_email.as_deref()
     {
         seed_owner_email_channel(&state, org, resolved.user_id, email).await;
+    }
+
+    // Nobody asked for this in so many words, so the account is told.
+    if resolved.is_new_user {
+        crate::storage::oauth_identities::record_event(
+            pool,
+            resolved.user_id,
+            crate::storage::oauth_identities::CredentialEvent {
+                provider,
+                provider_user_id: &identity.provider_user_id,
+                action: crate::auth::CredentialAction::Linked,
+                origin: crate::auth::CredentialOrigin::Signup,
+                ip_hash: ip_hash.as_deref(),
+                user_agent_hash: ua_hash.as_deref(),
+            },
+        )
+        .await;
+    }
+
+    if resolved.newly_linked {
+        crate::storage::oauth_identities::record_event(
+            pool,
+            resolved.user_id,
+            crate::storage::oauth_identities::CredentialEvent {
+                provider,
+                provider_user_id: &identity.provider_user_id,
+                action: crate::auth::CredentialAction::Linked,
+                origin: crate::auth::CredentialOrigin::EmailMatch,
+                ip_hash: ip_hash.as_deref(),
+                user_agent_hash: ua_hash.as_deref(),
+            },
+        )
+        .await;
+        // `account_email` filters tombstones: an account inside its deletion
+        // grace window is signed out everywhere else, and its address is not
+        // ours to write to.
+        if let Some(email) = account_email(pool, resolved.user_id).await {
+            notify_credential_change(&state, &email, provider, CredentialChange::Linked);
+        }
     }
 
     // The dance carried an invitation — redeem it now, server-side; the
@@ -420,6 +773,18 @@ async fn finish_login(
         tracing::warn!(error = %err, "login_audit write failed (non-fatal)");
     }
 
+    // The one line that says a sign-in happened. `login_attempts` holds the
+    // durable record, but following a support report through the log stream
+    // otherwise means querying the database to find out anything happened at
+    // all. Ids only — the address belongs in neither logs nor metrics.
+    tracing::info!(
+        user_id = %resolved.user_id.0,
+        provider = provider.as_db_str(),
+        new_user = resolved.is_new_user,
+        org_id = ?active_org.map(|o| o.0),
+        "sign-in complete"
+    );
+
     crate::analytics::track_login(
         &state,
         method,
@@ -445,9 +810,10 @@ async fn finish_login(
     let invite_missed = joined.is_none() && consumed.invitation_id.is_some();
     crate::web::flash::set(
         &cookies,
-        crate::web::flash::Flash {
+        &crate::web::flash::Flash {
             restored: false,
             invite_missed,
+            ..Default::default()
         },
         state.cfg.auth.session.cookie_secure,
         &state.cfg.auth.session.cookie_domain,

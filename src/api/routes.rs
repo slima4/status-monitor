@@ -359,6 +359,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         // soft-deleted, which every other extractor reads as signed out.
         .route("/me/restore", post(handlers::account::restore_account))
         .route("/me/data-export", get(handlers::account::data_export))
+        .route(
+            "/me/sign-in-methods/{provider}",
+            axum::routing::delete(handlers::identities::unlink),
+        )
         .route("/me/usage", get(handlers::usage::get_me_usage))
         .route(
             "/me/theme",
@@ -448,6 +452,12 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/auth/gitlab/callback",
             get(handlers::auth::gitlab_callback),
         )
+        // POST, so the CSRF guard covers a request that mints state and starts
+        // a credential-adding dance; a GET here is forgeable from any page.
+        .route("/auth/github/link", post(handlers::auth::github_link))
+        .route("/auth/google/link", post(handlers::auth::google_link))
+        .route("/auth/microsoft/link", post(handlers::auth::microsoft_link))
+        .route("/auth/gitlab/link", post(handlers::auth::gitlab_link))
         .route("/auth/logout", post(handlers::auth::logout))
         .route("/auth/logout-all", post(handlers::auth::logout_all));
 

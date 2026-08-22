@@ -115,6 +115,25 @@ const SIGNUP_SLUG_RETRIES: u32 = 5;
 /// may be created. The callback routes it back to the login page.
 pub const NO_VERIFIED_EMAIL: &str = "NO_VERIFIED_EMAIL";
 
+/// A link dance whose provider account is already somebody else's credential.
+pub const IDENTITY_TAKEN: &str = "IDENTITY_TAKEN";
+
+/// A concurrent dance claimed this provider account first — a double-clicked
+/// sign-in. Routine, so the callback bounces to `/login`.
+pub const IDENTITY_RACED: &str = "IDENTITY_RACED";
+
+/// Bounds the insert/read loop against an identity being unlinked between the
+/// two.
+const LINK_INSERT_ATTEMPTS: u32 = 3;
+
+/// `AlreadyLinked` covers the double-submit and the user who forgot they had
+/// linked it — both benign.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkOutcome {
+    Linked,
+    AlreadyLinked,
+}
+
 /// Aggregated upstream result of Phase B. `verified_email` must be None
 /// unless the provider attested ownership — the email-link guard against
 /// account takeover lives in that field, not in Phase C.
@@ -140,6 +159,9 @@ pub struct ResolvedIdentity {
     /// `deleted_at` when this sign-in landed on a soft-deleted account. The
     /// sign-in does not undo it; the caller routes to the restore choice.
     pub pending_deletion: Option<DateTime<Utc>>,
+    /// This sign-in gave an existing account a credential it did not have
+    /// before, so the caller mails it — an email match is invisible otherwise.
+    pub newly_linked: bool,
 }
 
 /// Capped-body HTTP fetch shared by the provider modules' Phase B calls.
@@ -211,11 +233,10 @@ pub async fn upsert_identity_and_signup_org(
             signup_org_id,
             is_new_user: false,
             pending_deletion: deleted_at,
+            newly_linked: false,
         });
     }
 
-    // 2. Email-based recovery. CITEXT comparison is the load-bearing reason
-    //    invitations + users share the same column type.
     let Some(email) = identity.verified_email.as_ref() else {
         return Err(AppError::bad_request(
             NO_VERIFIED_EMAIL,
@@ -223,14 +244,21 @@ pub async fn upsert_identity_and_signup_org(
         ));
     };
 
-    // ::citext cast is load-bearing — sqlx binds &str as TEXT, which would
-    // select the case-sensitive operator. Tombstones included: a verified
-    // email proves ownership, so a soft-deleted account reached via a new
-    // provider resolves to that row instead of spawning a duplicate (email
-    // unique index is partial). Active row first, then newest tombstone.
+    // 2. An attested address that already has an account: the provider becomes
+    //    a credential for it, so someone who signed up with GitHub can use
+    //    Google later. Safe to do without asking only because it is not
+    //    silent — `newly_linked` mails the account, and /settings/account
+    //    lists every credential with a way to remove one.
+    //
+    //    ::citext cast is load-bearing — sqlx binds &str as TEXT, which would
+    //    select the case-sensitive operator. Tombstones included: a verified
+    //    email proves ownership, so a soft-deleted account reached via a new
+    //    provider resolves to that row instead of spawning a duplicate (the
+    //    email unique index is partial). Active row first, then newest
+    //    tombstone.
     let by_email: Option<(Uuid, Option<DateTime<Utc>>)> = sqlx::query_as(
         "SELECT id, deleted_at FROM users WHERE email = $1::citext \
-         ORDER BY (deleted_at IS NULL) DESC, created_at DESC LIMIT 1",
+          ORDER BY (deleted_at IS NULL) DESC, created_at DESC LIMIT 1",
     )
     .bind(email)
     .fetch_optional(&mut *tx)
@@ -238,26 +266,73 @@ pub async fn upsert_identity_and_signup_org(
     .context("phase C: user-by-email")?;
 
     if let Some((user_id, deleted_at)) = by_email {
+        // Same race, and the same answer, as [`link_identity_to_user`]: a
+        // conflict means a concurrent dance for this provider account got in
+        // first — usually a double-clicked sign-in. Swallowing it outright
+        // would sign this one in as the email-matched user while the row points
+        // elsewhere, so the owner is read back; a row that has gone by then was
+        // unlinked in between and the insert is worth another go.
+        let mut newly_linked = false;
+        let mut settled = false;
+        for _ in 0..LINK_INSERT_ATTEMPTS {
+            let claimed: Option<(Uuid,)> = sqlx::query_as(
+                "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
+                 VALUES ($1, $2, $3, $4) \
+                 ON CONFLICT (provider, provider_user_id) DO NOTHING \
+                 RETURNING user_id",
+            )
+            .bind(user_id)
+            .bind(provider.as_db_str())
+            .bind(&identity.provider_user_id)
+            .bind(&identity.provider_username)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("phase C: link identity")?;
+            if claimed.is_some() {
+                newly_linked = true;
+                settled = true;
+                break;
+            }
+
+            let owner: Option<(Uuid,)> = sqlx::query_as(
+                "SELECT user_id FROM oauth_identities \
+                  WHERE provider = $1 AND provider_user_id = $2",
+            )
+            .bind(provider.as_db_str())
+            .bind(&identity.provider_user_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .context("phase C: link owner")?;
+            match owner.map(|(o,)| o) {
+                Some(o) if o == user_id => {
+                    settled = true;
+                    break;
+                }
+                Some(_) => {
+                    return Err(AppError::bad_request(
+                        IDENTITY_RACED,
+                        format!("{provider:?} identity was claimed by another account"),
+                    ));
+                }
+                None => continue,
+            }
+        }
+        if !settled {
+            return Err(AppError::bad_request(
+                IDENTITY_RACED,
+                format!("identity claimed and released {LINK_INSERT_ATTEMPTS} times running"),
+            ));
+        }
+
         sqlx::query(
-            "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
-             VALUES ($1, $2, $3, $4) \
-             ON CONFLICT (provider, provider_user_id) DO NOTHING",
+            "UPDATE users SET email_verified_at = now() \
+              WHERE id = $1 AND email_verified_at IS NULL",
         )
         .bind(user_id)
-        .bind(provider.as_db_str())
-        .bind(&identity.provider_user_id)
-        .bind(&identity.provider_username)
         .execute(&mut *tx)
         .await
-        .context("phase C: link identity")?;
-        if sqlx::query("UPDATE users SET email_verified_at = now() WHERE id = $1 AND email_verified_at IS NULL")
-            .bind(user_id)
-            .execute(&mut *tx)
-            .await
-            .context("phase C: backfill verified_at")?
-            .rows_affected() == 0 {
-            // Already verified — no-op.
-        }
+        .context("phase C: backfill verified_at")?;
+
         tx.commit().await.context("phase C: commit (linked)")?;
         let signup_org_id = users_store::resolve_signup_org(pool, UserId(user_id)).await?;
         return Ok(ResolvedIdentity {
@@ -265,6 +340,7 @@ pub async fn upsert_identity_and_signup_org(
             signup_org_id,
             is_new_user: false,
             pending_deletion: deleted_at,
+            newly_linked,
         });
     }
 
@@ -310,7 +386,66 @@ pub async fn upsert_identity_and_signup_org(
         signup_org_id: Some(org_id),
         is_new_user: true,
         pending_deletion: None,
+        newly_linked: false,
     })
+}
+
+/// Attaches a provider identity to the user whose session started the dance.
+/// Nothing is resolved from the provider's email here — the session already
+/// proved who this is, which is the whole reason a link is safe and an
+/// email match is not.
+pub async fn link_identity_to_user(
+    pool: &PgPool,
+    provider: OauthProvider,
+    identity: &RemoteIdentity,
+    user_id: UserId,
+) -> Result<LinkOutcome> {
+    // One statement so two concurrent callbacks can't both believe they won;
+    // the loser reads the owner back and finds out whose it is. A row that has
+    // gone by then was unlinked in between, so the insert is worth retrying —
+    // reporting it as somebody else's would be a lie about a free identity.
+    for _ in 0..LINK_INSERT_ATTEMPTS {
+        let inserted: Option<(Uuid,)> = sqlx::query_as(
+            "INSERT INTO oauth_identities (user_id, provider, provider_user_id, provider_username) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (provider, provider_user_id) DO NOTHING \
+             RETURNING user_id",
+        )
+        .bind(user_id.0)
+        .bind(provider.as_db_str())
+        .bind(&identity.provider_user_id)
+        .bind(&identity.provider_username)
+        .fetch_optional(pool)
+        .await
+        .context("link: insert identity")?;
+
+        if inserted.is_some() {
+            return Ok(LinkOutcome::Linked);
+        }
+
+        let owner: Option<(Uuid,)> = sqlx::query_as(
+            "SELECT user_id FROM oauth_identities WHERE provider = $1 AND provider_user_id = $2",
+        )
+        .bind(provider.as_db_str())
+        .bind(&identity.provider_user_id)
+        .fetch_optional(pool)
+        .await
+        .context("link: owner lookup")?;
+
+        match owner {
+            Some((owner,)) if owner == user_id.0 => return Ok(LinkOutcome::AlreadyLinked),
+            Some(_) => {
+                return Err(AppError::bad_request(
+                    IDENTITY_TAKEN,
+                    "that provider account already signs in to a different account",
+                ));
+            }
+            None => continue,
+        }
+    }
+    Err(AppError::Other(anyhow::anyhow!(
+        "link: identity claimed and released {LINK_INSERT_ATTEMPTS} times running"
+    )))
 }
 
 /// Signup-org creation inside the new-user tx. Delegates to

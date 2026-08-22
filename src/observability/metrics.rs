@@ -293,6 +293,14 @@ fn register_descriptions() {
         "Self-service account deletions requested. Churn signal, not a health signal: every increment is a customer leaving inside a grace window that is still reversible, and nothing else in the stack observes it"
     );
     describe_counter!(
+        "uptimepage_credential_changes_total",
+        "Sign-in methods added to or removed from an account, labelled by `action` (linked | unlinked), `origin` (signup | email_match | session) and `provider`. `signup` is the credential the account was created with and dominates the `linked` series, so alert on `origin=\"email_match\"` specifically rather than on all links. `email_match` means a provider let itself in on an address it attested and nobody clicked add — a rise there without matching sign-ups is what a provider attesting addresses it does not own looks like"
+    );
+    describe_counter!(
+        "uptimepage_credential_link_refused_total",
+        "Link callbacks whose state named one account while the live session was another, labelled by `reason`. `no_session` is routine — the session lapsed while the user was on the provider's consent screen. `other_user` should sit at zero: the state alone is not allowed to authorise attaching a credential, so an increment there is a leaked state being replayed or a bug in the guard. `identity_taken` means a completed dance offered a provider account that already opens somebody else's account — a handful is someone confusing two logins, a rate of them is someone hunting"
+    );
+    describe_counter!(
         "uptimepage_ai_crawler_requests_total",
         "Assistant crawler fetches of the marketing surface, labelled by `bot`, `section`, and `kind`. `kind=user-fetch` is an agent dispatched because a person asked a question seconds earlier, so it tracks live citation; `kind=crawler` is corpus building for answers weeks away. The browser tracker sees assistant referrals but never these fetches, because crawlers run no JavaScript"
     );
@@ -364,6 +372,15 @@ pub mod names {
     pub const CLICKHOUSE_MAX_PART_COUNT: &str =
         "uptimepage_clickhouse_max_part_count_for_partition";
     pub const ACCOUNT_DELETIONS_REQUESTED: &str = "uptimepage_account_deletions_requested_total";
+    /// Labelled `action` (linked/unlinked) + `origin` (signup/email_match/session).
+    /// A rise in `linked`+`email_match` without matching sign-ups is what a
+    /// provider attesting addresses it should not looks like.
+    pub const CREDENTIAL_CHANGES: &str = "uptimepage_credential_changes_total";
+    /// A link callback whose state named a user the live session was not,
+    /// labelled `reason`. `no_session` is routine (the session lapsed on the
+    /// provider's consent screen); `other_user` and `identity_taken` should sit
+    /// at zero.
+    pub const CREDENTIAL_LINK_REFUSED: &str = "uptimepage_credential_link_refused_total";
     pub const ORGS_EMPTIED: &str = "uptimepage_orgs_emptied_total";
     pub const HTTP_REQUESTS_TOTAL: &str = "uptimepage_http_requests_total";
     pub const HTTP_REQUEST_DURATION_MS: &str = "uptimepage_http_request_duration_ms";

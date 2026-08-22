@@ -30,6 +30,7 @@ Uptime over a window that has no data at all is reported as unknown rather than 
 | Sessions | 90 days maximum |
 | API tokens | Until you revoke them |
 | Login attempts | 180 days |
+| Sign-in method changes | 180 days |
 | Quota and rate-limit events | 90 days |
 | Audit log | 2 years |
 | Server access and error logs | 30 days |

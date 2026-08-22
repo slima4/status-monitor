@@ -30,6 +30,20 @@ pub struct ConsumedState {
     /// Delegate link a connect dance was started from; possession of that
     /// link replaces the session-membership check on the callback.
     pub link_code_id: Option<Uuid>,
+    /// Set only by a link dance: the signed-in user the resulting identity
+    /// attaches to. `None` is a login dance, which resolves its own user.
+    pub link_user_id: Option<Uuid>,
+}
+
+/// What a dance carries beyond its provider. Every field is a purpose marker,
+/// so a dance that sets none is a plain sign-in.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StateBinding<'a> {
+    pub redirect_after: Option<&'a str>,
+    pub invitation_id: Option<Uuid>,
+    pub org_id: Option<Uuid>,
+    pub link_code_id: Option<Uuid>,
+    pub link_user_id: Option<Uuid>,
 }
 
 /// 32 random bytes, base64url-no-pad. Caller stores via [`insert`].
@@ -41,28 +55,26 @@ pub fn generate_state() -> String {
     base64url_no_pad(&bytes)
 }
 
-#[allow(clippy::too_many_arguments)]
 pub async fn insert(
     pool: &PgPool,
     state: &str,
     provider: &str,
-    redirect_after: Option<&str>,
-    invitation_id: Option<Uuid>,
-    org_id: Option<Uuid>,
-    link_code_id: Option<Uuid>,
+    binding: StateBinding<'_>,
 ) -> Result<DateTime<Utc>> {
     let expires_at = Utc::now() + Duration::minutes(STATE_EXPIRY_MINUTES);
     sqlx::query(
         "INSERT INTO oauth_states \
-             (state_hash, provider, redirect_after, invitation_id, org_id, link_code_id, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             (state_hash, provider, redirect_after, invitation_id, org_id, link_code_id, \
+              link_user_id, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(hash_state(state))
     .bind(provider)
-    .bind(redirect_after)
-    .bind(invitation_id)
-    .bind(org_id)
-    .bind(link_code_id)
+    .bind(binding.redirect_after)
+    .bind(binding.invitation_id)
+    .bind(binding.org_id)
+    .bind(binding.link_code_id)
+    .bind(binding.link_user_id)
     .bind(expires_at)
     .execute(pool)
     .await
@@ -77,7 +89,7 @@ pub async fn consume(pool: &PgPool, state: &str) -> Result<Option<ConsumedState>
     sqlx::query_as(
         "DELETE FROM oauth_states \
          WHERE state_hash = $1 AND expires_at > now() \
-         RETURNING provider, redirect_after, invitation_id, org_id, link_code_id",
+         RETURNING provider, redirect_after, invitation_id, org_id, link_code_id, link_user_id",
     )
     .bind(hash_state(state))
     .fetch_optional(pool)

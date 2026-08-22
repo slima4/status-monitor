@@ -5,6 +5,7 @@ pub mod auth;
 pub mod dashboard;
 pub mod escalation_policies;
 pub mod health;
+pub mod identities;
 pub mod incidents;
 pub mod invitations;
 pub mod magic_link;

@@ -8,7 +8,7 @@
 //! Each tick, in order:
 //!  1. The soft-deleted org cascade + ClickHouse drain + recovery-aware user
 //!     hard-purge — reused from [`purge_deleted`], not reimplemented.
-//!  2. Row deletes for `login_attempts`, `quota_events`, `org_audit_log` and
+//!  2. Row deletes for `login_attempts`, `credential_events`, `quota_events`, `org_audit_log` and
 //!     `mcp_audit` past their configured windows. Every window is bound from
 //!     `[retention]` config — never a literal — so config, code and the
 //!     Privacy Policy cannot drift apart.
@@ -47,6 +47,7 @@ pub struct RetentionReport {
     pub purge: PurgeStats,
     pub purge_queue: QueueDepth,
     pub login_attempts: u64,
+    pub credential_events: u64,
     pub quota_events: u64,
     pub audit_log: u64,
     pub mcp_audit: u64,
@@ -111,6 +112,8 @@ fn emit_metrics(r: &RetentionReport) {
     metrics::counter!("purge_deleted_total", "kind" => "user").increment(u64::from(r.purge.users));
     metrics::counter!("retention_purged_rows_total", "table" => "login_attempts")
         .increment(r.login_attempts);
+    metrics::counter!("retention_purged_rows_total", "table" => "credential_events")
+        .increment(r.credential_events);
     metrics::counter!("retention_purged_rows_total", "table" => "quota_events")
         .increment(r.quota_events);
     metrics::counter!("retention_purged_rows_total", "table" => "org_audit_log")
@@ -149,6 +152,17 @@ pub async fn purge_old_data(
          WHERE occurred_at < now() - ($1::int * INTERVAL '1 day')",
         retention.login_attempts_days,
         "retention: login_attempts",
+    )
+    .await?;
+    // Same window as `login_attempts`; a second knob would only let the two
+    // halves of one security history drift apart.
+    let credential_events = trim_partitioned(
+        pool,
+        "credential_events",
+        "DELETE FROM credential_events \
+         WHERE occurred_at < now() - ($1::int * INTERVAL '1 day')",
+        retention.login_attempts_days,
+        "retention: credential_events",
     )
     .await?;
     let quota_events = trim_partitioned(
@@ -202,6 +216,7 @@ pub async fn purge_old_data(
         purge,
         purge_queue,
         login_attempts,
+        credential_events,
         quota_events,
         audit_log,
         mcp_audit,

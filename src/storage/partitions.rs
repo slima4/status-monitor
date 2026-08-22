@@ -5,7 +5,12 @@ use sqlx::PgPool;
 
 use crate::error::Result;
 
-pub const PARTITIONED_TABLES: &[&str] = &["login_attempts", "quota_events", "org_audit_log"];
+pub const PARTITIONED_TABLES: &[&str] = &[
+    "login_attempts",
+    "quota_events",
+    "org_audit_log",
+    "credential_events",
+];
 
 /// Months provisioned ahead, so a lagging maintenance run still has a partition.
 const MONTHS_AHEAD: i32 = 3;

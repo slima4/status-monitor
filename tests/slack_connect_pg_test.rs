@@ -127,10 +127,10 @@ async fn callback_cancel_bounces_to_form_and_burns_state() {
         &pool,
         &s,
         SLACK_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(org.0),
-        None,
+        oauth_state::StateBinding {
+            org_id: Some(org.0),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -169,10 +169,10 @@ async fn callback_rejects_state_minted_for_a_foreign_org() {
         &pool,
         &s,
         SLACK_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(foreign_org),
-        None,
+        oauth_state::StateBinding {
+            org_id: Some(foreign_org),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -225,10 +225,11 @@ async fn delegate_state_callback_needs_no_session_and_cancel_keeps_the_link() {
         &pool,
         &s,
         SLACK_CONNECT_PROVIDER,
-        None,
-        None,
-        Some(org.0),
-        Some(minted.id),
+        oauth_state::StateBinding {
+            org_id: Some(org.0),
+            link_code_id: Some(minted.id),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
