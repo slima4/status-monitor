@@ -288,11 +288,12 @@ async fn magic_verify_existing_user_auto_accepts_and_lands_in_org() {
 
     let minted = magic_link::create(
         &pool,
-        "member5@example.test",
-        None,
-        15,
-        None,
-        Some(created.row.id),
+        magic_link::NewMagicLink {
+            email: "member5@example.test",
+            expiry_minutes: 15,
+            invitation_id: Some(created.row.id),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -338,11 +339,12 @@ async fn magic_verify_bootstraps_invited_unknown_email() {
 
     let minted = magic_link::create(
         &pool,
-        "fresh6@example.test",
-        None,
-        15,
-        None,
-        Some(created.row.id),
+        magic_link::NewMagicLink {
+            email: "fresh6@example.test",
+            expiry_minutes: 15,
+            invitation_id: Some(created.row.id),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -389,9 +391,16 @@ async fn magic_verify_unknown_email_without_invitation_opens_an_account() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let minted = magic_link::create(&pool, "ghost7@example.test", None, 15, None, None)
-        .await
-        .unwrap();
+    let minted = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "ghost7@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
     let (get_status, status, location) = magic_verify(&app, &minted.token).await;
     assert_eq!(
@@ -431,11 +440,12 @@ async fn magic_verify_bootstrap_email_mismatch_is_410_no_user() {
     // Token minted for a DIFFERENT address than the invitation's.
     let minted = magic_link::create(
         &pool,
-        "stranger8@example.test",
-        None,
-        15,
-        None,
-        Some(created.row.id),
+        magic_link::NewMagicLink {
+            email: "stranger8@example.test",
+            expiry_minutes: 15,
+            invitation_id: Some(created.row.id),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -470,9 +480,16 @@ async fn magic_verify_plain_login_resolves_active_org() {
     let user = seed_user(&pool, "plain9@example.test").await;
     let org = seed_org(&pool, user).await;
 
-    let minted = magic_link::create(&pool, "plain9@example.test", None, 15, None, None)
-        .await
-        .unwrap();
+    let minted = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "plain9@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
     let (get_status, status, _) = magic_verify(&app, &minted.token).await;
     assert_eq!(
@@ -547,11 +564,12 @@ async fn b2_full_org_creates_no_user_and_keeps_invitation() {
 
     let minted = magic_link::create(
         &pool,
-        "fresh11@example.test",
-        None,
-        15,
-        None,
-        Some(created.row.id),
+        magic_link::NewMagicLink {
+            email: "fresh11@example.test",
+            expiry_minutes: 15,
+            invitation_id: Some(created.row.id),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();
@@ -632,9 +650,16 @@ async fn magic_verify_get_prefetch_does_not_consume_then_post_signs_in() {
     MIGRATOR.run(&pool).await.unwrap();
     let user = seed_user(&pool, "scan13@example.test").await;
     let _org = seed_org(&pool, user).await;
-    let minted = magic_link::create(&pool, "scan13@example.test", None, 15, None, None)
-        .await
-        .unwrap();
+    let minted = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "scan13@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
 
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
 
@@ -694,9 +719,16 @@ async fn magic_verify_post_with_missing_or_mismatched_nonce_is_forbidden() {
     MIGRATOR.run(&pool).await.unwrap();
     let user = seed_user(&pool, "csrf14@example.test").await;
     let _org = seed_org(&pool, user).await;
-    let minted = magic_link::create(&pool, "csrf14@example.test", None, 15, None, None)
-        .await
-        .unwrap();
+    let minted = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "csrf14@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
 
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
 
@@ -748,10 +780,16 @@ async fn an_invite_only_deployment_turns_a_stranger_away() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let created =
-        uptimepage::auth::magic_link::create(&pool, "nope@example.test", None, 15, None, None)
-            .await
-            .expect("mint a link");
+    let created = uptimepage::auth::magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "nope@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("mint a link");
 
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |cfg| {
         cfg.auth.open_signup = false;
@@ -787,11 +825,12 @@ async fn an_invitation_outranks_the_signup_policy() {
     let invited = invite(&pool, org, owner, "guest@example.test").await;
     let minted = magic_link::create(
         &pool,
-        "guest@example.test",
-        None,
-        15,
-        None,
-        Some(invited.row.id),
+        magic_link::NewMagicLink {
+            email: "guest@example.test",
+            expiry_minutes: 15,
+            invitation_id: Some(invited.row.id),
+            ..Default::default()
+        },
     )
     .await
     .unwrap();

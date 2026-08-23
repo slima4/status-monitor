@@ -92,3 +92,41 @@ async fn magic_link_is_mounted_by_default() {
         .unwrap();
     assert_ne!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn magic_link_code_is_404_when_disabled() {
+    let app = build_test_app(|cfg| {
+        cfg.auth.enabled_methods = vec!["github_oauth".into()];
+    });
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/magic-link/code")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("code=4KP9RT"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn magic_link_code_is_mounted_when_enabled() {
+    let app = build_test_app(|cfg| {
+        cfg.auth.enabled_methods = vec!["github_oauth".into(), "magic_link".into()];
+    });
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/auth/magic-link/code")
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(Body::from("code=4KP9RT"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(resp.status(), StatusCode::NOT_FOUND);
+}

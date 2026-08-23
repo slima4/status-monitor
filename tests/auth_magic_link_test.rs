@@ -34,9 +34,16 @@ async fn create_then_consume_roundtrip() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let created = magic_link::create(&pool, "alice@example.test", None, 15, None, None)
-        .await
-        .expect("create");
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "alice@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
 
     let consumed = magic_link::consume(&pool, &created.token)
         .await
@@ -66,9 +73,16 @@ async fn peek_is_read_only_and_does_not_consume() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let created = magic_link::create(&pool, "peek@example.test", None, 15, None, None)
-        .await
-        .expect("create");
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "peek@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
 
     // Peek returns the row but must leave the token spendable.
     let peeked = magic_link::peek(&pool, &created.token)
@@ -135,9 +149,16 @@ async fn consume_with_unknown_token_returns_none() {
     // Seed a real row so the prefix-narrowed SELECT has something to compare
     // against — otherwise an empty table never enters the argon2-verify loop
     // and the test couldn't catch a verify-mismatch regression.
-    let _real = magic_link::create(&pool, "real@example.test", None, 15, None, None)
-        .await
-        .expect("seed");
+    let _real = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "real@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("seed");
 
     let outcome = magic_link::consume(&pool, "this-token-was-never-issued")
         .await
@@ -156,9 +177,16 @@ async fn consume_skips_expired_rows() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let created = magic_link::create(&pool, "bob@example.test", None, 15, None, None)
-        .await
-        .expect("create");
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "bob@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
 
     // Force-expire the row.
     sqlx::query(
@@ -182,7 +210,7 @@ async fn consume_skips_expired_rows() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn purge_old_removes_expired_and_old_used() {
+async fn purge_old_collects_rows_once_they_expire() {
     let Some((db, name)) = fresh_pg().await else {
         return;
     };
@@ -190,9 +218,16 @@ async fn purge_old_removes_expired_and_old_used() {
     MIGRATOR.run(&pool).await.unwrap();
 
     // Row 1: expired, unused.
-    let r1 = magic_link::create(&pool, "x1@example.test", None, 15, None, None)
-        .await
-        .expect("create");
+    let r1 = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "x1@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
     sqlx::query(
         "UPDATE magic_link_tokens SET expires_at = now() - INTERVAL '1 minute' WHERE id = $1",
     )
@@ -201,143 +236,259 @@ async fn purge_old_removes_expired_and_old_used() {
     .await
     .unwrap();
 
-    // Row 2: used 8 days ago.
-    let r2 = magic_link::create(&pool, "x2@example.test", None, 15, None, None)
-        .await
-        .expect("create");
-    sqlx::query("UPDATE magic_link_tokens SET used_at = now() - INTERVAL '8 days' WHERE id = $1")
-        .bind(r2.row.id)
-        .execute(&pool)
-        .await
-        .unwrap();
+    let r2 = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "x2@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::consume(&pool, &r2.token).await.unwrap();
 
     // Row 3: fresh, unused — must survive.
-    let r3 = magic_link::create(&pool, "x3@example.test", None, 15, None, None)
-        .await
-        .expect("create");
+    let r3 = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "x3@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
 
     let removed = magic_link::purge_old(&pool).await.unwrap();
-    assert_eq!(removed, 2);
+    assert_eq!(removed, 1);
 
-    let row_count: i64 = sqlx::query_scalar("SELECT count(*) FROM magic_link_tokens")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(row_count, 1);
-
-    let survivor: Uuid = sqlx::query_scalar("SELECT id FROM magic_link_tokens")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-    assert_eq!(survivor, r3.row.id);
+    let survivors: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM magic_link_tokens ORDER BY created_at")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(survivors, vec![r2.row.id, r3.row.id]);
 
     drop_pg(&name).await;
 }
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn earliest_in_window_picks_first_row_and_excludes_others() {
+async fn the_throttle_counts_what_was_delivered_not_what_was_inserted() {
     let Some((db, name)) = fresh_pg().await else {
         return;
     };
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    // Two requests for the same email back-to-back.
-    let first = magic_link::create(&pool, "throttle@example.test", None, 15, None, None)
-        .await
-        .expect("first create");
-    let second = magic_link::create(&pool, "throttle@example.test", None, 15, None, None)
-        .await
-        .expect("second create");
-    assert_ne!(first.row.id, second.row.id);
+    // Every request inserts, so inserts alone must not throttle anything.
+    let first = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "throttle@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("first create");
+    magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "throttle@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("second create");
+    assert!(
+        !magic_link::sent_within(&pool, "throttle@example.test", 60)
+            .await
+            .expect("sent_within")
+    );
 
-    // Inside the 60s window: first row wins for both spawn checks.
-    let winner = magic_link::earliest_in_window(&pool, "throttle@example.test", 60)
+    magic_link::mark_sent(&pool, first.row.id)
         .await
-        .expect("earliest");
-    assert_eq!(winner, Some(first.row.id));
+        .expect("send");
+    assert!(
+        magic_link::sent_within(&pool, "throttle@example.test", 60)
+            .await
+            .expect("sent_within")
+    );
 
-    // A different email is not throttled.
-    let other = magic_link::create(&pool, "other@example.test", None, 15, None, None)
-        .await
-        .expect("other create");
-    let other_winner = magic_link::earliest_in_window(&pool, "other@example.test", 60)
-        .await
-        .expect("other earliest");
-    assert_eq!(other_winner, Some(other.row.id));
+    assert!(
+        !magic_link::sent_within(&pool, "other@example.test", 60)
+            .await
+            .expect("other")
+    );
+    assert!(
+        !magic_link::sent_within(&pool, "throttle@example.test", 0)
+            .await
+            .expect("disabled")
+    );
 
-    // window_seconds = 0 disables (operator escape hatch).
-    let disabled = magic_link::earliest_in_window(&pool, "throttle@example.test", 0)
-        .await
-        .expect("disabled");
-    assert!(disabled.is_none());
-
-    // Force the first row outside the window — the second now wins.
     sqlx::query(
-        "UPDATE magic_link_tokens SET created_at = now() - INTERVAL '2 minutes' WHERE id = $1",
+        "UPDATE magic_link_tokens SET sent_at = now() - INTERVAL '2 minutes' WHERE id = $1",
     )
     .bind(first.row.id)
     .execute(&pool)
     .await
     .unwrap();
-    let post_expiry = magic_link::earliest_in_window(&pool, "throttle@example.test", 60)
-        .await
-        .expect("post expiry");
-    assert_eq!(post_expiry, Some(second.row.id));
+    assert!(
+        !magic_link::sent_within(&pool, "throttle@example.test", 60)
+            .await
+            .expect("past window")
+    );
 
-    // Mark second as used → no winner remains in the window.
-    sqlx::query("UPDATE magic_link_tokens SET used_at = now() WHERE id = $1")
-        .bind(second.row.id)
-        .execute(&pool)
-        .await
-        .unwrap();
-    let after_use = magic_link::earliest_in_window(&pool, "throttle@example.test", 60)
-        .await
-        .expect("after use");
-    assert!(after_use.is_none());
-
+    pool.close().await;
     drop_pg(&name).await;
 }
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn earliest_in_window_under_concurrent_inserts_picks_one_winner() {
-    // Locks the race contract that the spawn-based throttle relies on:
-    // two parallel INSERTs for the same email must resolve to exactly one
-    // winner under `earliest_in_window`. If the ORDER BY ever loses its
-    // total-order property, this test fails — the throttle's "one email
-    // per window" guarantee would break with it.
+async fn asking_again_does_not_starve_the_next_mail() {
     let Some((db, name)) = fresh_pg().await else {
         return;
     };
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let (a, b) = tokio::join!(
-        magic_link::create(&pool, "race@example.test", None, 15, None, None),
-        magic_link::create(&pool, "race@example.test", None, 15, None, None),
-    );
-    let a = a.expect("a create");
-    let b = b.expect("b create");
-    assert_ne!(a.row.id, b.row.id);
-
-    let winner = magic_link::earliest_in_window(&pool, "race@example.test", 60)
+    let sent = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "again@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, sent.row.id)
         .await
-        .expect("earliest")
-        .expect("a winner exists");
+        .expect("send");
+    sqlx::query(
+        "UPDATE magic_link_tokens SET sent_at = now() - INTERVAL '90 seconds' WHERE id = $1",
+    )
+    .bind(sent.row.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    for _ in 0..3 {
+        magic_link::create(
+            &pool,
+            magic_link::NewMagicLink {
+                email: "again@example.test",
+                expiry_minutes: 15,
+                nonce: Some("n"),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("resend");
+    }
     assert!(
-        winner == a.row.id || winner == b.row.id,
-        "winner must be one of the two inserted rows"
+        !magic_link::sent_within(&pool, "again@example.test", 60)
+            .await
+            .expect("sent_within"),
+        "undelivered rows must never hold the window open"
     );
 
-    // Every spawn would converge on the same winner — deterministic.
-    let again = magic_link::earliest_in_window(&pool, "race@example.test", 60)
-        .await
-        .expect("earliest again")
-        .expect("still a winner");
-    assert_eq!(winner, again, "winner must be stable across reads");
+    pool.close().await;
+    drop_pg(&name).await;
+}
 
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_code_nobody_was_sent_is_not_redeemable() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "unsent@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+
+    magic_link::mark_sent(&pool, created.row.id)
+        .await
+        .expect("send");
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_link_with_no_browser_behind_it_survives_a_stranger_asking() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let console = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "owner@example.test",
+            expiry_minutes: 1440,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("console link");
+    let asked = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "owner@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("requested link");
+    magic_link::mark_sent(&pool, asked.row.id)
+        .await
+        .expect("send");
+    assert_eq!(
+        magic_link::supersede_others(&pool, "owner@example.test", asked.row.id)
+            .await
+            .expect("supersede"),
+        0
+    );
+    assert!(
+        magic_link::peek(&pool, &console.token)
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    pool.close().await;
     drop_pg(&name).await;
 }
 
@@ -446,11 +597,12 @@ async fn redirect_and_invitation_round_trip_through_create_and_consume() {
 
     let created = magic_link::create(
         &pool,
-        "hop@example.test",
-        None,
-        15,
-        Some("/targets/abc"),
-        None,
+        magic_link::NewMagicLink {
+            email: "hop@example.test",
+            expiry_minutes: 15,
+            redirect_after: Some("/targets/abc"),
+            ..Default::default()
+        },
     )
     .await
     .expect("create");
@@ -526,6 +678,638 @@ async fn a_second_account_on_one_address_is_refused() {
         .await
         .expect("count");
     assert_eq!(orgs, 1, "so no second org exists");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_wrong_code_burns_itself_and_spares_the_link() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let nonce = "browser-that-asked";
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "one@example.test",
+            expiry_minutes: 15,
+            nonce: Some(nonce),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, created.row.id)
+        .await
+        .expect("send");
+
+    assert!(matches!(
+        magic_link::consume_code(&pool, nonce, &wrong_code(&created.code))
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+    // The one attempt is gone, even for the right code.
+    assert!(matches!(
+        magic_link::consume_code(&pool, nonce, &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+    assert!(
+        magic_link::consume(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_some(),
+        "the link still redeems"
+    );
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_paste_accident_does_not_spend_the_attempt() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let nonce = "asked-here";
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "two@example.test",
+            expiry_minutes: 15,
+            nonce: Some(nonce),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, created.row.id)
+        .await
+        .expect("send");
+
+    for malformed in ["", "  ", "ABC", "4KP9RT77"] {
+        assert!(matches!(
+            magic_link::consume_code(&pool, nonce, malformed)
+                .await
+                .unwrap(),
+            magic_link::CodeOutcome::Refused
+        ));
+    }
+    let padded = format!("  {}  ", created.code);
+    assert!(matches!(
+        magic_link::consume_code(&pool, nonce, &padded)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_code_is_useless_in_another_browser() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "three@example.test",
+            expiry_minutes: 15,
+            nonce: Some("mine"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, created.row.id)
+        .await
+        .expect("send");
+    assert!(matches!(
+        magic_link::consume_code(&pool, "somebody-elses", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+    assert!(matches!(
+        magic_link::consume_code(&pool, "mine", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn only_the_newest_credential_is_live() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let first = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "four@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n1"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("first");
+    magic_link::mark_sent(&pool, first.row.id)
+        .await
+        .expect("send");
+    let second = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "four@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n2"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("second");
+    magic_link::mark_sent(&pool, second.row.id)
+        .await
+        .expect("send");
+    let retired = magic_link::supersede_others(&pool, "four@example.test", second.row.id)
+        .await
+        .expect("supersede");
+    assert_eq!(retired, 1, "the earlier row went");
+
+    assert!(
+        magic_link::consume(&pool, &first.token)
+            .await
+            .unwrap()
+            .is_none(),
+        "the older link is dead"
+    );
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n1", &first.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n2", &second.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_trail_says_which_credential_opened_the_session() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let by_link = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "l@example.test",
+            expiry_minutes: 15,
+            nonce: Some("a"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, by_link.row.id)
+        .await
+        .expect("send");
+    magic_link::consume(&pool, &by_link.token).await.unwrap();
+    let by_code = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "c@example.test",
+            expiry_minutes: 15,
+            nonce: Some("b"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, by_code.row.id)
+        .await
+        .expect("send");
+    magic_link::consume_code(&pool, "b", &by_code.code)
+        .await
+        .unwrap();
+
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT email::text, redeemed_via FROM magic_link_tokens ORDER BY email")
+            .fetch_all(&pool)
+            .await
+            .expect("read");
+    assert_eq!(
+        rows,
+        vec![
+            ("c@example.test".into(), Some("code".into())),
+            ("l@example.test".into(), Some("link".into())),
+        ]
+    );
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_superseded_row_does_not_look_redeemed() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let first = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "s@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n1"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("first");
+    magic_link::mark_sent(&pool, first.row.id)
+        .await
+        .expect("send");
+    let second = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "s@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n2"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("second");
+    magic_link::mark_sent(&pool, second.row.id)
+        .await
+        .expect("send");
+    magic_link::supersede_others(&pool, "s@example.test", second.row.id)
+        .await
+        .expect("supersede");
+
+    let (used, superseded, via): (bool, bool, Option<String>) = sqlx::query_as(
+        "SELECT used_at IS NOT NULL, superseded_at IS NOT NULL, redeemed_via \
+         FROM magic_link_tokens WHERE id = $1",
+    )
+    .bind(first.row.id)
+    .fetch_one(&pool)
+    .await
+    .expect("read");
+    assert!(!used, "nobody redeemed it");
+    assert!(superseded, "it was replaced");
+    assert_eq!(via, None);
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+/// Well formed, so entering it spends the attempt.
+fn wrong_code(right: &str) -> String {
+    let mut c = right.to_string();
+    c.replace_range(0..1, if right.starts_with('2') { "3" } else { "2" });
+    c
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn an_expired_code_is_refused() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "old@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, created.row.id)
+        .await
+        .expect("send");
+    sqlx::query(
+        "UPDATE magic_link_tokens SET expires_at = now() - INTERVAL '1 minute' WHERE id = $1",
+    )
+    .bind(created.row.id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_code_opens_the_session_once() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "once@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, created.row.id)
+        .await
+        .expect("send");
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_link_dies_with_the_code_that_beat_it() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "both@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, created.row.id)
+        .await
+        .expect("send");
+    assert!(matches!(
+        magic_link::consume_code(&pool, "n", &created.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+    assert!(
+        magic_link::consume(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        magic_link::peek(&pool, &created.token)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_wrong_guess_spends_only_the_browser_that_made_it() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let mine = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "a@example.test",
+            expiry_minutes: 15,
+            nonce: Some("mine"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, mine.row.id)
+        .await
+        .expect("send");
+    let theirs = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "b@example.test",
+            expiry_minutes: 15,
+            nonce: Some("theirs"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, theirs.row.id)
+        .await
+        .expect("send");
+
+    assert!(matches!(
+        magic_link::consume_code(&pool, "mine", &wrong_code(&mine.code))
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Refused
+    ));
+    assert!(matches!(
+        magic_link::consume_code(&pool, "theirs", &theirs.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn supersede_others_spares_other_addresses_and_spent_rows() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let elsewhere = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "other@example.test",
+            expiry_minutes: 15,
+            nonce: Some("e"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, elsewhere.row.id)
+        .await
+        .expect("send");
+    let spent = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "same@example.test",
+            expiry_minutes: 15,
+            nonce: Some("s"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, spent.row.id)
+        .await
+        .expect("send");
+    magic_link::consume(&pool, &spent.token).await.unwrap();
+    let earlier = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "same@example.test",
+            expiry_minutes: 15,
+            nonce: Some("e2"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, earlier.row.id)
+        .await
+        .expect("send");
+    let newest = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "same@example.test",
+            expiry_minutes: 15,
+            nonce: Some("n"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, newest.row.id)
+        .await
+        .expect("send");
+
+    let retired = magic_link::supersede_others(&pool, "same@example.test", newest.row.id)
+        .await
+        .expect("supersede");
+    assert_eq!(retired, 1);
+
+    let untouched: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM magic_link_tokens WHERE superseded_at IS NOT NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(untouched, vec![earlier.row.id]);
+    assert!(
+        magic_link::peek(&pool, &elsewhere.token)
+            .await
+            .unwrap()
+            .is_some()
+    );
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_browser_binding_and_the_code_are_hashed_at_rest() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let nonce = "the-cookie-value";
+    let created = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "rest@example.test",
+            expiry_minutes: 15,
+            nonce: Some(nonce),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+
+    let (code_hash, nonce_hash): (String, String) =
+        sqlx::query_as("SELECT code_hash, nonce_hash FROM magic_link_tokens WHERE id = $1")
+            .bind(created.row.id)
+            .fetch_one(&pool)
+            .await
+            .expect("read");
+    assert!(!code_hash.contains(&created.code));
+    assert!(!nonce_hash.contains(nonce));
+    assert!(code_hash.starts_with("$argon2"), "{code_hash}");
 
     pool.close().await;
     drop_pg(&name).await;

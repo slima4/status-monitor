@@ -85,6 +85,7 @@ mod tests {
             template: EmailTemplate::MagicLink {
                 url: "https://example.test/auth/magic-link/verify?token=xyz".into(),
                 expires_in_minutes: 15,
+                code: "4KP9RT".into(),
                 ip_hint: Some("203.0.113.5".into()),
                 opens_accounts: false,
             },

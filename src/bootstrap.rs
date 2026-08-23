@@ -188,7 +188,15 @@ pub async fn seed_first_owner(pool: &PgPool, cfg: &AppConfig) -> Result<()> {
     // Whoever installed the app may not read the logs for hours.
     const FIRST_RUN_LINK_MINUTES: u32 = 24 * 60;
     // Link before account: failing here leaves no user row, so the next boot retries.
-    let link = magic_link::create(pool, email, None, FIRST_RUN_LINK_MINUTES, None, None).await?;
+    let link = magic_link::create(
+        pool,
+        magic_link::NewMagicLink {
+            email,
+            expiry_minutes: FIRST_RUN_LINK_MINUTES,
+            ..Default::default()
+        },
+    )
+    .await?;
 
     let (_, org) = ensure_owner_org(pool, cfg, email, &cfg.bootstrap.org_name).await?;
     // Reached only when the instance had no users, so this org is always the one
@@ -254,7 +262,15 @@ pub async fn run_owner(cfg: &AppConfig, args: &BootstrapArgs) -> Result<()> {
     // directly. The verify route logs the existing owner straight in.
     let web_login = if cfg.auth.magic_link_enabled() {
         let expiry = cfg.auth.magic_link.expiry_minutes;
-        let link = magic_link::create(&pool, &args.email, None, expiry, None, None).await?;
+        let link = magic_link::create(
+            &pool,
+            magic_link::NewMagicLink {
+                email: &args.email,
+                expiry_minutes: expiry,
+                ..Default::default()
+            },
+        )
+        .await?;
         Some((
             token_link(
                 &cfg.auth.public_base_url,

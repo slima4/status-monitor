@@ -59,6 +59,8 @@ pub enum EmailTemplate {
     /// `auth.enabled_methods` config until the verify endpoint is wired.
     MagicLink {
         url: String,
+        /// Typed back in the tab that asked.
+        code: String,
         expires_in_minutes: u32,
         ip_hint: Option<String>,
         /// A property of the deployment, never of the recipient: the same
@@ -175,12 +177,14 @@ impl EmailTemplate {
             ),
             EmailTemplate::MagicLink {
                 url,
+                code,
                 expires_in_minutes,
                 ip_hint,
                 opens_accounts,
             } => templates::magic_link::render(
                 site_name,
                 url,
+                code,
                 *expires_in_minutes,
                 ip_hint.as_deref(),
                 *opens_accounts,

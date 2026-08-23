@@ -1,0 +1,23 @@
+{% extends "chromeless_base.html" %}
+{# One state for wrong, spent and wrong-browser alike. #}
+{% block title %}Code not accepted{% endblock %}
+{% block head_scripts %}{% include "auth/_analytics.html" %}{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center"
+          data-auth-event="login-error" data-auth-event-reason="code-refused">
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>code not accepted</h1>
+        <p class="text-sm text-muted">
+            Codes get one attempt. The link in that same email still signs
+            you in, so open it rather than asking for another code.
+        </p>
+        <p class="text-sm text-muted">
+            Requesting a new email replaces the one you have, link included.
+        </p>
+        <p>
+            <a href="/login"
+               class="sticker-btn inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
+                back to sign in
+            </a>
+        </p>
+    </main>
+{% endblock %}

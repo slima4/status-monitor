@@ -1206,6 +1206,17 @@ mod tests {
     }
 
     #[test]
+    fn the_last_used_badge_rides_the_email_button() {
+        // Absolutely positioned, so it lands on its `relative` ancestor.
+        let mut page = login_page(true, false, false, false, false, true);
+        page.last_magic = true;
+        let html = page.render().unwrap();
+        let badge = html.find("last used").expect("badge renders");
+        let button = html.find("continue with email").expect("button renders");
+        assert!(badge > button, "inside the button, after its label");
+    }
+
+    #[test]
     fn login_page_marks_last_used_method_only() {
         let mut page = login_page(true, true, true, true, false, true);
         page.last_google = true;
@@ -1261,6 +1272,75 @@ mod tests {
             "no field to autofill into"
         );
         assert!(!html.contains("webauthn"), "and nothing claiming otherwise");
+    }
+
+    #[test]
+    fn email_is_only_hidden_where_it_cannot_open_an_account() {
+        let open = login_page(true, false, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(!open.contains("<details"), "no disclosure at all");
+        assert!(open.contains("or with email"));
+        assert!(
+            !open.contains(r#"<p class="relative text-center"#),
+            "the badge belongs on the control, not the divider"
+        );
+        assert!(open.contains(r#"id="magic-link-email""#));
+
+        let mut page = login_page(true, false, false, false, false, true);
+        page.open_signup = false;
+        let closed = page.render().unwrap();
+        assert!(closed.contains("<details"), "invite-only still hides it");
+        assert!(closed.contains("Already registered?"));
+
+        let mut alone = login_page(false, false, false, false, false, true);
+        alone.open_signup = false;
+        assert!(!alone.render().unwrap().contains("<details"));
+    }
+
+    #[test]
+    fn the_email_button_matches_the_others_where_it_can_deliver() {
+        let open = login_page(true, false, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(open.contains("continue with email"));
+
+        let mut page = login_page(true, false, false, false, false, true);
+        page.open_signup = false;
+        let closed = page.render().unwrap();
+        assert!(!closed.contains("continue with email"));
+        assert!(closed.contains("email me a sign-in link"));
+    }
+
+    #[test]
+    fn the_email_field_caps_where_the_server_does() {
+        // A client rule stricter than the server would reject addresses the
+        // server accepts.
+        let html = login_page(true, false, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(html.contains(&format!(
+            r#"maxlength="{}""#,
+            crate::auth::email_norm::MAX_EMAIL_LEN
+        )));
+    }
+
+    #[test]
+    fn the_code_submits_as_a_plain_form_post() {
+        // Revealing the panel needs the script; submitting must not.
+        let html = login_page(true, false, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(html.contains(r#"action="/auth/magic-link/code""#));
+        assert!(html.contains(r#"id="magic-link-code""#));
+        assert!(html.contains(r#"autocomplete="one-time-code""#));
+        assert!(html.contains(r#"placeholder="4KP9RT""#));
+        assert_eq!("4KP9RT".len(), crate::auth::magic_link::CODE_LEN);
+        assert!(
+            html.contains("The link in the same email still works"),
+            "one try is only fair if the fallback is named"
+        );
+        assert!(html.contains(r#"id="magic-link-again""#));
     }
 
     #[test]
@@ -1367,22 +1447,6 @@ mod tests {
             .render()
             .unwrap();
         assert!(!html.contains("/link"), "no link-dance URL belongs here");
-    }
-
-    #[test]
-    fn login_page_opens_the_email_form_only_when_it_is_the_way_in() {
-        // Email sign-in only redeems an existing account, so it stays behind a
-        // disclosure while OAuth is the path to a new one. With OAuth off it is
-        // the only way in and must render open.
-        let beside_oauth = login_page(true, false, false, false, false, true)
-            .render()
-            .unwrap();
-        assert!(beside_oauth.contains("<details"), "should be tucked away");
-
-        let alone = login_page(false, false, false, false, false, true)
-            .render()
-            .unwrap();
-        assert!(!alone.contains("<details"), "nothing left to hide behind");
     }
 
     #[test]

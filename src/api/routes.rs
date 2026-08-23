@@ -497,6 +497,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
                 "/auth/magic-link/verify",
                 get(handlers::magic_link::verify_landing)
                     .post(handlers::magic_link::verify_confirm),
+            )
+            .route(
+                "/auth/magic-link/code",
+                post(handlers::magic_link::submit_code),
             );
     }
 

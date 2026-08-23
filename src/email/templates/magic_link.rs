@@ -11,6 +11,7 @@ use crate::email::trait_def::RenderedEmail;
 pub fn render(
     site_name: &str,
     url: &str,
+    code: &str,
     expires_in_minutes: u32,
     ip_hint: Option<&str>,
     opens_accounts: bool,
@@ -36,6 +37,9 @@ pub fn render(
         "{opening}\n\
          \n  {url}\n\
          \n\
+         Or enter this code in the tab you started from:\n\
+         \n  {code}\n\
+         \n\
          This link expires in {expires_in_minutes} minutes and can only be used once.\n\
          {ip_line_text}\
          If you didn't request this, you can ignore the message.\n"
@@ -43,6 +47,10 @@ pub fn render(
 
     let mut body = layout::paragraph(&html_escape(&opening));
     body.push_str(&layout::button(url, action, ButtonStyle::Solid));
+    body.push_str(&layout::paragraph(&format!(
+        "Or enter <strong>{}</strong> in the tab you started from.",
+        html_escape(code)
+    )));
     body.push_str(&layout::fine_print(&format!(
         "This link expires in <strong>{expires_in_minutes}</strong> minutes and can only be \
          used once."
@@ -78,7 +86,14 @@ mod tests {
 
     #[test]
     fn an_open_deployment_does_not_promise_an_account_already_exists() {
-        let open = render("Uptimepage", "https://a.test/v?token=x", 15, None, true);
+        let open = render(
+            "Uptimepage",
+            "https://a.test/v?token=x",
+            "4KP9RT",
+            15,
+            None,
+            true,
+        );
         assert!(!open.subject.contains("Sign in"), "{}", open.subject);
         // The preheader is the second line an inbox shows unopened.
         assert!(
@@ -90,7 +105,14 @@ mod tests {
             assert!(body.contains("opens an account"), "{body}");
         }
 
-        let closed = render("Uptimepage", "https://a.test/v?token=x", 15, None, false);
+        let closed = render(
+            "Uptimepage",
+            "https://a.test/v?token=x",
+            "4KP9RT",
+            15,
+            None,
+            false,
+        );
         assert_eq!(closed.subject, "Sign in to Uptimepage");
         for body in [&closed.text_body, &closed.html_body] {
             assert!(
@@ -101,9 +123,31 @@ mod tests {
     }
 
     #[test]
+    fn the_code_reaches_both_bodies() {
+        let r = render(
+            "Uptimepage",
+            "https://a.test/v?token=x",
+            "4KP9RT",
+            15,
+            None,
+            true,
+        );
+        assert!(r.text_body.contains("4KP9RT"), "{}", r.text_body);
+        assert!(r.html_body.contains("4KP9RT"), "{}", r.html_body);
+        assert!(!r.subject.contains("4KP9RT"), "never in the subject line");
+    }
+
+    #[test]
     fn the_link_reaches_both_bodies_either_way() {
         for opens in [true, false] {
-            let r = render("Uptimepage", "https://a.test/v?token=abc", 15, None, opens);
+            let r = render(
+                "Uptimepage",
+                "https://a.test/v?token=abc",
+                "4KP9RT",
+                15,
+                None,
+                opens,
+            );
             assert!(r.text_body.contains("https://a.test/v?token=abc"));
             assert!(r.html_body.contains("https://a.test/v?token=abc"));
         }

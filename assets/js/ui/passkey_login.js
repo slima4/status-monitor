@@ -59,9 +59,8 @@
     // Autofill
     // ---------------------------------------------------------------------
     const field = document.getElementById("magic-link-email");
-    // On any page that loads this script the magic-link form sits inside the
-    // disclosure, so there is no no-disclosure case to carry.
     const disclosure = field && field.closest("details");
+    const canArm = () => !disclosure || disclosure.open;
 
     let offer = null;
     let modal = false;
@@ -111,7 +110,7 @@
     }
 
     function arm() {
-        if (offer || modal || !disclosure.open) return;
+        if (offer || modal || !canArm()) return;
         const controller = new AbortController();
         const entry = { controller: controller, done: null };
         entry.done = runOffer(controller)
@@ -155,10 +154,16 @@
                 // the field can take focus, which buys the round-trip the
                 // autofill list needs; `focus` covers the block already being
                 // open on arrival, which is how a returning visitor lands.
-                disclosure.addEventListener("toggle", function () {
-                    if (disclosure.open) arm();
-                    else disarm();
-                });
+                if (disclosure) {
+                    disclosure.addEventListener("toggle", function () {
+                        if (disclosure.open) arm();
+                        else disarm();
+                    });
+                } else {
+                    // Focus alone lands in the same tick the browser builds
+                    // its autofill list, too late for the round-trip.
+                    arm();
+                }
                 field.addEventListener("focus", function () {
                     clearError();
                     arm();

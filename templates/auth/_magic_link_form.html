@@ -2,27 +2,56 @@
   <label class="sr-only" for="magic-link-email">Email address</label>
   {# `webauthn` is appended, not swapped in, so email autofill survives. Only
      where passkeys are on, since nothing answers the offer otherwise. #}
-  <input id="magic-link-email" name="email" type="email" required
+  {# The same 254 the server enforces; every other rule is left to it. #}
+  <input id="magic-link-email" name="email" type="email" required maxlength="254"
          autocomplete="email{% if passkey_enabled %} webauthn{% endif %}"
          placeholder="you@company.com" spellcheck="false"
          class="w-full field">
   <button type="submit"
-          class="sticker-btn sticker-btn--accent inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
-    {% if open_signup %}email me a link{% else %}email me a sign-in link{% endif %}
+          class="sticker-btn sticker-btn--accent relative inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
+    {% if open_signup %}continue with email{% else %}email me a sign-in link{% endif %}
+    {# Behind the disclosure the badge rides the summary instead. #}
+    {% if last_magic && open_signup %}{% include "auth/_last_used.html" %}{% endif %}
   </button>
   <div id="magic-link-error" role="alert" aria-live="polite"
        class="hidden alert-card alert-card--error"></div>
 </form>
-<p id="magic-link-sent" class="alert-card alert-card--muted hidden text-sm">
-  {# With signup open every address gets a link, so nothing needs hedging. #}
-  {% if open_signup %}
-  Check your inbox &mdash; a link is on its way. It signs you in, or opens an
-  account if you don&rsquo;t have one yet.
-  {% else %}
-  Check your inbox &mdash; if that address has an account, a sign-in link is
-  on its way.
-  {% endif %}
-  The link works once and expires in
-  {{ magic_link_expiry_minutes }} minutes. Nothing arrived? You can
-  request another shortly.
-</p>
+
+<div id="magic-link-sent" class="hidden space-y-3 pt-3">
+  <p class="alert-card alert-card--muted text-sm">
+    {% if open_signup %}
+    Check your inbox. The link signs you in, or opens an account if you
+    don&rsquo;t have one.
+    {% else %}
+    Check your inbox &mdash; if that address has an account, a link is on its
+    way.
+    {% endif %}
+    Works once, expires in {{ magic_link_expiry_minutes }} minutes.
+  </p>
+
+  {# A plain POST, so the submit path does not need the script. Revealing
+     this panel still does. #}
+  <form method="post" action="/auth/magic-link/code" class="space-y-2">
+    <label class="block text-xs text-muted" for="magic-link-code">code</label>
+    <div class="flex gap-2">
+      {# Larger than six so a pasted `4KP-9RT` is not truncated before the
+         server strips its separators. #}
+      <input id="magic-link-code" name="code" required
+             autocomplete="one-time-code" inputmode="text" spellcheck="false"
+             maxlength="12" placeholder="4KP9RT"
+             class="w-full field font-mono uppercase tracking-[0.35em]">
+      <button type="submit"
+              class="sticker-btn inline-flex shrink-0 items-center justify-center px-4 py-2.5 text-sm font-medium">
+        sign in
+      </button>
+    </div>
+    <p class="text-xs text-muted">
+      One try. The link in the same email still works if it fails.
+    </p>
+  </form>
+
+  <button type="button" id="magic-link-again"
+          class="btn-ghost px-3 py-1.5 text-xs font-medium text-muted">
+    send another
+  </button>
+</div>

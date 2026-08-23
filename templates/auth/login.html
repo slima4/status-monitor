@@ -141,18 +141,19 @@
 
     {% if magic_link_enabled %}
     {% if github_enabled || google_enabled || microsoft_enabled || gitlab_enabled || passkey_enabled %}
-    {# Open by default when it was the last method used. #}
+    {% if open_signup %}
+    <p class="text-center text-sm text-muted">or with email</p>
+    {% include "auth/_magic_link_form.html" %}
+    {% else %}
+    {# Open when it was the last method used. #}
     <details{% if last_magic %} open{% endif %}>
       <summary class="magic-summary relative cursor-pointer text-center text-sm text-muted">
-        {% if open_signup %}
-        Or <span class="underline decoration-dotted underline-offset-2">use your email address</span>
-        {% else %}
         Already registered? <span class="underline decoration-dotted underline-offset-2">email me a sign-in link</span>
-        {% endif %}
         {% if last_magic %}{% include "auth/_last_used.html" %}{% endif %}
       </summary>
       {% include "auth/_magic_link_form.html" %}
     </details>
+    {% endif %}
     {% else %}
     {% include "auth/_magic_link_form.html" %}
     {% endif %}

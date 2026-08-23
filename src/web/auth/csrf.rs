@@ -33,11 +33,14 @@ pub const CSRF_HEADER_VALUE: &str = "uptimepage";
 /// POST cannot carry a valid token, so the CSRF header check adds nothing and
 /// would only break the plain-HTML confirmation form these serve to a recipient
 /// who is also a signed-in user. `/auth/magic-link/verify` carries its own
-/// double-submit nonce; the others authenticate via an HMAC query token.
+/// double-submit nonce and `/auth/magic-link/code` a SameSite=Lax cookie a
+/// cross-site POST cannot send; the others authenticate via an HMAC query
+/// token.
 const TOKEN_AUTHENTICATED_PATHS: &[&str] = &[
     "/alert-channel/stop",
     "/subscribe/unsubscribe",
     "/auth/magic-link/verify",
+    "/auth/magic-link/code",
 ];
 
 /// Tower middleware that enforces the rule documented at module level.
@@ -133,6 +136,7 @@ mod tests {
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/alert-channel/stop"));
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/subscribe/unsubscribe"));
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/auth/magic-link/verify"));
+        assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/auth/magic-link/code"));
         assert!(!TOKEN_AUTHENTICATED_PATHS.contains(&"/api/v1/notification-channels"));
     }
 

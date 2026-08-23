@@ -1,4 +1,4 @@
-//! Magic-link sign-in endpoints. Both routes are mounted only when
+//! Magic-link sign-in endpoints. These are mounted only when
 //! `auth.enabled_methods` contains `"magic_link"`; otherwise the router never
 //! exposes them and the surface is a 404.
 //!
@@ -9,12 +9,17 @@
 //!   string isn't an email shape — no signal about specific accounts). Email
 //!   delivery and the per-email send throttle run inside `tokio::spawn` so
 //!   neither SMTP latency nor rate-limit state leaks via response time. The
-//!   throttle keeps a recipient's inbox to one link per
+//!   throttle keeps a recipient's inbox to one mail per
 //!   `auth.magic_link.rate_limit_seconds` regardless of source.
-//! - `GET  /auth/magic-link/verify?token=…` — atomically consumes the token,
-//!   destroys any pre-login session bound to the browser (fixation defence),
-//!   mints a fresh session cookie, and redirects: `/account/restore` for an
-//!   account scheduled for deletion, else the joined org, else `/`.
+//! - `GET  /auth/magic-link/verify?token=…` — peeks the token and renders a
+//!   one-click confirmation carrying a double-submit nonce, so a mail
+//!   scanner's prefetch cannot burn it.
+//! - `POST /auth/magic-link/verify` — consumes the token, destroys any
+//!   pre-login session bound to the browser (fixation defence), mints a fresh
+//!   session cookie, and redirects: `/account/restore` for an account
+//!   scheduled for deletion, else the joined org, else `/`.
+//! - `POST /auth/magic-link/code` — the same redemption proved by the code
+//!   printed in that mail, and only from the browser that asked for it.
 
 use anyhow::Context;
 use askama::Template;
@@ -46,6 +51,11 @@ use crate::web::filters;
 /// POST. A cross-site forged POST can neither read nor set it, so it can't
 /// forge a login. Path-scoped to the verify endpoint; nothing else needs it.
 const CONFIRM_NONCE_COOKIE: &str = "_sm_ml_confirm";
+/// Binds an emailed code to the browser that asked for it.
+const CODE_NONCE_COOKIE: &str = "_sm_ml_code";
+
+const CODE_COOKIE_PATH: &str = "/auth/magic-link/code";
+const CONFIRM_COOKIE_PATH: &str = "/auth/magic-link/verify";
 
 #[derive(Debug, Deserialize)]
 pub struct RequestBody {
@@ -70,6 +80,7 @@ pub struct RequestResponse {
 /// doesn't make the response observable.
 pub async fn request(
     State(state): State<AppState>,
+    cookies: Cookies,
     crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
     Json(body): Json<RequestBody>,
 ) -> Result<Json<RequestResponse>> {
@@ -79,6 +90,18 @@ pub async fn request(
 
     if let Some(email) = email_norm::normalize(&body.email) {
         let cfg = &state.cfg.auth.magic_link;
+        // Reminting binds the browser to a row whose mail the throttle may
+        // suppress, and the code already in the reader's inbox stops matching.
+        let nonce = cookies
+            .get(CODE_NONCE_COOKIE)
+            .map(|c| c.value().to_string())
+            .unwrap_or_else(token_hash::generate_raw_token);
+        set_code_nonce(
+            &cookies,
+            &state.cfg.auth.session,
+            &nonce,
+            cfg.expiry_minutes,
+        );
         let redirect_after = body
             .redirect_after
             .as_deref()
@@ -92,11 +115,14 @@ pub async fn request(
         // distinguish them; a no-user row never redeems at /verify.
         let created = magic_link::create(
             pool,
-            email,
-            ip_hash.as_deref(),
-            cfg.expiry_minutes,
-            redirect_after,
-            invitation_id,
+            magic_link::NewMagicLink {
+                email,
+                ip_hash: ip_hash.as_deref(),
+                expiry_minutes: cfg.expiry_minutes,
+                redirect_after,
+                invitation_id,
+                nonce: Some(&nonce),
+            },
         )
         .await?;
         let verify_url = token_link(
@@ -113,6 +139,7 @@ pub async fn request(
             to: EmailAddress::new(email.to_string(), email.to_string()),
             template: EmailTemplate::MagicLink {
                 url: verify_url,
+                code: created.code.clone(),
                 expires_in_minutes: cfg.expiry_minutes,
                 ip_hint: Some(client_ip.to_string()),
                 opens_accounts: state.cfg.auth.open_signup_enabled(),
@@ -127,25 +154,17 @@ pub async fn request(
         // per-email throttle below also runs off the response path. The
         // handler returns the anti-enum response immediately.
         tokio::spawn(async move {
-            // Per-email send throttle: only the first row inserted inside the
-            // window for a given address actually mails the user. Later
-            // duplicates still INSERT in the handler (anti-enum work) but the
-            // throttle check here finds an earlier row and drops the send,
-            // bounding the recipient's inbox to one link per window
-            // regardless of how many sources hammer /request.
-            //
-            // Fail open on DB error — a transient hiccup must not silently
-            // swallow a legitimate sign-in attempt.
-            match magic_link::earliest_in_window(&throttle_pool, &throttle_email, rate_limit).await
-            {
-                Ok(Some(winner)) if winner != created_id => {
+            // Fail open on DB error: a transient hiccup must not swallow a
+            // legitimate sign-in attempt.
+            match magic_link::sent_within(&throttle_pool, &throttle_email, rate_limit).await {
+                Ok(true) => {
                     tracing::info!(
                         window_seconds = rate_limit,
                         "magic_link: rate-limited, suppressing email"
                     );
                     return;
                 }
-                Ok(_) => {}
+                Ok(false) => {}
                 Err(err) => {
                     tracing::warn!(
                         error = %err,
@@ -155,6 +174,18 @@ pub async fn request(
             }
             if let Err(err) = sender.send(outgoing).await {
                 tracing::warn!(error = %err, "magic_link: email send failed (background)");
+                return;
+            }
+            // Stamp before superseding: a crash between the two must leave
+            // the older link standing.
+            if let Err(err) = magic_link::mark_sent(&throttle_pool, created_id).await {
+                tracing::warn!(error = %err, "magic_link: send stamp failed");
+                return;
+            }
+            match magic_link::supersede_others(&throttle_pool, &throttle_email, created_id).await {
+                Ok(n) if n > 0 => tracing::info!(retired = n, "magic_link: earlier links retired"),
+                Ok(_) => {}
+                Err(err) => tracing::warn!(error = %err, "magic_link: supersede failed"),
             }
         });
     }
@@ -185,6 +216,13 @@ struct MagicLinkInvalidPage {
     analytics: Option<&'static str>,
 }
 
+/// Separate from the dead-link page: the link in that mail is still live.
+#[derive(Template, WebTemplate)]
+#[template(path = "auth/magic_link_code_refused.html")]
+struct MagicLinkCodeRefusedPage {
+    analytics: Option<&'static str>,
+}
+
 /// The one-click confirmation served on GET so a mail link-scanner's prefetch
 /// can't burn the token. The token round-trips through a hidden field; the
 /// human's button press is the POST that signs in.
@@ -212,20 +250,45 @@ fn invalid_page(state: &AppState, status: StatusCode) -> Response {
         .into_response()
 }
 
-/// Set the double-submit nonce cookie. Path-scoped to the verify endpoint,
-/// HttpOnly (the hidden field is server-rendered, JS never reads it), and it
-/// outlives the token so a still-valid link always has a live cookie to match.
-fn set_confirm_nonce(cookies: &Cookies, cfg: &SessionConfig, nonce: &str, token_ttl_minutes: u32) {
-    let mut c = Cookie::new(CONFIRM_NONCE_COOKIE, nonce.to_string());
+/// `SameSite=Lax` is why both paths are exempt from the CSRF header check.
+/// The extra five minutes keep a live cookie behind a still-valid token.
+fn nonce_cookie(
+    name: &'static str,
+    path: &'static str,
+    cfg: &SessionConfig,
+    nonce: &str,
+    token_ttl_minutes: u32,
+) -> Cookie<'static> {
+    let mut c = Cookie::new(name, nonce.to_string());
     c.set_http_only(true);
     c.set_secure(cfg.cookie_secure);
     c.set_same_site(SameSite::Lax);
-    c.set_path("/auth/magic-link/verify");
+    c.set_path(path);
     if !cfg.cookie_domain.is_empty() {
         c.set_domain(cfg.cookie_domain.clone());
     }
     c.set_max_age(CookieDuration::minutes(i64::from(token_ttl_minutes) + 5));
-    cookies.add(c);
+    c
+}
+
+fn set_code_nonce(cookies: &Cookies, cfg: &SessionConfig, nonce: &str, token_ttl_minutes: u32) {
+    cookies.add(nonce_cookie(
+        CODE_NONCE_COOKIE,
+        CODE_COOKIE_PATH,
+        cfg,
+        nonce,
+        token_ttl_minutes,
+    ));
+}
+
+fn set_confirm_nonce(cookies: &Cookies, cfg: &SessionConfig, nonce: &str, token_ttl_minutes: u32) {
+    cookies.add(nonce_cookie(
+        CONFIRM_NONCE_COOKIE,
+        CONFIRM_COOKIE_PATH,
+        cfg,
+        nonce,
+        token_ttl_minutes,
+    ));
 }
 
 /// Constant-time double-submit check: the posted `csrf` must be non-empty and
@@ -237,10 +300,9 @@ fn confirm_nonce_ok(cookies: &Cookies, posted: &str) -> bool {
     !posted.is_empty() && cookie.value().as_bytes().ct_eq(posted.as_bytes()).into()
 }
 
-/// Clear the nonce cookie once its confirmation has been spent.
-fn clear_confirm_nonce(cookies: &Cookies, cfg: &SessionConfig) {
-    let mut gone = Cookie::new(CONFIRM_NONCE_COOKIE, "");
-    gone.set_path("/auth/magic-link/verify");
+fn clear_nonce(cookies: &Cookies, cfg: &SessionConfig, name: &'static str, path: &'static str) {
+    let mut gone = Cookie::new(name, "");
+    gone.set_path(path);
     if !cfg.cookie_domain.is_empty() {
         gone.set_domain(cfg.cookie_domain.clone());
     }
@@ -325,7 +387,92 @@ pub async fn verify_confirm(
         .await;
         return Ok(invalid_page(&state, StatusCode::GONE));
     };
-    clear_confirm_nonce(&cookies, &state.cfg.auth.session);
+    clear_nonce(
+        &cookies,
+        &state.cfg.auth.session,
+        CONFIRM_NONCE_COOKIE,
+        CONFIRM_COOKIE_PATH,
+    );
+    open_session_for(&state, &cookies, row, client_ip, &headers, ip_hash, ua_hash).await
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CodeForm {
+    pub code: String,
+}
+
+/// Redeems the code printed beside the link, only from the browser that
+/// asked for it.
+pub async fn submit_code(
+    State(state): State<AppState>,
+    crate::web::client_ip::ClientIp(client_ip): crate::web::client_ip::ClientIp,
+    headers: HeaderMap,
+    cookies: Cookies,
+    Form(form): Form<CodeForm>,
+) -> Result<Response> {
+    let pool = state.require_db()?;
+    let salt = state.cfg.auth.fingerprint_salt.as_str();
+    let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
+    let ua_hash = fingerprint::hash_fingerprint(
+        salt,
+        headers
+            .get(USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default(),
+    );
+
+    let Some(nonce) = cookies
+        .get(CODE_NONCE_COOKIE)
+        .map(|c| c.value().to_string())
+    else {
+        return Ok(invalid_page(&state, StatusCode::GONE));
+    };
+    match magic_link::consume_code(pool, &nonce, &form.code).await? {
+        magic_link::CodeOutcome::Ok(row) => {
+            clear_nonce(
+                &cookies,
+                &state.cfg.auth.session,
+                CODE_NONCE_COOKIE,
+                CODE_COOKIE_PATH,
+            );
+            open_session_for(&state, &cookies, row, client_ip, &headers, ip_hash, ua_hash).await
+        }
+        magic_link::CodeOutcome::Refused => {
+            login_audit::record_failure_anon(
+                pool,
+                LoginMethod::MagicLink,
+                ip_hash.as_deref(),
+                ua_hash.as_deref(),
+                "code_refused",
+            )
+            .await;
+            // Spent whatever refused it.
+            clear_nonce(
+                &cookies,
+                &state.cfg.auth.session,
+                CODE_NONCE_COOKIE,
+                CODE_COOKIE_PATH,
+            );
+            let mut resp = MagicLinkCodeRefusedPage {
+                analytics: crate::analytics::website_id(&state.cfg.auth.public_base_url),
+            }
+            .into_response();
+            *resp.status_mut() = StatusCode::GONE;
+            Ok(resp)
+        }
+    }
+}
+
+async fn open_session_for(
+    state: &AppState,
+    cookies: &Cookies,
+    row: magic_link::MagicLinkRow,
+    client_ip: std::net::IpAddr,
+    headers: &HeaderMap,
+    ip_hash: Option<String>,
+    ua_hash: Option<String>,
+) -> Result<Response> {
+    let pool = state.require_db()?;
 
     // Tombstone-inclusive: a verified link proves email ownership. Resolving
     // the row is not restoring it — same as the OAuth callbacks.
@@ -341,7 +488,7 @@ pub async fn verify_confirm(
                 }
                 (user_id, deleted_at.is_some(), Bootstrap::Existing)
             }
-            None => match bootstrap_unknown_email(&state, &row).await? {
+            None => match bootstrap_unknown_email(state, &row).await? {
                 Some((user_id, created)) => (user_id, false, created),
                 None => {
                     login_audit::record_failure_anon(
@@ -352,7 +499,7 @@ pub async fn verify_confirm(
                         "no_user_for_email",
                     )
                     .await;
-                    return Ok(invalid_page(&state, StatusCode::GONE));
+                    return Ok(invalid_page(state, StatusCode::GONE));
                 }
             },
         };
@@ -360,7 +507,7 @@ pub async fn verify_confirm(
     // Redeem a carried invitation before the session is minted so the
     // session opens in the joined org. Soft-fails — login never breaks.
     let joined = match row.invitation_id {
-        Some(id) => crate::api::handlers::invitations::try_auto_accept(&state, user_id, id).await,
+        Some(id) => crate::api::handlers::invitations::try_auto_accept(state, user_id, id).await,
         None => None,
     };
     if bootstrapped == Bootstrap::Invited && joined.is_none() {
@@ -381,7 +528,7 @@ pub async fn verify_confirm(
             "invited_bootstrap_raced",
         )
         .await;
-        return Ok(invalid_page(&state, StatusCode::GONE));
+        return Ok(invalid_page(state, StatusCode::GONE));
     }
     let active_org = match joined.as_ref().map(|j| j.org_id) {
         Some(org) => Some(org),
@@ -425,12 +572,12 @@ pub async fn verify_confirm(
     }
 
     crate::analytics::track_login(
-        &state,
+        state,
         LoginMethod::MagicLink,
         bootstrapped != Bootstrap::Existing,
         row.redirect_after.as_deref(),
         client_ip,
-        &headers,
+        headers,
     );
 
     cookies.add(session_store::build_cookie(
@@ -438,11 +585,11 @@ pub async fn verify_confirm(
         created.cookie_token,
     ));
     crate::web::login_hint::set(
-        &cookies,
+        cookies,
         &state.cfg.auth.session,
         LoginMethod::MagicLink.as_db_str(),
     );
-    if let Err(err) = crate::web::display_prefs::issue_cookies(&state, &cookies, user_id).await {
+    if let Err(err) = crate::web::display_prefs::issue_cookies(state, cookies, user_id).await {
         tracing::warn!(error = %err, "display-preference cookie issue failed (non-fatal)");
     }
     // One-shot banners ride a flash cookie (unspoofable, fires once); only the
@@ -450,7 +597,7 @@ pub async fn verify_confirm(
     // callback.
     let invite_missed = joined.is_none() && row.invitation_id.is_some();
     crate::web::flash::set(
-        &cookies,
+        cookies,
         &crate::web::flash::Flash {
             restored: false,
             invite_missed,
@@ -550,6 +697,40 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_nonce_cookie_cannot_ride_a_cross_site_post() {
+        let cfg = SessionConfig::default();
+        for (name, path) in [
+            (CODE_NONCE_COOKIE, CODE_COOKIE_PATH),
+            (CONFIRM_NONCE_COOKIE, CONFIRM_COOKIE_PATH),
+        ] {
+            let c = nonce_cookie(name, path, &cfg, "n", 15);
+            // The CSRF exemption for both endpoints rests on these.
+            assert_eq!(c.same_site(), Some(SameSite::Lax), "{name}");
+            assert_eq!(c.http_only(), Some(true), "{name}");
+            assert_eq!(c.path(), Some(path), "{name}");
+            assert_eq!(c.max_age(), Some(CookieDuration::minutes(20)), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unset_cookie_domain_leaves_the_cookie_host_only() {
+        // `Domain=` with nothing after it is a cookie the browser drops.
+        let cfg = SessionConfig::default();
+        assert_eq!(
+            nonce_cookie(CODE_NONCE_COOKIE, CODE_COOKIE_PATH, &cfg, "n", 15).domain(),
+            None
+        );
+        let cfg = SessionConfig {
+            cookie_domain: "example.test".into(),
+            ..SessionConfig::default()
+        };
+        assert_eq!(
+            nonce_cookie(CODE_NONCE_COOKIE, CODE_COOKIE_PATH, &cfg, "n", 15).domain(),
+            Some("example.test")
+        );
+    }
+
+    #[test]
     fn confirm_page_scrubs_the_token_from_every_analytics_send() {
         let html = MagicLinkConfirmPage {
             email: "who@example.com".into(),
@@ -585,6 +766,20 @@ mod tests {
         .expect("renders");
         assert!(!invalid.contains("analytics.uptimepage.dev"));
         assert!(!invalid.contains("auth_analytics.js"));
+    }
+
+    #[test]
+    fn a_refused_code_does_not_read_as_a_dead_link() {
+        let html = MagicLinkCodeRefusedPage {
+            analytics: Some("website-id"),
+        }
+        .render()
+        .expect("renders");
+        assert!(html.contains("still signs"));
+        assert!(!html.contains("request a new link"));
+        assert!(html.contains(r#"data-auth-event-reason="code-refused""#));
+        // One reason for wrong, spent and wrong-browser alike.
+        assert_eq!(html.matches("data-auth-event-reason").count(), 1);
     }
 
     #[test]

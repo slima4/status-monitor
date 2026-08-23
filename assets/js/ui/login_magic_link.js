@@ -7,6 +7,13 @@
     const sent = document.getElementById("magic-link-sent");
     const email = document.getElementById("magic-link-email");
 
+    document.getElementById("magic-link-again")?.addEventListener("click", () => {
+        sent.classList.add("hidden");
+        form.classList.remove("hidden");
+        form.querySelector("button[type=submit]").disabled = false;
+        email.focus();
+    });
+
     form.addEventListener("submit", async (ev) => {
         ev.preventDefault();
         if (!email.value || !email.checkValidity()) {
