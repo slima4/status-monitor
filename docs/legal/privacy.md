@@ -1,6 +1,6 @@
 # Privacy Policy
 
-**Last updated:** 2026-08-22
+**Last updated:** 2026-08-23
 
 This Privacy Policy explains how the uptimepage service ("we", "us") collects and processes personal data. It is intended to satisfy our obligations under the EU General Data Protection Regulation (GDPR) and similar laws.
 
@@ -21,6 +21,7 @@ We collect data in three ways:
 **You provide:**
 - Email address (via GitHub or Google OAuth, or magic-link sign-in)
 - Display name (via GitHub or Google OAuth)
+- Passkey public keys and the name you give each one. The private key is created by your device and never leaves it, so we never receive it
 - Organisation names, slugs, branding (display name, about text, logo)
 - Target configurations (URLs, intervals, headers, optional credentials)
 - Status-page customisation (incident narration, maintenance windows)
@@ -36,11 +37,13 @@ We collect data in three ways:
 
 **We collect via your browser:**
 - Session cookie (`_sm_session`) — necessary for authentication
+- Two short-lived cookies while an email sign-in is in progress (`_sm_ml_confirm`, `_sm_ml_code`), which bind that sign-in to the browser that started it
+- Small functional cookies for your last sign-in method and your display settings. See the [Cookie Policy](/cookies) for the full list
 - IP address (hashed before storage; never stored raw)
 
 **Analytics (public marketing and sign-in pages only):** We run self-hosted, cookieless analytics (Umami) on our own EU infrastructure. It records aggregate page views, referrer, browser, operating system, device type, and coarse location (country and region). Visits are grouped by a hash of your IP address and user agent mixed with a secret value that rotates every month, so within one month repeat visits from the same network and browser count as one returning visitor. It sets no cookies, never stores your raw IP, cannot tell us who you are, and cannot follow you to other websites. The data stays on our infrastructure and is never sent to a third party.
 
-On the sign-in page this also records which sign-in method you chose (GitHub, Google, or email link) and whether signing in succeeded, so we can tell how many people who set out to sign in actually got in. Once you are signed in, no page of the product is tracked: there is no analytics on your dashboard, monitors, incidents, or settings.
+On the sign-in page this also records which sign-in method you chose (GitHub, Google, email link, or passkey) and whether signing in succeeded, so we can tell how many people who set out to sign in actually got in. Once you are signed in, no page of the product is tracked: there is no analytics on your dashboard, monitors, incidents, or settings.
 
 We do **not** use third-party analytics services that export your data (no Google Analytics, no Mixpanel, no tracking pixels).
 
@@ -48,7 +51,7 @@ We do **not** use third-party analytics services that export your data (no Googl
 
 | Data | Purpose | Lawful basis (GDPR Art. 6) |
 |---|---|---|
-| Email, display name, OAuth identity | Provide authentication | Contract |
+| Email, display name, OAuth identity, passkey public keys | Provide authentication | Contract |
 | Targets, check results | Provide monitoring service | Contract |
 | Browser flow runs and failure evidence | Show why a monitored journey broke | Contract |
 | Heartbeat pings and the output your job sends with them | Show when a scheduled job ran and why it failed | Contract |
@@ -71,7 +74,7 @@ We do not engage in automated decision-making with significant effects on you (n
 
 | Category | Retention |
 |---|---|
-| Account data (email, OAuth) | Until account deletion |
+| Account data (email, OAuth, passkeys) | Until account deletion |
 | Sessions | 90 days maximum |
 | API tokens | Until you revoke them |
 | Check results (raw per-check detail) | 30 days |
@@ -146,7 +149,7 @@ Under GDPR, you have the right to:
 
 ## 9. Cookies
 
-We use one cookie: `_sm_session`, which holds your session identifier. This is **strictly necessary** for the Service to function and does not require consent.
+We use a small number of first-party cookies: one to hold your session identifier, two short-lived ones that bind an email sign-in to the browser that started it, and a few that remember your last sign-in method and your display settings. All of them are either **strictly necessary** for the Service to function or remember a choice you made yourself, so none requires consent.
 
 We do not use analytics, advertising, or third-party tracking cookies.
 

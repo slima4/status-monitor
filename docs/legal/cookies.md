@@ -1,18 +1,37 @@
 # Cookie Policy
 
-**Last updated:** 2026-06-24
+**Last updated:** 2026-08-23
 
 ## What Cookies We Use
 
-We use exactly one cookie:
+Every cookie below is set by the Service itself. None of them identify you to third parties, track your browsing across other sites, or facilitate advertising.
 
-| Name | Purpose | Type | Duration | Required? |
-|---|---|---|---|---|
-| `_sm_session` | Authenticate your session after sign-in | Strictly necessary | 90 days maximum (30 days idle) | Yes |
+### Signing in
 
-Without this cookie, you cannot stay signed in. This cookie does **not**
-identify you to third parties, track your browsing across other sites,
-or facilitate advertising.
+| Name | Purpose | Duration | Required? |
+|---|---|---|---|
+| `_sm_session` | Authenticate your session after sign-in | 90 days maximum (30 days idle) | Yes |
+| `_sm_ml_confirm` | Ties the sign-in link you opened to the button you press on it, so nobody else can complete that sign-in | Lifetime of the link, 20 minutes by default | Only for email sign-in |
+| `_sm_ml_code` | Binds the sign-in code we email you to the browser that asked for it, so the code is useless anywhere else | Lifetime of the link, 20 minutes by default | Only for email sign-in |
+
+Without `_sm_session` you cannot stay signed in. The other two are set only while an email sign-in is in progress. `_sm_ml_confirm` is cleared as soon as the link is used, and `_sm_ml_code` as soon as a code is entered; either way both expire on their own shortly after the sign-in they belong to.
+
+### Running the app
+
+| Name | Purpose | Duration | Required? |
+|---|---|---|---|
+| `_sm_last_method` | Remembers which sign-in method you used last, so the sign-in page can point you back at it | 180 days | No |
+| `_sm_flash` | Carries a one-off confirmation message across a redirect | 60 seconds | No |
+| `_sm_deleted` | Shows the receipt for an account deletion you just requested | 5 minutes | No |
+
+### Remembering your display choices
+
+| Name | Purpose | Duration | Required? |
+|---|---|---|---|
+| `sm_theme` | Your light or dark choice, so the page paints in it before the stylesheet loads | 365 days | No |
+| `sm_time_format` | Your 12-hour or 24-hour clock choice | 365 days | No |
+
+These two mirror preferences already stored on your account. They are issued when you sign in and updated when you change the setting.
 
 ## What Cookies We Don't Use
 
@@ -25,13 +44,9 @@ We do not use:
 
 ## Consent
 
-Under the ePrivacy Directive and GDPR, "strictly necessary" cookies
-required for a service the user explicitly requested do not require
-consent. The `_sm_session` cookie qualifies — you only receive it after
-signing in, which is an explicit action.
+Under the ePrivacy Directive and GDPR, cookies strictly necessary for a service you explicitly requested do not require consent, and neither do cookies that only remember a choice you made yourself. Every cookie above falls into one of those two groups: you receive them by signing in, or by changing a setting. We set no analytics, advertising or tracking cookie, so there is nothing to consent to and no banner to dismiss.
 
-You can configure your browser to reject all cookies, but you would not
-be able to use the Service in that case.
+You can configure your browser to reject all cookies, but you would not be able to sign in.
 
 ## Public Status Pages
 

@@ -56,7 +56,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `auth` passkeys | none | Passkeys have no client credentials to configure: they answer to this deployment alone. Enabled by `enabled_methods` including `"passkey"`, plus an `auth.public_base_url` with a host, whose host becomes the relying-party id. WebAuthn needs a secure context, so they are unavailable over plain http on a real hostname. **Changing that host retires every passkey already created**; nothing can migrate them, and boot logs a warning counting the casualties. At most 10 per account |
 | `auth.api_tokens` | `prefix_visible_chars` | Indexed prefix length for token lookup. The per-user token cap is a plan quota (`plans.max_api_tokens_per_user`), not a config key |
 | `auth.invitations` | `expiry_hours` | Invitation lifetime. The per-org pending cap is a plan quota (`plans.max_pending_invitations`), not a config key |
-| `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Magic-link token lifetime. Routes only mount when `enabled_methods` includes `"magic_link"` |
+| `auth.magic_link` | `expiry_minutes`, `rate_limit_seconds` | Lifetime of both credentials in the mail, the link and the six-character code beside it. The code is bound to the browser that asked for it and gets one attempt; a miss leaves the link redeemable. Sending a new mail retires every earlier link and code for that address. Routes only mount when `enabled_methods` includes `"magic_link"` |
 | `bootstrap` | `email`, `org_name` | Seeds the first owner at boot when the instance has no users, for installs with no terminal to run `bootstrap-owner` in. Empty `email` (default) disables it. See [First-run owner](#first-run-owner) below |
 | `mcp` | `enabled`, `oauth_enabled`, `resource_uri`, `allowed_origins`, `access_token_ttl_secs` | LLM connector (MCP) server at `/mcp`. Off by default; OAuth requires real HTTPS `resource_uri` + `auth.public_base_url`. See [MCP server](mcp.md) |
 | `email` | `provider`, `from_name`, `from_address`, `support_address` | Transactional email backend. `provider` ∈ `"resend" \| "log" \| "memory"`. A set `support_address` mounts the in-app help form at `/help` and relays it there, with the sender as `Reply-To`; empty (default) leaves the page, its endpoint and its nav entry absent |
@@ -138,7 +138,7 @@ expiry_hours = 168                   # 7 days; pending-invite cap is plans.max_p
 prefix_visible_chars = 16            # floor; lower values fail boot; per-user cap is plans.max_api_tokens_per_user
 
 [auth.magic_link]
-expiry_minutes = 15
+expiry_minutes = 15                  # covers the link and the code printed beside it
 rate_limit_seconds = 60                # per-email send throttle; 0 disables
 
 [email]
@@ -167,7 +167,7 @@ an entry disables that method's login start/callback (404) and hides its
 button. OAuth providers additionally need client_id + client_secret +
 redirect_url set — a listed but incompletely configured provider stays
 hidden and logs a warning on probe. `"magic_link"` mounts the magic-link
-request/verify endpoints and the login-page email form.
+request, verify and code endpoints along with the login-page email form.
 
 `auth.fingerprint_salt` is paired with the `auth_salt_history` table.
 Rotating the value mid-deployment refuses to boot unless the override

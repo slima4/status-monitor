@@ -376,6 +376,18 @@ with the same argon2id parameters as API tokens).
   invitation for that same address bootstraps the account at verify
   time: user created (verified, consent stamped, no personal org) and
   joined directly into the inviter's org.
+- The same mail carries a **code** for a reader whose inbox is on another
+  device: six Crockford base32 characters, entered back in the tab that
+  asked. It is bound to that browser by a `_sm_ml_code` cookie, so a code
+  guessed from anywhere else is refused whatever it says. **One attempt** —
+  a well-formed miss retires the code and leaves the link in the same mail
+  redeemable, which is what makes a single attempt survivable. Malformed
+  input, whitespace and separators spend nothing, since a paste accident is
+  not a guess.
+- **Only the newest credential is live.** Sending a new mail retires every
+  earlier link and code for that address. Retirement is recorded separately
+  from redemption, so "did anyone actually click this?" stays answerable,
+  and the trail records which of the two opened the session.
 - With `auth.open_signup` on (the default), a magic link requested for
   an **unknown** email and carrying no invitation opens an account with
   an org of its own. With it off the deployment is invite-only and that
@@ -394,7 +406,8 @@ with the same argon2id parameters as API tokens).
 | `GET`  | `/auth/github/callback`        | none    | Handle OAuth callback |
 | `POST` | `/auth/logout`                 | session | Destroy current session |
 | `POST` | `/auth/logout-all`             | session | Destroy all sessions for current user |
-| `POST` | `/auth/magic-link/request`     | none    | Request magic link (gated) |
+| `POST` | `/auth/magic-link/request`     | none    | Request magic link + code (gated) |
+| `POST` | `/auth/magic-link/code`        | none    | Redeem the emailed code in the browser that asked (gated) |
 | `GET`  | `/auth/magic-link/verify`      | none    | Verify magic-link token (gated) |
 | `GET`  | `/auth/google/login`           | none    | Initiate Google OAuth |
 | `GET`  | `/auth/google/callback`        | none    | Handle Google OAuth callback |

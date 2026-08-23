@@ -6,9 +6,11 @@ This walks through the hosted service at <https://app.uptimepage.dev>. Running y
 
 ## 1. Sign in
 
-Sign in with GitHub or Google. There is no password to choose and no email opt-in.
+Sign in with GitHub, Google, or your email address. There is no password to choose and no email opt-in.
 
-The email sign-in link on the login page is for accounts that already exist or have been invited, so a brand new account starts with GitHub or Google.
+Choosing email sends one message carrying two ways in: a link, and a six-character code beneath it. Open the link on whichever device has your inbox, or type the code back into the tab you started from, whichever is less trouble. Either signs you in, and for an address we have not seen before, either opens the account. The code gets one attempt, so if it is refused, use the link in the same message rather than guessing again.
+
+Once you are in you can add a passkey from your account settings, which then signs you in with the fingerprint reader or face unlock you already use on that device.
 
 Signing in for the first time creates your organization, makes you its owner, and gives you a slug based on your name. Everything you create from here belongs to that org, and teammates you invite later share it.
 
