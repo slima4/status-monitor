@@ -536,3 +536,153 @@ async fn find_pending_by_id_honors_pending_guards() {
 
     drop_pg(&name).await;
 }
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn revoking_does_not_buy_another_send() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let owner = seed_user(&pool, "spray@example.test").await;
+    let org = seed_org(&pool, owner).await;
+
+    // Revoking frees a slot under the stock cap. It must not free the send.
+    let mut ids = Vec::new();
+    for i in 0..invitations::MAX_SENDS_PER_WINDOW {
+        invitations::ensure_send_window(&pool, org, owner)
+            .await
+            .expect("under the window");
+        let created = invitations::create(
+            &pool,
+            org,
+            owner,
+            &format!("t{i}@example.test"),
+            Role::Member,
+            168,
+            u32::MAX,
+        )
+        .await
+        .expect("create");
+        invitations::record_send(&pool, org, owner, created.row.id)
+            .await
+            .expect("record");
+        ids.push(created.row.id);
+    }
+    for id in &ids {
+        invitations::revoke(&pool, org, *id).await.expect("revoke");
+    }
+    let (pending,): (i64,) = sqlx::query_as("SELECT count(*) FROM invitations WHERE org_id = $1")
+        .bind(org.0)
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(pending, 0, "every row is gone, so the stock cap is clear");
+
+    let err = invitations::ensure_send_window(&pool, org, owner)
+        .await
+        .expect_err("the window still remembers");
+    assert!(
+        format!("{err:?}").contains("INVITATION_SEND_LIMIT"),
+        "{err:?}"
+    );
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_send_reaches_the_org_trail() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let owner = seed_user(&pool, "trail@example.test").await;
+    let org = seed_org(&pool, owner).await;
+    let created = invitations::create(
+        &pool,
+        org,
+        owner,
+        "guest@example.test",
+        Role::Member,
+        168,
+        u32::MAX,
+    )
+    .await
+    .expect("create");
+    invitations::record_send(&pool, org, owner, created.row.id)
+        .await
+        .expect("record");
+
+    // The count that bounds sending reads from here.
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT action FROM org_audit_log WHERE org_id = $1 AND action = 'invitation.sent'",
+    )
+    .bind(org.0)
+    .fetch_all(&pool)
+    .await
+    .expect("read trail");
+    assert_eq!(rows.len(), 1, "one send, one row");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_window_forgets_what_fell_out_of_it() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let owner = seed_user(&pool, "aged@example.test").await;
+    let org = seed_org(&pool, owner).await;
+
+    for i in 0..invitations::MAX_SENDS_PER_WINDOW {
+        let created = invitations::create(
+            &pool,
+            org,
+            owner,
+            &format!("a{i}@example.test"),
+            Role::Member,
+            168,
+            u32::MAX,
+        )
+        .await
+        .expect("create");
+        invitations::record_send(&pool, org, owner, created.row.id)
+            .await
+            .expect("record");
+        invitations::revoke(&pool, org, created.row.id)
+            .await
+            .expect("revoke");
+    }
+    invitations::ensure_send_window(&pool, org, owner)
+        .await
+        .expect_err("at the ceiling");
+
+    // A ceiling on abuse, not a permanent one: age the trail past the window.
+    sqlx::query(
+        "UPDATE org_audit_log SET occurred_at = occurred_at - make_interval(hours => $2) \
+         WHERE org_id = $1 AND action = 'invitation.sent'",
+    )
+    .bind(org.0)
+    .bind(i32::try_from(invitations::SEND_WINDOW_HOURS + 1).unwrap())
+    .execute(&pool)
+    .await
+    .expect("age the trail");
+
+    invitations::ensure_send_window(&pool, org, owner)
+        .await
+        .expect("the window has moved on");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}

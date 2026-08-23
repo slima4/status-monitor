@@ -194,6 +194,30 @@ const FOUNDING_CUTOFF: i64 = 1000;
 ///
 /// Runs inside an existing `Transaction` so the signup tx in the OAuth
 /// callback can roll back atomically on failure.
+/// `generate_signup_slug` collides at p≈1e-9 per pair; 5 retries covers that
+/// without spinning.
+const SIGNUP_SLUG_RETRIES: u32 = 5;
+
+/// Signup-org creation inside a caller's new-user tx. Name and slug are
+/// neutral: a slug is a public host on our domain, so nothing user-supplied
+/// may land there unreviewed.
+pub async fn create_signup_org_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user: UserId,
+) -> Result<OrgId> {
+    for _ in 0..SIGNUP_SLUG_RETRIES {
+        let slug = crate::domain::generate_signup_slug();
+        if let Some(org_id) =
+            create_signup_org_with_owner_in_tx(tx, user, &slug, "My status").await?
+        {
+            return Ok(org_id);
+        }
+    }
+    Err(AppError::Other(anyhow::anyhow!(
+        "signup slug retries exhausted ({SIGNUP_SLUG_RETRIES})"
+    )))
+}
+
 pub async fn create_signup_org_with_owner_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: UserId,

@@ -115,6 +115,7 @@ pub async fn request(
                 url: verify_url,
                 expires_in_minutes: cfg.expiry_minutes,
                 ip_hint: Some(client_ip.to_string()),
+                opens_accounts: state.cfg.auth.open_signup_enabled(),
             },
         };
         let sender = state.email_sender.clone();
@@ -338,12 +339,9 @@ pub async fn verify_confirm(
                         "magic-link sign-in on an account scheduled for deletion; routing to the restore choice"
                     );
                 }
-                (user_id, deleted_at.is_some(), false)
+                (user_id, deleted_at.is_some(), Bootstrap::Existing)
             }
-            // Unknown email: bootstrap an account ONLY for a valid carried
-            // invitation whose address matches — the inviter's explicit
-            // allowlist. Everything else stays the indistinguishable page.
-            None => match bootstrap_invited_user(&state, &row).await? {
+            None => match bootstrap_unknown_email(&state, &row).await? {
                 Some((user_id, created)) => (user_id, false, created),
                 None => {
                     login_audit::record_failure_anon(
@@ -365,7 +363,7 @@ pub async fn verify_confirm(
         Some(id) => crate::api::handlers::invitations::try_auto_accept(&state, user_id, id).await,
         None => None,
     };
-    if bootstrapped && joined.is_none() {
+    if bootstrapped == Bootstrap::Invited && joined.is_none() {
         // The freshly minted user exists ONLY to redeem this invitation; a
         // raced revoke between pre-flight and accept must not leave an
         // org-less orphan account. No FK children yet — plain DELETE.
@@ -426,11 +424,10 @@ pub async fn verify_confirm(
         tracing::warn!(error = %err, "magic_link audit write failed (non-fatal)");
     }
 
-    // Invited bootstrap is the one path where a link mints an account.
     crate::analytics::track_login(
         &state,
         LoginMethod::MagicLink,
-        bootstrapped,
+        bootstrapped != Bootstrap::Existing,
         row.redirect_after.as_deref(),
         client_ip,
         &headers,
@@ -485,7 +482,7 @@ pub async fn verify_confirm(
 async fn bootstrap_invited_user(
     state: &AppState,
     row: &magic_link::MagicLinkRow,
-) -> Result<Option<(crate::domain::UserId, bool)>> {
+) -> Result<Option<(crate::domain::UserId, Bootstrap)>> {
     let pool = state.require_db()?;
     let Some(invitation_id) = row.invitation_id else {
         return Ok(None);
@@ -508,7 +505,44 @@ async fn bootstrap_invited_user(
     if created {
         tracing::info!(user_id = %user_id.0, via = "invitation", "magic-link bootstrap created account");
     }
-    Ok(Some((user_id, created)))
+    // A row this call did not create must not be compensated away.
+    let how = if created {
+        Bootstrap::Invited
+    } else {
+        Bootstrap::Existing
+    };
+    Ok(Some((user_id, how)))
+}
+
+/// Only one of these can be rolled back.
+#[derive(Clone, Copy, PartialEq)]
+enum Bootstrap {
+    Existing,
+    /// Minted to redeem an invitation; rolled back if that fails.
+    Invited,
+    /// Opened its own org under `auth.open_signup`.
+    Founded,
+}
+
+/// An invitation works whatever the signup policy says. Anything else is
+/// `auth.open_signup`.
+async fn bootstrap_unknown_email(
+    state: &AppState,
+    row: &magic_link::MagicLinkRow,
+) -> Result<Option<(crate::domain::UserId, Bootstrap)>> {
+    // Founding a different org would strand the invitation and its seat.
+    if row.invitation_id.is_some() {
+        return bootstrap_invited_user(state, row).await;
+    }
+    if !state.cfg.auth.open_signup_enabled() {
+        return Ok(None);
+    }
+    let (user_id, created) =
+        crate::storage::users::create_signup_user(state.require_db()?, &row.email).await?;
+    if created {
+        tracing::info!(user_id = %user_id.0, via = "open_signup", "magic-link bootstrap created account");
+    }
+    Ok(Some((user_id, Bootstrap::Founded)))
 }
 
 #[cfg(test)]

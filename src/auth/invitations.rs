@@ -50,7 +50,65 @@ pub struct CreatedInvitation {
     pub token: String,
 }
 
+/// Counted from the audit trail, not from `invitations`: revoking deletes the
+/// row, and revoke-then-resend is the bypass this closes.
+pub const MAX_SENDS_PER_WINDOW: i64 = 25;
+pub const SEND_WINDOW_HOURS: i64 = 24;
+
 pub use crate::auth::token_hash::generate_raw_token;
+
+/// Refuses once the org has sent [`MAX_SENDS_PER_WINDOW`] inside the window.
+/// Both the create and the resend path mail, so both ask.
+pub async fn ensure_send_window(pool: &PgPool, org: OrgId, inviter: UserId) -> Result<()> {
+    let (sent,): (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM org_audit_log \
+         WHERE org_id = $1 AND action = 'invitation.sent' \
+         AND occurred_at > now() - make_interval(hours => $2)",
+    )
+    .bind(org.0)
+    .bind(i32::try_from(SEND_WINDOW_HOURS).unwrap_or(24))
+    .fetch_one(pool)
+    .await
+    .context("invitations::ensure_send_window")?;
+    if sent < MAX_SENDS_PER_WINDOW {
+        return Ok(());
+    }
+    tracing::warn!(org_id = %org.0, inviter = %inviter.0, sent, "invitation send limit reached");
+    crate::quotas::service::record_quota_event(
+        Some(pool.clone()),
+        Some(org),
+        Some(inviter),
+        "quota_exceeded",
+        Some(crate::quotas::service::usage_keys::INVITATION_SENDS),
+        serde_json::json!({ "current": sent, "limit": MAX_SENDS_PER_WINDOW }),
+        None,
+    );
+    Err(AppError::conflict(
+        crate::api::error::codes::INVITATION_SEND_LIMIT,
+        format!("invitation send limit reached ({MAX_SENDS_PER_WINDOW} in {SEND_WINDOW_HOURS}h)"),
+    ))
+}
+
+/// Append-only, so it survives the revoke that deletes the invitation row.
+/// Written once the mail is away, so a failed send spends no budget.
+pub async fn record_send(
+    pool: &PgPool,
+    org: OrgId,
+    inviter: UserId,
+    invitation: Uuid,
+) -> Result<()> {
+    let mut tx = pool.begin().await.context("record_send: begin")?;
+    crate::storage::orgs::record_audit_tx(
+        &mut tx,
+        org,
+        Some(inviter),
+        "invitation.sent",
+        serde_json::json!({ "invitation_id": invitation }),
+    )
+    .await?;
+    tx.commit().await.context("record_send: commit")?;
+    Ok(())
+}
 
 /// Number of pending invitations on the org. The cap is enforced
 /// atomically inside `create` against the plan; this helper is read-only

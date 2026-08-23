@@ -217,6 +217,9 @@ pub mod codes {
     pub const INVITATION_INVALID: &str = "INVITATION_INVALID";
     pub const INVITATION_EMAIL_MISMATCH: &str = "INVITATION_EMAIL_MISMATCH";
     pub const INVITATIONS_LIMIT: &str = "INVITATIONS_LIMIT";
+    /// Distinct from `INVITATIONS_LIMIT`: that one clears by revoking a
+    /// pending invitation, this one only by waiting.
+    pub const INVITATION_SEND_LIMIT: &str = "INVITATION_SEND_LIMIT";
     pub const INVALID_ROLE: &str = "INVALID_ROLE";
     pub const INVALID_EMAIL: &str = "INVALID_EMAIL";
     pub const CSRF_PROTECTION: &str = "CSRF_PROTECTION";

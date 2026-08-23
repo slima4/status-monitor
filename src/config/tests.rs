@@ -360,3 +360,24 @@ fn an_unaddressable_microsoft_tenant_fails_the_boot() {
     cfg.auth.microsoft.client.client_id = String::new();
     assert!(cfg.validate_microsoft_oauth().is_ok());
 }
+
+/// The field defaults to `true`, so a misplaced or misspelled key loads as if
+/// it were there. Only reading the parsed tree by path catches that.
+#[test]
+fn the_shipped_config_puts_open_signup_where_auth_reads_it() {
+    let shipped = include_str!("../../config/default.toml");
+    let built = Config::builder()
+        .add_source(File::from_str(shipped, FileFormat::Toml))
+        .build()
+        .expect("shipped config builds");
+    assert_eq!(
+        built.get_bool("auth.open_signup").ok(),
+        Some(true),
+        "auth.open_signup is missing from the shipped config, or sits under another table"
+    );
+
+    let cfg: crate::config::AppConfig = built
+        .try_deserialize()
+        .expect("shipped config deserialises");
+    assert!(cfg.auth.open_signup, "and it reaches the field");
+}

@@ -375,9 +375,13 @@ with the same argon2id parameters as API tokens).
 - A magic link requested for an **unknown** email that carries a valid
   invitation for that same address bootstraps the account at verify
   time: user created (verified, consent stamped, no personal org) and
-  joined directly into the inviter's org. Without a matching
-  invitation, unknown emails still get the indistinguishable
-  invalid-link page.
+  joined directly into the inviter's org.
+- With `auth.open_signup` on (the default), a magic link requested for
+  an **unknown** email and carrying no invitation opens an account with
+  an org of its own. With it off the deployment is invite-only and that
+  case still gets the indistinguishable invalid-link page. Either way
+  the link is sent to every address, so nothing about the answer says
+  whether an account existed.
 - A seat-race loser's invitation is un-consumed (`accepted_at`
   reverted), so "try again once a seat frees up" stays true.
 

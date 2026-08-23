@@ -27,6 +27,9 @@ impl Default for BootstrapConfig {
 #[serde(default)]
 pub struct AuthConfig {
     pub enabled_methods: Vec<String>,
+    /// Off makes the deployment invite-only. Existing users still sign in and
+    /// an invitation still bootstraps its recipient.
+    pub open_signup: bool,
     pub fingerprint_salt: String,
     /// External base URL (scheme + host + optional port) used to build links
     /// the user sees in emails — invitation accept/decline, magic-link verify.
@@ -54,6 +57,7 @@ impl Default for AuthConfig {
                 "passkey".into(),
                 "magic_link".into(),
             ],
+            open_signup: true,
             fingerprint_salt: String::new(),
             public_base_url: "http://localhost:8080".into(),
             session: SessionConfig::default(),
@@ -79,6 +83,12 @@ impl AuthConfig {
     /// login-page form, and the token-purge ticker must agree.
     pub fn magic_link_enabled(&self) -> bool {
         self.method_enabled("magic_link")
+    }
+
+    /// Needs the magic-link surface too: a link is how a stranger proves the
+    /// address is theirs.
+    pub fn open_signup_enabled(&self) -> bool {
+        self.open_signup && self.magic_link_enabled()
     }
 
     pub fn github_login_enabled(&self) -> bool {
@@ -268,5 +278,29 @@ impl Default for MagicLinkConfig {
             expiry_minutes: 15,
             rate_limit_seconds: 60,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AuthConfig;
+
+    #[test]
+    fn open_signup_needs_a_link_to_arrive_by() {
+        let mut cfg = AuthConfig::default();
+        assert!(cfg.open_signup_enabled(), "both on by default");
+
+        cfg.enabled_methods.retain(|m| m != "magic_link");
+        assert!(!cfg.open_signup_enabled(), "no link, no signup");
+
+        let cfg = AuthConfig {
+            open_signup: false,
+            ..AuthConfig::default()
+        };
+        assert!(!cfg.open_signup_enabled(), "policy still wins");
+        assert!(
+            cfg.magic_link_enabled(),
+            "and existing users keep their way in"
+        );
     }
 }

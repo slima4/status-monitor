@@ -83,6 +83,45 @@ pub async fn set_theme(pool: &PgPool, user: UserId, theme: AppTheme) -> Result<b
     Ok(res.rows_affected() == 1)
 }
 
+/// User, their own org and the membership that owns it, in one transaction.
+/// `created == false` means a concurrent signup won the partial-unique-index
+/// race, so the existing account is returned and no second org is made.
+pub async fn create_signup_user(pool: &PgPool, email: &str) -> Result<(UserId, bool)> {
+    let mut tx = pool.begin().await.context("create_signup_user: begin")?;
+    let inserted: Option<(Uuid,)> = sqlx::query_as(
+        "INSERT INTO users (email, email_verified_at, terms_version, privacy_version) \
+         VALUES ($1, now(), $2, $3) \
+         ON CONFLICT (email) WHERE deleted_at IS NULL DO NOTHING \
+         RETURNING id",
+    )
+    .bind(email)
+    .bind(crate::auth::consent::TERMS_VERSION)
+    .bind(crate::auth::consent::PRIVACY_VERSION)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("create_signup_user: insert user")?;
+    let Some((user_id,)) = inserted else {
+        tx.rollback().await.ok();
+        let (id,): (Uuid,) =
+            sqlx::query_as("SELECT id FROM users WHERE email = $1::citext AND deleted_at IS NULL")
+                .bind(email)
+                .fetch_one(pool)
+                .await
+                .context("create_signup_user: resolve race winner")?;
+        return Ok((UserId(id), false));
+    };
+    let user = UserId(user_id);
+    let org_id = crate::storage::orgs::create_signup_org_in_tx(&mut tx, user).await?;
+    sqlx::query("UPDATE users SET signup_org_id = $1 WHERE id = $2")
+        .bind(org_id.0)
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await
+        .context("create_signup_user: set signup_org_id")?;
+    tx.commit().await.context("create_signup_user: commit")?;
+    Ok((user, true))
+}
+
 /// Invited-bootstrap user (magic-link + invitation): verified email, consent
 /// stamped, NO personal signup org — their only org is the one they join,
 /// resolved via oldest membership. `created == false` means a concurrent

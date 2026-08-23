@@ -42,6 +42,8 @@ pub struct LoginPage {
     pub gitlab_url: String,
     pub passkey_enabled: bool,
     pub magic_link_enabled: bool,
+    /// With signup open the email form stops hedging about who gets a link.
+    pub open_signup: bool,
     pub magic_link_expiry_minutes: u32,
     /// Marks the provider this browser used last (a returning-visitor cue, not
     /// an auth signal). At most one is true; the cookie carries the method.
@@ -116,6 +118,7 @@ pub async fn login(
         // deployment must not offer a button that cannot finish.
         passkey_enabled: state.cfg.auth.passkey_login_enabled() && state.db.is_some(),
         magic_link_enabled: state.cfg.auth.magic_link_enabled() && state.db.is_some(),
+        open_signup: state.cfg.auth.open_signup_enabled() && state.db.is_some(),
         magic_link_expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
         last_github: last == Some(LoginMethod::GithubOauth.as_db_str()),
         last_google: last == Some(LoginMethod::GoogleOauth.as_db_str()),
@@ -1134,6 +1137,7 @@ mod tests {
             gitlab_url: "/auth/gitlab/login".into(),
             passkey_enabled: passkey,
             magic_link_enabled: magic,
+            open_signup: true,
             magic_link_expiry_minutes: 15,
             last_github: false,
             last_google: false,

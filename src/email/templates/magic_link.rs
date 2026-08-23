@@ -13,14 +13,27 @@ pub fn render(
     url: &str,
     expires_in_minutes: u32,
     ip_hint: Option<&str>,
+    opens_accounts: bool,
 ) -> RenderedEmail {
-    let subject = format!("Sign in to {site_name}");
+    // The same mail reaches an address with an account and one without.
+    let (subject, action) = if opens_accounts {
+        (format!("Your link to {site_name}"), "Continue")
+    } else {
+        (format!("Sign in to {site_name}"), "Sign in")
+    };
+    let opening = if opens_accounts {
+        format!(
+            "Click the link below to continue to {site_name}. It signs you in, or opens an account if you don't have one yet:"
+        )
+    } else {
+        format!("Click the link below to sign in to {site_name}:")
+    };
     let ip_line_text = ip_hint
-        .map(|ip| format!("\nSign-in requested from {ip}.\n"))
+        .map(|ip| format!("\nRequested from {ip}.\n"))
         .unwrap_or_default();
 
     let text_body = format!(
-        "Click the link below to sign in to {site_name}:\n\
+        "{opening}\n\
          \n  {url}\n\
          \n\
          This link expires in {expires_in_minutes} minutes and can only be used once.\n\
@@ -28,23 +41,24 @@ pub fn render(
          If you didn't request this, you can ignore the message.\n"
     );
 
-    let mut body = layout::button(url, "Sign in", ButtonStyle::Solid);
+    let mut body = layout::paragraph(&html_escape(&opening));
+    body.push_str(&layout::button(url, action, ButtonStyle::Solid));
     body.push_str(&layout::fine_print(&format!(
         "This link expires in <strong>{expires_in_minutes}</strong> minutes and can only be \
          used once."
     )));
     if let Some(ip) = ip_hint {
         body.push_str(&layout::fine_print(&format!(
-            "Sign-in requested from {}.",
+            "Requested from {}.",
             html_escape(ip)
         )));
     }
 
     let html_body = layout::render(Page {
         title: &subject,
-        preheader: &format!("One-time sign-in link, good for {expires_in_minutes} minutes."),
+        preheader: &format!("One-time link, good for {expires_in_minutes} minutes."),
         signature: Some(site_name),
-        header: layout::wordmark(site_name, "Sign in"),
+        header: layout::wordmark(site_name, action),
         body,
         footnote: Some(layout::fine_print(
             "If you didn't request this, you can ignore the message.",
@@ -55,5 +69,43 @@ pub fn render(
         subject,
         text_body,
         html_body,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+
+    #[test]
+    fn an_open_deployment_does_not_promise_an_account_already_exists() {
+        let open = render("Uptimepage", "https://a.test/v?token=x", 15, None, true);
+        assert!(!open.subject.contains("Sign in"), "{}", open.subject);
+        // The preheader is the second line an inbox shows unopened.
+        assert!(
+            !open.html_body.contains("One-time sign-in"),
+            "{}",
+            open.html_body
+        );
+        for body in [&open.text_body, &open.html_body] {
+            assert!(body.contains("opens an account"), "{body}");
+        }
+
+        let closed = render("Uptimepage", "https://a.test/v?token=x", 15, None, false);
+        assert_eq!(closed.subject, "Sign in to Uptimepage");
+        for body in [&closed.text_body, &closed.html_body] {
+            assert!(
+                !body.contains("opens an account"),
+                "invite-only promises nothing of the sort: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_link_reaches_both_bodies_either_way() {
+        for opens in [true, false] {
+            let r = render("Uptimepage", "https://a.test/v?token=abc", 15, None, opens);
+            assert!(r.text_body.contains("https://a.test/v?token=abc"));
+            assert!(r.html_body.contains("https://a.test/v?token=abc"));
+        }
     }
 }

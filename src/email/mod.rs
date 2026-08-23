@@ -86,6 +86,7 @@ mod tests {
                 url: "https://example.test/auth/magic-link/verify?token=xyz".into(),
                 expires_in_minutes: 15,
                 ip_hint: Some("203.0.113.5".into()),
+                opens_accounts: false,
             },
         }
     }
@@ -94,8 +95,12 @@ mod tests {
     fn invitation_render_includes_action_url_and_org() {
         let email = sample_invitation();
         let rendered = email.template.render("Uptimepage");
-        assert!(rendered.subject.contains("Acme"));
-        assert!(rendered.subject.contains("Bob"));
+        // Named by whoever sent the invitation, so they stay out of the
+        // subject. See `templates::invitation`.
+        assert!(!rendered.subject.contains("Acme"));
+        assert!(!rendered.subject.contains("Bob"));
+        assert!(rendered.text_body.contains("Acme"));
+        assert!(rendered.text_body.contains("Bob"));
         assert!(
             rendered
                 .text_body

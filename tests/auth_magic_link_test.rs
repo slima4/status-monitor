@@ -463,3 +463,70 @@ async fn redirect_and_invitation_round_trip_through_create_and_consume() {
 
     drop_pg(&name).await;
 }
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_stranger_opening_an_account_gets_an_org_of_their_own() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let (user, created) =
+        uptimepage::storage::users::create_signup_user(&pool, "cold@example.test")
+            .await
+            .expect("signup");
+    assert!(created, "a brand-new account");
+
+    let (org_id, role): (Uuid, String) =
+        sqlx::query_as("SELECT m.org_id, m.role FROM memberships m WHERE m.user_id = $1")
+            .bind(user.0)
+            .fetch_one(&pool)
+            .await
+            .expect("membership");
+    assert_eq!(role, "owner", "their own org, not somebody else's");
+
+    let (signup_org, verified): (Option<Uuid>, bool) = sqlx::query_as(
+        "SELECT signup_org_id, email_verified_at IS NOT NULL FROM users WHERE id = $1",
+    )
+    .bind(user.0)
+    .fetch_one(&pool)
+    .await
+    .expect("user row");
+    assert_eq!(signup_org, Some(org_id), "the session opens in it");
+    assert!(verified, "the link that got here is the proof");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_second_account_on_one_address_is_refused() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let (first, _) = uptimepage::storage::users::create_signup_user(&pool, "dup@example.test")
+        .await
+        .expect("first");
+    // Two links racing resolve to one account, not an error and not a second org.
+    let (second, created) =
+        uptimepage::storage::users::create_signup_user(&pool, "dup@example.test")
+            .await
+            .expect("the loser resolves the winner");
+    assert!(!created, "it created nothing");
+    assert_eq!(second, first, "and hands back the same account");
+
+    let (orgs,): (i64,) = sqlx::query_as("SELECT count(*) FROM organizations")
+        .fetch_one(&pool)
+        .await
+        .expect("count");
+    assert_eq!(orgs, 1, "so no second org exists");
+
+    pool.close().await;
+    drop_pg(&name).await;
+}

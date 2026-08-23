@@ -226,6 +226,11 @@ api_key = ""
 # client credentials + redirect_url set below (list = policy, creds =
 # capability); magic_link gates its request/verify routes + purge ticker.
 enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "gitlab_oauth", "passkey", "magic_link"]
+# Whether an address nobody invited can open an account, and get an org of its
+# own. Off makes the deployment invite-only: existing users still sign in, and
+# an invitation still bootstraps whoever it names. Needs magic_link, since an
+# emailed link is how a stranger proves the address is theirs.
+open_signup = true
 # Salt for hashing IPs / user-agents in login_attempts + sessions.
 # GENERATE WITH: openssl rand -base64 32
 # LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The

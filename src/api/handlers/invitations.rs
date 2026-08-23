@@ -95,6 +95,7 @@ pub async fn create(
     )
     .unwrap_or(u32::MAX);
     let expiry_hours = state.cfg.auth.invitations.expiry_hours;
+    inv::ensure_send_window(pool, org, user_id).await?;
     let created = inv::create(pool, org, user_id, email, role, expiry_hours, max).await?;
 
     if let Err(err) = send_invitation_email(
@@ -102,6 +103,7 @@ pub async fn create(
         pool,
         &org_row,
         user_id,
+        created.row.id,
         email,
         &created.token,
         created.row.expires_at,
@@ -217,6 +219,7 @@ pub async fn resend(
     // mail error then leaves the existing link untouched instead of bricking it
     // (old hash kept, no new link delivered). The original inviter is preserved
     // so the "invited by" attribution stays stable across resends.
+    inv::ensure_send_window(pool, org, user_id).await?;
     let raw = inv::generate_raw_token();
     let expires_at =
         Utc::now() + chrono::Duration::hours(i64::from(state.cfg.auth.invitations.expiry_hours));
@@ -225,6 +228,7 @@ pub async fn resend(
         pool,
         &org_row,
         target.inviter_id,
+        invitation_id,
         &target.email,
         &raw,
         expires_at,
@@ -437,11 +441,13 @@ fn validate_email(raw: &str) -> Result<&str> {
 /// Build + send the invitation email. Shared by create and resend; the
 /// caller owns the failure policy (create rolls the new row back, resend
 /// leaves the pre-existing row pending).
+#[allow(clippy::too_many_arguments)]
 async fn send_invitation_email(
     state: &AppState,
     pool: &sqlx::PgPool,
     org_row: &Organization,
     inviter_id: UserId,
+    invitation_id: Uuid,
     email: &str,
     token: &str,
     expires_at: DateTime<Utc>,
@@ -469,6 +475,9 @@ async fn send_invitation_email(
         tracing::warn!(error = %err, org = %org_row.id.0, "invitation send failed");
         AppError::Other(anyhow::anyhow!("invitation send failed: {err}"))
     })?;
+    if let Err(err) = inv::record_send(pool, org_row.id, inviter_id, invitation_id).await {
+        tracing::warn!(error = %err, org = %org_row.id.0, "invitation send not recorded");
+    }
     Ok(())
 }
 

@@ -28,6 +28,15 @@ impl Default for LogOnlyEmailSender {
 /// reason — it embeds the same URL.
 const SENSITIVE_PARAMS: [&str; 4] = ["token", "state", "recovery", "code"];
 
+/// Local work on an emailed flow, where the truncated URL is unusable and the
+/// DB keeps only an argon2 hash. Anyone who can read the log can then take over
+/// the account it was addressed to, so nothing infers this from a log level.
+const ENV_SHOW_LINKS: &str = "UPTIMEPAGE_DEV_EMAIL_LINKS";
+
+fn show_links_in_full() -> bool {
+    std::env::var(ENV_SHOW_LINKS).is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
 /// Truncate the value of any [`SENSITIVE_PARAMS`] query key to its first 6
 /// chars + `…`. Only matches a real query key (`?key=` / `&key=`); leaves the
 /// host/path intact so the dev still sees which flow fired.
@@ -83,8 +92,18 @@ impl EmailSender for LogOnlyEmailSender {
         );
 
         if let Some(url) = email.template.primary_url() {
-            // SAFE: redacted — token/state/recovery/code params truncated
-            tracing::info!(action_url = %redact_sensitive_params(url), "📧 Action URL");
+            if show_links_in_full() {
+                tracing::warn!(
+                    // SAFE: unredacted on purpose and only when the operator
+                    // sets ENV_SHOW_LINKS on a deployment that sends no mail.
+                    // Warn level so the log says what it now contains.
+                    action_url = %url,
+                    "📧 Action URL IN FULL — {ENV_SHOW_LINKS} is set, so this log holds a live credential"
+                );
+            } else {
+                // SAFE: redacted — token/state/recovery/code params truncated
+                tracing::info!(action_url = %redact_sensitive_params(url), "📧 Action URL");
+            }
         }
 
         Ok(MessageId(format!("log-only-{}", Uuid::now_v7())))

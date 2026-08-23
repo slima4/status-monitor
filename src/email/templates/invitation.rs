@@ -13,7 +13,10 @@ pub fn render(
     expires_at: DateTime<Utc>,
 ) -> RenderedEmail {
     let expires_human = utc_stamp(expires_at);
-    let subject = format!("{inviter_display} invited you to {org_name}");
+    // Subject and preheader are what an inbox shows unopened; the org and the
+    // sender are named by whoever sent this.
+    let subject = format!("You have an invitation on {site_name}");
+    let preheader = "Accept or decline it from this message.";
 
     let text_body = format!(
         "{inviter_display} invited you to join {org_name} on {site_name}.\n\
@@ -48,9 +51,9 @@ pub fn render(
 
     let html_body = layout::render(Page {
         title: &subject,
-        preheader: &format!("Join {org_name} on {site_name}."),
+        preheader,
         signature: Some(site_name),
-        header: layout::wordmark(site_name, &format!("You're invited to {org_name}")),
+        header: layout::wordmark(site_name, "You're invited"),
         body,
         footnote: Some(layout::fine_print(
             "If you weren't expecting this, you can ignore the message — no account is created.",
@@ -61,5 +64,59 @@ pub fn render(
         subject,
         text_body,
         html_body,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::render;
+    use chrono::{TimeZone, Utc};
+
+    fn hostile() -> crate::email::trait_def::RenderedEmail {
+        render(
+            "Uptimepage",
+            "verify your account, action required",
+            "Uptimepage Security",
+            "https://app.test/accept",
+            "https://app.test/decline",
+            Utc.with_ymd_and_hms(2026, 8, 30, 9, 0, 0).unwrap(),
+        )
+    }
+
+    #[test]
+    fn nothing_the_sender_chose_reaches_the_inbox_list() {
+        let r = hostile();
+        assert_eq!(r.subject, "You have an invitation on Uptimepage");
+        let preheader = r
+            .html_body
+            .split("Accept or decline it from this message.")
+            .count();
+        assert_eq!(preheader, 2, "the preheader is ours: {}", r.html_body);
+        assert!(!r.subject.contains("action required"));
+    }
+
+    #[test]
+    fn who_is_asking_still_reaches_the_body() {
+        let r = hostile();
+        for body in [&r.text_body, &r.html_body] {
+            assert!(body.contains("Uptimepage Security"), "inviter: {body}");
+            assert!(body.contains("action required"), "org: {body}");
+            assert!(body.contains("https://app.test/accept"), "accept: {body}");
+        }
+    }
+
+    #[test]
+    fn a_name_carrying_markup_is_escaped_into_the_html_body() {
+        let r = render(
+            "Uptimepage",
+            "<script>x</script>",
+            "<img src=x onerror=y>",
+            "https://app.test/accept",
+            "https://app.test/decline",
+            Utc.with_ymd_and_hms(2026, 8, 30, 9, 0, 0).unwrap(),
+        );
+        assert!(!r.html_body.contains("<script>x"), "{}", r.html_body);
+        assert!(!r.html_body.contains("<img src=x"), "{}", r.html_body);
+        assert!(r.html_body.contains("&lt;script&gt;"));
     }
 }

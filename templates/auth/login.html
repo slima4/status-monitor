@@ -141,12 +141,14 @@
 
     {% if magic_link_enabled %}
     {% if github_enabled || google_enabled || microsoft_enabled || gitlab_enabled || passkey_enabled %}
-    {# Email sign-in only redeems existing or invited accounts, so it hides
-       behind a disclosure and OAuth stays the new-account path. Open by
-       default when it was the last method used. #}
+    {# Open by default when it was the last method used. #}
     <details{% if last_magic %} open{% endif %}>
       <summary class="magic-summary relative cursor-pointer text-center text-sm text-muted">
+        {% if open_signup %}
+        Or <span class="underline decoration-dotted underline-offset-2">use your email address</span>
+        {% else %}
         Already registered? <span class="underline decoration-dotted underline-offset-2">email me a sign-in link</span>
+        {% endif %}
         {% if last_magic %}{% include "auth/_last_used.html" %}{% endif %}
       </summary>
       {% include "auth/_magic_link_form.html" %}

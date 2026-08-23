@@ -180,6 +180,7 @@ dev-login:
 # Needs port 8080: `docker compose -f compose.dev.yml stop uptimepage` first.
 # Then `just dev-login` and `just dev-sign-in-methods` in another shell.
 run-oauth:
+    UPTIMEPAGE_DEV_EMAIL_LINKS=1 \
     UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
     UPTIMEPAGE_AUTH__FINGERPRINT_SALT="dev-only-fingerprint-salt-not-for-prod" \
     UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE=false \
@@ -207,8 +208,13 @@ run-oauth:
 # `api_bind` is therefore widened to dual-stack here: the default binds IPv4
 # only, and a browser resolving `localhost` tries ::1 first and gives up.
 #
+# Emailed links print in full here (UPTIMEPAGE_DEV_EMAIL_LINKS), because the
+# `log` provider otherwise truncates the token and the DB only keeps its hash,
+# which leaves no way to finish a magic-link or invitation flow by hand.
+#
 # Open http://localhost:8080/login
 run-passkeys:
+    UPTIMEPAGE_DEV_EMAIL_LINKS=1 \
     UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
     UPTIMEPAGE_AUTH__FINGERPRINT_SALT="dev-only-fingerprint-salt-not-for-prod" \
     UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE=false \

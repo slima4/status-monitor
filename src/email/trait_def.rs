@@ -61,6 +61,9 @@ pub enum EmailTemplate {
         url: String,
         expires_in_minutes: u32,
         ip_hint: Option<String>,
+        /// A property of the deployment, never of the recipient: the same
+        /// mail goes to every address either way.
+        opens_accounts: bool,
     },
     /// Account-deletion notification. Restoring is a signed-in confirmation
     /// before the data is permanently purged on `scheduled_purge_at`.
@@ -174,11 +177,13 @@ impl EmailTemplate {
                 url,
                 expires_in_minutes,
                 ip_hint,
+                opens_accounts,
             } => templates::magic_link::render(
                 site_name,
                 url,
                 *expires_in_minutes,
                 ip_hint.as_deref(),
+                *opens_accounts,
             ),
             EmailTemplate::AccountDeletion { scheduled_purge_at } => {
                 templates::account_deletion::render(site_name, *scheduled_purge_at)

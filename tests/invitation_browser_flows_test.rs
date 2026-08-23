@@ -382,7 +382,7 @@ async fn magic_verify_bootstraps_invited_unknown_email() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn magic_verify_unknown_email_without_invitation_is_410_no_user() {
+async fn magic_verify_unknown_email_without_invitation_opens_an_account() {
     let Some((db, name)) = fresh_pg().await else {
         return;
     };
@@ -393,20 +393,25 @@ async fn magic_verify_unknown_email_without_invitation_is_410_no_user() {
         .await
         .unwrap();
     let (app, _default) = common::build_test_app_with_pg(pool.clone(), |_| {}).await;
-    let (get_status, status, _) = magic_verify(&app, &minted.token).await;
+    let (get_status, status, location) = magic_verify(&app, &minted.token).await;
     assert_eq!(
         get_status,
         StatusCode::OK,
         "confirm page must render for a live token"
     );
-    assert_eq!(status, StatusCode::GONE);
-    let users: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM users WHERE email = 'ghost7@example.test'::citext",
+    assert_eq!(status, StatusCode::SEE_OTHER, "redeemed, got {status}");
+    assert_eq!(location.as_deref(), Some("/"), "and lands in the app");
+
+    let (role, has_signup_org): (String, bool) = sqlx::query_as(
+        "SELECT m.role, u.signup_org_id IS NOT NULL FROM users u \
+         JOIN memberships m ON m.user_id = u.id \
+         WHERE u.email = 'ghost7@example.test'::citext",
     )
     .fetch_one(&pool)
     .await
-    .unwrap();
-    assert_eq!(users, 0);
+    .expect("the account exists");
+    assert_eq!(role, "owner", "in an org of their own, not somebody else's");
+    assert!(has_signup_org, "and the session has somewhere to open");
 
     common::drop_test_db(&name).await;
 }
@@ -730,6 +735,90 @@ async fn magic_verify_post_with_missing_or_mismatched_nonce_is_forbidden() {
         unused().await,
         "mismatched nonce must not consume the token"
     );
+
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn an_invite_only_deployment_turns_a_stranger_away() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let created =
+        uptimepage::auth::magic_link::create(&pool, "nope@example.test", None, 15, None, None)
+            .await
+            .expect("mint a link");
+
+    let (app, _default) = common::build_test_app_with_pg(pool.clone(), |cfg| {
+        cfg.auth.open_signup = false;
+    })
+    .await;
+    let (_, post, _) = magic_verify(&app, &created.token).await;
+    // The answer an unknown address has always got, so closing signup does
+    // not become a way to ask whether an account exists.
+    assert_eq!(post, StatusCode::GONE, "refused, got {post}");
+
+    let (users,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM users WHERE email = 'nope@example.test'::citext")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(users, 0, "and nothing was created");
+
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn an_invitation_outranks_the_signup_policy() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let owner = seed_user(&pool, "host@example.test").await;
+    let org = seed_org(&pool, owner).await;
+    let slug = org_slug(&pool, org).await;
+    let invited = invite(&pool, org, owner, "guest@example.test").await;
+    let minted = magic_link::create(
+        &pool,
+        "guest@example.test",
+        None,
+        15,
+        None,
+        Some(invited.row.id),
+    )
+    .await
+    .unwrap();
+
+    // Closing signup stops strangers, not people an owner asked for by name.
+    let (app, _default) = common::build_test_app_with_pg(pool.clone(), |cfg| {
+        cfg.auth.open_signup = false;
+    })
+    .await;
+    let (_, status, location) = magic_verify(&app, &minted.token).await;
+    assert_eq!(status, StatusCode::SEE_OTHER, "redeemed, got {status}");
+    assert_eq!(
+        location.as_deref(),
+        Some(format!("/?joined={slug}").as_str()),
+        "and lands in the org that invited them"
+    );
+
+    let (role, signup_org): (String, Option<uuid::Uuid>) = sqlx::query_as(
+        "SELECT m.role, u.signup_org_id FROM users u \
+         JOIN memberships m ON m.user_id = u.id \
+         WHERE u.email = 'guest@example.test'::citext",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("the account exists");
+    assert_eq!(role, "member", "joined, not founded");
+    assert!(signup_org.is_none(), "and founded nothing of their own");
 
     common::drop_test_db(&name).await;
 }

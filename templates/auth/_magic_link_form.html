@@ -1,7 +1,6 @@
 <form id="magic-link-form" class="space-y-3 pt-3" novalidate data-last-used="{{ last_magic }}">
   <label class="sr-only" for="magic-link-email">Email address</label>
-  {# `webauthn` is appended, not swapped in: it opts the field into passkey
-     autofill without giving up the email autofill the magic link wants. Only
+  {# `webauthn` is appended, not swapped in, so email autofill survives. Only
      where passkeys are on, since nothing answers the offer otherwise. #}
   <input id="magic-link-email" name="email" type="email" required
          autocomplete="email{% if passkey_enabled %} webauthn{% endif %}"
@@ -9,14 +8,21 @@
          class="w-full field">
   <button type="submit"
           class="sticker-btn sticker-btn--accent inline-flex w-full items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">
-    email me a sign-in link
+    {% if open_signup %}email me a link{% else %}email me a sign-in link{% endif %}
   </button>
   <div id="magic-link-error" role="alert" aria-live="polite"
        class="hidden alert-card alert-card--error"></div>
 </form>
 <p id="magic-link-sent" class="alert-card alert-card--muted hidden text-sm">
+  {# With signup open every address gets a link, so nothing needs hedging. #}
+  {% if open_signup %}
+  Check your inbox &mdash; a link is on its way. It signs you in, or opens an
+  account if you don&rsquo;t have one yet.
+  {% else %}
   Check your inbox &mdash; if that address has an account, a sign-in link is
-  on its way. The link works once and expires in
+  on its way.
+  {% endif %}
+  The link works once and expires in
   {{ magic_link_expiry_minutes }} minutes. Nothing arrived? You can
   request another shortly.
 </p>

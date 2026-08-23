@@ -15,14 +15,13 @@ use chrono::{DateTime, Utc};
 use http_body_util::{BodyExt, Full, Limited};
 use hyper::Request;
 use hyper::body::Bytes;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::auth::OauthProvider;
-use crate::domain::{OrgId, UserId, generate_signup_slug};
+use crate::domain::{OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::http_outbound::OutboundHttpClient;
-use crate::storage::orgs::create_signup_org_with_owner_in_tx;
 use crate::storage::users as users_store;
 
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
@@ -106,10 +105,6 @@ pub(crate) fn de_bool_loose<'de, D: serde::Deserializer<'de>>(
         Some(Loose::S(_) | Loose::Other(_)) | None => None,
     })
 }
-
-/// Signup-slug retry budget. `generate_signup_slug` collides at p≈1e-9 per
-/// pair; 5 retries covers the 99.9999... case without spinning.
-const SIGNUP_SLUG_RETRIES: u32 = 5;
 
 /// No attested address and no identity match: nothing to open, nothing that
 /// may be created. The callback routes it back to the login page.
@@ -371,7 +366,8 @@ pub async fn upsert_identity_and_signup_org(
     .await
     .context("phase C: insert identity")?;
 
-    let org_id = create_signup_org_in_tx(&mut tx, UserId(new_user_id)).await?;
+    let org_id =
+        crate::storage::orgs::create_signup_org_in_tx(&mut tx, UserId(new_user_id)).await?;
 
     sqlx::query("UPDATE users SET signup_org_id = $1 WHERE id = $2")
         .bind(org_id.0)
@@ -445,30 +441,5 @@ pub async fn link_identity_to_user(
     }
     Err(AppError::Other(anyhow::anyhow!(
         "link: identity claimed and released {LINK_INSERT_ATTEMPTS} times running"
-    )))
-}
-
-/// Signup-org creation inside the new-user tx. Delegates to
-/// [`create_signup_org_with_owner_in_tx`] — that helper is the single owner
-/// of writes to `organizations` / `memberships` / `org_audit_log`. The retry
-/// loop here only covers the rare slug collision from the adjective+noun+suffix
-/// RNG; the owner-limit bypass is documented there.
-///
-/// Both name and slug are deliberately neutral: a slug is a public host on our
-/// domain, so nothing user-supplied may land there unreviewed.
-async fn create_signup_org_in_tx(
-    tx: &mut Transaction<'_, Postgres>,
-    user: UserId,
-) -> Result<OrgId> {
-    for _ in 0..SIGNUP_SLUG_RETRIES {
-        let slug = generate_signup_slug();
-        if let Some(org_id) =
-            create_signup_org_with_owner_in_tx(tx, user, &slug, "My status").await?
-        {
-            return Ok(org_id);
-        }
-    }
-    Err(AppError::Other(anyhow::anyhow!(
-        "signup slug retries exhausted ({SIGNUP_SLUG_RETRIES}) — adjective/noun pool too small or RNG broken"
     )))
 }

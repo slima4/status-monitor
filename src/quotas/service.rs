@@ -70,6 +70,8 @@ pub mod usage_keys {
     pub const TARGETS: &str = "max_targets";
     pub const MEMBERS: &str = "max_members";
     pub const PENDING_INVITATIONS: &str = "max_pending_invitations";
+    /// Not a `plans` column: an abuse ceiling, equal for every plan.
+    pub const INVITATION_SENDS: &str = "invitation_sends_per_window";
     pub const PUBLIC_COMPONENTS: &str = "max_public_components";
     pub const STATUS_PAGES: &str = "max_status_pages";
     pub const MAINTENANCE_WINDOWS: &str = "max_maintenance_windows";
