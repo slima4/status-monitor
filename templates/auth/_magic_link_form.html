@@ -1,6 +1,10 @@
 <form id="magic-link-form" class="space-y-3 pt-3" novalidate data-last-used="{{ last_magic }}">
   <label class="sr-only" for="magic-link-email">Email address</label>
-  <input id="magic-link-email" name="email" type="email" required autocomplete="email"
+  {# `webauthn` is appended, not swapped in: it opts the field into passkey
+     autofill without giving up the email autofill the magic link wants. Only
+     where passkeys are on, since nothing answers the offer otherwise. #}
+  <input id="magic-link-email" name="email" type="email" required
+         autocomplete="email{% if passkey_enabled %} webauthn{% endif %}"
          placeholder="you@company.com" spellcheck="false"
          class="w-full field">
   <button type="submit"

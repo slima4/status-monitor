@@ -62,11 +62,21 @@
         return err && (err.name === "NotAllowedError" || err.name === "AbortError");
     }
 
+    // smApiErrorMessage rides api_form.js, which does not load on every page
+    // that talks to these endpoints, so the status line is the fallback.
+    async function errorDetail(res) {
+        const fallback = "HTTP " + res.status;
+        return window.smApiErrorMessage
+            ? await window.smApiErrorMessage(res, fallback)
+            : fallback;
+    }
+
     window.smPasskey = {
         supported: function () {
             return Boolean(window.PublicKeyCredential && navigator.credentials);
         },
         headers: { "Accept": "application/json", "Content-Type": "application/json", "X-Requested-With": "uptimepage" },
+        errorDetail: errorDetail,
         decodeOptions: decodeOptions,
         encodeCredential: encodeCredential,
         isAbandoned: isAbandoned,

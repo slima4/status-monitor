@@ -228,6 +228,30 @@ explicit "no" is refused.
 **User verification is required**, so the device asks for a biometric or PIN
 every time rather than mere presence.
 
+Where `magic_link` is also enabled, the email field it renders carries
+`autocomplete="email webauthn"`, so a browser that supports conditional
+mediation offers a held passkey from its own autofill list beside the saved
+addresses. Nothing about that reaches us: the browser matches against what it
+holds, which is why it can surface a passkey without us ever being told whether
+a visitor has one. A deployment with no magic link has no such field, and so no
+autofill offer.
+
+The challenge is requested when the visitor opens that block or focuses the
+field, never on page load, so a visit that only passes through writes no
+ceremony row. The browser then holds that request open until someone picks,
+which outlasts the challenge behind it, so the page replaces it on a timer at
+four fifths of the ceremony TTL the start response tells it. Without that, an
+unhurried visitor is the one who finds out.
+
+**Passkeys live in a browser's credential store, not on a machine.** Chrome
+keeps its own; Safari uses iCloud Keychain. So a passkey added in one browser
+does not appear in another on the same computer, which is not a fault in the
+deployment and nothing a relying party can change. The second browser offers a
+QR code or a security key instead, both of which reach a credential held
+elsewhere. Someone who wants one passkey everywhere needs a manager that spans
+browsers; everyone else adds one per browser, which is part of why the cap is
+ten rather than one.
+
 The relying-party id is the **host of `auth.public_base_url`**, derived rather
 than configured so it cannot drift from the origin the browser reports. An
 authenticator binds every credential it mints to that exact string, so

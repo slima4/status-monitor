@@ -21,11 +21,6 @@
         window.smToast({ message: what + ": " + err.message, kind: "error" });
     }
 
-    async function detail(res) {
-        const fallback = "HTTP " + res.status;
-        return window.smApiErrorMessage ? await window.smApiErrorMessage(res, fallback) : fallback;
-    }
-
     // Same rule the sign-in button follows: a security key or a phone can mint
     // one on a machine with no built-in authenticator.
     if (addRow && addBtn) {
@@ -39,7 +34,7 @@
                     headers: smPasskey.headers,
                     body: "{}",
                 });
-                if (!started.ok) throw new Error(await detail(started));
+                if (!started.ok) throw new Error(await smPasskey.errorDetail(started));
                 const challenge = await started.json();
 
                 const created = await navigator.credentials.create({
@@ -60,7 +55,7 @@
                         credential: smPasskey.encodeCredential(created),
                     }),
                 });
-                if (!finished.ok) throw new Error(await detail(finished));
+                if (!finished.ok) throw new Error(await smPasskey.errorDetail(finished));
                 window.location.reload();
             } catch (err) {
                 if (!smPasskey.isAbandoned(err)) failed("could not add a passkey", err);
@@ -79,7 +74,7 @@
                     "/api/v1/me/passkeys/" + encodeURIComponent(row.dataset.passkeyId),
                     { method: "DELETE", headers: smPasskey.headers },
                 );
-                if (!res.ok) throw new Error(await detail(res));
+                if (!res.ok) throw new Error(await smPasskey.errorDetail(res));
                 window.location.reload();
             } catch (err) {
                 failed("could not remove it", err);

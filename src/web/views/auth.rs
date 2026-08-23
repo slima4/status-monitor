@@ -1233,6 +1233,45 @@ mod tests {
     }
 
     #[test]
+    fn the_email_field_opts_into_passkey_autofill() {
+        // The `webauthn` token is what arms conditional mediation, and it only
+        // does anything where the script that reads it is also on the page.
+        // Dropping either costs the offer with nothing else to show for it.
+        let html = login_page(true, false, false, false, true, true)
+            .render()
+            .unwrap();
+        assert!(html.contains(r#"autocomplete="email webauthn""#));
+        assert!(html.contains("js/ui/passkey_login.js"));
+    }
+
+    #[test]
+    fn without_a_magic_link_there_is_no_field_to_autofill_into() {
+        // The token rides the magic-link form, so a deployment without one has
+        // no autofill offer to make. The docs say so; this holds them to it.
+        let html = login_page(true, false, false, false, true, false)
+            .render()
+            .unwrap();
+        assert!(html.contains("continue with a passkey"));
+        assert!(
+            !html.contains("magic-link-email"),
+            "no field to autofill into"
+        );
+        assert!(!html.contains("webauthn"), "and nothing claiming otherwise");
+    }
+
+    #[test]
+    fn the_autofill_token_goes_where_nothing_would_answer_it() {
+        // With passkeys off the endpoint 404s and the script never loads, so
+        // the token would advertise a capability this page does not have.
+        let html = login_page(true, false, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(html.contains("magic-link-email"), "the field is still here");
+        assert!(html.contains(r#"autocomplete="email""#));
+        assert!(!html.contains("webauthn"));
+    }
+
+    #[test]
     fn login_page_omits_the_passkey_button_where_it_is_off() {
         let html = login_page(true, false, false, false, false, false)
             .render()
