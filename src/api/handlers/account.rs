@@ -39,6 +39,7 @@ pub struct UserDataExport {
     pub exported_at: DateTime<Utc>,
     pub user: UserExport,
     pub oauth_identities: Vec<OAuthIdentityExport>,
+    pub passkeys: Vec<PasskeyExport>,
     pub sessions: Vec<SessionMetadata>,
     pub api_tokens: Vec<ApiTokenMetadata>,
     pub owned_orgs: Vec<OwnedOrgExport>,
@@ -47,6 +48,15 @@ pub struct UserDataExport {
     pub credential_changes: Vec<CredentialEventExport>,
     pub audit_entries: Vec<AuditEntryExport>,
     pub mcp_write_actions: Vec<McpAuditExport>,
+}
+
+/// The credential itself never leaves: it is a public key bound to this host.
+#[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
+pub struct PasskeyExport {
+    pub nickname: Option<String>,
+    pub rp_id: String,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Serialize, ToSchema, sqlx::FromRow)]
@@ -369,6 +379,15 @@ async fn build_export(pool: &sqlx::PgPool, user_id: UserId) -> Result<UserDataEx
     .await
     .map_err(db_err("memberships"))?;
 
+    let passkeys: Vec<PasskeyExport> = sqlx::query_as(
+        "SELECT nickname, rp_id, created_at, last_used_at \
+         FROM webauthn_credentials WHERE user_id = $1 ORDER BY created_at",
+    )
+    .bind(user_id.0)
+    .fetch_all(pool)
+    .await
+    .map_err(db_err("passkeys"))?;
+
     let login_history: Vec<LoginAttemptExport> = sqlx::query_as(&format!(
         "SELECT method, success, ip_hash, user_agent_hash, failure_reason, occurred_at \
          FROM login_attempts \
@@ -417,6 +436,7 @@ async fn build_export(pool: &sqlx::PgPool, user_id: UserId) -> Result<UserDataEx
         exported_at: Utc::now(),
         user,
         oauth_identities,
+        passkeys,
         sessions,
         api_tokens,
         owned_orgs,

@@ -583,6 +583,22 @@ async fn main() -> Result<()> {
         .await
         .map_err(|e| AppError::Other(anyhow::anyhow!("auth salt guard: {e}")))?;
 
+    // Moving the app retires every passkey at once and nothing can migrate
+    // them, so the least we owe is not letting it happen quietly.
+    if cfg.auth.passkey_login_enabled()
+        && let Ok(rp_id) = uptimepage::auth::passkey::relying_party_id(&cfg.auth.public_base_url)
+        && let Ok(orphaned) =
+            uptimepage::storage::passkeys::orphaned_by_rp_id(&pg_pool_for_stores, &rp_id).await
+        && orphaned > 0
+    {
+        tracing::warn!(
+            rp_id = %rp_id,
+            orphaned,
+            "auth.public_base_url does not match the host these passkeys were created for; \
+             they can no longer sign anyone in and their owners must add new ones"
+        );
+    }
+
     let unsubscribe_secret = uptimepage::storage::app_secrets::ensure_secret(
         &pg_pool_for_stores,
         cipher.as_deref(),
@@ -620,6 +636,16 @@ async fn main() -> Result<()> {
         Duration::from_secs(10 * 60),
         "oauth_state_cleanup",
         uptimepage::auth::oauth_state::purge_expired,
+    ));
+
+    // Matches the ceremony TTL, so an abandoned one is swept about as fast as
+    // it expires. Consumed rows delete themselves as they are read.
+    let webauthn_state_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+        pg_pool_for_stores.clone(),
+        root.clone(),
+        Duration::from_secs(5 * 60),
+        "webauthn_state_cleanup",
+        uptimepage::storage::passkeys::purge_expired,
     ));
 
     let channel_verification_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
@@ -859,6 +885,7 @@ async fn main() -> Result<()> {
             purge_handle,
             invitation_purge_handle,
             oauth_state_cleanup_handle,
+            webauthn_state_cleanup_handle,
             channel_verification_cleanup_handle,
             subscriber_dispatch_handle,
             subscriber_token_cleanup_handle,

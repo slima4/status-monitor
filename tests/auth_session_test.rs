@@ -30,6 +30,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres
 fn no_email_back() -> WaysIn {
     WaysIn {
         enabled_providers: P::ALL.to_vec(),
+        passkeys_open_the_account: false,
         email_is_a_way_back: false,
     }
 }
@@ -38,6 +39,7 @@ fn no_email_back() -> WaysIn {
 fn email_is_back() -> WaysIn {
     WaysIn {
         enabled_providers: P::ALL.to_vec(),
+        passkeys_open_the_account: false,
         email_is_a_way_back: true,
     }
 }
@@ -601,6 +603,7 @@ async fn unlink_holds_the_last_way_in_only_when_email_cannot_open_it() {
         OauthProvider::Github,
         Some("777"),
         &no_email_back(),
+        0,
         Default::default(),
     )
     .await
@@ -616,6 +619,7 @@ async fn unlink_holds_the_last_way_in_only_when_email_cannot_open_it() {
         OauthProvider::Github,
         Some("777"),
         &email_is_back(),
+        0,
         Default::default(),
     )
     .await
@@ -647,6 +651,7 @@ async fn unlink_holds_the_last_way_in_only_when_email_cannot_open_it() {
         OauthProvider::Github,
         Some("777"),
         &no_email_back(),
+        0,
         Default::default(),
     )
     .await
@@ -701,6 +706,7 @@ async fn unlink_without_a_subject_cannot_empty_the_account() {
         OauthProvider::Github,
         None,
         &no_email_back(),
+        0,
         Default::default(),
     )
     .await
@@ -722,6 +728,7 @@ async fn unlink_without_a_subject_cannot_empty_the_account() {
         OauthProvider::Github,
         Some("gh-a"),
         &no_email_back(),
+        0,
         Default::default(),
     )
     .await
@@ -768,6 +775,7 @@ async fn unlink_reports_a_method_that_is_not_on_the_account() {
         OauthProvider::Gitlab,
         Some("nope"),
         &no_email_back(),
+        0,
         Default::default(),
     )
     .await
@@ -1227,6 +1235,7 @@ async fn a_disabled_provider_is_a_row_not_a_way_in() {
     // as a way in would let the account drop its only working method.
     let gitlab_only = WaysIn {
         enabled_providers: vec![OauthProvider::Gitlab],
+        passkeys_open_the_account: false,
         email_is_a_way_back: false,
     };
     let err = oauth_identities::unlink(
@@ -1235,6 +1244,7 @@ async fn a_disabled_provider_is_a_row_not_a_way_in() {
         OauthProvider::Gitlab,
         Some("gl-on"),
         &gitlab_only,
+        0,
         Default::default(),
     )
     .await
@@ -1248,6 +1258,7 @@ async fn a_disabled_provider_is_a_row_not_a_way_in() {
         OauthProvider::Github,
         Some("gh-off"),
         &gitlab_only,
+        0,
         Default::default(),
     )
     .await
@@ -1287,7 +1298,7 @@ async fn signup_and_a_later_link_both_leave_a_trail() {
         &pool,
         owner.user_id,
         oauth_identities::CredentialEvent {
-            provider: OauthProvider::Github,
+            provider: OauthProvider::Github.as_db_str(),
             provider_user_id: "gh-first",
             action: uptimepage::auth::CredentialAction::Linked,
             origin: uptimepage::auth::CredentialOrigin::Signup,

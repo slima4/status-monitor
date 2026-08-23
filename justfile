@@ -197,6 +197,28 @@ run-oauth:
     RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
         cargo run --bin uptimepage
 
+# Native run for the passkey ceremonies. Two constraints fight each other
+# locally, and `localhost` is the only address that satisfies both:
+#   - WebAuthn needs a secure context, so plain http is only allowed on
+#     localhost. An http host with a real name (app.lvh.me) has no
+#     navigator.credentials at all and the button never appears.
+#   - the relying-party id must be a valid DOMAIN, so 127.0.0.1 is rejected
+#     however it is reached.
+# `api_bind` is therefore widened to dual-stack here: the default binds IPv4
+# only, and a browser resolving `localhost` tries ::1 first and gives up.
+#
+# Open http://localhost:8080/login
+run-passkeys:
+    UPTIMEPAGE_STORAGE__ALLOW_DEFAULT_CREDENTIALS=true \
+    UPTIMEPAGE_AUTH__FINGERPRINT_SALT="dev-only-fingerprint-salt-not-for-prod" \
+    UPTIMEPAGE_AUTH__SESSION__COOKIE_SECURE=false \
+    UPTIMEPAGE_SERVER__API_BIND="[::]:8080" \
+    UPTIMEPAGE_AUTH__PUBLIC_BASE_URL=http://localhost:8080 \
+    UPTIMEPAGE_AUTH__GITHUB__CLIENT_ID=dev UPTIMEPAGE_AUTH__GITHUB__CLIENT_SECRET=dev \
+    UPTIMEPAGE_AUTH__GITHUB__REDIRECT_URL=http://localhost:8080/auth/github/callback \
+    RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
+        cargo run --bin uptimepage
+
 # Give the dev operator three linked sign-in methods and a credential trail,
 # so /settings/account has something to show. Needs `just dev-login` first.
 dev-sign-in-methods:

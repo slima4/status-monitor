@@ -51,6 +51,7 @@ impl Default for AuthConfig {
                 "google_oauth".into(),
                 "microsoft_oauth".into(),
                 "gitlab_oauth".into(),
+                "passkey".into(),
                 "magic_link".into(),
             ],
             fingerprint_salt: String::new(),
@@ -111,6 +112,12 @@ impl AuthConfig {
 
     pub fn gitlab_login_enabled(&self) -> bool {
         self.method_enabled("gitlab_oauth") && self.gitlab.client.is_configured()
+    }
+
+    /// No client credentials to check. The capability half is asked of the
+    /// builder, which rejects a base URL naming an IP rather than a domain.
+    pub fn passkey_login_enabled(&self) -> bool {
+        self.method_enabled("passkey") && crate::auth::passkey::build(&self.public_base_url).is_ok()
     }
 }
 

@@ -40,6 +40,7 @@ pub async fn list_for_user(pool: &PgPool, user: UserId) -> Result<Vec<LinkedIden
 pub struct WaysIn {
     pub enabled_providers: Vec<OauthProvider>,
     pub email_is_a_way_back: bool,
+    pub passkeys_open_the_account: bool,
 }
 
 impl WaysIn {
@@ -47,11 +48,19 @@ impl WaysIn {
         Self {
             enabled_providers: cfg.auth.enabled_login_providers(),
             email_is_a_way_back: cfg.auth.magic_link_enabled() && cfg.email.delivers(),
+            passkeys_open_the_account: cfg.auth.passkey_login_enabled(),
         }
     }
 
-    pub fn reachable_with<'a>(&self, mut remaining: impl Iterator<Item = &'a str>) -> bool {
+    /// `passkeys` is how many usable credentials would survive the removal,
+    /// counted apart from the slugs because no vendor can switch one off.
+    pub fn reachable_with<'a>(
+        &self,
+        mut remaining: impl Iterator<Item = &'a str>,
+        passkeys: usize,
+    ) -> bool {
         self.email_is_a_way_back
+            || (self.passkeys_open_the_account && passkeys > 0)
             || remaining.any(|slug| {
                 OauthProvider::from_db_str(slug)
                     .is_some_and(|p| self.enabled_providers.contains(&p))
@@ -61,14 +70,21 @@ impl WaysIn {
     /// Two vendors can mint the same subject, so a sibling is anything that is
     /// not this exact pair. Shared with [`unlink`] so the button and the guard
     /// behind it cannot answer differently.
-    pub fn removable(&self, row: &LinkedIdentity, all: &[LinkedIdentity]) -> bool {
+    pub fn removable(&self, row: &LinkedIdentity, all: &[LinkedIdentity], passkeys: usize) -> bool {
         self.reachable_with(
             all.iter()
                 .filter(|o| {
                     o.provider != row.provider || o.provider_user_id != row.provider_user_id
                 })
                 .map(|o| o.provider.as_str()),
+            passkeys,
         )
+    }
+
+    /// The same question asked from the other side: taking one passkey away
+    /// leaves the linked providers plus whatever passkeys remain.
+    pub fn passkey_removable(&self, all: &[LinkedIdentity], surviving_passkeys: usize) -> bool {
+        self.reachable_with(all.iter().map(|o| o.provider.as_str()), surviving_passkeys)
     }
 }
 
@@ -81,6 +97,7 @@ pub async fn unlink(
     provider: OauthProvider,
     provider_user_id: Option<&str>,
     ways_in: &WaysIn,
+    surviving_passkeys: usize,
     from: RequestOrigin<'_>,
 ) -> Result<String> {
     let mut tx = pool.begin().await.map_err(db("begin"))?;
@@ -111,7 +128,7 @@ pub async fn unlink(
     // What would be left, not what is there now: without a subject this
     // removes every row for the provider, and counting the total first would
     // wave through a call that empties the account.
-    if !ways_in.reachable_with(surviving.iter().map(|r| r.0.as_str())) {
+    if !ways_in.reachable_with(surviving.iter().map(|r| r.0.as_str()), surviving_passkeys) {
         return Err(AppError::bad_request(
             "LAST_SIGN_IN_METHOD",
             "add another sign-in method before removing this one",
@@ -134,7 +151,7 @@ pub async fn unlink(
             &mut tx,
             user,
             CredentialEvent {
-                provider,
+                provider: provider.as_db_str(),
                 provider_user_id: subject,
                 action: CredentialAction::Unlinked,
                 origin: CredentialOrigin::Session,
@@ -158,7 +175,7 @@ pub async fn unlink(
     // claiming a removal that never happened.
     for (_, subject) in doomed.iter().copied() {
         CredentialEvent {
-            provider,
+            provider: provider.as_db_str(),
             provider_user_id: subject,
             action: CredentialAction::Unlinked,
             origin: CredentialOrigin::Session,
@@ -177,10 +194,11 @@ pub struct RequestOrigin<'a> {
     pub user_agent_hash: Option<&'a str>,
 }
 
-/// Grouped so the two writers cannot disagree about what a row needs.
+/// Grouped so the writers cannot disagree about what a row needs. `provider` is
+/// the slug, not [`OauthProvider`]: a passkey has no vendor and still belongs.
 #[derive(Debug, Clone, Copy)]
 pub struct CredentialEvent<'a> {
-    pub provider: OauthProvider,
+    pub provider: &'a str,
     pub provider_user_id: &'a str,
     pub action: CredentialAction,
     pub origin: CredentialOrigin,
@@ -192,10 +210,10 @@ impl CredentialEvent<'_> {
     /// On the event, not at the call sites, so no path can record a change
     /// without saying so while an operator is watching. `provider_user_id`
     /// stays out: it is the user's identifier at a third party.
-    fn announce(&self, user: UserId) {
+    pub(crate) fn announce(&self, user: UserId) {
         tracing::info!(
             user_id = %user.0,
-            provider = self.provider.as_db_str(),
+            provider = self.provider,
             action = self.action.as_db_str(),
             origin = self.origin.as_db_str(),
             "sign-in method changed"
@@ -204,7 +222,7 @@ impl CredentialEvent<'_> {
             crate::observability::metrics::names::CREDENTIAL_CHANGES,
             "action" => self.action.as_db_str(),
             "origin" => self.origin.as_db_str(),
-            "provider" => self.provider.as_db_str(),
+            "provider" => self.provider.to_string(),
         )
         .increment(1);
     }
@@ -215,7 +233,7 @@ impl CredentialEvent<'_> {
 pub async fn record_event(pool: &PgPool, user: UserId, event: CredentialEvent<'_>) {
     let written = sqlx::query(EVENT_INSERT)
         .bind(user.0)
-        .bind(event.provider.as_db_str())
+        .bind(event.provider)
         .bind(event.provider_user_id)
         .bind(event.action.as_db_str())
         .bind(event.origin.as_db_str())
@@ -235,14 +253,14 @@ const EVENT_INSERT: &str = "INSERT INTO credential_events \
      (user_id, provider, provider_user_id, action, origin, ip_hash, user_agent_hash) \
      VALUES ($1, $2, $3, $4, $5, $6, $7)";
 
-async fn record_event_in_tx(
+pub(crate) async fn record_event_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     user: UserId,
     event: CredentialEvent<'_>,
 ) -> Result<()> {
     sqlx::query(EVENT_INSERT)
         .bind(user.0)
-        .bind(event.provider.as_db_str())
+        .bind(event.provider)
         .bind(event.provider_user_id)
         .bind(event.action.as_db_str())
         .bind(event.origin.as_db_str())
@@ -277,6 +295,7 @@ mod tests {
         WaysIn {
             enabled_providers: enabled.to_vec(),
             email_is_a_way_back: email,
+            passkeys_open_the_account: true,
         }
     }
 
@@ -286,15 +305,15 @@ mod tests {
         // left", and every method then reads as the only one.
         let all = vec![row("github", "12345"), row("google", "12345")];
         let w = ways_in(&[OauthProvider::Github, OauthProvider::Google], false);
-        assert!(w.removable(&all[0], &all));
-        assert!(w.removable(&all[1], &all));
+        assert!(w.removable(&all[0], &all, 0));
+        assert!(w.removable(&all[1], &all, 0));
     }
 
     #[test]
     fn the_only_method_stays_unless_email_is_a_way_back() {
         let all = vec![row("github", "1")];
-        assert!(!ways_in(&[OauthProvider::Github], false).removable(&all[0], &all));
-        assert!(ways_in(&[OauthProvider::Github], true).removable(&all[0], &all));
+        assert!(!ways_in(&[OauthProvider::Github], false).removable(&all[0], &all, 0));
+        assert!(ways_in(&[OauthProvider::Github], true).removable(&all[0], &all, 0));
     }
 
     #[test]
@@ -303,7 +322,39 @@ mod tests {
         // the one method that still works.
         let all = vec![row("github", "1"), row("gitlab", "2")];
         let w = ways_in(&[OauthProvider::Gitlab], false);
-        assert!(!w.removable(&all[1], &all), "gitlab is all that opens it");
-        assert!(w.removable(&all[0], &all), "github opens nothing anyway");
+        assert!(
+            !w.removable(&all[1], &all, 0),
+            "gitlab is all that opens it"
+        );
+        assert!(w.removable(&all[0], &all, 0), "github opens nothing anyway");
+    }
+    #[test]
+    fn a_passkey_keeps_the_last_provider_removable() {
+        // Without counting it the page hides the remove button on the only
+        // provider, from someone who already has another way in.
+        let all = vec![row("github", "1")];
+        let w = ways_in(&[OauthProvider::Github], false);
+        assert!(!w.removable(&all[0], &all, 0));
+        assert!(w.removable(&all[0], &all, 1));
+    }
+
+    #[test]
+    fn a_passkey_does_not_count_where_the_deployment_switched_them_off() {
+        let all = vec![row("github", "1")];
+        let mut w = ways_in(&[OauthProvider::Github], false);
+        w.passkeys_open_the_account = false;
+        assert!(!w.removable(&all[0], &all, 3), "none of them can sign in");
+    }
+
+    #[test]
+    fn the_last_passkey_stays_unless_something_else_opens_the_account() {
+        let none: Vec<LinkedIdentity> = Vec::new();
+        let w = ways_in(&[], false);
+        assert!(!w.passkey_removable(&none, 0), "nothing would be left");
+        assert!(w.passkey_removable(&none, 1), "a sibling passkey remains");
+
+        let linked = vec![row("github", "1")];
+        let w = ways_in(&[OauthProvider::Github], false);
+        assert!(w.passkey_removable(&linked, 0), "github still opens it");
     }
 }

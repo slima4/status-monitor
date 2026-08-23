@@ -121,6 +121,7 @@ fn method_prop(method: LoginMethod) -> Option<&'static str> {
         LoginMethod::GoogleOauth => Some("google"),
         LoginMethod::MicrosoftOauth => Some("microsoft"),
         LoginMethod::GitlabOauth => Some("gitlab"),
+        LoginMethod::Passkey => Some("passkey"),
         LoginMethod::MagicLink => Some("magic-link"),
         LoginMethod::ApiToken => None,
     }

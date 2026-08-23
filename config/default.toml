@@ -225,7 +225,7 @@ api_key = ""
 # Policy switch per sign-in method. OAuth providers additionally need their
 # client credentials + redirect_url set below (list = policy, creds =
 # capability); magic_link gates its request/verify routes + purge ticker.
-enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "gitlab_oauth", "magic_link"]
+enabled_methods = ["github_oauth", "google_oauth", "microsoft_oauth", "gitlab_oauth", "passkey", "magic_link"]
 # Salt for hashing IPs / user-agents in login_attempts + sessions.
 # GENERATE WITH: openssl rand -base64 32
 # LOAD-BEARING: rotating this re-fragments anomaly-detection windows. The

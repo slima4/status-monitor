@@ -65,6 +65,7 @@ pub async fn unlink(
         provider,
         q.provider_user_id.as_deref(),
         &oauth_identities::WaysIn::from_config(&state.cfg),
+        usable_passkeys(&state, pool, user_id).await?,
         oauth_identities::RequestOrigin {
             ip_hash: ip_hash.as_deref(),
             user_agent_hash: ua_hash.as_deref(),
@@ -96,4 +97,22 @@ pub async fn unlink(
         crate::api::handlers::auth::CredentialChange::Unlinked,
     );
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Credentials bound to a relying-party id this deployment no longer answers to
+/// cannot sign anyone in, so they are rows in the table rather than ways back.
+async fn usable_passkeys(
+    state: &AppState,
+    pool: &sqlx::PgPool,
+    user_id: crate::domain::UserId,
+) -> Result<usize> {
+    if !state.cfg.auth.passkey_login_enabled() {
+        return Ok(0);
+    }
+    let rp_id = crate::auth::passkey::relying_party_id(&state.cfg.auth.public_base_url)?;
+    Ok(crate::storage::passkeys::list_for_user(pool, user_id)
+        .await?
+        .iter()
+        .filter(|row| row.usable_from(&rp_id))
+        .count())
 }

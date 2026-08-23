@@ -1095,6 +1095,18 @@ pub async fn find_user_by_email(pool: &PgPool, email: &str) -> Result<Option<Use
     Ok(row.map(|(u,)| UserId(u)))
 }
 
+/// A soft-deleted account keeps its rows, so a credential still resolves to it.
+/// Every sign-in path has to ask this before it opens a session.
+pub async fn user_deleted_at(pool: &PgPool, user: UserId) -> Result<Option<DateTime<Utc>>> {
+    let row: Option<(Option<DateTime<Utc>>,)> =
+        sqlx::query_as("SELECT deleted_at FROM users WHERE id = $1")
+            .bind(user.0)
+            .fetch_optional(pool)
+            .await
+            .context("user_deleted_at")?;
+    Ok(row.and_then(|(d,)| d))
+}
+
 /// Tombstone-inclusive variant for re-auth restore; invitations keep the
 /// active-only [`find_user_by_email`]. The email unique index is partial, so
 /// active + tombstoned rows can coexist — prefer active, then newest.

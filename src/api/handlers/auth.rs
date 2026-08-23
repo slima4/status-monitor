@@ -257,11 +257,22 @@ pub fn notify_credential_change(
     provider: OauthProvider,
     change: CredentialChange,
 ) {
+    notify_credential_change_labelled(state, email, provider.label(), change);
+}
+
+/// The same mail for a credential with no vendor behind it, so a passkey
+/// arriving or leaving is announced exactly like a provider would be.
+pub fn notify_credential_change_labelled(
+    state: &AppState,
+    email: &str,
+    provider_label: &str,
+    change: CredentialChange,
+) {
     let account_url = format!(
         "{}{ACCOUNT_PATH}",
         state.cfg.auth.public_base_url.trim_end_matches('/')
     );
-    let provider_label = provider.label().to_string();
+    let provider_label = provider_label.to_string();
     let template = match change {
         CredentialChange::Linked => crate::email::EmailTemplate::IdentityLinked {
             provider_label,
@@ -373,7 +384,7 @@ async fn finish_link(
                 pool,
                 link_user,
                 crate::storage::oauth_identities::CredentialEvent {
-                    provider,
+                    provider: provider.as_db_str(),
                     provider_user_id: &identity.provider_user_id,
                     action: crate::auth::CredentialAction::Linked,
                     origin: crate::auth::CredentialOrigin::Session,
@@ -692,7 +703,7 @@ async fn finish_login(
             pool,
             resolved.user_id,
             crate::storage::oauth_identities::CredentialEvent {
-                provider,
+                provider: provider.as_db_str(),
                 provider_user_id: &identity.provider_user_id,
                 action: crate::auth::CredentialAction::Linked,
                 origin: crate::auth::CredentialOrigin::Signup,
@@ -708,7 +719,7 @@ async fn finish_login(
             pool,
             resolved.user_id,
             crate::storage::oauth_identities::CredentialEvent {
-                provider,
+                provider: provider.as_db_str(),
                 provider_user_id: &identity.provider_user_id,
                 action: crate::auth::CredentialAction::Linked,
                 origin: crate::auth::CredentialOrigin::EmailMatch,

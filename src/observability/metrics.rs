@@ -381,6 +381,14 @@ pub mod names {
     /// provider's consent screen); `other_user` and `identity_taken` should sit
     /// at zero.
     pub const CREDENTIAL_LINK_REFUSED: &str = "uptimepage_credential_link_refused_total";
+    /// A passkey sign-in that got as far as a verified challenge and was still
+    /// refused, labelled `reason`. Both reasons mean a credential resolved to
+    /// an account that cannot back it, so neither should be routine.
+    pub const PASSKEY_LOGIN_REFUSED: &str = "uptimepage_passkey_login_refused_total";
+    /// A hardware authenticator whose signature counter did not advance. The
+    /// spec calls this a possible clone. Synced passkeys carry no counter, so
+    /// they never reach this; anything here is worth looking at.
+    pub const PASSKEY_COUNTER_STALLED: &str = "uptimepage_passkey_counter_stalled_total";
     pub const ORGS_EMPTIED: &str = "uptimepage_orgs_emptied_total";
     pub const HTTP_REQUESTS_TOTAL: &str = "uptimepage_http_requests_total";
     pub const HTTP_REQUEST_DURATION_MS: &str = "uptimepage_http_request_duration_ms";

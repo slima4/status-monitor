@@ -175,7 +175,7 @@ async fn an_auto_link_is_told_apart_from_a_deliberate_one() {
         &pool,
         owner.user_id,
         uptimepage::storage::oauth_identities::CredentialEvent {
-            provider: uptimepage::auth::OauthProvider::Google,
+            provider: uptimepage::auth::OauthProvider::Google.as_db_str(),
             provider_user_id: "g-1",
             action: uptimepage::auth::CredentialAction::Linked,
             origin: uptimepage::auth::CredentialOrigin::EmailMatch,
@@ -188,7 +188,7 @@ async fn an_auto_link_is_told_apart_from_a_deliberate_one() {
         &pool,
         owner.user_id,
         uptimepage::storage::oauth_identities::CredentialEvent {
-            provider: uptimepage::auth::OauthProvider::Gitlab,
+            provider: uptimepage::auth::OauthProvider::Gitlab.as_db_str(),
             provider_user_id: "gl-1",
             action: uptimepage::auth::CredentialAction::Linked,
             origin: uptimepage::auth::CredentialOrigin::Session,

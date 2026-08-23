@@ -2,7 +2,8 @@
 
 uptimepage ships with an in-binary auth stack: GitHub, Google, Microsoft and
 GitLab OAuth for the operator UI (the hosted service currently offers GitHub
-and Google; the other two are for deployments that configure them), opaque per-user API tokens for the REST surface, and
+and Google; the other two are for deployments that configure them), passkeys,
+opaque per-user API tokens for the REST surface, and
 magic-link sign-in (enabled by default) for users without an OAuth identity. The
 binary always runs as multi-tenant SaaS — single-tenant deployments are
 just SaaS with one signed-up user; see [Multi-tenancy](multi-tenancy.md)
@@ -200,6 +201,69 @@ left checked — the flow authenticates with the client secret, not PKCE.
 The id_token signature is unverified for the same reason it is on the
 Microsoft path: the bytes came straight back from the token endpoint over TLS.
 
+### Passkeys
+
+A passkey is the one credential this deployment mints itself. Every other way
+in belongs to a vendor who can refuse to register the app or lock the owner
+out, which is not hypothetical: the Microsoft and GitLab buttons are dark on
+the hosted service for exactly that reason.
+
+Sign-in is **discoverable**, so the page never asks for an address first.
+Asking would answer whether that address has a passkey, which is the
+enumeration oracle the magic-link path was built to avoid. The assertion
+carries the account id as its user handle, and nothing is trusted from it
+until the signature verifies against a credential that account actually holds.
+
+**A passkey cannot create an account.** It carries no email address, so it is
+only ever added to an account that already exists. New accounts still start at
+an OAuth provider.
+
+Because sign-in is discoverable, the credential has to live on the
+authenticator itself. A browser that reports back that it saved a server-side
+credential instead is refused with `400 PASSKEY_NOT_DISCOVERABLE`, since
+storing it would put a credential in the count that keeps the last way in and
+could never answer a sign-in. The report is an unsigned hint, so only an
+explicit "no" is refused.
+
+**User verification is required**, so the device asks for a biometric or PIN
+every time rather than mere presence.
+
+The relying-party id is the **host of `auth.public_base_url`**, derived rather
+than configured so it cannot drift from the origin the browser reports. An
+authenticator binds every credential it mints to that exact string, so
+**changing that host retires every passkey on the deployment**. Nothing can
+migrate them. Each row records the `rp_id` it was made for, the account page
+labels the ones that no longer answer, and startup logs a warning naming how
+many there are. Treat the app's hostname as permanent once passkeys are in use.
+
+WebAuthn needs a secure context, so passkeys work over https or on
+`localhost` and nowhere else. A self-hosted deployment served over plain http
+on a real hostname will simply never show the button.
+
+At most ten per account (`MAX_PER_USER`), counted under a per-user advisory
+lock so two ceremonies finishing at once cannot both pass the check. A flat
+limit rather than a plan tier: a passkey is not a metered resource, and the
+only job is to stop one account writing rows without end.
+
+Ceremony state lives in `webauthn_states` for five minutes and is deleted as
+it is read, so a replayed answer finds nothing. A registration is bound to the
+session that started it and is refused if another account answers it. An
+abandoned ceremony is swept on a five-minute loop.
+
+The signature counter is checked but **not enforced**: a counter that was
+advancing and stops is the spec's cloned-authenticator signal, so it raises
+`uptimepage_passkey_counter_stalled_total` and a warning rather than refusing
+the sign-in. Refusing would lock someone out over a firmware quirk, and the
+assertion itself is already cryptographically sound. Synced passkeys carry no
+counter at all, so this only ever fires for hardware keys.
+
+Attestation is off. A passkey is trusted because the owner holds it, not
+because a certificate authority vouches for the authenticator model.
+
+Adding or removing one sends the same mail, writes the same `credential_events`
+row and increments the same counter as a linked provider, and removal revokes
+the account's other sessions for the same reason.
+
 ### API token auth
 
 Bearer tokens skip the cookie path entirely. The middleware checks the
@@ -311,12 +375,17 @@ with the same argon2id parameters as API tokens).
 | `GET`  | `/auth/gitlab/login`           | none    | Initiate GitLab OAuth |
 | `GET`  | `/auth/gitlab/callback`        | none    | Handle GitLab OAuth callback |
 | `POST` | `/auth/{provider}/link`        | session | Add that provider to the signed-in account |
+| `POST` | `/auth/passkey/login/start`    | none    | Begin a passkey sign-in, carrying any `invitation` / `redirect_after` (gated) |
+| `POST` | `/auth/passkey/login/finish`   | none    | Complete it and open a session (gated) |
+| `POST` | `/auth/passkey/register/start` | session | Begin adding a passkey (gated) |
+| `POST` | `/auth/passkey/register/finish`| session | Store the credential just minted (gated) |
 | `GET`  | `/invitations/accept`          | optional session | Emailed accept link (HTML; redeems with session, else login bounce) |
 | `GET`  | `/invitations/decline`         | none    | Emailed decline link (HTML confirm page; POST does the decline) |
 | `GET`  | `/api/v1/me`                   | session/token | Current user info |
 | `DELETE` | `/api/v1/me`                 | session | Delete account (soft, 30-day grace) |
 | `POST` | `/api/v1/me/restore`           | session for a soft-deleted account | Cancel a pending account deletion |
 | `DELETE` | `/api/v1/me/sign-in-methods/{provider}` | session | Remove a linked provider |
+| `DELETE` | `/api/v1/me/passkeys/{id}`   | session | Remove one passkey |
 | `GET`  | `/api/v1/me/sessions`          | session | List active sessions |
 | `DELETE` | `/api/v1/me/sessions/{id}`   | session | Revoke a session |
 | `GET`  | `/api/v1/me/api-tokens`        | session | List tokens (prefix only) |
@@ -374,7 +443,7 @@ Every authentication attempt — success or failure — writes a row to
 `login_attempts`:
 
 - `method` ∈ `'github_oauth' | 'google_oauth' | 'microsoft_oauth' |
-  'gitlab_oauth' | 'api_token' | 'magic_link'`
+  'gitlab_oauth' | 'passkey' | 'api_token' | 'magic_link'`
 - `success` boolean
 - `failure_reason` text (`'invalid_state'`, `'token_expired'`,
   `'invalid_token'`, …)

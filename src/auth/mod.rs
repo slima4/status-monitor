@@ -23,6 +23,7 @@ pub mod magic_link;
 pub mod microsoft;
 pub mod oauth_login;
 pub mod oauth_state;
+pub mod passkey;
 pub mod provider;
 pub mod scope;
 pub mod session;

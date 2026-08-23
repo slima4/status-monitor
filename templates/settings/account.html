@@ -150,6 +150,52 @@
       </div>
       {% endfor %}
 
+      {% for pk in passkeys %}
+      <div class="flex flex-wrap items-center justify-between gap-3 p-5" data-passkey data-passkey-id="{{ pk.id }}">
+        <div class="space-y-1">
+          <p class="text-sm font-medium text-body">
+            Passkey{% if let Some(n) = pk.nickname %} <span class="font-mono text-xs text-muted">{{ n }}</span>{% endif %}
+          </p>
+          <p class="text-xs text-muted">
+            added <time datetime="{{ pk.added|iso_ts }}" data-tz="exact">{{ pk.added|human_ts }}</time>
+            · last used <time datetime="{{ pk.last_used|iso_ts }}" data-tz="exact">{{ pk.last_used|human_ts }}</time>
+            {% if !pk.usable %}· <span class="flash-text flash-text--bad">made for a different address of this site, cannot sign in</span>{% endif %}
+          </p>
+        </div>
+        <div class="flex items-center gap-2">
+        {# The button rides a script this page only loads while passkeys are on. #}
+        {% if !passkeys_enabled %}
+        <span class="text-xs text-muted">switched off here</span>
+        {% else if pk.removable %}
+        <button type="button" data-passkey-remove
+                class="btn-ghost btn-ghost--danger px-3 py-1.5 text-sm font-medium"
+                data-confirm-modal
+                data-confirm-title="Remove this passkey?"
+                data-confirm-body="This passkey will no longer sign in to this account. Your other methods keep working, and you&rsquo;ll be signed out on your other devices, since a session it opened would outlive it otherwise."
+                data-confirm-label="remove"
+                data-confirm-danger>
+          remove
+        </button>
+        {% else %}
+        <span class="text-xs text-muted">needed to sign in</span>
+        {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if passkeys_enabled %}
+      <div class="space-y-2 p-5" id="sm-passkey-add-row" hidden>
+        <button type="button" id="sm-passkey-add" class="btn-ghost px-3 py-1.5 text-sm font-medium text-body">
+          add a passkey
+        </button>
+        <p class="text-sm text-muted">
+          Signs you in with this device&rsquo;s unlock, no provider involved. A
+          passkey saved to your password manager follows you to your other
+          devices and browsers; one saved to this browser alone does not.
+        </p>
+      </div>
+      {% endif %}
+
       {% if !linkable.is_empty() %}
       <div class="space-y-2 p-5">
         <div class="flex flex-wrap gap-2">
@@ -179,6 +225,10 @@
   </section>
   <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
   <script defer src="{{ "js/ui/sign_in_methods.js"|asset }}"></script>
+  {% if passkeys_enabled %}
+  <script defer src="{{ "js/ui/passkey_shared.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/passkey_manage.js"|asset }}"></script>
+  {% endif %}
 
   <section class="sticker-card overflow-hidden" aria-labelledby="privacy-heading">
     <header class="card-band">

@@ -363,6 +363,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/me/sign-in-methods/{provider}",
             axum::routing::delete(handlers::identities::unlink),
         )
+        .route(
+            "/me/passkeys/{id}",
+            axum::routing::delete(handlers::passkeys::remove),
+        )
         .route("/me/usage", get(handlers::usage::get_me_usage))
         .route(
             "/me/theme",
@@ -460,6 +464,28 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
         .route("/auth/gitlab/link", post(handlers::auth::gitlab_link))
         .route("/auth/logout", post(handlers::auth::logout))
         .route("/auth/logout-all", post(handlers::auth::logout_all));
+
+    // Mounted only where they can complete, so a deployment without them
+    // answers 404 rather than starting a ceremony that cannot finish.
+    if state.cfg.auth.passkey_login_enabled() {
+        auth_routes = auth_routes
+            .route(
+                "/auth/passkey/register/start",
+                post(handlers::passkeys::register_start),
+            )
+            .route(
+                "/auth/passkey/register/finish",
+                post(handlers::passkeys::register_finish),
+            )
+            .route(
+                "/auth/passkey/login/start",
+                post(handlers::passkeys::login_start),
+            )
+            .route(
+                "/auth/passkey/login/finish",
+                post(handlers::passkeys::login_finish),
+            );
+    }
 
     if state.cfg.auth.magic_link_enabled() {
         auth_routes = auth_routes

@@ -148,6 +148,25 @@ subtle = "2.6"
 # token verification.
 argon2 = "0.6.0-rc.8"
 
+# Passkeys. `danger-allow-state-serialisation` is what lets a ceremony's state
+# live in Postgres between the two round trips; the name is a warning that the
+# row must be single-use and expiring, which `webauthn_states` enforces.
+# `conditional-ui` carries the discoverable login that keeps the sign-in page
+# from having to be told an address first.
+# Pinned exactly, and to a prerelease on purpose: 0.5 is the newest stable and
+# hard-depends on openssl, which the musl builder has no headers for and which
+# would put a second C crypto stack beside ring. 0.6 verifies with RustCrypto
+# instead. Exact so a later -dev publish cannot move the login path on its own.
+#
+# `attestation` stays off with the default features: it pulls openssl back in
+# through webauthn-attestation-ca, and a passkey is trusted because the user
+# holds it, not because a CA vouches for the authenticator model.
+webauthn-rs = { version = "=0.6.1-dev", default-features = false, features = [
+    "danger-allow-state-serialisation",
+    "conditional-ui",
+    "resident-key-support",
+] }
+
 # OpenAPI schema derivation
 utoipa = { version = "5.5", features = ["axum_extras", "chrono", "uuid", "url"] }
 utoipa-axum = "0.2"

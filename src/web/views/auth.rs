@@ -40,6 +40,7 @@ pub struct LoginPage {
     pub microsoft_url: String,
     pub gitlab_enabled: bool,
     pub gitlab_url: String,
+    pub passkey_enabled: bool,
     pub magic_link_enabled: bool,
     pub magic_link_expiry_minutes: u32,
     /// Marks the provider this browser used last (a returning-visitor cue, not
@@ -48,6 +49,7 @@ pub struct LoginPage {
     pub last_google: bool,
     pub last_microsoft: bool,
     pub last_gitlab: bool,
+    pub last_passkey: bool,
     pub last_magic: bool,
     pub invitation_hint: Option<String>,
     /// Cached, timeout-bounded `target_store.ping()` — same dependency check
@@ -110,12 +112,16 @@ pub async fn login(
         gitlab_url: login_url("/auth/gitlab/login", &params),
         // DB-gated too: without Postgres the request handler can only 500,
         // so a self-host/in-mem deployment must not render the form.
+        // Same shape as magic link: the ceremony writes rows, so an in-memory
+        // deployment must not offer a button that cannot finish.
+        passkey_enabled: state.cfg.auth.passkey_login_enabled() && state.db.is_some(),
         magic_link_enabled: state.cfg.auth.magic_link_enabled() && state.db.is_some(),
         magic_link_expiry_minutes: state.cfg.auth.magic_link.expiry_minutes,
         last_github: last == Some(LoginMethod::GithubOauth.as_db_str()),
         last_google: last == Some(LoginMethod::GoogleOauth.as_db_str()),
         last_microsoft: last == Some(LoginMethod::MicrosoftOauth.as_db_str()),
         last_gitlab: last == Some(LoginMethod::GitlabOauth.as_db_str()),
+        last_passkey: last == Some(LoginMethod::Passkey.as_db_str()),
         last_magic: last == Some(LoginMethod::MagicLink.as_db_str()),
         invitation_hint: q.invitation,
         ready: login_ready(&state).await,
@@ -347,6 +353,18 @@ pub mod settings {
         pub add_another_url: String,
     }
 
+    pub struct PasskeyRow {
+        pub id: String,
+        pub nickname: Option<String>,
+        pub added: chrono::DateTime<chrono::Utc>,
+        pub last_used: chrono::DateTime<chrono::Utc>,
+        /// False when removing it would leave nobody able to sign in.
+        pub removable: bool,
+        /// A dead credential still lists: a row nobody can explain is worse
+        /// than a labelled one.
+        pub usable: bool,
+    }
+
     /// A provider this deployment offers that the account has not linked yet.
     pub struct LinkOption {
         pub label: &'static str,
@@ -359,6 +377,8 @@ pub mod settings {
         pub active_tab: &'static str,
         pub email: String,
         pub identities: Vec<IdentityRow>,
+        pub passkeys: Vec<PasskeyRow>,
+        pub passkeys_enabled: bool,
         pub linkable: Vec<LinkOption>,
         pub linked: Option<&'static str>,
         /// The provider account offered already opens somebody else's account.
@@ -387,10 +407,11 @@ pub mod settings {
         };
         let pool = state.require_db()?;
         // No data dependency between the three, so they go together.
-        let (facts, linked, prefs) = tokio::try_join!(
+        let (facts, linked, prefs, stored_passkeys) = tokio::try_join!(
             account::account_facts(pool, user.id),
             crate::storage::oauth_identities::list_for_user(pool, user.id),
             crate::storage::users::get_display_prefs(pool, user.id),
+            crate::storage::passkeys::list_for_user(pool, user.id),
         )?;
         let (joined, last_seen) = match facts {
             Some(f) => (Some(f.created_at), f.last_seen_at),
@@ -400,6 +421,17 @@ pub mod settings {
         // 400s; stricter hides one from a user whose only provider is
         // compromised.
         let ways_in = crate::storage::oauth_identities::WaysIn::from_config(&state.cfg);
+        // A dead credential must not hold a removal open.
+        let rp_id = crate::auth::passkey::relying_party_id(&state.cfg.auth.public_base_url).ok();
+        let usable_passkeys = rp_id
+            .as_deref()
+            .filter(|_| state.cfg.auth.passkey_login_enabled())
+            .map_or(0, |rp| {
+                stored_passkeys
+                    .iter()
+                    .filter(|row| row.usable_from(rp))
+                    .count()
+            });
         let identities: Vec<IdentityRow> = linked
             .iter()
             .filter_map(|row| {
@@ -411,9 +443,32 @@ pub mod settings {
                     username: row.provider_username.clone(),
                     added: row.created_at,
                     last_login: row.last_login_at,
-                    removable: ways_in.removable(row, &linked),
+                    removable: ways_in.removable(row, &linked, usable_passkeys),
                     add_another_url: format!("/auth/{}/link", p.as_db_str()),
                 })
+            })
+            .collect();
+        let passkeys: Vec<PasskeyRow> = stored_passkeys
+            .iter()
+            .map(|row| {
+                let usable = rp_id.as_deref().is_some_and(|rp| row.usable_from(rp));
+                PasskeyRow {
+                    id: row.id.to_string(),
+                    nickname: row.nickname.clone(),
+                    added: row.created_at,
+                    last_used: row.last_used_at,
+                    // The question the API will ask. A row that was never a
+                    // way in does not take one away by leaving.
+                    removable: ways_in.passkey_removable(
+                        &linked,
+                        if usable {
+                            usable_passkeys.saturating_sub(1)
+                        } else {
+                            usable_passkeys
+                        },
+                    ),
+                    usable,
+                }
             })
             .collect();
         let linkable = link_options(&state, &identities);
@@ -422,6 +477,8 @@ pub mod settings {
             active_tab: TAB_ACCOUNT,
             email: user.email,
             identities,
+            passkeys,
+            passkeys_enabled: state.cfg.auth.passkey_login_enabled(),
             linkable,
             linked: flash.identity_linked.map(|p| p.label()),
             taken: flash.identity_taken,
@@ -783,10 +840,20 @@ pub mod settings {
         }
 
         fn account_page(identities: Vec<IdentityRow>, linkable: Vec<LinkOption>) -> AccountPage {
+            account_page_with(identities, linkable, Vec::new())
+        }
+
+        fn account_page_with(
+            identities: Vec<IdentityRow>,
+            linkable: Vec<LinkOption>,
+            passkeys: Vec<PasskeyRow>,
+        ) -> AccountPage {
             AccountPage {
                 active_tab: super::super::TAB_ACCOUNT,
                 email: "alice@example.com".into(),
                 identities,
+                passkeys,
+                passkeys_enabled: true,
                 linkable,
                 linked: None,
                 taken: false,
@@ -797,6 +864,66 @@ pub mod settings {
                 theme: "default".into(),
                 time_format: "auto".into(),
             }
+        }
+
+        fn passkey(nickname: &str, removable: bool, usable: bool) -> PasskeyRow {
+            PasskeyRow {
+                id: "0198f000-0000-7000-8000-000000000001".into(),
+                nickname: Some(nickname.into()),
+                added: "2026-02-14T09:00:00Z".parse().unwrap(),
+                last_used: "2026-05-16T12:00:00Z".parse().unwrap(),
+                removable,
+                usable,
+            }
+        }
+
+        #[test]
+        fn a_passkey_lists_with_a_way_to_take_it_back() {
+            let html = account_page_with(vec![], vec![], vec![passkey("laptop", true, true)])
+                .render()
+                .unwrap();
+            assert!(html.contains("Passkey"), "the row is named");
+            assert!(html.contains("laptop"), "the nickname shows");
+            assert!(html.contains("data-passkey-remove"), "and can be removed");
+        }
+
+        #[test]
+        fn the_only_passkey_offers_no_remove_button() {
+            let html = account_page_with(vec![], vec![], vec![passkey("phone", false, true)])
+                .render()
+                .unwrap();
+            assert!(!html.contains("data-passkey-remove"), "nothing to press");
+            assert!(html.contains("needed to sign in"));
+        }
+
+        #[test]
+        fn a_credential_for_another_host_says_so_and_still_goes() {
+            // Listing it silently reads as a working way in; hiding it leaves
+            // a row nobody can account for.
+            let html = account_page_with(vec![], vec![], vec![passkey("old", true, false)])
+                .render()
+                .unwrap();
+            assert!(html.contains("cannot sign in"), "labelled as dead");
+            assert!(html.contains("data-passkey-remove"), "and removable");
+        }
+
+        #[test]
+        fn a_switched_off_deployment_draws_no_remove_button() {
+            // The button rides a script this page only loads while passkeys
+            // are on, so drawing it there gives someone a dead control.
+            let mut page = account_page_with(vec![], vec![], vec![passkey("laptop", true, true)]);
+            page.passkeys_enabled = false;
+            let html = page.render().unwrap();
+            assert!(html.contains("laptop"), "the row still lists");
+            assert!(
+                !html.contains("data-passkey-remove"),
+                "but offers no control"
+            );
+            assert!(
+                !html.contains("needed to sign in"),
+                "and does not claim it is a way in"
+            );
+            assert!(html.contains("switched off here"));
         }
 
         fn identity(provider: &'static str, label: &'static str, removable: bool) -> IdentityRow {
@@ -992,6 +1119,7 @@ mod tests {
         google: bool,
         microsoft: bool,
         gitlab: bool,
+        passkey: bool,
         magic: bool,
     ) -> LoginPage {
         LoginPage {
@@ -1004,12 +1132,14 @@ mod tests {
             microsoft_url: "/auth/microsoft/login".into(),
             gitlab_enabled: gitlab,
             gitlab_url: "/auth/gitlab/login".into(),
+            passkey_enabled: passkey,
             magic_link_enabled: magic,
             magic_link_expiry_minutes: 15,
             last_github: false,
             last_google: false,
             last_microsoft: false,
             last_gitlab: false,
+            last_passkey: false,
             last_magic: false,
             invitation_hint: None,
             ready: true,
@@ -1019,7 +1149,10 @@ mod tests {
 
     #[test]
     fn login_page_renders_all_methods_when_enabled() {
-        let html = login_page(true, true, true, true, true).render().unwrap();
+        let html = login_page(true, true, true, true, true, true)
+            .render()
+            .unwrap();
+        assert!(html.contains("continue with a passkey"));
         assert!(html.contains("continue with github"));
         assert!(html.contains(r#"href="/auth/github/login""#));
         assert!(html.contains("continue with google"));
@@ -1038,13 +1171,14 @@ mod tests {
 
     #[test]
     fn login_page_tags_every_method_for_the_funnel() {
-        let mut page = login_page(true, true, true, true, true);
+        let mut page = login_page(true, true, true, true, true, true);
         page.last_google = true;
         let html = page.render().unwrap();
         assert!(html.contains(r#"data-umami-event-method="github""#));
         assert!(html.contains(r#"data-umami-event-method="google""#));
         assert!(html.contains(r#"data-umami-event-method="microsoft""#));
         assert!(html.contains(r#"data-umami-event-method="gitlab""#));
+        assert!(html.contains(r#"data-umami-event-method="passkey""#));
         // The email form has no attribute event; its script reads this instead.
         assert!(html.contains(r#"data-last-used="false""#));
         assert!(html.contains(r#"data-umami-event-last-used="true""#));
@@ -1053,12 +1187,12 @@ mod tests {
     #[test]
     fn login_page_loads_the_tracker_only_when_analytics_is_on() {
         assert!(
-            !login_page(true, true, true, true, true)
+            !login_page(true, true, true, true, false, true)
                 .render()
                 .unwrap()
                 .contains("analytics.uptimepage.dev")
         );
-        let mut page = login_page(true, true, true, true, true);
+        let mut page = login_page(true, true, true, true, false, true);
         page.analytics = Some("website-id");
         let html = page.render().unwrap();
         assert!(html.contains(r#"data-website-id="website-id""#));
@@ -1069,7 +1203,7 @@ mod tests {
 
     #[test]
     fn login_page_marks_last_used_method_only() {
-        let mut page = login_page(true, true, true, true, true);
+        let mut page = login_page(true, true, true, true, false, true);
         page.last_google = true;
         let html = page.render().unwrap();
         assert_eq!(html.matches("last used").count(), 1);
@@ -1081,14 +1215,53 @@ mod tests {
     }
 
     #[test]
+    fn login_page_offers_a_passkey_hidden_until_the_device_answers() {
+        let mut page = login_page(true, false, false, false, true, false);
+        page.last_passkey = true;
+        let html = page.render().unwrap();
+        assert!(html.contains("continue with a passkey"));
+        // Hidden at render; the script reveals it once it knows the browser
+        // speaks WebAuthn.
+        assert!(
+            html.contains(r#"id="sm-passkey-signin" hidden"#),
+            "the button starts hidden"
+        );
+        assert!(
+            html.contains("js/ui/passkey_login.js"),
+            "and the script that reveals it is loaded"
+        );
+    }
+
+    #[test]
+    fn login_page_omits_the_passkey_button_where_it_is_off() {
+        let html = login_page(true, false, false, false, false, false)
+            .render()
+            .unwrap();
+        assert!(!html.contains("continue with a passkey"));
+        assert!(!html.contains("js/ui/passkey_login.js"));
+    }
+
+    #[test]
+    fn a_passkey_alone_is_still_a_configured_method() {
+        // The "nothing is configured" warning counts passkeys, or a deployment
+        // offering only them claims it offers nothing.
+        let html = login_page(false, false, false, false, true, false)
+            .render()
+            .unwrap();
+        assert!(!html.contains("No sign-in method is configured"));
+    }
+
+    #[test]
     fn login_page_shows_no_badge_for_first_visit() {
-        let html = login_page(true, true, true, true, true).render().unwrap();
+        let html = login_page(true, true, true, true, false, true)
+            .render()
+            .unwrap();
         assert!(!html.contains("last used"));
     }
 
     #[test]
     fn login_page_hides_disabled_methods() {
-        let html = login_page(true, false, false, false, false)
+        let html = login_page(true, false, false, false, false, false)
             .render()
             .unwrap();
         assert!(html.contains("continue with github"));
@@ -1098,7 +1271,7 @@ mod tests {
 
     #[test]
     fn login_page_renders_microsoft_on_its_own() {
-        let html = login_page(false, false, true, false, false)
+        let html = login_page(false, false, true, false, false, false)
             .render()
             .unwrap();
         assert!(html.contains("continue with microsoft"));
@@ -1107,7 +1280,7 @@ mod tests {
 
     #[test]
     fn login_page_renders_gitlab_on_its_own() {
-        let html = login_page(false, false, false, true, false)
+        let html = login_page(false, false, false, true, false, false)
             .render()
             .unwrap();
         assert!(html.contains("continue with gitlab"));
@@ -1126,7 +1299,7 @@ mod tests {
             ("continue with gitlab", "/auth/gitlab/login"),
         ];
         for (i, (label, url)) in BUTTONS.iter().enumerate() {
-            let html = login_page(i == 0, i == 1, i == 2, i == 3, false)
+            let html = login_page(i == 0, i == 1, i == 2, i == 3, false, false)
                 .render()
                 .unwrap();
             assert!(html.contains(label), "{label} missing when enabled alone");
@@ -1147,7 +1320,9 @@ mod tests {
         // Adding a method is a signed-in action from settings, and its route is
         // POST-only. A start URL rendered as a link here would be dead on click
         // and an invitation to confuse the two flows.
-        let html = login_page(true, true, true, true, true).render().unwrap();
+        let html = login_page(true, true, true, true, false, true)
+            .render()
+            .unwrap();
         assert!(!html.contains("/link"), "no link-dance URL belongs here");
     }
 
@@ -1156,12 +1331,12 @@ mod tests {
         // Email sign-in only redeems an existing account, so it stays behind a
         // disclosure while OAuth is the path to a new one. With OAuth off it is
         // the only way in and must render open.
-        let beside_oauth = login_page(true, false, false, false, true)
+        let beside_oauth = login_page(true, false, false, false, false, true)
             .render()
             .unwrap();
         assert!(beside_oauth.contains("<details"), "should be tucked away");
 
-        let alone = login_page(false, false, false, false, true)
+        let alone = login_page(false, false, false, false, false, true)
             .render()
             .unwrap();
         assert!(!alone.contains("<details"), "nothing left to hide behind");
@@ -1169,14 +1344,14 @@ mod tests {
 
     #[test]
     fn login_page_warns_only_when_no_method_available() {
-        let html = login_page(false, false, false, false, false)
+        let html = login_page(false, false, false, false, false, false)
             .render()
             .unwrap();
         assert!(html.contains("No sign-in method is configured"));
         assert!(!html.contains("continue with github"));
         assert!(!html.contains("continue with google"));
 
-        let html = login_page(false, false, false, false, true)
+        let html = login_page(false, false, false, false, false, true)
             .render()
             .unwrap();
         assert!(!html.contains("No sign-in method is configured"));
@@ -1187,7 +1362,7 @@ mod tests {
 
     #[test]
     fn login_page_shows_invitation_hint() {
-        let mut page = login_page(true, false, false, false, false);
+        let mut page = login_page(true, false, false, false, false, false);
         page.github_url = "/auth/github/login?invitation=abc".into();
         page.invitation_hint = Some("abc".into());
         let html = page.render().unwrap();

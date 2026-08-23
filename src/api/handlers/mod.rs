@@ -15,6 +15,7 @@ pub mod notification_channels;
 pub mod on_call;
 pub mod operator;
 pub mod orgs;
+pub mod passkeys;
 pub mod public;
 pub mod results;
 pub mod shares;
