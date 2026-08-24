@@ -59,15 +59,31 @@ You agree NOT to:
 We may suspend or terminate accounts that violate this section. See our
 [Abuse Policy](/abuse-policy) for our reporting and response process.
 
-## 6. Free Tier and Reasonable Use
+## 6. Plans, Billing and Reasonable Use
 
-We currently provide the Service free of charge. Free-tier resource limits
-are published at /settings/usage and apply per organisation. We may change
-these limits with at least 30 days' notice for existing users.
+The Service is offered on several plans, listed at
+https://uptimepage.dev/pricing. Plan resource limits are published there and
+at /settings/usage, and apply per organisation.
 
-We reserve the right to enforce reasonable-use protections beyond the
-published quotas if your usage pattern suggests abuse, even if no specific
-quota is exceeded.
+**Billing is not yet open.** We do not currently accept payment, hold a
+payment method, or charge for any plan. Nothing in these Terms obliges you to
+pay for the Service as they stand. Before we begin charging we will publish
+billing terms covering at least the billing period, renewal, cancellation,
+refunds and taxes, and give existing users no less than 30 days' notice. No
+charge will be made against an account that has not accepted those terms.
+
+**Founding places.** A Founding place is limited to the first accounts to
+claim one. Once claimed it stays free for as long as the account remains open,
+and we will not move it onto a paid plan or reduce the limits published for it
+at the time it was claimed. This survives the change rights in the next
+paragraph and in Section 9.
+
+**Changes to plan limits.** For plans other than Founding, we may change
+published limits with at least 30 days' notice to existing users.
+
+**Reasonable use.** We reserve the right to enforce reasonable-use protections
+beyond the published quotas if your usage pattern suggests abuse, even if no
+specific quota is exceeded.
 
 ## 7. Your Content
 
