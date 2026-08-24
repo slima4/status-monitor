@@ -174,9 +174,8 @@ pub async fn request(
                         error = %err,
                         "magic_link: throttle claim failed; sending anyway"
                     );
-                    // Send unthrottled rather than swallow a legitimate attempt,
-                    // but stamp anyway: an unstamped row mails a code that
-                    // cannot be redeemed, and the refusal would blame the reader.
+                    // Stamp anyway: an unstamped row mails a code that cannot
+                    // be redeemed, and the refusal would blame the reader.
                     if let Err(err) =
                         magic_link::claim_send(&throttle_pool, created_id, &throttle_email, 0).await
                     {
@@ -444,11 +443,12 @@ pub async fn submit_code(
             .unwrap_or_default(),
     );
 
+    // Not the dead-link page: the link in that mail may still sign them in.
     let Some(nonce) = cookies
         .get(CODE_NONCE_COOKIE)
         .map(|c| c.value().to_string())
     else {
-        return Ok(invalid_page(&state, StatusCode::GONE));
+        return Ok(code_refused_page(&state, true));
     };
     match magic_link::consume_code(pool, &nonce, &form.code).await? {
         magic_link::CodeOutcome::Ok(row) => {
@@ -845,6 +845,19 @@ mod tests {
         assert!(html.contains(r#"data-auth-event-reason="code-refused""#));
         // One reason for wrong, spent and wrong-browser alike.
         assert_eq!(html.matches("data-auth-event-reason").count(), 1);
+    }
+
+    #[test]
+    fn a_missing_binding_does_not_read_as_a_dead_link() {
+        // Where the route lands with no cookie behind it.
+        let html = MagicLinkCodeRefusedPage {
+            analytics: None,
+            spent: true,
+        }
+        .render()
+        .expect("renders");
+        assert!(!html.contains("expired"));
+        assert!(html.contains("still signs"));
     }
 
     #[test]
