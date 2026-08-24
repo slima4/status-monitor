@@ -382,8 +382,8 @@ pub mod names {
     /// at zero.
     pub const CREDENTIAL_LINK_REFUSED: &str = "uptimepage_credential_link_refused_total";
     /// A passkey sign-in that got as far as a verified challenge and was still
-    /// refused, labelled `reason`. Both reasons mean a credential resolved to
-    /// an account that cannot back it, so neither should be routine.
+    /// refused, labelled `reason`. Every reason means the assertion resolved to
+    /// something this deployment cannot back, so none should be routine.
     pub const PASSKEY_LOGIN_REFUSED: &str = "uptimepage_passkey_login_refused_total";
     /// A hardware authenticator whose signature counter did not advance. The
     /// spec calls this a possible clone. Synced passkeys carry no counter, so
