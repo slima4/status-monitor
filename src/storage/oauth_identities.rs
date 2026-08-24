@@ -104,9 +104,8 @@ pub async fn unlink(
     from: RequestOrigin<'_>,
 ) -> Result<String> {
     let mut tx = pool.begin().await.map_err(db("begin"))?;
-    // The same key passkey removal takes. FOR UPDATE below serialises this
-    // against another unlink, but not against the passkey side, and an account
-    // whose last provider and last passkey go at once loses both.
+    // FOR UPDATE below serialises this against another unlink, but not against
+    // passkey removal, which counts under this key.
     crate::storage::locks::advisory_xact_lock(
         &mut *tx,
         &crate::storage::locks::user_lock_key(user),

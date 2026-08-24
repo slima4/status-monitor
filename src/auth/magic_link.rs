@@ -224,8 +224,6 @@ pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkR
 /// Claimed before the send, not after: the alternative leaves the whole SMTP
 /// round trip as a gap for the next request to walk through. A send that then
 /// fails hands the window back via [`release_send`].
-///
-/// Runs inside `tokio::spawn`, so response timing never depends on it.
 pub async fn claim_send(pool: &PgPool, id: Uuid, email: &str, window_seconds: u32) -> Result<bool> {
     if window_seconds == 0 {
         sqlx::query("UPDATE magic_link_tokens SET sent_at = now() WHERE id = $1")
@@ -239,9 +237,8 @@ pub async fn claim_send(pool: &PgPool, id: Uuid, email: &str, window_seconds: u3
         .begin()
         .await
         .context("magic_link::claim_send: begin")?;
-    // The read and the write must not straddle another claim's. Two UPDATEs on
-    // different rows take different row locks and never conflict, so the
-    // subquery alone would let every concurrent request read an empty window.
+    // Two UPDATEs on different rows take different row locks and never conflict,
+    // so the subquery alone lets every concurrent request read an empty window.
     advisory_xact_lock(&mut *tx, &magic_link_send_lock_key(email))
         .await
         .context("magic_link::claim_send: lock")?;

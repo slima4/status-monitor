@@ -1327,8 +1327,8 @@ mod tests {
 
     #[test]
     fn the_email_field_makes_no_passkey_offer() {
-        // A `webauthn` token here would arm conditional mediation, which mints a
-        // ceremony row on every view of the page. The button is the only way in.
+        // A `webauthn` token here arms conditional mediation, which mints a
+        // ceremony row on every view of the page.
         for passkey in [true, false] {
             let html = login_page(true, false, false, false, passkey, true)
                 .render()
@@ -1340,8 +1340,6 @@ mod tests {
 
     #[test]
     fn the_signup_page_shows_what_signup_records() {
-        // create_signup_user stamps terms_version and privacy_version; a record
-        // of consent needs the documents on the page that produced it.
         let html = login_page(true, false, false, false, false, true)
             .render()
             .unwrap();

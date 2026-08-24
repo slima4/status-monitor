@@ -97,8 +97,8 @@ pub fn track_login(state: &AppState, login: Login<'_>, ip: IpAddr, headers: &Hea
     });
 }
 
-/// `via` is left out rather than sent as a filler value: Umami charts every
-/// value a property takes, and a third slice reading "none" is not a way in.
+/// `via` is absent rather than a filler value: Umami charts every value a
+/// property takes, and a third slice reading "none" is not a sign-in method.
 fn props(method: &'static str, login: &Login<'_>) -> BTreeMap<&'static str, &'static str> {
     let mut data = BTreeMap::from([("method", method), ("intent", intent(login.redirect_after))]);
     if let Some(via) = login.via {

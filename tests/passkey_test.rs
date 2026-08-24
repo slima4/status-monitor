@@ -104,8 +104,6 @@ async fn two_removals_at_once_cannot_empty_the_account() {
     MIGRATOR.run(&pool).await.unwrap();
     let user = common::make_user(&pool, "raced").await;
 
-    // Exactly two, and nothing else opens the account: each removal on its own
-    // is allowed, and both together must not be.
     let a = add_credential(&pool, user, "cred-a", HOST).await;
     let b = add_credential(&pool, user, "cred-b", HOST).await;
 
@@ -141,8 +139,6 @@ async fn dropping_the_last_provider_and_the_last_passkey_at_once_leaves_one() {
     MIGRATOR.run(&pool).await.unwrap();
     let user = common::make_user(&pool, "both").await;
 
-    // One of each and no email back: either may go, never both. The two guards
-    // live in different modules and used to take different locks.
     let only = add_credential(&pool, user, "cred-a", HOST).await;
     sqlx::query(
         "INSERT INTO oauth_identities (user_id, provider, provider_user_id)          VALUES ($1, 'github', '900')",

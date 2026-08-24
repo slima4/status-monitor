@@ -802,8 +802,7 @@ async fn a_paste_accident_does_not_spend_the_attempt() {
     mark_sent(&pool, created.row.id).await;
 
     for malformed in ["", "  ", "ABC", "4KP9RT77"] {
-        // Malformed, not Refused: the caller keeps the browser's binding on
-        // this one, which is the whole point of spending nothing.
+        // Malformed, not Refused: the caller keeps the browser's binding.
         assert!(matches!(
             magic_link::consume_code(&pool, nonce, malformed)
                 .await
@@ -1251,8 +1250,7 @@ async fn two_sends_that_raced_do_not_retire_each_other() {
     .await
     .unwrap();
 
-    // Both winners, each retiring what it found — the interleaving that used to
-    // leave the reader holding two dead links.
+    // Both winners, each retiring what it found.
     magic_link::supersede_others(&pool, "race@example.test", newer.row.id)
         .await
         .expect("newer sweeps");
@@ -1300,8 +1298,7 @@ async fn the_attempt_is_claimed_before_the_guess_is_judged() {
         magic_link::CodeOutcome::Ok(_)
     ));
 
-    // Even the guess that wins carries the mark, because it is stamped before
-    // anything knows it won. Without that, parallel guesses each get a try.
+    // Stamped before anything knows it won, so it marks the guess that wins too.
     let spent: bool =
         sqlx::query_scalar("SELECT code_spent_at IS NOT NULL FROM magic_link_tokens WHERE id = $1")
             .bind(sent.row.id)
