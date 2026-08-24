@@ -45,7 +45,13 @@ mod static_refs {
     /// is the index and `{{ "/hosted/regions"|docs_url }}` is one page.
     #[askama::filter_fn]
     pub fn docs_url(path: &str, _: &dyn askama::Values) -> askama::Result<String> {
-        Ok(format!("https://uptimepage.dev/docs{path}"))
+        Ok(docs_link(path))
+    }
+
+    /// The same link off a template, for the surfaces askama does not render
+    /// (mail, notifications). One owner for the base so the two cannot drift.
+    pub fn docs_link(path: &str) -> String {
+        format!("https://uptimepage.dev/docs{path}")
     }
 
     /// Crate version baked at compile time. Public build string, safe to

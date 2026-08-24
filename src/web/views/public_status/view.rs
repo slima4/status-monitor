@@ -501,6 +501,8 @@ pub(super) fn component_classes(
         PublicComponentStatus::Maintenance => {
             ("Maintenance", "public-cmp--mnt", "\u{2699}\u{FE0E}")
         }
+        // Hollow, like the day strip's silent cells.
+        PublicComponentStatus::NoData => ("No data", "public-cmp--none", "\u{25CB}"),
     }
 }
 

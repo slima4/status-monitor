@@ -28,6 +28,9 @@ pub enum PublicComponentStatus {
     PartialOutage,
     MajorOutage,
     Maintenance,
+    /// Nothing recorded anywhere in the history window. A heartbeat that has
+    /// never been pinged sits here; calling that operational is the worse lie.
+    NoData,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -229,4 +232,30 @@ pub struct ComponentHistoryResponse {
     pub component_name: String,
     pub days: u32,
     pub history: Vec<DayState>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// These strings are the public API's wire contract; renaming one silently
+    /// breaks every status-page client and the badge endpoint.
+    #[test]
+    fn component_and_day_states_serialise_as_snake_case() {
+        let json = |s: PublicComponentStatus| serde_json::to_string(&s).unwrap();
+        assert_eq!(json(PublicComponentStatus::Operational), "\"operational\"");
+        assert_eq!(json(PublicComponentStatus::Degraded), "\"degraded\"");
+        assert_eq!(
+            json(PublicComponentStatus::PartialOutage),
+            "\"partial_outage\""
+        );
+        assert_eq!(json(PublicComponentStatus::MajorOutage), "\"major_outage\"");
+        assert_eq!(json(PublicComponentStatus::Maintenance), "\"maintenance\"");
+        assert_eq!(json(PublicComponentStatus::NoData), "\"no_data\"");
+        // The strip already spelled it this way, and the two must match.
+        assert_eq!(
+            serde_json::to_string(&DayState::NoData).unwrap(),
+            "\"no_data\""
+        );
+    }
 }

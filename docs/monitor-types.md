@@ -61,7 +61,9 @@ The direction is reversed. Instead of us probing you, your system calls a URL we
 
 This is how you monitor things that have no endpoint to poll: nightly backups, cron jobs, queue workers, data pipelines. Creating one mints a ping URL; call it at the end of each successful run, typically by appending `curl -fsS $URL` to the job.
 
-You set a **period** (how often you expect the ping) and a **grace** (how late it may be before it counts as failed). A job that runs hourly with a ten-minute grace flips to failing ten minutes after the missed run, and the alert follows once the monitor's confirmation count is met (default 2 consecutive failing evaluations). A fresh or re-enabled monitor gets a full period plus grace before it can go down, so creating one at an awkward moment does not page you immediately.
+You set a **period** (how often you expect the ping) and a **grace** (how late it may be before it counts as failed). A job that runs hourly with a ten-minute grace flips to failing ten minutes after the missed run, and the alert follows once the monitor's confirmation count is met (default 2 consecutive failing evaluations). A new monitor waits for its first ping before it is evaluated at all: until one arrives it reports no state, opens no incident and alerts nobody, so the gap between creating the monitor and deploying the job costs you nothing. A monitor that has pinged before and is then re-enabled gets a full period plus grace from the moment you resume it.
+
+Because a monitor waiting for its first ping is silent, one that is never wired up would stay silent forever. Three days after you create it, if no ping has arrived, its owner gets a single reminder by email. One message, never repeated, and it stops mattering the moment the job reports in.
 
 Set the period to how often the job *actually* runs, not how often you would like it to. A period shorter than the real cadence means every run is late by the time the next one arrives, and the monitor flaps all night for a job that is fine.
 

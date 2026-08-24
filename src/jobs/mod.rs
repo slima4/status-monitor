@@ -2,6 +2,7 @@
 //! tick functions the runtime schedules (daily scheduler, manual invocation
 //! in tests) and the shared `periodic` purge-loop runner.
 
+pub mod heartbeat_nudge;
 pub mod periodic;
 pub mod purge_deleted;
 pub mod retention;

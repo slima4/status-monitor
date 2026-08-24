@@ -155,11 +155,27 @@ fn sample_page() -> DetailPage {
 }
 
 #[test]
+fn a_never_pinged_heartbeat_reads_waiting_not_down() {
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    p.last_status = super::WAITING_FOR_PING;
+    let html = p.render().unwrap();
+    assert!(html.contains("waiting for first ping"));
+    assert!(html.contains("status-badge--pending"), "grey, not red");
+    assert!(
+        !html.contains(">down<") && !html.contains("checking\u{2026}"),
+        "an unwired job is neither down nor being checked"
+    );
+}
+
+#[test]
 fn heartbeat_detail_renders_ping_card_without_probe_surfaces() {
     let mut p = sample_page();
     p.kind = "HEARTBEAT";
     p.heartbeat = Some(crate::api::handlers::targets::HeartbeatInfo {
         ping_url: Some("https://app.example.com/ping/tok123".into()),
+        first_ping_at: Some(chrono::Utc::now()),
+        pending: false,
         last_ping_at: None,
         last_start_at: None,
         last_fail_at: Some(chrono::Utc::now()),

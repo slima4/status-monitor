@@ -10,8 +10,9 @@ use crate::storage::locks::try_job;
 
 /// Runs `purge` every `every` under the `job` advisory lock until `shutdown`
 /// fires. The immediate first tick is skipped so boot isn't slowed by a
-/// sweep; missed ticks are dropped — every purge is idempotent SQL, so
-/// cadence drift is harmless. `job` keys the lock and the log lines.
+/// sweep; missed ticks are dropped — every job here is idempotent, so cadence
+/// drift is harmless. `job` keys the lock and the log lines, and the returned
+/// count is whatever that job acted on.
 pub async fn run_purge_loop<E: std::fmt::Display>(
     pool: PgPool,
     shutdown: CancellationToken,
@@ -29,8 +30,8 @@ pub async fn run_purge_loop<E: std::fmt::Display>(
                 try_job(&pool, job, || async {
                     match purge(&pool).await {
                         Ok(0) => {}
-                        Ok(n) => tracing::info!(deleted = n, "{job} purge"),
-                        Err(err) => tracing::warn!(error = %err, "{job} purge failed"),
+                        Ok(n) => tracing::info!(rows = n, "{job}"),
+                        Err(err) => tracing::warn!(error = %err, "{job} failed"),
                     }
                 })
                 .await;

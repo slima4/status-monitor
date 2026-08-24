@@ -152,11 +152,14 @@ impl OrgAggregator {
             .iter()
             .map(|c| {
                 let maint = maintenance_by_target.contains(&c.id);
-                let current = component_status(open_worst.get(&c.id).copied(), maint);
                 let history = history_by_target
                     .get(&c.id)
                     .cloned()
                     .unwrap_or_else(|| vec![DayState::NoData; days as usize]);
+                // Read the evidence off the strip the page is about to render,
+                // so the pill and the history under it cannot disagree.
+                let has_evidence = history.iter().any(|d| *d != DayState::NoData);
+                let current = component_status(open_worst.get(&c.id).copied(), maint, has_evidence);
                 let pc = PublicComponent {
                     id: c.id,
                     name: c.name.clone(),

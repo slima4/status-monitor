@@ -110,6 +110,15 @@ pub enum EmailTemplate {
         incident_url: String,
         unsubscribe_url: String,
     },
+    /// Told once to the owner. A pending heartbeat alerts nobody by design, so
+    /// without this a monitor somebody half-wired stays quiet forever.
+    HeartbeatNeverPinged {
+        monitor_name: String,
+        waiting_secs: i64,
+        monitor_url: Option<String>,
+        docs_url: Option<String>,
+        org_name: Option<String>,
+    },
     /// An in-app help request relayed to the operator's support address.
     /// Everything but `message` and `page_url` is server-derived, and
     /// `from_email` becomes the Reply-To so an answer goes straight back.
@@ -235,6 +244,22 @@ impl EmailTemplate {
                     channel_url: channel_url.as_deref(),
                 },
             ),
+            EmailTemplate::HeartbeatNeverPinged {
+                monitor_name,
+                waiting_secs,
+                monitor_url,
+                docs_url,
+                org_name,
+            } => templates::heartbeat_never_pinged::render(
+                site_name,
+                &templates::heartbeat_never_pinged::UnwiredHeartbeat {
+                    monitor_name,
+                    waiting_secs: *waiting_secs,
+                    monitor_url: monitor_url.as_deref(),
+                    docs_url: docs_url.as_deref(),
+                    org_name: org_name.as_deref(),
+                },
+            ),
             EmailTemplate::IncidentAlert(alert) => {
                 templates::incident_alert::render(site_name, alert)
             }
@@ -321,6 +346,7 @@ impl EmailTemplate {
             | EmailTemplate::IdentityUnlinked { account_url, .. } => Some(account_url),
             EmailTemplate::ChannelVerification { verify_url, .. } => Some(verify_url),
             EmailTemplate::ChannelFailing { channel_url, .. } => channel_url.as_deref(),
+            EmailTemplate::HeartbeatNeverPinged { monitor_url, .. } => monitor_url.as_deref(),
             EmailTemplate::IncidentAlert(_) => None,
             EmailTemplate::SubscriberConfirm { confirm_url, .. } => Some(confirm_url),
             EmailTemplate::SubscriberIncident { incident_url, .. } => Some(incident_url),

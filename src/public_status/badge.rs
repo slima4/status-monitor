@@ -14,6 +14,7 @@ const COLOR_YELLOW: &str = "#dfb317";
 const COLOR_ORANGE: &str = "#fe7d37";
 const COLOR_RED: &str = "#e05d44";
 const COLOR_BLUE: &str = "#007ec6";
+const COLOR_GREY: &str = "#9f9f9f";
 
 /// Approximate character width in 11px Verdana, in user-units. Verdana renders
 /// roughly 6.5px/char on average; round up to 7 so longer strings still fit
@@ -47,6 +48,7 @@ pub fn component_badge(state: PublicComponentStatus) -> (&'static str, &'static 
         PublicComponentStatus::Maintenance => ("maintenance", COLOR_BLUE),
         PublicComponentStatus::PartialOutage => ("partial outage", COLOR_ORANGE),
         PublicComponentStatus::MajorOutage => ("major outage", COLOR_RED),
+        PublicComponentStatus::NoData => ("no data", COLOR_GREY),
     }
 }
 
@@ -109,11 +111,21 @@ mod tests {
             PublicComponentStatus::Maintenance,
             PublicComponentStatus::PartialOutage,
             PublicComponentStatus::MajorOutage,
+            PublicComponentStatus::NoData,
         ] {
             let (text, color) = component_badge(s);
             assert!(!text.is_empty());
             assert!(color.starts_with('#'));
         }
+    }
+
+    #[test]
+    fn a_silent_component_badge_is_grey_and_says_no_data() {
+        // Never a green badge: a README embedding this must not read as a
+        // health claim for something that has reported nothing.
+        let (text, color) = component_badge(PublicComponentStatus::NoData);
+        assert_eq!(text, "no data");
+        assert_ne!(color, COLOR_GREEN);
     }
 
     #[test]

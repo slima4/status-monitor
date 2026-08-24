@@ -121,6 +121,96 @@ async fn signals_report_the_run_the_bare_url_cannot() {
     );
 }
 
+/// The pending gate's exit: the first ping through the real route is what
+/// wires a monitor up, whatever signal it carries.
+#[tokio::test]
+async fn the_first_ping_through_the_route_wires_the_monitor_up() {
+    for signal in ["", "/start", "/fail", "/1", "/0"] {
+        let state = build_test_app_state(|_| {});
+        let org = OrgId(Uuid::new_v4());
+        let target_id = Uuid::new_v4();
+        let token = state
+            .heartbeat_store
+            .ensure(org, target_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .token
+            .unwrap();
+        let store = state.heartbeat_store.clone();
+        let router = uptimepage::build_app_router(state, CancellationToken::new());
+
+        assert!(
+            store
+                .get(org, target_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .first_ping_at
+                .is_none(),
+            "minting a token is not the job speaking"
+        );
+
+        let res = router
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(format!("/ping/{token}{signal}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK, "signal {signal:?}");
+        assert!(
+            store
+                .get(org, target_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .first_ping_at
+                .is_some(),
+            "signal {signal:?} left the monitor pending"
+        );
+    }
+}
+
+/// A rejected ping must not wire anything up: an unknown token resolves to no
+/// row, so there is nothing to stamp.
+#[tokio::test]
+async fn a_refused_ping_wires_nothing_up() {
+    let state = build_test_app_state(|_| {});
+    let org = OrgId(Uuid::new_v4());
+    let target_id = Uuid::new_v4();
+    state.heartbeat_store.ensure(org, target_id).await.unwrap();
+    let store = state.heartbeat_store.clone();
+    let router = uptimepage::build_app_router(state, CancellationToken::new());
+
+    for uri in ["/ping/not-a-token", "/ping/not-a-token/start"] {
+        let res = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::NOT_FOUND, "{uri}");
+    }
+    assert!(
+        store
+            .get(org, target_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .first_ping_at
+            .is_none()
+    );
+}
+
 #[tokio::test]
 async fn unknown_token_is_a_uniform_404() {
     let state = build_test_app_state(|_| {});

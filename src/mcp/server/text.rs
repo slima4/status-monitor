@@ -35,7 +35,9 @@ pub(super) fn create_prompt_lines(
     let mut lines = vec![format!("checked every {}s", new.interval.as_secs())];
     lines.push(match probe {
         Some(p) => format!("trial run: {}", sanitize_prompt(&probe_line(p))),
-        None => "nothing to probe: it waits for the job to report in".to_string(),
+        None => "nothing to probe: it reports nothing and alerts nobody until the job's \
+                 first ping"
+            .to_string(),
     });
     if !new.tags.is_empty() {
         lines.push(format!("tags: {}", sanitize_prompt(&tag_list(&new.tags))));

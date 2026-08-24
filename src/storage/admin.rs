@@ -321,14 +321,22 @@ impl AdminRepo {
         Ok(())
     }
 
-    /// Every enabled heartbeat-kind target in a live org. Passive checks run
-    /// only on the control plane (state is this process's memory), so this list
-    /// is region-independent and excluded from the agent-facing region queries.
+    /// Every enabled heartbeat-kind target in a live org that has been pinged at
+    /// least once. Passive checks run only on the control plane (state is this
+    /// process's memory), so this list is region-independent and excluded from
+    /// the agent-facing region queries.
+    ///
+    /// The `first_ping_at` join is the pending gate: a job that has never spoken
+    /// has no health to report, so it is not evaluated against a window that
+    /// started when somebody clicked save.
     pub async fn list_enabled_heartbeat_targets(&self) -> Result<Vec<(OrgId, Target)>> {
         let sql = format!(
             "SELECT {TARGET_COLUMNS} \
-             FROM targets t JOIN organizations o ON o.id = t.org_id \
-             WHERE t.enabled = true AND o.deleted_at IS NULL AND t.kind = 'heartbeat'"
+             FROM targets t \
+             JOIN organizations o ON o.id = t.org_id \
+             JOIN heartbeat_monitors hm ON hm.target_id = t.id \
+             WHERE t.enabled = true AND o.deleted_at IS NULL AND t.kind = 'heartbeat' \
+               AND hm.first_ping_at IS NOT NULL"
         );
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
             .fetch_all(&self.pool)

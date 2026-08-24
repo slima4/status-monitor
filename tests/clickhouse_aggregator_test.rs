@@ -225,6 +225,65 @@ async fn build_round_trips_seeded_data() {
     .await;
 }
 
+/// The public face of the heartbeat pending state: an unwired job has not been
+/// proven healthy, so the banner must not borrow confidence from it.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL + CLICKHOUSE_URL — run via `docker compose -f compose.dev.yml up -d` then `cargo test -- --ignored`"]
+async fn a_component_that_recorded_nothing_is_no_data_not_operational() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        eprintln!("skipped: DATABASE_URL not set");
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        eprintln!("skipped: CLICKHOUSE_URL not set");
+        return;
+    };
+
+    purge_prefix(&pool, "agg-silent-").await;
+
+    let org_id = seed_org(&pool, "agg-silent").await;
+    let unique = format!("agg-silent-{}", Uuid::now_v7());
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let target = store
+        .create(
+            org_id,
+            public_target(&unique),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create public target");
+    let target_id = target.id;
+    let pool_for_cleanup = pool.clone();
+
+    with_cleanup(&pool_for_cleanup, target_id, async move {
+        // Deliberately no ClickHouse rows and no incident.
+        let page_id = seed_page_with_target(&pool, org_id, target_id).await;
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
+
+        let component = page
+            .groups
+            .iter()
+            .flat_map(|g| &g.components)
+            .find(|c| c.id == target_id)
+            .expect("seeded public component present in page");
+
+        assert_eq!(component.current_status, PublicComponentStatus::NoData);
+        assert!(
+            component.history.iter().all(|d| *d == DayState::NoData),
+            "the pill and the strip under it agree"
+        );
+        assert_eq!(
+            page.overall.state,
+            OverallState::Operational,
+            "silence carries no evidence, so it neither raises nor holds the banner"
+        );
+    })
+    .await;
+}
+
 /// `component_history` is a separate code path from `build()`. It hits the
 /// same history-strip query directly — would have caught the DateTime→i64
 /// bug independently of the page-build smoke test.
@@ -644,9 +703,13 @@ async fn internal_auto_incident_paints_strip_manual_stays_hidden() {
         );
         assert_eq!(page.overall.state, OverallState::MajorOutage);
 
-        assert_eq!(
-            manual.current_status,
-            PublicComponentStatus::Operational,
+        // Neither value is an outage, which is what this asserts; the strip
+        // assertion below has always allowed the same pair.
+        assert!(
+            matches!(
+                manual.current_status,
+                PublicComponentStatus::Operational | PublicComponentStatus::NoData
+            ),
             "internal manual incident does not touch the dot"
         );
         assert!(

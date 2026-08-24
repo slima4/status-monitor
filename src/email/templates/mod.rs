@@ -2,6 +2,7 @@ pub mod account_deletion;
 pub mod account_restored;
 pub mod channel_failing;
 pub mod channel_verification;
+pub mod heartbeat_never_pinged;
 pub mod identity_linked;
 pub mod identity_unlinked;
 pub mod incident_alert;

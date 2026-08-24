@@ -25,12 +25,21 @@ pub struct HeartbeatMonitor {
     pub last_ping_at: Option<DateTime<Utc>>,
     /// Re-arm point: set at creation and on every disabled→enabled flip.
     pub armed_at: DateTime<Utc>,
+    /// Wired-up point: the first ping of any signal, never cleared. `None`
+    /// means the job has never spoken, which is not the same as silent.
+    pub first_ping_at: Option<DateTime<Utc>>,
     pub last_start_at: Option<DateTime<Utc>>,
     pub last_fail_at: Option<DateTime<Utc>>,
     pub last_exit_code: Option<u8>,
 }
 
 impl HeartbeatMonitor {
+    /// No ping of any signal yet: not evaluated, not alerting, no data. Single
+    /// owner of the rule, since the API projection and the badge both ask.
+    pub fn is_pending(&self) -> bool {
+        self.first_ping_at.is_none()
+    }
+
     pub fn ping_state(&self) -> PingState {
         ping_state_of(
             self.armed_at,
@@ -59,6 +68,12 @@ pub(crate) fn ping_state_of(
             exit_code: last_exit_code,
         }),
     }
+}
+
+/// A CHECK keeps the column in range, so anything outside it is corruption:
+/// truncating would read 256 back as 0, reporting a failed run as a clean exit.
+fn exit_code_of(stored: Option<i16>) -> Option<u8> {
+    stored.and_then(|c| u8::try_from(c).ok())
 }
 
 /// Measured against the state as it stood *before* the signal landed.
@@ -118,6 +133,7 @@ struct HeartbeatRow {
     token_enc: String,
     last_ping_at: Option<DateTime<Utc>>,
     armed_at: DateTime<Utc>,
+    first_ping_at: Option<DateTime<Utc>>,
     last_start_at: Option<DateTime<Utc>>,
     last_fail_at: Option<DateTime<Utc>>,
     last_exit_code: Option<i16>,
@@ -129,15 +145,16 @@ impl HeartbeatRow {
             token: capability_token::open(&self.token_enc, cipher),
             last_ping_at: self.last_ping_at,
             armed_at: self.armed_at,
+            first_ping_at: self.first_ping_at,
             last_start_at: self.last_start_at,
             last_fail_at: self.last_fail_at,
-            last_exit_code: self.last_exit_code.map(|c| c as u8),
+            last_exit_code: exit_code_of(self.last_exit_code),
         }
     }
 }
 
-const HB_COLUMNS: &str =
-    "token_enc, last_ping_at, armed_at, last_start_at, last_fail_at, last_exit_code";
+const HB_COLUMNS: &str = "token_enc, last_ping_at, armed_at, first_ping_at, last_start_at, \
+     last_fail_at, last_exit_code";
 
 #[async_trait]
 impl HeartbeatStore for PgHeartbeatStore {
@@ -209,7 +226,8 @@ impl HeartbeatStore for PgHeartbeatStore {
                  last_ping_at   = CASE WHEN $2 = 'success' THEN now() ELSE hm.last_ping_at END, \
                  last_start_at  = CASE WHEN $2 = 'start'   THEN now() ELSE hm.last_start_at END, \
                  last_fail_at   = CASE WHEN $2 = 'fail'    THEN now() ELSE hm.last_fail_at END, \
-                 last_exit_code = CASE WHEN $2 = 'fail'    THEN $3   ELSE hm.last_exit_code END \
+                 last_exit_code = CASE WHEN $2 = 'fail'    THEN $3   ELSE hm.last_exit_code END, \
+                 first_ping_at  = COALESCE(hm.first_ping_at, now()) \
              FROM prev \
              WHERE hm.target_id = prev.target_id \
              RETURNING hm.org_id, hm.target_id, hm.armed_at, hm.last_ping_at, hm.last_start_at, \
@@ -249,7 +267,7 @@ impl AcceptedRow {
             self.last_ping_at,
             self.last_start_at,
             self.last_fail_at,
-            self.last_exit_code.map(|c| c as u8),
+            exit_code_of(self.last_exit_code),
         );
         // Whichever column the statement's `now()` wrote holds the accept time.
         let at = match signal {
@@ -313,6 +331,7 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             token: Some(minted.raw),
             last_ping_at: None,
             armed_at: Utc::now(),
+            first_ping_at: None,
             last_start_at: None,
             last_fail_at: None,
             last_exit_code: None,
@@ -359,6 +378,7 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             .find(|m| m.token_hash == hash)
             .map(|m| {
                 let prev = m.monitor.ping_state();
+                m.monitor.first_ping_at = m.monitor.first_ping_at.or(Some(now));
                 match signal {
                     PingSignal::Start => m.monitor.last_start_at = Some(now),
                     PingSignal::Success => m.monitor.last_ping_at = Some(now),
@@ -451,6 +471,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_first_ping_of_any_signal_wires_the_monitor_up_once() {
+        let store = InMemoryHeartbeatStore::new();
+        let org = OrgId(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        let fresh = store.ensure(org, target).await.unwrap().unwrap();
+        assert!(
+            fresh.first_ping_at.is_none(),
+            "creating a monitor is not the job speaking"
+        );
+
+        // A start is the job speaking too, so it ends the pending state.
+        let started = store
+            .record_signal_by_token(fresh.token.as_deref().unwrap(), PingSignal::Start, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let wired = store.get(org, target).await.unwrap().unwrap().first_ping_at;
+        assert_eq!(wired, Some(started.at));
+
+        store
+            .record_signal_by_token(fresh.token.as_deref().unwrap(), PingSignal::Success, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            store.get(org, target).await.unwrap().unwrap().first_ping_at,
+            wired,
+            "later pings leave the wired-up point alone"
+        );
+    }
+
+    #[tokio::test]
     async fn removed_token_stops_recording() {
         let store = InMemoryHeartbeatStore::new();
         let org = OrgId(Uuid::new_v4());
@@ -464,6 +516,15 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[test]
+    fn an_out_of_range_exit_code_reads_as_unknown_not_success() {
+        assert_eq!(exit_code_of(Some(137)), Some(137));
+        assert_eq!(exit_code_of(Some(0)), Some(0));
+        assert_eq!(exit_code_of(Some(256)), None);
+        assert_eq!(exit_code_of(Some(-1)), None);
+        assert_eq!(exit_code_of(None), None);
     }
 
     #[test]

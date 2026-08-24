@@ -42,11 +42,13 @@ pub fn incident_impact(degraded: bool, any_region_up: bool) -> IncidentImpact {
 }
 
 /// Component status from the worst impact among its open incidents.
-/// Maintenance dominates over any failure signal; no open incident →
-/// Operational.
+/// Maintenance dominates over any failure signal. An incident is positive
+/// evidence and paints even with nothing recorded, matching [`day_state`], so
+/// only a component with neither reaches `NoData`.
 pub fn component_status(
     worst: Option<IncidentImpact>,
     maintenance_active: bool,
+    has_evidence: bool,
 ) -> PublicComponentStatus {
     if maintenance_active {
         return PublicComponentStatus::Maintenance;
@@ -55,11 +57,15 @@ pub fn component_status(
         Some(IncidentImpact::MajorOutage) => PublicComponentStatus::MajorOutage,
         Some(IncidentImpact::PartialOutage) => PublicComponentStatus::PartialOutage,
         Some(IncidentImpact::Degraded) => PublicComponentStatus::Degraded,
-        None => PublicComponentStatus::Operational,
+        None if has_evidence => PublicComponentStatus::Operational,
+        None => PublicComponentStatus::NoData,
     }
 }
 
 /// Overall page banner state from per-component statuses.
+///
+/// A `NoData` component carries no evidence, so it neither raises the banner
+/// nor holds it down.
 ///
 /// Empty component list → `Operational`.
 pub fn overall_state(components: &[PublicComponentStatus]) -> OverallState {
@@ -76,7 +82,9 @@ pub fn overall_state(components: &[PublicComponentStatus]) -> OverallState {
     let others_operational = components.iter().all(|s| {
         matches!(
             s,
-            PublicComponentStatus::Maintenance | PublicComponentStatus::Operational
+            PublicComponentStatus::Maintenance
+                | PublicComponentStatus::Operational
+                | PublicComponentStatus::NoData
         )
     });
     if any_maintenance && others_operational {
@@ -149,7 +157,7 @@ mod tests {
     #[test]
     fn component_maintenance_dominates_even_with_major_impact() {
         assert_eq!(
-            component_status(Some(IncidentImpact::MajorOutage), true),
+            component_status(Some(IncidentImpact::MajorOutage), true, true),
             PublicComponentStatus::Maintenance
         );
     }
@@ -157,7 +165,7 @@ mod tests {
     #[test]
     fn component_maintenance_dominates_with_no_incident() {
         assert_eq!(
-            component_status(None, true),
+            component_status(None, true, true),
             PublicComponentStatus::Maintenance
         );
     }
@@ -165,28 +173,77 @@ mod tests {
     #[test]
     fn component_no_open_incident_is_operational() {
         assert_eq!(
-            component_status(None, false),
+            component_status(None, false, true),
             PublicComponentStatus::Operational
+        );
+    }
+
+    #[test]
+    fn component_without_evidence_is_no_data_not_operational() {
+        assert_eq!(
+            component_status(None, false, false),
+            PublicComponentStatus::NoData,
+            "a job that has never run is not operational"
+        );
+    }
+
+    #[test]
+    fn an_incident_paints_a_component_that_recorded_nothing() {
+        // A manual incident on an unprobed component still shows as an outage.
+        assert_eq!(
+            component_status(Some(IncidentImpact::MajorOutage), false, false),
+            PublicComponentStatus::MajorOutage
+        );
+        assert_eq!(
+            component_status(None, true, false),
+            PublicComponentStatus::Maintenance
         );
     }
 
     #[test]
     fn component_maps_each_impact() {
         assert_eq!(
-            component_status(Some(IncidentImpact::Degraded), false),
+            component_status(Some(IncidentImpact::Degraded), false, true),
             PublicComponentStatus::Degraded
         );
         assert_eq!(
-            component_status(Some(IncidentImpact::PartialOutage), false),
+            component_status(Some(IncidentImpact::PartialOutage), false, true),
             PublicComponentStatus::PartialOutage
         );
         assert_eq!(
-            component_status(Some(IncidentImpact::MajorOutage), false),
+            component_status(Some(IncidentImpact::MajorOutage), false, true),
             PublicComponentStatus::MajorOutage
         );
     }
 
     // ── overall_state truth table ───────────────────────────────────────────
+
+    #[test]
+    fn overall_ignores_components_with_no_evidence() {
+        use PublicComponentStatus as S;
+        // Indistinguishable from the empty page, which already reads operational.
+        assert_eq!(overall_state(&[S::NoData]), OverallState::Operational);
+        assert_eq!(
+            overall_state(&[S::NoData, S::Operational]),
+            OverallState::Operational
+        );
+        for (other, expected) in [
+            (S::MajorOutage, OverallState::MajorOutage),
+            (S::PartialOutage, OverallState::PartialOutage),
+            (S::Degraded, OverallState::MinorDisruption),
+        ] {
+            assert_eq!(
+                overall_state(&[S::NoData, other]),
+                expected,
+                "silence never masks a real outage"
+            );
+        }
+        assert_eq!(
+            overall_state(&[S::NoData, S::Maintenance]),
+            OverallState::Maintenance,
+            "a silent component does not block the maintenance banner"
+        );
+    }
 
     #[test]
     fn overall_empty_is_operational() {

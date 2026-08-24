@@ -204,7 +204,13 @@ Maintenance windows are managed through the API only in this release; there is n
   maintenance precedence as described above.
 - **Component groups** — each component shows its current state, a
   90-day history strip (one cell per day, oldest-first), and the
-  operator-supplied description.
+  operator-supplied description. A component with nothing recorded
+  anywhere in the window reads `No data` rather than `Operational`: a
+  heartbeat that has never been pinged has not been proven healthy, and
+  saying otherwise is the worse of the two lies. An open incident still
+  paints over it, so a manually declared incident on an unprobed
+  component shows as the outage it is. Silence carries no evidence, so
+  it neither raises the banner nor holds it down.
 - **Active and recent incidents** — operator-set `public_title` if
   present, otherwise an auto-generated `"<component> <status>"`
   string. Each incident links to a permalink at

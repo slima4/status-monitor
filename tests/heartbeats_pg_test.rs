@@ -1,7 +1,8 @@
 //! Live-Postgres contract for `heartbeat_monitors`: idempotent token minting,
 //! single-statement ping recording (unknown / deleted-target / deleted-org →
 //! None), the store-level disabled→enabled re-arm, per-org isolation, the
-//! refresh-time row self-heal, and migration 031.
+//! refresh-time row self-heal, the never-pinged dispatch gate, and
+//! migrations 031 and 047.
 //!
 //! Live-PG ignored: needs `DATABASE_URL`. Migrations auto-apply on first
 //! connect. Point it at a throwaway DB to also validate migration 031.
@@ -73,6 +74,46 @@ async fn make_heartbeat_target(pool: &sqlx::PgPool, org: OrgId, name: &str, enab
         .await
         .expect("create target")
         .id
+}
+
+/// Ids the scheduler would actually evaluate this tick.
+async fn dispatched_heartbeats(repo: &AdminRepo) -> Vec<Uuid> {
+    repo.list_enabled_heartbeat_targets()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(_, t)| t.id)
+        .collect()
+}
+
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations/postgres");
+
+/// The nudge sweep and migration 047 are org-unscoped by design, so they run on
+/// their own database instead of stomping a parallel test's rows.
+async fn isolated_pool(tag: &str) -> Option<(sqlx::PgPool, String)> {
+    let (url, name) = common::fresh_test_db(tag).await?;
+    let pool = common::open_test_pool(&url).await;
+    MIGRATOR.run(&pool).await.expect("migrate isolated db");
+    Some((pool, name))
+}
+
+/// One sweep against a sender that records what it accepted.
+async fn run_nudge(
+    pool: &sqlx::PgPool,
+) -> (u64, std::sync::Arc<uptimepage::email::InMemoryEmailSender>) {
+    use uptimepage::jobs::heartbeat_nudge::{NudgeConfig, nudge_unwired_heartbeats};
+    let sender = std::sync::Arc::new(uptimepage::email::InMemoryEmailSender::new());
+    let cfg = std::sync::Arc::new(NudgeConfig {
+        email: uptimepage::notifier::EmailDelivery {
+            sender: sender.clone(),
+            from_address: "noreply@test.example".into(),
+            from_name: "Uptimepage".into(),
+        },
+        public_base_url: "https://app.test".into(),
+        docs_url: Some("https://docs.test/monitor-types".into()),
+    });
+    let sent = nudge_unwired_heartbeats(pool, &cfg).await.unwrap();
+    (sent, sender)
 }
 
 async fn cleanup(pool: &sqlx::PgPool, orgs: &[OrgId], users: &[UserId]) {
@@ -308,6 +349,403 @@ async fn dead_tokens_stop_recording_and_sync_heals_rows_live_pg() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn a_never_pinged_heartbeat_is_not_dispatched_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-pending").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let targets = PostgresTargetStore::from_pool(pool.clone(), None);
+    let repo = AdminRepo::new(pool.clone(), None, "heartbeat_pending");
+    let unwired = make_heartbeat_target(&pool, org_a, "unwired", true).await;
+    let wired = make_heartbeat_target(&pool, org_a, "wired", true).await;
+    store.ensure(org_a, unwired).await.unwrap();
+    let token = store
+        .ensure(org_a, wired)
+        .await
+        .unwrap()
+        .unwrap()
+        .token
+        .unwrap();
+
+    let listed = dispatched_heartbeats(&repo).await;
+    assert!(
+        !listed.contains(&unwired) && !listed.contains(&wired),
+        "neither has pinged, so neither is evaluated"
+    );
+
+    // A fail is the job speaking, so it wires the monitor up like a success.
+    let accepted = store
+        .record_signal_by_token(&token, PingSignal::Fail, Some(1))
+        .await
+        .unwrap()
+        .expect("token resolves");
+    let first = store
+        .get(org_a, wired)
+        .await
+        .unwrap()
+        .unwrap()
+        .first_ping_at;
+    assert_eq!(first, Some(accepted.at));
+    let listed = dispatched_heartbeats(&repo).await;
+    assert!(listed.contains(&wired) && !listed.contains(&unwired));
+
+    // Wired up once is wired up for good.
+    store
+        .record_signal_by_token(&token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .unwrap();
+    targets
+        .set_enabled(org_a, &[wired], false, None)
+        .await
+        .unwrap();
+    targets
+        .set_enabled(org_a, &[wired], true, None)
+        .await
+        .unwrap();
+    let after = store.get(org_a, wired).await.unwrap().unwrap();
+    assert_eq!(after.first_ping_at, first, "the re-arm is not a first ping");
+    assert!(dispatched_heartbeats(&repo).await.contains(&wired));
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+/// The shipped text, not a copy that could drift from it. Both statements are
+/// guarded, so re-applying is a no-op on anything already handled.
+const MIGRATION_047: &str = include_str!("../migrations/postgres/047_heartbeat_first_ping.up.sql");
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn migration_047_backfills_wired_rows_and_withdraws_false_incidents_live_pg() {
+    let Some((pool, db)) = isolated_pool("hb_mig047").await else {
+        return;
+    };
+    let (org_a, _org_b, _user_a, _user_b) = two_orgs(&pool, "hb-mig047").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+
+    let unwired = make_heartbeat_target(&pool, org_a, "unwired", true).await;
+    let fail_only = make_heartbeat_target(&pool, org_a, "fail-only", true).await;
+    let manual = make_heartbeat_target(&pool, org_a, "manual-incident", true).await;
+    for id in [unwired, fail_only, manual] {
+        store.ensure(org_a, id).await.unwrap();
+    }
+
+    // A monitor that has only ever said "I failed" has still spoken.
+    let failed_at: (chrono::DateTime<chrono::Utc>,) = sqlx::query_as(
+        "UPDATE heartbeat_monitors \
+         SET last_fail_at = now() - INTERVAL '2 hours', last_exit_code = 137, first_ping_at = NULL \
+         WHERE target_id = $1 RETURNING last_fail_at",
+    )
+    .bind(fail_only)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let open_incident = |target: Uuid, origin: &'static str| {
+        let pool = pool.clone();
+        async move {
+            let row: (Uuid,) = sqlx::query_as(
+                "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, origin, visibility) \
+                 VALUES ($1, $2, now() - INTERVAL '90 minutes', 'down', $3, 'public') RETURNING id",
+            )
+            .bind(org_a.0)
+            .bind(target)
+            .bind(origin)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            row.0
+        }
+    };
+    let false_alarm = open_incident(unwired, "monitor").await;
+    let declared = open_incident(manual, "manual").await;
+
+    sqlx::raw_sql(MIGRATION_047).execute(&pool).await.unwrap();
+
+    assert_eq!(
+        store
+            .get(org_a, fail_only)
+            .await
+            .unwrap()
+            .unwrap()
+            .first_ping_at,
+        Some(failed_at.0),
+        "a fail is the job speaking, so the backfill treats it as wired"
+    );
+    assert!(
+        store
+            .get(org_a, unwired)
+            .await
+            .unwrap()
+            .unwrap()
+            .first_ping_at
+            .is_none(),
+        "nothing ever arrived, so it stays pending"
+    );
+
+    let closed = |id: Uuid| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_as::<_, (Option<chrono::DateTime<chrono::Utc>>, String)>(
+                "SELECT ended_at, state FROM incidents WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+        }
+    };
+    let (ended, state) = closed(false_alarm).await;
+    assert!(ended.is_some() && state == "resolved", "{state:?}");
+    let (still_open, state) = closed(declared).await;
+    assert!(
+        still_open.is_none() && state == "triggered",
+        "a hand-declared incident is not ours to withdraw: {state:?}"
+    );
+
+    // A public incident carries the retraction so the page stops showing it
+    // open. Nothing else is notified: the writer never re-reads these rows.
+    let updates: Vec<(String, String)> =
+        sqlx::query_as("SELECT phase, message FROM incident_updates WHERE incident_id = $1")
+            .bind(false_alarm)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates[0].0, "resolved");
+    assert!(
+        updates[0].1.contains("never received a ping"),
+        "{:?}",
+        updates[0].1
+    );
+    assert!(
+        sqlx::query_as::<_, (i64,)>("SELECT count(*) FROM incident_updates WHERE incident_id = $1")
+            .bind(declared)
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .0
+            == 0,
+        "the untouched incident gets no update either"
+    );
+
+    common::drop_test_db(&db).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn the_nudge_tells_the_owner_once_about_an_unwired_heartbeat_live_pg() {
+    use uptimepage::email::EmailTemplate;
+    use uptimepage::jobs::heartbeat_nudge::{NudgeConfig, nudge_unwired_heartbeats};
+
+    let Some((pool, db)) = isolated_pool("hb_nudge").await else {
+        return;
+    };
+    let (org_a, _org_b, _user_a, _user_b) = two_orgs(&pool, "hb-nudge").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let targets = PostgresTargetStore::from_pool(pool.clone(), None);
+
+    // The monitor names an owner of its own; the org owner must not be used.
+    let monitor_owner = make_user(&pool, "hb-nudge-owner").await;
+    let owner_email: (String,) = sqlx::query_as("SELECT email FROM users WHERE id = $1")
+        .bind(monitor_owner.0)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let stale = make_heartbeat_target(&pool, org_a, "stale", true).await;
+    let fresh = make_heartbeat_target(&pool, org_a, "fresh", true).await;
+    let paused = make_heartbeat_target(&pool, org_a, "paused", true).await;
+    let wired = make_heartbeat_target(&pool, org_a, "wired", true).await;
+    let token = store
+        .ensure(org_a, wired)
+        .await
+        .unwrap()
+        .unwrap()
+        .token
+        .unwrap();
+    for id in [stale, fresh, paused] {
+        store.ensure(org_a, id).await.unwrap();
+    }
+    store
+        .record_signal_by_token(&token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .unwrap();
+    targets
+        .set_enabled(org_a, &[paused], false, None)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE targets SET owner_user_id = $2 WHERE id = $1")
+        .bind(stale)
+        .bind(monitor_owner.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // Only `stale` and `paused` are old enough to qualify on age alone.
+    sqlx::query(
+        "UPDATE heartbeat_monitors SET created_at = now() - INTERVAL '5 days' \
+         WHERE target_id = ANY($1)",
+    )
+    .bind(vec![stale, paused, wired])
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let sender = std::sync::Arc::new(uptimepage::email::InMemoryEmailSender::new());
+    let cfg = std::sync::Arc::new(NudgeConfig {
+        email: uptimepage::notifier::EmailDelivery {
+            sender: sender.clone(),
+            from_address: "noreply@test.example".into(),
+            from_name: "Uptimepage".into(),
+        },
+        public_base_url: "https://app.test".into(),
+        docs_url: Some("https://docs.test/monitor-types".into()),
+    });
+
+    assert_eq!(nudge_unwired_heartbeats(&pool, &cfg).await.unwrap(), 1);
+    let sent = sender.sent();
+    assert_eq!(sent.len(), 1, "one monitor qualified, so one mail");
+    assert_eq!(sent[0].to.address, owner_email.0, "the monitor's own owner");
+    let EmailTemplate::HeartbeatNeverPinged {
+        monitor_name,
+        monitor_url,
+        ..
+    } = &sent[0].template
+    else {
+        panic!("wrong template: {:?}", sent[0].template);
+    };
+    assert_eq!(monitor_name, "stale");
+    assert_eq!(
+        monitor_url.as_deref(),
+        Some(format!("https://app.test/targets/{stale}").as_str())
+    );
+
+    // A second sweep is silent: this is a reminder, not a recurring alert.
+    sender.clear();
+    assert_eq!(nudge_unwired_heartbeats(&pool, &cfg).await.unwrap(), 0);
+    assert!(sender.is_empty());
+
+    // The ones that did not qualify stay eligible for the day they earn it.
+    for (id, why) in [
+        (fresh, "created moments ago"),
+        (paused, "deliberately paused"),
+        (wired, "has pinged"),
+    ] {
+        let nudged: (Option<chrono::DateTime<chrono::Utc>>,) =
+            sqlx::query_as("SELECT nudged_at FROM heartbeat_monitors WHERE target_id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(nudged.0.is_none(), "{why}");
+    }
+
+    common::drop_test_db(&db).await;
+}
+
+/// A monitor with no owner of its own still reaches somebody: the org's owner.
+/// Without this the four ownerless heartbeats in a typical org would be the
+/// exact monitors the reminder was written for and never hear about it.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn the_nudge_falls_back_to_the_org_owner_and_skips_dead_orgs_live_pg() {
+    let Some((pool, db)) = isolated_pool("hb_nudge_fb").await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-nudge-fb").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let org_owner_email: (String,) = sqlx::query_as("SELECT email FROM users WHERE id = $1")
+        .bind(user_a.0)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let ownerless = make_heartbeat_target(&pool, org_a, "ownerless", true).await;
+    let doomed = make_heartbeat_target(&pool, org_b, "doomed", true).await;
+    for (org, id) in [(org_a, ownerless), (org_b, doomed)] {
+        store.ensure(org, id).await.unwrap();
+    }
+    sqlx::query("UPDATE heartbeat_monitors SET created_at = now() - INTERVAL '5 days'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    soft_delete_org(&pool, org_b, user_b).await.unwrap();
+
+    let (sent, sender) = run_nudge(&pool).await;
+    assert_eq!(sent, 1, "the dead org's monitor is not anyone's problem");
+    let sent = sender.sent();
+    assert_eq!(sent[0].to.address, org_owner_email.0);
+
+    let doomed_nudged: (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT nudged_at FROM heartbeat_monitors WHERE target_id = $1")
+            .bind(doomed)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(doomed_nudged.0.is_none());
+
+    common::drop_test_db(&db).await;
+}
+
+/// A provider outage must not burn the only reminder a monitor ever gets.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn a_failed_nudge_is_not_stamped_and_retries_live_pg() {
+    use uptimepage::email::{EmailError, EmailResult, EmailSender, MessageId, TransactionalEmail};
+    use uptimepage::jobs::heartbeat_nudge::{NudgeConfig, nudge_unwired_heartbeats};
+
+    struct DeadSender;
+    #[async_trait::async_trait]
+    impl EmailSender for DeadSender {
+        async fn send(&self, _: TransactionalEmail) -> EmailResult<MessageId> {
+            Err(EmailError::Transport("provider unreachable".into()))
+        }
+    }
+
+    let Some((pool, db)) = isolated_pool("hb_nudge_fail").await else {
+        return;
+    };
+    let (org_a, _org_b, _user_a, _user_b) = two_orgs(&pool, "hb-nudge-fail").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let target = make_heartbeat_target(&pool, org_a, "unreachable", true).await;
+    store.ensure(org_a, target).await.unwrap();
+    sqlx::query("UPDATE heartbeat_monitors SET created_at = now() - INTERVAL '5 days'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let dead = std::sync::Arc::new(NudgeConfig {
+        email: uptimepage::notifier::EmailDelivery {
+            sender: std::sync::Arc::new(DeadSender),
+            from_address: "noreply@test.example".into(),
+            from_name: "Uptimepage".into(),
+        },
+        public_base_url: "https://app.test".into(),
+        docs_url: None,
+    });
+    assert_eq!(nudge_unwired_heartbeats(&pool, &dead).await.unwrap(), 0);
+    let nudged: (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT nudged_at FROM heartbeat_monitors WHERE target_id = $1")
+            .bind(target)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        nudged.0.is_none(),
+        "an undelivered reminder is not delivered"
+    );
+
+    // Next tick, provider back: the monitor is still eligible.
+    let (sent, _) = run_nudge(&pool).await;
+    assert_eq!(sent, 1);
+
+    common::drop_test_db(&db).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
 async fn restore_org_rearms_heartbeats_live_pg() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
@@ -315,7 +753,25 @@ async fn restore_org_rearms_heartbeats_live_pg() {
     let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-restore").await;
     let store = PgHeartbeatStore::new(pool.clone(), None);
     let target = make_heartbeat_target(&pool, org_a, "cron", true).await;
-    store.ensure(org_a, target).await.unwrap();
+    let token = store
+        .ensure(org_a, target)
+        .await
+        .unwrap()
+        .unwrap()
+        .token
+        .unwrap();
+    store
+        .record_signal_by_token(&token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .unwrap();
+    let wired_at = store
+        .get(org_a, target)
+        .await
+        .unwrap()
+        .unwrap()
+        .first_ping_at;
+    assert!(wired_at.is_some());
 
     // Freeze the anchor two hours back: after a deletion window this is stale
     // enough that an un-armed monitor would false-Down on the first eval.
@@ -347,6 +803,10 @@ async fn restore_org_rearms_heartbeats_live_pg() {
         hb.ping_state().success_at,
         hb.armed_at,
         "fresh arm point wins the anchor"
+    );
+    assert_eq!(
+        hb.first_ping_at, wired_at,
+        "a restore re-arms; it must not unwire a job that has already reported"
     );
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;

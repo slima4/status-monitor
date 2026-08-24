@@ -22,7 +22,7 @@ use crate::domain::{
 };
 use crate::error::{AppError, Result};
 use crate::observability::metrics::names;
-use crate::storage::TargetFilter;
+use crate::storage::{HeartbeatMonitor, TargetFilter};
 use crate::web::{
     Authorized, CurrentOrg, CurrentUser, RequestSource, TargetsDelete, TargetsExecute, TargetsRead,
     TargetsWrite, TokenScopes,
@@ -511,6 +511,10 @@ pub struct HeartbeatInfo {
     pub ping_url: Option<String>,
     /// Last success. A `/start` opens a run, it does not report one.
     pub last_ping_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// First ping of any signal. `null` while the job has never spoken.
+    pub first_ping_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Waiting for that first ping: not evaluated, not alerting, no data yet.
+    pub pending: bool,
     pub last_start_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_fail_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_exit_code: Option<u8>,
@@ -593,6 +597,9 @@ pub(crate) async fn heartbeat_info(
             )
         }),
         last_ping_at: hb.as_ref().and_then(|h| h.last_ping_at),
+        first_ping_at: hb.as_ref().and_then(|h| h.first_ping_at),
+        // A missing row is still provisioning, which is pending all the same.
+        pending: hb.as_ref().is_none_or(HeartbeatMonitor::is_pending),
         last_start_at: hb.as_ref().and_then(|h| h.last_start_at),
         last_fail_at: hb.as_ref().and_then(|h| h.last_fail_at),
         last_exit_code: hb.and_then(|h| h.last_exit_code),

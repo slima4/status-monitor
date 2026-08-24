@@ -13,7 +13,7 @@ use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::CheckSpec;
 use crate::error::AppError;
-use crate::storage::TimeRange;
+use crate::storage::{HeartbeatMonitor, TimeRange};
 use crate::web::error::WebResult;
 use crate::web::filters;
 use crate::web::views::coverage;
@@ -316,6 +316,11 @@ pub async fn index(
         labeled_regions(&catalog, region_ids)
     };
 
+    let last_status = match heartbeat.as_ref() {
+        Some(hb) if hb.pending => WAITING_FOR_PING,
+        _ => live.last_status,
+    };
+
     Ok(DetailPage {
         active_tab: "targets",
         subtab: SUBTAB_MONITOR,
@@ -332,7 +337,7 @@ pub async fn index(
         alerts_nobody: reaches_nobody,
         flapping_opens,
         flap_hold_minutes: state.cfg.escalation.flap_hold_secs.div_ceil(60),
-        last_status: live.last_status,
+        last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
@@ -499,12 +504,14 @@ pub async fn live_partial(
     )
     .await?;
 
+    let last_status = badge_status(&state, org, &target, live.last_status).await;
+
     let page = DetailLive {
         id: target.id.to_string(),
         name: target.name,
         range: range_key,
         enabled: target.enabled,
-        last_status: live.last_status,
+        last_status,
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
         last_at_iso: Arc::clone(&live.last_at_iso),
@@ -605,6 +612,7 @@ pub async fn incidents(
         .count_active_for_target(org, target.id)
         .await? as usize;
     let reaches_nobody = alerts_nobody(&state, org, &target).await;
+    let last_status = badge_status(&state, org, &target, data.last_status).await;
 
     Ok(IncidentsPage {
         active_tab: "targets",
@@ -620,7 +628,7 @@ pub async fn incidents(
         managed_by: target.write_source.managed_label(),
         share_count,
         alerts_nobody: reaches_nobody,
-        last_status: data.last_status,
+        last_status,
         last_at_iso: data.last_at_iso,
         incidents: data.rows,
         incidents_has_more: data.has_more,
@@ -635,6 +643,31 @@ pub async fn incidents(
         selected_region: None,
         unconfirmed,
     })
+}
+
+/// An unwired heartbeat is not being checked, so the badge must not borrow the
+/// "checking…" an empty status renders for probed monitors.
+const WAITING_FOR_PING: &str = "waiting";
+
+/// The extra read only happens when there is no result at all, on a page that
+/// would otherwise render no data.
+async fn badge_status(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    target: &crate::domain::Target,
+    last_status: &'static str,
+) -> &'static str {
+    if !last_status.is_empty() || target.check.as_heartbeat().is_none() {
+        return last_status;
+    }
+    match state.heartbeat_store.get(org, target.id).await {
+        Ok(hb) if hb.as_ref().is_none_or(HeartbeatMonitor::is_pending) => WAITING_FOR_PING,
+        Ok(_) => last_status,
+        Err(err) => {
+            tracing::warn!(error = %err, "heartbeat pending state unavailable");
+            last_status
+        }
+    }
 }
 
 /// Whether a listed incident accounts for the flap window. Incidents older than

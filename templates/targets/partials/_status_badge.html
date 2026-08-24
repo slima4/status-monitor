@@ -1,4 +1,5 @@
-{# Enabled monitor with no result yet reads "checking…", not "no data". #}
+{# Enabled monitor with no result yet reads "checking…", not "no data".
+   An unwired heartbeat reads "waiting": nothing is checking it yet. #}
 {% macro show(last_status, enabled, oob) -%}
-<span id="detail-status-badge"{% if oob %} hx-swap-oob="true"{% endif %} class="status-badge status-badge--{% if last_status == "up" %}up{% else if last_status == "down" %}down{% else if last_status == "degraded" %}degraded{% else if last_status == "error" %}error{% else if enabled %}pending{% else %}none{% endif %}">{% if last_status == "up" %}up{% else if last_status == "down" %}down{% else if last_status == "degraded" %}degraded{% else if last_status == "error" %}error{% else if enabled %}checking…{% else %}no data{% endif %}</span>
+<span id="detail-status-badge"{% if oob %} hx-swap-oob="true"{% endif %} class="status-badge status-badge--{% if last_status == "up" %}up{% else if last_status == "down" %}down{% else if last_status == "degraded" %}degraded{% else if last_status == "error" %}error{% else if last_status == "waiting" %}pending{% else if enabled %}pending{% else %}none{% endif %}">{% if last_status == "up" %}up{% else if last_status == "down" %}down{% else if last_status == "degraded" %}degraded{% else if last_status == "error" %}error{% else if last_status == "waiting" %}waiting for first ping{% else if enabled %}checking…{% else %}no data{% endif %}</span>
 {%- endmacro %}

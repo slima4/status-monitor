@@ -692,6 +692,29 @@ async fn main() -> Result<()> {
         uptimepage::storage::subscriber_deliveries::purge_old,
     ));
 
+    // 6h, not daily: the three-day age is the real gate, and the tick only
+    // bounds how late the reminder lands.
+    let heartbeat_nudge_handle: JoinHandle<()> = {
+        let nudge = Arc::new(uptimepage::jobs::heartbeat_nudge::NudgeConfig {
+            email: uptimepage::notifier::EmailDelivery {
+                sender: email_sender.clone(),
+                from_address: cfg.email.from_address.clone(),
+                from_name: cfg.email.from_name.clone(),
+            },
+            public_base_url: cfg.auth.public_base_url.clone(),
+            docs_url: Some(uptimepage::web::filters::docs_link("/monitor-types")),
+        });
+        tokio::spawn(run_purge_loop(
+            pg_pool_for_stores.clone(),
+            root.clone(),
+            Duration::from_secs(6 * 60 * 60),
+            "heartbeat_nudge",
+            async move |pool: &sqlx::PgPool| {
+                uptimepage::jobs::heartbeat_nudge::nudge_unwired_heartbeats(pool, &nudge).await
+            },
+        ))
+    };
+
     // Magic-link sweep only runs when the method is wired into the router.
     // When disabled the routes 404, no rows are ever inserted, and the ticker
     // would be dead weight.
@@ -890,6 +913,7 @@ async fn main() -> Result<()> {
             subscriber_dispatch_handle,
             subscriber_token_cleanup_handle,
             subscriber_delivery_cleanup_handle,
+            heartbeat_nudge_handle,
         );
         if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;

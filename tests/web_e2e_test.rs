@@ -29,6 +29,31 @@ fn html_ct(resp: &axum::http::Response<Body>) -> &str {
         .unwrap_or("")
 }
 
+async fn create_heartbeat_target(router: &axum::Router, name: &str) -> String {
+    let body = json!({
+        "name": name,
+        "interval": 60,
+        "enabled": true,
+        "tags": [],
+        "alerts": [],
+        "check": { "type": "heartbeat", "period": 300000, "grace": 300000 }
+    });
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "create target");
+    let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    let v: Value = serde_json::from_slice(&bytes).unwrap();
+    v["id"].as_str().expect("id").to_string()
+}
+
 async fn create_http_target(router: &axum::Router, name: &str) -> String {
     create_http_target_with_alerts(router, name, json!([])).await
 }
@@ -274,6 +299,82 @@ async fn edit_form_renders_existing_target_without_leaking_credentials() {
     // Stored credentials must never reach the form HTML.
     assert!(!html.contains("s3cret"));
     assert!(!html.contains("tok-abc"));
+}
+
+/// The pending state's own surface: an unwired heartbeat must not borrow the
+/// red pill from a monitor that actually failed, nor the "checking…" from one
+/// that is genuinely being probed.
+#[tokio::test]
+async fn a_heartbeat_waiting_for_its_first_ping_says_so_on_every_badge() {
+    let router = app();
+    let id = create_heartbeat_target(&router, "unwired-cron").await;
+
+    for uri in [
+        format!("/targets/{id}"),
+        format!("/web/partials/targets/{id}/live"),
+        format!("/targets/{id}/incidents"),
+    ] {
+        let resp = router
+            .clone()
+            .oneshot(Request::get(uri.clone()).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        let html = body_text(resp).await;
+        assert!(html.contains("waiting for first ping"), "{uri}");
+        assert!(
+            html.contains("status-badge--pending"),
+            "{uri}: grey, not red"
+        );
+        assert!(!html.contains(">down<"), "{uri}");
+        assert!(!html.contains("checking"), "{uri}: nothing is checking it");
+    }
+
+    // One ping ends it. No check result has been written yet, so the badge
+    // falls back to the ordinary "checking…" a fresh monitor shows.
+    let ping_url = heartbeat_ping_url(&router, &id).await;
+    let path = ping_url.split("/ping/").nth(1).expect("ping url shape");
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::post(format!("/ping/{path}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::get(format!("/targets/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let html = body_text(resp).await;
+    assert!(
+        !html.contains("waiting for first ping"),
+        "the job has spoken"
+    );
+}
+
+async fn heartbeat_ping_url(router: &axum::Router, id: &str) -> String {
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::get(format!("/api/v1/targets/{id}/heartbeat"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v: Value = serde_json::from_str(&body_text(resp).await).unwrap();
+    assert_eq!(v["pending"], json!(true), "not pinged yet");
+    v["ping_url"].as_str().expect("ping url").to_string()
 }
 
 #[tokio::test]
