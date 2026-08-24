@@ -19,6 +19,23 @@ use uuid::Uuid;
 use crate::auth::token_hash::{self, slice_prefix};
 use crate::error::Result;
 
+/// Which half of the mail signed the reader in. The two variants are the only
+/// values the `redeemed_via` check constraint admits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RedeemedVia {
+    Link,
+    Code,
+}
+
+impl RedeemedVia {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            RedeemedVia::Link => "link",
+            RedeemedVia::Code => "code",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct MagicLinkRow {
     pub id: Uuid,
@@ -182,10 +199,11 @@ pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkR
         return Ok(None);
     };
     let updated = sqlx::query(
-        "UPDATE magic_link_tokens SET used_at = now(), redeemed_via = 'link' \
+        "UPDATE magic_link_tokens SET used_at = now(), redeemed_via = $2 \
          WHERE id = $1 AND used_at IS NULL",
     )
     .bind(r.id)
+    .bind(RedeemedVia::Link.as_str())
     .execute(pool)
     .await
     .context("magic_link::consume: mark used")?;
@@ -310,10 +328,11 @@ pub async fn consume_code(pool: &PgPool, nonce: &str, code: &str) -> Result<Code
     }
 
     let consumed = sqlx::query(
-        "UPDATE magic_link_tokens SET used_at = now(), redeemed_via = 'code' \
+        "UPDATE magic_link_tokens SET used_at = now(), redeemed_via = $2 \
          WHERE id = $1 AND used_at IS NULL",
     )
     .bind(r.id)
+    .bind(RedeemedVia::Code.as_str())
     .execute(pool)
     .await
     .context("magic_link::consume_code: consume")?;

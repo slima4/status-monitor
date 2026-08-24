@@ -798,9 +798,12 @@ async fn finish_login(
 
     crate::analytics::track_login(
         &state,
-        method,
-        resolved.is_new_user,
-        consumed.redirect_after.as_deref(),
+        crate::analytics::Login {
+            method,
+            new_user: resolved.is_new_user,
+            redirect_after: consumed.redirect_after.as_deref(),
+            via: None,
+        },
         client_ip,
         &headers,
     );

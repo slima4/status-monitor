@@ -417,7 +417,17 @@ async fn complete_login(
         org_id = ?active_org.map(|o| o.0),
         "sign-in complete"
     );
-    crate::analytics::track_login(state, LoginMethod::Passkey, false, None, client_ip, headers);
+    crate::analytics::track_login(
+        state,
+        crate::analytics::Login {
+            method: LoginMethod::Passkey,
+            new_user: false,
+            redirect_after: None,
+            via: None,
+        },
+        client_ip,
+        headers,
+    );
 
     cookies.add(session_store::build_cookie(
         &state.cfg.auth.session,

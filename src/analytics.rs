@@ -16,6 +16,7 @@ use serde::Serialize;
 
 use crate::app::AppState;
 use crate::auth::login_audit::LoginMethod;
+use crate::auth::magic_link::RedeemedVia;
 
 /// Shared with the marketing site so a visit spanning both hosts is one session.
 const WEBSITE_ID: &str = "2ef8ae40-ba4a-40a4-90bf-6d6b2b1eae2e";
@@ -34,22 +35,25 @@ pub fn website_id(public_base_url: &str) -> Option<&'static str> {
     (public_base_url.trim().trim_end_matches('/') == APP_ORIGIN).then_some(WEBSITE_ID)
 }
 
+/// One completed sign-in, as the funnel sees it.
+pub struct Login<'a> {
+    pub method: LoginMethod,
+    pub new_user: bool,
+    pub redirect_after: Option<&'a str>,
+    /// Which half of a magic-link mail was used. `None` where the method offers
+    /// only one way in.
+    pub via: Option<RedeemedVia>,
+}
+
 /// Fire-and-forget: a failure warns and is dropped, never touching the session
 /// the caller just minted. `new_user` picks the event *name* rather than riding
 /// along as a property, because Umami funnel steps match on name — one mixed
 /// event would count returning logins as signups.
-pub fn track_login(
-    state: &AppState,
-    method: LoginMethod,
-    new_user: bool,
-    redirect_after: Option<&str>,
-    ip: IpAddr,
-    headers: &HeaderMap,
-) {
+pub fn track_login(state: &AppState, login: Login<'_>, ip: IpAddr, headers: &HeaderMap) {
     if website_id(&state.cfg.auth.public_base_url).is_none() {
         return;
     }
-    let Some(method) = method_prop(method) else {
+    let Some(method) = method_prop(login.method) else {
         return;
     };
     // No User-Agent, no session to hash against — and Umami drops it as a bot.
@@ -68,9 +72,9 @@ pub fn track_login(
             website: WEBSITE_ID,
             hostname: HOSTNAME,
             url: EVENT_URL,
-            name: event_name(new_user),
+            name: event_name(login.new_user),
             ip: ip.to_string(),
-            data: BTreeMap::from([("method", method), ("intent", intent(redirect_after))]),
+            data: props(method, &login),
         },
     };
 
@@ -91,6 +95,16 @@ pub fn track_login(
             Err(_) => tracing::warn!("analytics send timed out (non-fatal)"),
         }
     });
+}
+
+/// `via` is left out rather than sent as a filler value: Umami charts every
+/// value a property takes, and a third slice reading "none" is not a way in.
+fn props(method: &'static str, login: &Login<'_>) -> BTreeMap<&'static str, &'static str> {
+    let mut data = BTreeMap::from([("method", method), ("intent", intent(login.redirect_after))]);
+    if let Some(via) = login.via {
+        data.insert("via", via.as_str());
+    }
+    data
 }
 
 fn event_name(new_user: bool) -> &'static str {
@@ -184,6 +198,30 @@ mod tests {
         assert_eq!(json["payload"]["ip"], "203.0.113.7");
         assert_eq!(json["payload"]["hostname"], HOSTNAME);
         assert_eq!(json["payload"]["data"]["method"], "github");
+    }
+
+    #[test]
+    fn only_the_emailed_methods_say_which_half_was_used() {
+        let sent = |method, via| {
+            props(
+                method,
+                &Login {
+                    method: LoginMethod::MagicLink,
+                    new_user: false,
+                    redirect_after: None,
+                    via,
+                },
+            )
+        };
+        assert_eq!(
+            sent("magic-link", Some(RedeemedVia::Link)).get("via"),
+            Some(&"link")
+        );
+        assert_eq!(
+            sent("magic-link", Some(RedeemedVia::Code)).get("via"),
+            Some(&"code")
+        );
+        assert!(!sent("github", None).contains_key("via"));
     }
 
     #[test]

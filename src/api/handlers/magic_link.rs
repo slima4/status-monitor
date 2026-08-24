@@ -393,7 +393,19 @@ pub async fn verify_confirm(
         CONFIRM_NONCE_COOKIE,
         CONFIRM_COOKIE_PATH,
     );
-    open_session_for(&state, &cookies, row, client_ip, &headers, ip_hash, ua_hash).await
+    open_session_for(
+        &state,
+        &cookies,
+        row,
+        magic_link::RedeemedVia::Link,
+        Requester {
+            client_ip,
+            headers: &headers,
+            ip_hash,
+            ua_hash,
+        },
+    )
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -435,7 +447,19 @@ pub async fn submit_code(
                 CODE_NONCE_COOKIE,
                 CODE_COOKIE_PATH,
             );
-            open_session_for(&state, &cookies, row, client_ip, &headers, ip_hash, ua_hash).await
+            open_session_for(
+                &state,
+                &cookies,
+                row,
+                magic_link::RedeemedVia::Code,
+                Requester {
+                    client_ip,
+                    headers: &headers,
+                    ip_hash,
+                    ua_hash,
+                },
+            )
+            .await
         }
         magic_link::CodeOutcome::Refused => {
             login_audit::record_failure_anon(
@@ -463,15 +487,27 @@ pub async fn submit_code(
     }
 }
 
+/// Everything the redemption learns from the request itself.
+struct Requester<'a> {
+    client_ip: std::net::IpAddr,
+    headers: &'a HeaderMap,
+    ip_hash: Option<String>,
+    ua_hash: Option<String>,
+}
+
 async fn open_session_for(
     state: &AppState,
     cookies: &Cookies,
     row: magic_link::MagicLinkRow,
-    client_ip: std::net::IpAddr,
-    headers: &HeaderMap,
-    ip_hash: Option<String>,
-    ua_hash: Option<String>,
+    via: magic_link::RedeemedVia,
+    from: Requester<'_>,
 ) -> Result<Response> {
+    let Requester {
+        client_ip,
+        headers,
+        ip_hash,
+        ua_hash,
+    } = from;
     let pool = state.require_db()?;
 
     // Tombstone-inclusive: a verified link proves email ownership. Resolving
@@ -573,9 +609,12 @@ async fn open_session_for(
 
     crate::analytics::track_login(
         state,
-        LoginMethod::MagicLink,
-        bootstrapped != Bootstrap::Existing,
-        row.redirect_after.as_deref(),
+        crate::analytics::Login {
+            method: LoginMethod::MagicLink,
+            new_user: bootstrapped != Bootstrap::Existing,
+            redirect_after: row.redirect_after.as_deref(),
+            via: Some(via),
+        },
         client_ip,
         headers,
     );
@@ -689,7 +728,14 @@ async fn bootstrap_unknown_email(
     if created {
         tracing::info!(user_id = %user_id.0, via = "open_signup", "magic-link bootstrap created account");
     }
-    Ok(Some((user_id, Bootstrap::Founded)))
+    // A concurrent signup may have won the race, and the account it resolved is
+    // not a new one to compensate away or to count as a signup.
+    let how = if created {
+        Bootstrap::Founded
+    } else {
+        Bootstrap::Existing
+    };
+    Ok(Some((user_id, how)))
 }
 
 #[cfg(test)]
