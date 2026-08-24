@@ -228,20 +228,11 @@ explicit "no" is refused.
 **User verification is required**, so the device asks for a biometric or PIN
 every time rather than mere presence.
 
-Where `magic_link` is also enabled, the email field it renders carries
-`autocomplete="email webauthn"`, so a browser that supports conditional
-mediation offers a held passkey from its own autofill list beside the saved
-addresses. Nothing about that reaches us: the browser matches against what it
-holds, which is why it can surface a passkey without us ever being told whether
-a visitor has one. A deployment with no magic link has no such field, and so no
-autofill offer.
-
-The challenge is requested when the visitor opens that block or focuses the
-field, never on page load, so a visit that only passes through writes no
-ceremony row. The browser then holds that request open until someone picks,
-which outlasts the challenge behind it, so the page replaces it on a timer at
-four fifths of the ceremony TTL the start response tells it. Without that, an
-unhurried visitor is the one who finds out.
+Signing in with a passkey starts from the button on the sign-in page, and the
+challenge is minted when it is pressed, so a visit that only passes through
+writes no ceremony row. There is no offer in the email field's autofill list:
+the browser would surface it on every view of the page, and nothing tells us
+whether the visitor holds a passkey to surface.
 
 **Passkeys live in a browser's credential store, not on a machine.** Chrome
 keeps its own; Safari uses iCloud Keychain. So a passkey added in one browser

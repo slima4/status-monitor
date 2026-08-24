@@ -30,10 +30,6 @@ pub struct CeremonyStart {
     pub handle: String,
     #[schema(value_type = Object)]
     pub options: serde_json::Value,
-    /// How long this challenge stays answerable. Sent rather than assumed: an
-    /// autofill offer is held open until someone picks, so the page has to know
-    /// when to replace it, and a copy of the number would drift from this one.
-    pub ttl_seconds: i64,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -103,7 +99,6 @@ pub async fn register_start(
         handle,
         options: serde_json::to_value(options)
             .map_err(|e| AppError::Other(anyhow::anyhow!("encode challenge: {e}")))?,
-        ttl_seconds: passkey::CEREMONY_TTL_SECONDS,
     }))
 }
 
@@ -232,7 +227,6 @@ pub async fn login_start(
         handle,
         options: serde_json::to_value(options)
             .map_err(|e| AppError::Other(anyhow::anyhow!("encode challenge: {e}")))?,
-        ttl_seconds: passkey::CEREMONY_TTL_SECONDS,
     }))
 }
 
