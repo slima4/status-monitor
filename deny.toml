@@ -45,6 +45,11 @@ ignore = [
     # path exists. Only decodes our own embedded syntax dumps, never user
     # input. Revisit when syntect drops the bincode dump format.
     "RUSTSEC-2025-0141",
+    # `rsa` — timing sidechannel leaking an RSA private key. Transitive via
+    # webauthn-rs-core; a relying party only verifies, so we hold no RSA
+    # private key for it to leak. No upgrade exists. Revisit on webauthn-rs
+    # 0.6 stable.
+    "RUSTSEC-2023-0071",
 ]
 
 # ── Licenses: explicit allow-list. Anything outside the list fails CI. ──────
