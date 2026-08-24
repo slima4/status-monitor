@@ -138,6 +138,8 @@ fn sample_page() -> DetailPage {
             },
         ]),
         ribbon_oob: false,
+        pending_ping: None,
+        pending_ping_oob: false,
         flow_runs: Vec::new(),
         config_json: r#"{"type":"http"}"#.into(),
         range: "24h",
@@ -169,6 +171,75 @@ fn a_never_pinged_heartbeat_reads_waiting_not_down() {
 }
 
 #[test]
+fn a_pending_heartbeat_card_explains_the_wait() {
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    p.last_status = super::WAITING_FOR_PING;
+    p.heartbeat = Some(crate::api::handlers::targets::HeartbeatInfo {
+        ping_url: Some("https://app.example.com/ping/tok123".into()),
+        first_ping_at: None,
+        pending: true,
+        created_at: Some(chrono::Utc::now() - chrono::Duration::days(2)),
+        last_ping_at: None,
+        last_start_at: None,
+        last_fail_at: None,
+        last_exit_code: None,
+        last_failure_output: None,
+        declared_period_secs: 600,
+        observed_period_secs: None,
+        cadence_advice: None,
+    });
+    p.pending_ping = Some(super::PendingPing {
+        pending: true,
+        since: Some(chrono::Utc::now() - chrono::Duration::days(2)),
+    });
+    let html = p.render().unwrap();
+    assert!(html.contains("waiting for first ping"));
+    assert!(html.contains("nobody alerted"));
+    assert!(html.contains("the schedule starts at the first ping"));
+
+    let mut wired = sample_page();
+    wired.kind = "HEARTBEAT";
+    let mut hb = p.heartbeat.take().unwrap();
+    hb.pending = false;
+    hb.first_ping_at = Some(chrono::Utc::now());
+    wired.heartbeat = Some(hb);
+    wired.pending_ping = Some(super::PendingPing {
+        pending: false,
+        since: None,
+    });
+    let html = wired.render().unwrap();
+    assert!(!html.contains("waiting for first ping"));
+}
+
+/// The notice lives in the ping card, which the live poll does not own, so the
+/// poll clears it out of band. Without that the card still claims nothing has
+/// arrived while the KPIs beside it count the ping.
+#[test]
+fn the_live_poll_clears_the_waiting_notice_out_of_band() {
+    let mut live = sample_live();
+    live.pending_ping = Some(super::PendingPing {
+        pending: true,
+        since: Some(chrono::Utc::now()),
+    });
+    let html = live.render().unwrap();
+    assert!(html.contains(r#"id="hb-pending" hx-swap-oob="true""#));
+    assert!(html.contains("waiting for first ping"));
+
+    live.pending_ping = Some(super::PendingPing {
+        pending: false,
+        since: None,
+    });
+    let html = live.render().unwrap();
+    assert!(html.contains(r#"id="hb-pending" hx-swap-oob="true""#));
+    assert!(!html.contains("waiting for first ping"));
+
+    // Nothing to clear on a probed monitor, so nothing is swapped at it.
+    live.pending_ping = None;
+    assert!(!live.render().unwrap().contains("hb-pending"));
+}
+
+#[test]
 fn heartbeat_detail_renders_ping_card_without_probe_surfaces() {
     let mut p = sample_page();
     p.kind = "HEARTBEAT";
@@ -176,6 +247,7 @@ fn heartbeat_detail_renders_ping_card_without_probe_surfaces() {
         ping_url: Some("https://app.example.com/ping/tok123".into()),
         first_ping_at: Some(chrono::Utc::now()),
         pending: false,
+        created_at: Some(chrono::Utc::now()),
         last_ping_at: None,
         last_start_at: None,
         last_fail_at: Some(chrono::Utc::now()),
@@ -705,6 +777,8 @@ fn sample_live() -> DetailLive {
         selected_region: None,
         segments: Arc::from(Vec::<StatusSeg>::new()),
         ribbon_oob: true,
+        pending_ping: None,
+        pending_ping_oob: true,
     }
 }
 
@@ -1305,4 +1379,46 @@ fn the_detail_banner_explains_a_held_alert() {
         html.contains("more than 10"),
         "the banner must say a real outage still alerts"
     );
+}
+
+/// Every surface reads the badge off `badge_status`, so a pending heartbeat
+/// that already has results cannot render one answer and swap to another on
+/// the first live poll. Reachable by switching an http monitor to heartbeat:
+/// the stored rows keep the target id, the ping state starts empty.
+#[test]
+fn a_pending_heartbeat_with_results_keeps_the_status_it_has() {
+    let wired = super::PendingPing {
+        pending: false,
+        since: None,
+    };
+    let unwired = super::PendingPing {
+        pending: true,
+        since: None,
+    };
+    assert_eq!(super::badge_status("up", Some(&unwired)), "up");
+    assert_eq!(super::badge_status("down", Some(&unwired)), "down");
+    assert_eq!(
+        super::badge_status("", Some(&unwired)),
+        super::WAITING_FOR_PING
+    );
+    assert_eq!(super::badge_status("", Some(&wired)), "");
+}
+
+/// A paused monitor is not waiting on anything: nothing dispatches it and the
+/// nudge skips it, so promising a schedule would be the one surface that
+/// disagrees.
+#[test]
+fn a_paused_heartbeat_does_not_claim_to_be_waiting() {
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    p.enabled = false;
+    p.last_status = "";
+    p.pending_ping = Some(super::PendingPing {
+        pending: false,
+        since: Some(chrono::Utc::now()),
+    });
+    let html = p.render().unwrap();
+    assert!(!html.contains("waiting for first ping"));
+    assert!(!html.contains("the schedule starts at the first ping"));
+    assert!(html.contains("no data"));
 }

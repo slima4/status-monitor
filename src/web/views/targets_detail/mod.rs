@@ -36,7 +36,7 @@ pub use charts::StatusSeg;
 pub use load::{LiveData, UnconfirmedFailures};
 pub use rows::{
     DetailCheckRows, DetailLive, FlowEvidenceView, FlowRunRow, FlowStepRow, IncidentRow, KpiTrend,
-    RegionBreakdownRow, ResultRow, UptimeStatsView,
+    PendingPing, RegionBreakdownRow, ResultRow, UptimeStatsView,
 };
 
 pub(crate) use rows::WindowLabels;
@@ -170,6 +170,9 @@ pub struct DetailPage {
     /// Ping-URL card for heartbeat monitors; `None` for every other kind.
     /// Shares the API handler's projection so the two surfaces can't diverge.
     pub heartbeat: Option<crate::api::handlers::targets::HeartbeatInfo>,
+    pub pending_ping: Option<PendingPing>,
+    /// The notice renders in place here, not as an OOB swap.
+    pub pending_ping_oob: bool,
     /// Stored runs, newest first. Empty for every kind but flow, which is what
     /// keeps the panel and its query off the other seven.
     pub flow_runs: Vec<FlowRunRow>,
@@ -316,10 +319,11 @@ pub async fn index(
         labeled_regions(&catalog, region_ids)
     };
 
-    let last_status = match heartbeat.as_ref() {
-        Some(hb) if hb.pending => WAITING_FOR_PING,
-        _ => live.last_status,
-    };
+    let pending_ping = heartbeat.as_ref().map(|h| PendingPing {
+        pending: h.pending && target.enabled,
+        since: h.created_at,
+    });
+    let last_status = badge_status(live.last_status, pending_ping.as_ref());
 
     Ok(DetailPage {
         active_tab: "targets",
@@ -356,6 +360,8 @@ pub async fn index(
         regions,
         selected_region,
         region_breakdown,
+        pending_ping,
+        pending_ping_oob: false,
         heartbeat,
         flow_runs,
     })
@@ -504,7 +510,8 @@ pub async fn live_partial(
     )
     .await?;
 
-    let last_status = badge_status(&state, org, &target, live.last_status).await;
+    let pending_ping = read_pending_ping(&state, org, &target).await;
+    let last_status = badge_status(live.last_status, pending_ping.as_ref());
 
     let page = DetailLive {
         id: target.id.to_string(),
@@ -518,6 +525,8 @@ pub async fn live_partial(
         selected_region,
         segments: Arc::clone(&live.segments),
         ribbon_oob: true,
+        pending_ping,
+        pending_ping_oob: true,
     };
     let rendered = page
         .render()
@@ -612,7 +621,10 @@ pub async fn incidents(
         .count_active_for_target(org, target.id)
         .await? as usize;
     let reaches_nobody = alerts_nobody(&state, org, &target).await;
-    let last_status = badge_status(&state, org, &target, data.last_status).await;
+    let last_status = badge_status(
+        data.last_status,
+        read_pending_ping(&state, org, &target).await.as_ref(),
+    );
 
     Ok(IncidentsPage {
         active_tab: "targets",
@@ -649,24 +661,32 @@ pub async fn incidents(
 /// "checking…" an empty status renders for probed monitors.
 const WAITING_FOR_PING: &str = "waiting";
 
-/// The extra read only happens when there is no result at all, on a page that
-/// would otherwise render no data.
-async fn badge_status(
+/// `None` for every kind but heartbeat, and on a read error: both leave the
+/// badge and the notice exactly as an ordinary monitor renders them.
+async fn read_pending_ping(
     state: &AppState,
     org: crate::domain::OrgId,
     target: &crate::domain::Target,
-    last_status: &'static str,
-) -> &'static str {
-    if !last_status.is_empty() || target.check.as_heartbeat().is_none() {
-        return last_status;
-    }
+) -> Option<PendingPing> {
+    target.check.as_heartbeat()?;
     match state.heartbeat_store.get(org, target.id).await {
-        Ok(hb) if hb.as_ref().is_none_or(HeartbeatMonitor::is_pending) => WAITING_FOR_PING,
-        Ok(_) => last_status,
+        // Paused: the wait is not what is stopping this monitor, and the
+        // notice would promise a schedule that cannot start.
+        Ok(hb) => Some(PendingPing {
+            pending: target.enabled && hb.as_ref().is_none_or(HeartbeatMonitor::is_pending),
+            since: hb.map(|h| h.created_at),
+        }),
         Err(err) => {
             tracing::warn!(error = %err, "heartbeat pending state unavailable");
-            last_status
+            None
         }
+    }
+}
+
+fn badge_status(last_status: &'static str, pending: Option<&PendingPing>) -> &'static str {
+    match pending {
+        Some(p) if p.pending && last_status.is_empty() => WAITING_FOR_PING,
+        _ => last_status,
     }
 }
 

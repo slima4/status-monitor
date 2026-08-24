@@ -332,6 +332,18 @@ async fn a_heartbeat_waiting_for_its_first_ping_says_so_on_every_badge() {
 
     // One ping ends it. No check result has been written yet, so the badge
     // falls back to the ordinary "checking…" a fresh monitor shows.
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::get(format!("/targets/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let html = body_text(resp).await;
+    assert!(html.contains("waiting for first ping"));
+
     let ping_url = heartbeat_ping_url(&router, &id).await;
     let path = ping_url.split("/ping/").nth(1).expect("ping url shape");
     let resp = router
@@ -974,4 +986,63 @@ async fn api_catalog_redirects_to_the_marketing_host() {
         resp.headers().get(header::LOCATION).unwrap(),
         "https://example.test/.well-known/api-catalog"
     );
+}
+
+/// A heartbeat can be pending and still have stored results: switching an http
+/// monitor to `kind = heartbeat` keeps its rows, and pre-gate heartbeats were
+/// evaluated before anything pinged them. Every surface has to read that the
+/// same way, or the page renders one answer and the first live poll swaps it.
+#[tokio::test]
+async fn a_pending_heartbeat_with_results_shows_them_on_every_surface() {
+    let state = common::build_test_app_state(|_| {});
+    let sink = state.result_sink.clone();
+    let router = common::with_session(
+        uptimepage::build_app_router(state, tokio_util::sync::CancellationToken::new()),
+        common::test_user_id(),
+        Some(common::test_org_id()),
+        Some("test-owner-session"),
+    );
+
+    let id = create_heartbeat_target(&router, "switched-over").await;
+    sink.write_batch(&[uptimepage::domain::CheckResult {
+        target_id: id.parse().expect("target id"),
+        org_id: common::test_org_id().0,
+        timestamp: chrono::Utc::now(),
+        status: uptimepage::domain::CheckStatus::Up,
+        duration_ms: 12,
+        dns_ms: None,
+        connect_ms: None,
+        tls_ms: None,
+        ttfb_ms: None,
+        response_code: None,
+        response_size: None,
+        diagnostic: None,
+        error: None,
+    }])
+    .await
+    .expect("seed a stored result");
+
+    for uri in [
+        format!("/targets/{id}"),
+        format!("/web/partials/targets/{id}/live"),
+        format!("/targets/{id}/incidents"),
+    ] {
+        let resp = router
+            .clone()
+            .oneshot(Request::get(uri.clone()).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK, "{uri}");
+        let html = body_text(resp).await;
+        // The notice still belongs here — unwired means nothing watches it from
+        // now on — but the badge reports the state actually on record.
+        assert!(
+            html.contains("status-badge--up"),
+            "{uri}: stored results decide the badge"
+        );
+        assert!(
+            !html.contains("status-badge--pending"),
+            "{uri}: renders one badge, not one per surface"
+        );
+    }
 }

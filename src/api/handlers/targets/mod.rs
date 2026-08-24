@@ -515,6 +515,8 @@ pub struct HeartbeatInfo {
     pub first_ping_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Waiting for that first ping: not evaluated, not alerting, no data yet.
     pub pending: bool,
+    /// When the wait started, and what the three-day reminder counts from.
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_start_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_fail_at: Option<chrono::DateTime<chrono::Utc>>,
     pub last_exit_code: Option<u8>,
@@ -600,6 +602,7 @@ pub(crate) async fn heartbeat_info(
         first_ping_at: hb.as_ref().and_then(|h| h.first_ping_at),
         // A missing row is still provisioning, which is pending all the same.
         pending: hb.as_ref().is_none_or(HeartbeatMonitor::is_pending),
+        created_at: hb.as_ref().map(|h| h.created_at),
         last_start_at: hb.as_ref().and_then(|h| h.last_start_at),
         last_fail_at: hb.as_ref().and_then(|h| h.last_fail_at),
         last_exit_code: hb.and_then(|h| h.last_exit_code),

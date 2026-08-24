@@ -40,6 +40,7 @@
   {% if let Some(hb) = heartbeat %}
   <section class="sticker-card space-y-4 p-5">
     <h2 class="panel-label">ping url</h2>
+    {% include "targets/partials/_heartbeat_pending.html" %}
     {% if let Some(url) = hb.ping_url %}
     <div class="space-y-2">
       <div class="flex flex-wrap items-center gap-2">

@@ -76,6 +76,15 @@ pub struct IncidentRow {
     pub ongoing: bool,
 }
 
+/// Wired-up state of a heartbeat, for the badge and the waiting notice. `Some`
+/// for every heartbeat, wired or not, so the live poll carries the answer that
+/// clears the notice as well as the one that raises it.
+pub struct PendingPing {
+    pub pending: bool,
+    /// Where the wait is counted from; `None` while the row is provisioning.
+    pub since: Option<DateTime<Utc>>,
+}
+
 #[derive(Template, WebTemplate)]
 #[template(path = "targets/partials/detail_live.html")]
 pub struct DetailLive {
@@ -94,6 +103,10 @@ pub struct DetailLive {
     pub segments: Arc<[StatusSeg]>,
     /// Marks the ribbon include as an out-of-band swap on the live response.
     pub ribbon_oob: bool,
+    pub pending_ping: Option<PendingPing>,
+    /// The notice is only ever out of band here: it lives in the ping card,
+    /// which this response does not own.
+    pub pending_ping_oob: bool,
 }
 
 /// Rows for the ribbon drill drawer: a page of raw checks over a bucket window,

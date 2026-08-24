@@ -1,0 +1,17 @@
+{# Waiting-for-first-ping notice. Rendered inside the ping card on the full page
+   and re-rendered out of band by the live poll, so it clears on the same tick
+   the ping shows up in the KPIs above it. #}
+{% if let Some(p) = pending_ping %}
+<div id="hb-pending"{% if pending_ping_oob %} hx-swap-oob="true"{% endif %}>
+  {% if p.pending %}
+  <div class="space-y-1 border-l-2 border-[color:var(--theme-line)] pl-3 font-mono text-xs text-quiet">
+    <p class="text-body"><span class="hl">waiting for first ping</span></p>
+    {% if let Some(since) = p.since %}
+    <p># nothing received since <time datetime="{{ since|iso_ts }}" data-tz="exact">{{ since|human_ts }}</time></p>
+    {% endif %}
+    <p># until one lands nothing is watched: no state, no incident, nobody alerted</p>
+    <p># the schedule starts at the first ping, so there is no rush</p>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
