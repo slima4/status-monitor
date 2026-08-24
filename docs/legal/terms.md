@@ -1,6 +1,6 @@
 # Terms of Service
 
-**Last updated:** 2026-07-25
+**Last updated:** 2026-08-24
 
 ## 1. About these Terms
 
@@ -17,9 +17,11 @@ open-source licence.
 
 ## 2. The Service
 
-uptimepage is an HTTP/TCP monitoring service. You configure endpoints
-("targets") to monitor; we periodically check them and store the results.
-We may also display selected results on a public status page if you opt in.
+uptimepage is an uptime monitoring service. You configure endpoints
+("monitors") to watch over HTTP, TCP, ping, heartbeat, DNS, TLS certificate,
+domain expiry or a scripted browser flow; we periodically check them and store
+the results. We may also display selected results on a public status page if
+you opt in.
 
 ## 3. Eligibility
 
@@ -29,10 +31,11 @@ The Service is not intended for use by minors under 16.
 
 ## 4. Your Account
 
-You sign in via GitHub OAuth (and other methods we may add). You are
-responsible for maintaining the security of your authentication provider
-and any API tokens you create within the Service. Notify us at
-security@uptimepage.dev immediately if you suspect a compromise.
+You sign in with GitHub, Google, Microsoft or GitLab, with a passkey, or
+with a link and code we email you. We may add or withdraw methods. You are
+responsible for maintaining the security of whichever method you use, of the
+mailbox it reaches, and of any API tokens you create within the Service.
+Notify us at security@uptimepage.dev immediately if you suspect a compromise.
 
 ## 5. Acceptable Use
 

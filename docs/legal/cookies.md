@@ -1,6 +1,6 @@
 # Cookie Policy
 
-**Last updated:** 2026-08-23
+**Last updated:** 2026-08-24
 
 ## What Cookies We Use
 
@@ -14,7 +14,7 @@ Every cookie below is set by the Service itself. None of them identify you to th
 | `_sm_ml_confirm` | Ties the sign-in link you opened to the button you press on it, so nobody else can complete that sign-in | Lifetime of the link, 20 minutes by default | Only for email sign-in |
 | `_sm_ml_code` | Binds the sign-in code we email you to the browser that asked for it, so the code is useless anywhere else | Lifetime of the link, 20 minutes by default | Only for email sign-in |
 
-Without `_sm_session` you cannot stay signed in. The other two are set only while an email sign-in is in progress. `_sm_ml_confirm` is cleared as soon as the link is used, and `_sm_ml_code` as soon as a code is entered; either way both expire on their own shortly after the sign-in they belong to.
+Without `_sm_session` you cannot stay signed in. The other two are set only while an email sign-in is in progress. `_sm_ml_confirm` is cleared as soon as the link is used, and `_sm_ml_code` once a code has been tried; either way both expire on their own shortly after the sign-in they belong to.
 
 ### Running the app
 

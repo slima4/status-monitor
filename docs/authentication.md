@@ -215,8 +215,8 @@ carries the account id as its user handle, and nothing is trusted from it
 until the signature verifies against a credential that account actually holds.
 
 **A passkey cannot create an account.** It carries no email address, so it is
-only ever added to an account that already exists. New accounts still start at
-an OAuth provider.
+only ever added to an account that already exists. A new account starts at an
+OAuth provider, or at a magic link where `auth.open_signup` is on.
 
 Because sign-in is discoverable, the credential has to live on the
 authenticator itself. A browser that reports back that it saved a server-side
