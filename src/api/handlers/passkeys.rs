@@ -422,7 +422,7 @@ async fn complete_login(
         crate::analytics::Login {
             method: LoginMethod::Passkey,
             new_user: false,
-            redirect_after: None,
+            redirect_after,
             via: None,
         },
         client_ip,
