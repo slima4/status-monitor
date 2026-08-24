@@ -21,13 +21,16 @@ pub struct LinkedIdentity {
     pub last_login_at: DateTime<Utc>,
 }
 
-pub async fn list_for_user(pool: &PgPool, user: UserId) -> Result<Vec<LinkedIdentity>> {
+pub async fn list_for_user<'c, E: sqlx::PgExecutor<'c>>(
+    executor: E,
+    user: UserId,
+) -> Result<Vec<LinkedIdentity>> {
     sqlx::query_as(
         "SELECT provider, provider_user_id, provider_username, created_at, last_login_at \
          FROM oauth_identities WHERE user_id = $1 ORDER BY created_at",
     )
     .bind(user.0)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|e| AppError::Other(anyhow::anyhow!("list linked identities: {e}")))
 }
@@ -97,10 +100,29 @@ pub async fn unlink(
     provider: OauthProvider,
     provider_user_id: Option<&str>,
     ways_in: &WaysIn,
-    surviving_passkeys: usize,
+    rp_id: Option<&str>,
     from: RequestOrigin<'_>,
 ) -> Result<String> {
     let mut tx = pool.begin().await.map_err(db("begin"))?;
+    // The same key passkey removal takes. FOR UPDATE below serialises this
+    // against another unlink, but not against the passkey side, and an account
+    // whose last provider and last passkey go at once loses both.
+    crate::storage::locks::advisory_xact_lock(
+        &mut *tx,
+        &crate::storage::locks::user_lock_key(user),
+    )
+    .await
+    .map_err(db("lock identities"))?;
+
+    // Counted here rather than passed in, so it cannot be read before the lock.
+    let surviving_passkeys = match rp_id {
+        Some(rp) => crate::storage::passkeys::list_for_user(&mut *tx, user)
+            .await?
+            .iter()
+            .filter(|row| row.usable_from(rp))
+            .count(),
+        None => 0,
+    };
 
     // FOR UPDATE so two concurrent removals can't each see two rows and both
     // proceed, leaving none; ORDER BY so they queue instead of deadlocking.

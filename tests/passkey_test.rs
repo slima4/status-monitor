@@ -10,6 +10,7 @@ mod common;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use tower::ServiceExt;
+use uptimepage::auth::OauthProvider;
 use uptimepage::domain::UserId;
 use uptimepage::storage::oauth_identities::{RequestOrigin, WaysIn};
 use uptimepage::storage::passkeys;
@@ -88,6 +89,108 @@ async fn the_last_way_in_cannot_be_removed() {
         .await
         .expect_err("now it is the last one again");
     assert!(format!("{err:?}").contains("LAST_SIGN_IN_METHOD"));
+
+    pool.close().await;
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires DATABASE_URL"]
+async fn two_removals_at_once_cannot_empty_the_account() {
+    let Some((db, name)) = common::fresh_test_db("passkey_race").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let user = common::make_user(&pool, "raced").await;
+
+    // Exactly two, and nothing else opens the account: each removal on its own
+    // is allowed, and both together must not be.
+    let a = add_credential(&pool, user, "cred-a", HOST).await;
+    let b = add_credential(&pool, user, "cred-b", HOST).await;
+
+    let ways = ways_in(true);
+    let (ra, rb) = tokio::join!(
+        passkeys::remove(&pool, user, a, Some(HOST), &ways, anon()),
+        passkeys::remove(&pool, user, b, Some(HOST), &ways, anon()),
+    );
+    assert!(
+        ra.is_ok() != rb.is_ok(),
+        "exactly one may win, got {ra:?} and {rb:?}"
+    );
+
+    let left: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM webauthn_credentials WHERE user_id = $1")
+            .bind(user.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 1, "the account must keep a way in");
+
+    pool.close().await;
+    common::drop_test_db(&name).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "requires DATABASE_URL"]
+async fn dropping_the_last_provider_and_the_last_passkey_at_once_leaves_one() {
+    let Some((db, name)) = common::fresh_test_db("passkey_cross").await else {
+        return;
+    };
+    let pool = common::open_test_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+    let user = common::make_user(&pool, "both").await;
+
+    // One of each and no email back: either may go, never both. The two guards
+    // live in different modules and used to take different locks.
+    let only = add_credential(&pool, user, "cred-a", HOST).await;
+    sqlx::query(
+        "INSERT INTO oauth_identities (user_id, provider, provider_user_id)          VALUES ($1, 'github', '900')",
+    )
+    .bind(user.0)
+    .execute(&pool)
+    .await
+    .expect("link github");
+
+    let ways = WaysIn {
+        enabled_providers: vec![OauthProvider::Github],
+        email_is_a_way_back: false,
+        passkeys_open_the_account: true,
+    };
+    let (passkey_gone, provider_gone) = tokio::join!(
+        passkeys::remove(&pool, user, only, Some(HOST), &ways, anon()),
+        uptimepage::storage::oauth_identities::unlink(
+            &pool,
+            user,
+            OauthProvider::Github,
+            Some("900"),
+            &ways,
+            Some(HOST),
+            Default::default(),
+        ),
+    );
+    assert!(
+        passkey_gone.is_ok() != provider_gone.is_ok(),
+        "exactly one may win, got {passkey_gone:?} and {provider_gone:?}"
+    );
+
+    let credentials: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM webauthn_credentials WHERE user_id = $1")
+            .bind(user.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let identities: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM oauth_identities WHERE user_id = $1")
+            .bind(user.0)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        credentials + identities,
+        1,
+        "the account must keep a way in"
+    );
 
     pool.close().await;
     common::drop_test_db(&name).await;

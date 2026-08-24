@@ -59,13 +59,14 @@ pub async fn unlink(
             .and_then(|v| v.to_str().ok())
             .unwrap_or_default(),
     );
+    let rp_id = passkey_rp_id(&state);
     let email = oauth_identities::unlink(
         pool,
         user_id,
         provider,
         q.provider_user_id.as_deref(),
         &oauth_identities::WaysIn::from_config(&state.cfg),
-        usable_passkeys(&state, pool, user_id).await?,
+        rp_id.as_deref(),
         oauth_identities::RequestOrigin {
             ip_hash: ip_hash.as_deref(),
             user_agent_hash: ua_hash.as_deref(),
@@ -99,20 +100,13 @@ pub async fn unlink(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Credentials bound to a relying-party id this deployment no longer answers to
-/// cannot sign anyone in, so they are rows in the table rather than ways back.
-async fn usable_passkeys(
-    state: &AppState,
-    pool: &sqlx::PgPool,
-    user_id: crate::domain::UserId,
-) -> Result<usize> {
-    if !state.cfg.auth.passkey_login_enabled() {
-        return Ok(0);
-    }
-    let rp_id = crate::auth::passkey::relying_party_id(&state.cfg.auth.public_base_url)?;
-    Ok(crate::storage::passkeys::list_for_user(pool, user_id)
-        .await?
-        .iter()
-        .filter(|row| row.usable_from(&rp_id))
-        .count())
+/// `None` where no passkey could sign anyone in, so the rows this deployment
+/// cannot answer for are counted as rows rather than ways back.
+fn passkey_rp_id(state: &AppState) -> Option<String> {
+    state
+        .cfg
+        .auth
+        .passkey_login_enabled()
+        .then(|| crate::auth::passkey::relying_party_id(&state.cfg.auth.public_base_url).ok())
+        .flatten()
 }

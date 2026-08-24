@@ -40,13 +40,16 @@ impl StoredPasskey {
     }
 }
 
-pub async fn list_for_user(pool: &PgPool, user: UserId) -> Result<Vec<StoredPasskey>> {
+pub async fn list_for_user<'c, E: sqlx::PgExecutor<'c>>(
+    executor: E,
+    user: UserId,
+) -> Result<Vec<StoredPasskey>> {
     sqlx::query_as(
         "SELECT id, credential_id, nickname, rp_id, created_at, last_used_at \
          FROM webauthn_credentials WHERE user_id = $1 ORDER BY created_at",
     )
     .bind(user.0)
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|e| AppError::Other(anyhow::anyhow!("list passkeys: {e}")))
 }
@@ -228,7 +231,22 @@ pub async fn remove(
     ways_in: &crate::storage::oauth_identities::WaysIn,
     from: RequestOrigin<'_>,
 ) -> Result<String> {
-    let held = list_for_user(pool, user).await?;
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| AppError::Other(anyhow::anyhow!("begin passkey removal: {e}")))?;
+    // Counting outside this lock lets two removals of different credentials
+    // each see the other surviving, and an account with two ways in and no
+    // third loses both. Same key `ensure_room` takes, so adds and removes
+    // serialise against each other too.
+    crate::storage::locks::advisory_xact_lock(
+        &mut *tx,
+        &crate::storage::locks::user_lock_key(user),
+    )
+    .await
+    .map_err(|e| AppError::Other(anyhow::anyhow!("lock passkey removal: {e}")))?;
+
+    let held = list_for_user(&mut *tx, user).await?;
     let Some(doomed) = held.iter().find(|row| row.id == id) else {
         return Err(AppError::not_found(
             "PASSKEY_NOT_FOUND",
@@ -242,7 +260,7 @@ pub async fn remove(
         .filter(|row| row.id != id)
         .filter(|row| rp_id.is_some_and(|rp| row.usable_from(rp)))
         .count();
-    let linked = crate::storage::oauth_identities::list_for_user(pool, user).await?;
+    let linked = crate::storage::oauth_identities::list_for_user(&mut *tx, user).await?;
     if !ways_in.passkey_removable(&linked, surviving) {
         return Err(AppError::bad_request(
             "LAST_SIGN_IN_METHOD",
@@ -251,12 +269,6 @@ pub async fn remove(
     }
 
     let label = credential_label(&doomed.credential_id);
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| AppError::Other(anyhow::anyhow!("begin passkey removal: {e}")))?;
-    // Optional, not one: the guard read outside this transaction, so a second
-    // request may already have taken the row.
     let email: Option<(String,)> = sqlx::query_as(
         "DELETE FROM webauthn_credentials WHERE id = $1 AND user_id = $2 \
          RETURNING (SELECT email::text FROM users WHERE id = $2)",
