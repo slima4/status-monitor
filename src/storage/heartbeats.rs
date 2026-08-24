@@ -23,11 +23,14 @@ pub struct HeartbeatMonitor {
     /// Last *success*. A `/start` must not hold a monitor up while the job it
     /// announced hangs, so it lives in `last_start_at` instead.
     pub last_ping_at: Option<DateTime<Utc>>,
-    /// Re-arm point: set at creation and on every disabled→enabled flip.
+    /// Silence-window start: creation, the wiring ping, every disabled→enabled
+    /// flip. A failing wiring ping does not move it, or the failure it carries
+    /// would be cleared by the statement that recorded it.
     pub armed_at: DateTime<Utc>,
     /// Wired-up point: the first ping of any signal, never cleared. `None`
     /// means the job has never spoken, which is not the same as silent.
     pub first_ping_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
     pub last_start_at: Option<DateTime<Utc>>,
     pub last_fail_at: Option<DateTime<Utc>>,
     pub last_exit_code: Option<u8>,
@@ -98,6 +101,11 @@ pub struct PingAccepted {
     pub state: PingState,
     /// `None` on a start, and on a finish whose start never arrived.
     pub run_ms: Option<u32>,
+    /// The signal that ended the pending wait. Nothing else reports on this
+    /// monitor yet: it reaches the registry a refresh from now.
+    pub first: bool,
+    /// A paused monitor still accepts pings but reports no health.
+    pub enabled: bool,
 }
 
 #[async_trait]
@@ -134,6 +142,7 @@ struct HeartbeatRow {
     last_ping_at: Option<DateTime<Utc>>,
     armed_at: DateTime<Utc>,
     first_ping_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
     last_start_at: Option<DateTime<Utc>>,
     last_fail_at: Option<DateTime<Utc>>,
     last_exit_code: Option<i16>,
@@ -146,6 +155,7 @@ impl HeartbeatRow {
             last_ping_at: self.last_ping_at,
             armed_at: self.armed_at,
             first_ping_at: self.first_ping_at,
+            created_at: self.created_at,
             last_start_at: self.last_start_at,
             last_fail_at: self.last_fail_at,
             last_exit_code: exit_code_of(self.last_exit_code),
@@ -153,8 +163,8 @@ impl HeartbeatRow {
     }
 }
 
-const HB_COLUMNS: &str = "token_enc, last_ping_at, armed_at, first_ping_at, last_start_at, \
-     last_fail_at, last_exit_code";
+const HB_COLUMNS: &str = "token_enc, last_ping_at, armed_at, first_ping_at, created_at, \
+     last_start_at, last_fail_at, last_exit_code";
 
 #[async_trait]
 impl HeartbeatStore for PgHeartbeatStore {
@@ -216,13 +226,17 @@ impl HeartbeatStore for PgHeartbeatStore {
         // committed, instead of timing the run against a start already closed.
         let row: Option<AcceptedRow> = sqlx::query_as(
             "WITH prev AS ( \
-                 SELECT hm.target_id, hm.last_ping_at, hm.last_start_at, hm.last_fail_at, hm.armed_at \
+                 SELECT hm.target_id, hm.last_ping_at, hm.last_start_at, hm.last_fail_at, \
+                        hm.armed_at, hm.first_ping_at, t.enabled \
                  FROM heartbeat_monitors hm \
                  JOIN organizations o ON o.id = hm.org_id AND o.deleted_at IS NULL \
+                 JOIN targets t ON t.id = hm.target_id \
                  WHERE hm.token_hash = $1 \
                  FOR UPDATE OF hm \
              ) \
              UPDATE heartbeat_monitors hm SET \
+                 armed_at       = CASE WHEN hm.first_ping_at IS NULL AND $2 <> 'fail' \
+                                       THEN now() ELSE hm.armed_at END, \
                  last_ping_at   = CASE WHEN $2 = 'success' THEN now() ELSE hm.last_ping_at END, \
                  last_start_at  = CASE WHEN $2 = 'start'   THEN now() ELSE hm.last_start_at END, \
                  last_fail_at   = CASE WHEN $2 = 'fail'    THEN now() ELSE hm.last_fail_at END, \
@@ -233,7 +247,8 @@ impl HeartbeatStore for PgHeartbeatStore {
              RETURNING hm.org_id, hm.target_id, hm.armed_at, hm.last_ping_at, hm.last_start_at, \
                        hm.last_fail_at, hm.last_exit_code, \
                        prev.last_ping_at AS prev_ping_at, prev.last_start_at AS prev_start_at, \
-                       prev.last_fail_at AS prev_fail_at, prev.armed_at AS prev_armed_at",
+                       prev.last_fail_at AS prev_fail_at, prev.armed_at AS prev_armed_at, \
+                       prev.first_ping_at AS prev_first_ping_at, prev.enabled",
         )
         .bind(capability_token::hash(raw_token))
         .bind(signal.as_str())
@@ -258,6 +273,8 @@ struct AcceptedRow {
     prev_start_at: Option<DateTime<Utc>>,
     prev_fail_at: Option<DateTime<Utc>>,
     prev_armed_at: DateTime<Utc>,
+    prev_first_ping_at: Option<DateTime<Utc>>,
+    enabled: bool,
 }
 
 impl AcceptedRow {
@@ -289,6 +306,8 @@ impl AcceptedRow {
             at,
             state,
             run_ms: run_ms_of(&prev, signal, at),
+            first: self.prev_first_ping_at.is_none(),
+            enabled: self.enabled,
         }
     }
 }
@@ -332,6 +351,7 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             last_ping_at: None,
             armed_at: Utc::now(),
             first_ping_at: None,
+            created_at: Utc::now(),
             last_start_at: None,
             last_fail_at: None,
             last_exit_code: None,
@@ -378,6 +398,10 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             .find(|m| m.token_hash == hash)
             .map(|m| {
                 let prev = m.monitor.ping_state();
+                let first = m.monitor.is_pending();
+                if first && signal != PingSignal::Fail {
+                    m.monitor.armed_at = now;
+                }
                 m.monitor.first_ping_at = m.monitor.first_ping_at.or(Some(now));
                 match signal {
                     PingSignal::Start => m.monitor.last_start_at = Some(now),
@@ -393,6 +417,9 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
                     at: now,
                     state: m.monitor.ping_state(),
                     run_ms: run_ms_of(&prev, signal, now),
+                    first,
+                    // No targets table here; the pause path is a live-PG concern.
+                    enabled: true,
                 }
             }))
     }

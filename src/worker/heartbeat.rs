@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::num::NonZeroU32;
 use uuid::Uuid;
 
-use crate::domain::{CheckResult, CheckStatus, HeartbeatCheck};
+use crate::domain::{CheckResult, CheckStatus, HeartbeatCheck, PingSignal};
 
 /// Per-token accepted-ping rate + burst; extra pings 429. Keyed pre-resolve so
 /// rejected pings never reach Postgres.
@@ -53,9 +53,11 @@ impl PingState {
         self.fail.filter(|f| f.at > self.success_at)
     }
 
+    /// `>=` against the anchor, because the wiring ping can be the start: it
+    /// arms the monitor and opens the run in one statement, at one timestamp.
     pub fn run_open_since(&self) -> Option<DateTime<Utc>> {
         self.start_at
-            .filter(|s| *s > self.success_at && self.fail.is_none_or(|f| *s > f.at))
+            .filter(|s| *s >= self.success_at && self.fail.is_none_or(|f| *s > f.at))
     }
 
     /// The snapshot may predate a ping this node already accepted.
@@ -158,14 +160,56 @@ pub fn execute_heartbeat_check(
     }
 }
 
+/// The verdict the wiring ping carries on its own, before the monitor reaches
+/// the scheduler's registry. Judged on the signal alone, never on the silence
+/// window: `armed_at` may be weeks old, and a job that has just started
+/// speaking is not down for the time before it did.
+pub fn first_ping_result(
+    target_id: Uuid,
+    org_id: Uuid,
+    at: DateTime<Utc>,
+    signal: PingSignal,
+    exit_code: Option<u8>,
+) -> Option<CheckResult> {
+    let error = match signal {
+        PingSignal::Success => None,
+        PingSignal::Fail => Some(failure_message(exit_code)),
+        // A run that announced itself has not reported an outcome yet.
+        PingSignal::Start => return None,
+    };
+    Some(CheckResult {
+        target_id,
+        org_id,
+        timestamp: at,
+        status: if error.is_none() {
+            CheckStatus::Up
+        } else {
+            CheckStatus::Down
+        },
+        duration_ms: 0,
+        dns_ms: None,
+        connect_ms: None,
+        tls_ms: None,
+        ttfb_ms: None,
+        response_code: None,
+        response_size: None,
+        diagnostic: None,
+        error,
+    })
+}
+
+fn failure_message(exit_code: Option<u8>) -> String {
+    match exit_code {
+        Some(code) => format!("job reported failure (exit {code})"),
+        None => "job reported failure".to_string(),
+    }
+}
+
 /// Cheapest evidence first: the job said it failed, the job announced a run it
 /// never finished, or nothing has been heard for too long.
 fn verdict(now: DateTime<Utc>, state: &PingState, check: &HeartbeatCheck) -> Option<String> {
     if let Some(failure) = state.failing() {
-        return Some(match failure.exit_code {
-            Some(code) => format!("job reported failure (exit {code})"),
-            None => "job reported failure".to_string(),
-        });
+        return Some(failure_message(failure.exit_code));
     }
     if let (Some(started), Some(max)) = (state.run_open_since(), check.max_runtime) {
         let running = now.signed_duration_since(started);
@@ -457,5 +501,68 @@ mod tests {
         let month = 30 * 24 * 3600;
         let r = execute_heartbeat_check(id, Uuid::new_v4(), &check(month, month), &rt);
         assert_eq!(r.status, CheckStatus::Up);
+    }
+}
+
+#[cfg(test)]
+mod first_ping_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn result(signal: PingSignal, exit_code: Option<u8>) -> Option<CheckResult> {
+        first_ping_result(
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Utc::now(),
+            signal,
+            exit_code,
+        )
+    }
+
+    #[test]
+    fn a_first_success_is_up_without_waiting_for_the_scheduler() {
+        let r = result(PingSignal::Success, None).expect("success reports");
+        assert_eq!(r.status, CheckStatus::Up);
+        assert!(r.error.is_none());
+    }
+
+    #[test]
+    fn a_first_failure_reports_the_job_verdict() {
+        let r = result(PingSignal::Fail, Some(3)).expect("failure reports");
+        assert_eq!(r.status, CheckStatus::Down);
+        assert_eq!(r.error.as_deref(), Some("job reported failure (exit 3)"));
+    }
+
+    #[test]
+    fn a_first_start_reports_nothing() {
+        assert!(result(PingSignal::Start, None).is_none());
+    }
+
+    /// One sentence, whichever path wrote the row.
+    #[test]
+    fn the_failure_wording_matches_the_scheduled_verdict() {
+        let state = PingState {
+            success_at: ago(600),
+            start_at: None,
+            fail: Some(Failure {
+                at: Utc::now(),
+                exit_code: Some(3),
+            }),
+        };
+        let scheduled = verdict(Utc::now(), &state, &check(60, 30));
+        let on_ping = result(PingSignal::Fail, Some(3)).unwrap().error;
+        assert_eq!(scheduled, on_ping);
+    }
+
+    fn ago(secs: i64) -> DateTime<Utc> {
+        Utc::now() - chrono::Duration::seconds(secs)
+    }
+
+    fn check(period_s: u64, grace_s: u64) -> HeartbeatCheck {
+        HeartbeatCheck {
+            period: std::time::Duration::from_secs(period_s),
+            grace: std::time::Duration::from_secs(grace_s),
+            max_runtime: None,
+        }
     }
 }

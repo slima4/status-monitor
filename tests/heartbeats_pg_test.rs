@@ -929,3 +929,142 @@ async fn signals_close_the_run_they_opened_live_pg() {
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
+
+/// The ping handler writes the first result off these two flags, so the SQL
+/// that computes them is what keeps a freshly-wired job from looking dead for
+/// a registry refresh plus an interval.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn accepted_ping_reports_the_wiring_ping_once_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-first").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+
+    let live = make_heartbeat_target(&pool, org_a, "nightly", true).await;
+    let token = store
+        .ensure(org_a, live)
+        .await
+        .unwrap()
+        .expect("row")
+        .token
+        .expect("plaintext without cipher");
+
+    let wiring = store
+        .record_signal_by_token(&token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("token records");
+    assert!(wiring.first, "the ping that ends the pending wait");
+    assert!(wiring.enabled);
+
+    let routine = store
+        .record_signal_by_token(&token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("token records");
+    assert!(!routine.first, "only the wiring ping reports first");
+
+    // A start counts as wiring too: it un-pends the monitor just the same.
+    let paused = make_heartbeat_target(&pool, org_a, "paused", false).await;
+    let paused_token = store
+        .ensure(org_a, paused)
+        .await
+        .unwrap()
+        .expect("row")
+        .token
+        .expect("plaintext without cipher");
+    let on_paused = store
+        .record_signal_by_token(&paused_token, PingSignal::Start, None)
+        .await
+        .unwrap()
+        .expect("token records");
+    assert!(on_paused.first);
+    assert!(
+        !on_paused.enabled,
+        "a paused monitor accepts the ping and reports no health"
+    );
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+/// The page promises the schedule starts at the first ping. A monitor created
+/// weeks before the job was wired must therefore not be judged on the silence
+/// it sat in, whichever signal breaks it.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn the_wiring_ping_starts_the_schedule_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-arm").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+
+    let announced = make_heartbeat_target(&pool, org_a, "announced", true).await;
+    let announced_token = token_of(&store, org_a, announced).await;
+    backdate_arm(&pool, announced).await;
+    let accepted = store
+        .record_signal_by_token(&announced_token, PingSignal::Start, None)
+        .await
+        .unwrap()
+        .expect("token records");
+    assert!(
+        accepted.state.success_at >= accepted.at - chrono::Duration::seconds(5),
+        "a start that wires the monitor arms it: {:?} vs ping at {:?}",
+        accepted.state.success_at,
+        accepted.at
+    );
+    let read = store.get(org_a, announced).await.unwrap().expect("row");
+    assert!(read.last_ping_at.is_none(), "a start is not a success");
+    assert!(
+        read.ping_state().failing().is_none(),
+        "three weeks unwired is not a failed run"
+    );
+
+    // A first ping that reports failure keeps its verdict: arming it here
+    // would clear the failure the same statement recorded.
+    let broken = make_heartbeat_target(&pool, org_a, "broken", true).await;
+    let broken_token = token_of(&store, org_a, broken).await;
+    backdate_arm(&pool, broken).await;
+    let failed = store
+        .record_signal_by_token(&broken_token, PingSignal::Fail, Some(1))
+        .await
+        .unwrap()
+        .expect("token records");
+    assert!(
+        failed.state.failing().is_some(),
+        "the job said it failed on its first run"
+    );
+
+    // A later re-arm is unaffected by any of this.
+    let routine = store
+        .record_signal_by_token(&broken_token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("token records");
+    assert!(routine.state.failing().is_none(), "a success clears it");
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+/// Wired long after somebody clicked save.
+async fn backdate_arm(pool: &sqlx::PgPool, target: Uuid) {
+    sqlx::query(
+        "UPDATE heartbeat_monitors SET armed_at = now() - interval '21 days' WHERE target_id = $1",
+    )
+    .bind(target)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn token_of(store: &PgHeartbeatStore, org: OrgId, target: Uuid) -> String {
+    store
+        .ensure(org, target)
+        .await
+        .unwrap()
+        .expect("row")
+        .token
+        .expect("plaintext without cipher")
+}

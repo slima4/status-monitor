@@ -13,6 +13,7 @@ use futures::StreamExt;
 use crate::app::AppState;
 use crate::auth::sha256_hex;
 use crate::domain::{HeartbeatPingRecord, Ping};
+use crate::storage::heartbeats::PingAccepted;
 
 /// Excess is drained and dropped, never refused: a 413 on a success ping would
 /// page the customer for a job that ran fine.
@@ -24,6 +25,10 @@ const BODY_DRAIN_LIMIT: usize = 256 * 1024;
 /// Without this a trickled body is a slowloris on an unauthenticated route.
 /// The verdict is already written, so a dropped tail costs output only.
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Shorter than the sink's own retry budget, so a wedged store sheds these
+/// rather than accumulating a task per newly wired monitor.
+const FIRST_RESULT_WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// First half of the token's SHA-256, so GCRA runs before any database work.
 fn token_key(raw: &str) -> u128 {
@@ -76,6 +81,10 @@ async fn record(state: &AppState, token: String, ping: Ping, body: Body) -> Resp
         .heartbeat_runtime
         .record(accepted.target_id, accepted.state);
 
+    if accepted.first && accepted.enabled {
+        spawn_first_result(state, &accepted, ping);
+    }
+
     if let Some(sink) = &state.heartbeat_ping_sink {
         sink.write_ping(&HeartbeatPingRecord {
             org_id: accepted.org_id.0,
@@ -94,6 +103,36 @@ async fn record(state: &AppState, token: String, ping: Ping, body: Body) -> Resp
         "heartbeat ping accepted"
     );
     (StatusCode::OK, "ok").into_response()
+}
+
+/// Detached: the sink retries a degraded ClickHouse for up to 30s, and the
+/// caller of this route is a cron job holding a `curl` open at the end of its
+/// run. The scheduler reports on its own tick if this never lands.
+fn spawn_first_result(state: &AppState, accepted: &PingAccepted, ping: Ping) {
+    let Some(result) = crate::worker::heartbeat::first_ping_result(
+        accepted.target_id,
+        accepted.org_id.0,
+        accepted.at,
+        ping.signal,
+        ping.exit_code,
+    ) else {
+        return;
+    };
+    let sink = state.result_sink.clone();
+    let target_id = accepted.target_id;
+    tokio::spawn(async move {
+        let write = sink.write_batch(std::slice::from_ref(&result));
+        let outcome = match tokio::time::timeout(FIRST_RESULT_WRITE_TIMEOUT, write).await {
+            Ok(Ok(())) => return,
+            Ok(Err(err)) => err.to_string(),
+            Err(_) => "timed out".to_string(),
+        };
+        tracing::warn!(
+            target_id = %target_id,
+            error = %outcome,
+            "heartbeat first-ping result not written; the scheduler reports on its own tick"
+        );
+    });
 }
 
 /// Keeps the first [`BODY_SAMPLE_BYTES`] but reads to the end, so `curl -fsS`
