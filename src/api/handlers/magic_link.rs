@@ -54,7 +54,9 @@ const CONFIRM_NONCE_COOKIE: &str = "_sm_ml_confirm";
 /// Binds an emailed code to the browser that asked for it.
 const CODE_NONCE_COOKIE: &str = "_sm_ml_code";
 
-const CODE_COOKIE_PATH: &str = "/auth/magic-link/code";
+/// Covers `/request` as well as `/code`: the request handler reuses the nonce
+/// it finds here, and RFC 6265 would not send a cookie scoped to `/code` there.
+const CODE_COOKIE_PATH: &str = "/auth/magic-link";
 const CONFIRM_COOKIE_PATH: &str = "/auth/magic-link/verify";
 
 #[derive(Debug, Deserialize)]

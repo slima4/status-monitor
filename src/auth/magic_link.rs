@@ -292,14 +292,15 @@ pub enum CodeOutcome {
 }
 
 /// One attempt: a well-formed miss retires the code and leaves the link in
-/// the same mail redeemable.
+/// the same mail redeemable. `code_spent_at` marks the attempt, not its
+/// outcome, so it is stamped before the guess is checked.
 pub async fn consume_code(pool: &PgPool, nonce: &str, code: &str) -> Result<CodeOutcome> {
     let normalized = normalize_code(code);
     if !code_is_well_formed(&normalized) {
         return Ok(CodeOutcome::Refused);
     }
     let Some(r) = sqlx::query_as::<_, RawCodeRow>(
-        "SELECT id, email::text AS email, code_hash, created_at, expires_at, \
+        "SELECT id, email::text AS email, created_at, expires_at, \
                 redirect_after, invitation_id \
          FROM magic_link_tokens \
          WHERE nonce_hash = $1 AND used_at IS NULL AND superseded_at IS NULL \
@@ -315,15 +316,22 @@ pub async fn consume_code(pool: &PgPool, nonce: &str, code: &str) -> Result<Code
         return Ok(CodeOutcome::Refused);
     };
 
-    let Some(hash) = r.code_hash.as_deref() else {
+    // Claimed before it is checked, so parallel guesses against one row get one
+    // attempt between them rather than one each. Losing this race is the same
+    // refusal as guessing wrong, and costs no argon2.
+    let claimed: Option<(Option<String>,)> = sqlx::query_as(
+        "UPDATE magic_link_tokens SET code_spent_at = now() \
+         WHERE id = $1 AND code_spent_at IS NULL \
+         RETURNING code_hash",
+    )
+    .bind(r.id)
+    .fetch_optional(pool)
+    .await
+    .context("magic_link::consume_code: spend")?;
+    let Some((Some(hash),)) = claimed else {
         return Ok(CodeOutcome::Refused);
     };
-    if !token_hash::verify(&normalized, hash) {
-        sqlx::query("UPDATE magic_link_tokens SET code_spent_at = now() WHERE id = $1")
-            .bind(r.id)
-            .execute(pool)
-            .await
-            .context("magic_link::consume_code: spend")?;
+    if !token_hash::verify(&normalized, &hash) {
         return Ok(CodeOutcome::Refused);
     }
 
@@ -353,18 +361,26 @@ pub async fn consume_code(pool: &PgPool, nonce: &str, code: &str) -> Result<Code
 struct RawCodeRow {
     id: Uuid,
     email: String,
-    code_hash: Option<String>,
     created_at: DateTime<Utc>,
     expires_at: DateTime<Utc>,
     redirect_after: Option<String>,
     invitation_id: Option<Uuid>,
 }
-/// Every row expires within hours of being created, so `expires_at` alone
-/// already covers the used and superseded ones.
+/// A row outlives its own expiry by [`RETENTION_DAYS`]: `redeemed_via` and
+/// `superseded_at` answer "did anyone open this, and how" during a takeover
+/// review, and a token that expires in minutes would take the answer with it.
+/// Expiry alone decides redeemability; this only decides how long the record
+/// survives it.
+const RETENTION_DAYS: i32 = 7;
+
 pub async fn purge_old(pool: &PgPool) -> sqlx::Result<u64> {
-    let res = sqlx::query("DELETE FROM magic_link_tokens WHERE expires_at < now()")
-        .execute(pool)
-        .await?;
+    let res = sqlx::query(
+        "DELETE FROM magic_link_tokens \
+         WHERE expires_at < now() - make_interval(days => $1)",
+    )
+    .bind(RETENTION_DAYS)
+    .execute(pool)
+    .await?;
     Ok(res.rows_affected())
 }
 

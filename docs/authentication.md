@@ -464,10 +464,11 @@ with the same argon2id parameters as API tokens).
 - `invitations::purge_old` — daily cleanup of accepted/declined/expired
   rows older than a configurable window.
 - `magic_link_cleanup` — every 6 hours when `magic_link` is in
-  `auth.enabled_methods`. Drops expired rows and used rows older than 7
-  days (the forensic window for "was this token redeemed?"). When the
-  method is disabled the routes 404 and no rows are ever inserted, so
-  the ticker stays asleep.
+  `auth.enabled_methods`. Drops rows seven days after they expire, not
+  as they expire: until then `redeemed_via` and `superseded_at` still
+  answer "did anyone open this, and by which half of the mail?". When
+  the method is disabled the routes 404 and no rows are ever inserted,
+  so the ticker stays asleep.
 
 ## Sign-in audit
 

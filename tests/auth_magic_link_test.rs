@@ -217,7 +217,7 @@ async fn purge_old_collects_rows_once_they_expire() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    // Row 1: expired, unused.
+    // Row 1: expired past the retention window.
     let r1 = magic_link::create(
         &pool,
         magic_link::NewMagicLink {
@@ -229,7 +229,7 @@ async fn purge_old_collects_rows_once_they_expire() {
     .await
     .expect("create");
     sqlx::query(
-        "UPDATE magic_link_tokens SET expires_at = now() - INTERVAL '1 minute' WHERE id = $1",
+        "UPDATE magic_link_tokens SET expires_at = now() - INTERVAL '8 days' WHERE id = $1",
     )
     .bind(r1.row.id)
     .execute(&pool)
@@ -247,6 +247,15 @@ async fn purge_old_collects_rows_once_they_expire() {
     .await
     .expect("create");
     magic_link::consume(&pool, &r2.token).await.unwrap();
+    // Redeemed and expired, but inside the window: the trail of who opened it
+    // is what a takeover review reads.
+    sqlx::query(
+        "UPDATE magic_link_tokens SET expires_at = now() - INTERVAL '1 minute' WHERE id = $1",
+    )
+    .bind(r2.row.id)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // Row 3: fresh, unused — must survive.
     let r3 = magic_link::create(
@@ -1185,6 +1194,51 @@ async fn a_wrong_guess_spends_only_the_browser_that_made_it() {
             .unwrap(),
         magic_link::CodeOutcome::Ok(_)
     ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_attempt_is_claimed_before_the_guess_is_judged() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let sent = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "a@example.test",
+            expiry_minutes: 15,
+            nonce: Some("mine"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("create");
+    magic_link::mark_sent(&pool, sent.row.id)
+        .await
+        .expect("send");
+
+    assert!(matches!(
+        magic_link::consume_code(&pool, "mine", &sent.code)
+            .await
+            .unwrap(),
+        magic_link::CodeOutcome::Ok(_)
+    ));
+
+    // Even the guess that wins carries the mark, because it is stamped before
+    // anything knows it won. Without that, parallel guesses each get a try.
+    let spent: bool =
+        sqlx::query_scalar("SELECT code_spent_at IS NOT NULL FROM magic_link_tokens WHERE id = $1")
+            .bind(sent.row.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(spent);
 
     pool.close().await;
     drop_pg(&name).await;
