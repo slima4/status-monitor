@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use crate::auth::token_hash::{self, slice_prefix};
 use crate::error::Result;
+use crate::storage::locks::{advisory_xact_lock, magic_link_send_lock_key};
 
 /// Which half of the mail signed the reader in. The two variants are the only
 /// values the `redeemed_via` check constraint admits.
@@ -214,33 +215,66 @@ pub async fn consume(pool: &PgPool, raw_token: &str) -> Result<Option<MagicLinkR
     Ok(Some(r.into_row()))
 }
 
-/// Runs inside `tokio::spawn`, so response timing never depends on rate-limit
-/// state. Counting inserted rows instead of delivered mail lets each resend
-/// suppress the next one. `window_seconds = 0` disables the throttle.
-pub async fn sent_within(pool: &PgPool, email: &str, window_seconds: u32) -> Result<bool> {
+/// Stamp `sent_at` on this row only if no mail for the address went out inside
+/// the window, and report whether it won. Serialised on the address, so
+/// parallel requests elect a single sender between them rather than each
+/// reading an empty window and all mailing. `window_seconds = 0` disables the
+/// throttle but still stamps: an unstamped row's code is unredeemable.
+///
+/// Claimed before the send, not after: the alternative leaves the whole SMTP
+/// round trip as a gap for the next request to walk through. A send that then
+/// fails hands the window back via [`release_send`].
+///
+/// Runs inside `tokio::spawn`, so response timing never depends on it.
+pub async fn claim_send(pool: &PgPool, id: Uuid, email: &str, window_seconds: u32) -> Result<bool> {
     if window_seconds == 0 {
-        return Ok(false);
+        sqlx::query("UPDATE magic_link_tokens SET sent_at = now() WHERE id = $1")
+            .bind(id)
+            .execute(pool)
+            .await
+            .context("magic_link::claim_send: stamp")?;
+        return Ok(true);
     }
-    let recent: Option<(Uuid,)> = sqlx::query_as(
-        "SELECT id FROM magic_link_tokens \
-         WHERE email = $1::citext \
-           AND sent_at > now() - make_interval(secs => $2) \
-         LIMIT 1",
+    let mut tx = pool
+        .begin()
+        .await
+        .context("magic_link::claim_send: begin")?;
+    // The read and the write must not straddle another claim's. Two UPDATEs on
+    // different rows take different row locks and never conflict, so the
+    // subquery alone would let every concurrent request read an empty window.
+    advisory_xact_lock(&mut *tx, &magic_link_send_lock_key(email))
+        .await
+        .context("magic_link::claim_send: lock")?;
+    let claimed: Option<(Uuid,)> = sqlx::query_as(
+        "UPDATE magic_link_tokens SET sent_at = now() \
+         WHERE id = $1 AND sent_at IS NULL \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM magic_link_tokens \
+             WHERE email = $2::citext \
+               AND sent_at > now() - make_interval(secs => $3) \
+           ) \
+         RETURNING id",
     )
+    .bind(id)
     .bind(email)
     .bind(i32::try_from(window_seconds).unwrap_or(i32::MAX))
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await
-    .context("magic_link::sent_within")?;
-    Ok(recent.is_some())
+    .context("magic_link::claim_send")?;
+    tx.commit()
+        .await
+        .context("magic_link::claim_send: commit")?;
+    Ok(claimed.is_some())
 }
 
-pub async fn mark_sent(pool: &PgPool, id: Uuid) -> Result<()> {
-    sqlx::query("UPDATE magic_link_tokens SET sent_at = now() WHERE id = $1")
+/// Hand the window back when the mail never left, so a transient SMTP failure
+/// does not suppress the reader's next attempt.
+pub async fn release_send(pool: &PgPool, id: Uuid) -> Result<()> {
+    sqlx::query("UPDATE magic_link_tokens SET sent_at = NULL WHERE id = $1")
         .bind(id)
         .execute(pool)
         .await
-        .context("magic_link::mark_sent")?;
+        .context("magic_link::release_send")?;
     Ok(())
 }
 #[derive(Debug, sqlx::FromRow)]
@@ -266,6 +300,11 @@ impl RawRow {
     }
 }
 
+/// Only rows strictly older than the keeper are retired, so two sends that
+/// raced cannot retire each other and leave the reader with nothing live.
+/// `created_at` is transaction-start time and ties are real, so `id` breaks
+/// them into a total order rather than letting both sides match.
+///
 /// `nonce_hash IS NULL` spares links minted outside the sign-in form: the
 /// first-run owner link is printed to the console once, and an anonymous
 /// request for that address must not be able to retire it.
@@ -274,7 +313,9 @@ pub async fn supersede_others(pool: &PgPool, email: &str, keep: Uuid) -> Result<
         "UPDATE magic_link_tokens SET superseded_at = now() \
          WHERE email = $1::citext AND id <> $2 \
            AND nonce_hash IS NOT NULL \
-           AND used_at IS NULL AND superseded_at IS NULL",
+           AND used_at IS NULL AND superseded_at IS NULL \
+           AND (created_at, id) \
+               < (SELECT created_at, id FROM magic_link_tokens WHERE id = $2)",
     )
     .bind(email)
     .bind(keep)
@@ -289,6 +330,10 @@ pub async fn supersede_others(pool: &PgPool, email: &str, keep: Uuid) -> Result<
 pub enum CodeOutcome {
     Ok(MagicLinkRow),
     Refused,
+    /// Not a code at all, so nothing was spent and the browser keeps its
+    /// binding. Distinct from [`CodeOutcome::Refused`] only to the caller;
+    /// the reader sees one answer either way.
+    Malformed,
 }
 
 /// One attempt: a well-formed miss retires the code and leaves the link in
@@ -297,7 +342,7 @@ pub enum CodeOutcome {
 pub async fn consume_code(pool: &PgPool, nonce: &str, code: &str) -> Result<CodeOutcome> {
     let normalized = normalize_code(code);
     if !code_is_well_formed(&normalized) {
-        return Ok(CodeOutcome::Refused);
+        return Ok(CodeOutcome::Malformed);
     }
     let Some(r) = sqlx::query_as::<_, RawCodeRow>(
         "SELECT id, email::text AS email, created_at, expires_at, \

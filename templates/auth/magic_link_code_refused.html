@@ -1,10 +1,11 @@
 {% extends "chromeless_base.html" %}
-{# One state for wrong, spent and wrong-browser alike. #}
-{% block title %}Code not accepted{% endblock %}
+{# One state for wrong, spent and wrong-browser alike; a shape refusal is its own. #}
+{% block title %}{% if spent %}Code not accepted{% else %}Not a code{% endif %}{% endblock %}
 {% block head_scripts %}{% include "auth/_analytics.html" %}{% endblock %}
 {% block main %}
     <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center"
-          data-auth-event="login-error" data-auth-event-reason="code-refused">
+          data-auth-event="login-error" data-auth-event-reason="{% if spent %}code-refused{% else %}code-malformed{% endif %}">
+        {% if spent %}
         <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>code not accepted</h1>
         <p class="text-sm text-muted">
             Codes get one attempt. The link in that same email still signs
@@ -13,6 +14,13 @@
         <p class="text-sm text-muted">
             Requesting a new email replaces the one you have, link included.
         </p>
+        {% else %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>that is not a code</h1>
+        <p class="text-sm text-muted">
+            A code is six characters, printed beside the link in the same
+            email. Nothing has been used up, and that link still signs you in.
+        </p>
+        {% endif %}
         <p>
             <a href="/login"
                class="sticker-btn inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium">

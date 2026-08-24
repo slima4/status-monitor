@@ -158,30 +158,37 @@ pub async fn request(
         tokio::spawn(async move {
             // Fail open on DB error: a transient hiccup must not swallow a
             // legitimate sign-in attempt.
-            match magic_link::sent_within(&throttle_pool, &throttle_email, rate_limit).await {
-                Ok(true) => {
+            match magic_link::claim_send(&throttle_pool, created_id, &throttle_email, rate_limit)
+                .await
+            {
+                Ok(false) => {
                     tracing::info!(
                         window_seconds = rate_limit,
                         "magic_link: rate-limited, suppressing email"
                     );
                     return;
                 }
-                Ok(false) => {}
+                Ok(true) => {}
                 Err(err) => {
                     tracing::warn!(
                         error = %err,
-                        "magic_link: throttle check failed; sending anyway"
+                        "magic_link: throttle claim failed; sending anyway"
                     );
+                    // Send unthrottled rather than swallow a legitimate attempt,
+                    // but stamp anyway: an unstamped row mails a code that
+                    // cannot be redeemed, and the refusal would blame the reader.
+                    if let Err(err) =
+                        magic_link::claim_send(&throttle_pool, created_id, &throttle_email, 0).await
+                    {
+                        tracing::warn!(error = %err, "magic_link: send stamp failed");
+                    }
                 }
             }
             if let Err(err) = sender.send(outgoing).await {
                 tracing::warn!(error = %err, "magic_link: email send failed (background)");
-                return;
-            }
-            // Stamp before superseding: a crash between the two must leave
-            // the older link standing.
-            if let Err(err) = magic_link::mark_sent(&throttle_pool, created_id).await {
-                tracing::warn!(error = %err, "magic_link: send stamp failed");
+                if let Err(err) = magic_link::release_send(&throttle_pool, created_id).await {
+                    tracing::warn!(error = %err, "magic_link: send release failed");
+                }
                 return;
             }
             match magic_link::supersede_others(&throttle_pool, &throttle_email, created_id).await {
@@ -223,6 +230,8 @@ struct MagicLinkInvalidPage {
 #[template(path = "auth/magic_link_code_refused.html")]
 struct MagicLinkCodeRefusedPage {
     analytics: Option<&'static str>,
+    /// False when the input was never a code, so the reader still holds theirs.
+    spent: bool,
 }
 
 /// The one-click confirmation served on GET so a mail link-scanner's prefetch
@@ -479,14 +488,21 @@ pub async fn submit_code(
                 CODE_NONCE_COOKIE,
                 CODE_COOKIE_PATH,
             );
-            let mut resp = MagicLinkCodeRefusedPage {
-                analytics: crate::analytics::website_id(&state.cfg.auth.public_base_url),
-            }
-            .into_response();
-            *resp.status_mut() = StatusCode::GONE;
-            Ok(resp)
+            Ok(code_refused_page(&state, true))
         }
+        // The binding survives, because the attempt behind it does.
+        magic_link::CodeOutcome::Malformed => Ok(code_refused_page(&state, false)),
     }
+}
+
+fn code_refused_page(state: &AppState, spent: bool) -> Response {
+    let mut resp = MagicLinkCodeRefusedPage {
+        analytics: crate::analytics::website_id(&state.cfg.auth.public_base_url),
+        spent,
+    }
+    .into_response();
+    *resp.status_mut() = StatusCode::GONE;
+    resp
 }
 
 /// Everything the redemption learns from the request itself.
@@ -820,6 +836,7 @@ mod tests {
     fn a_refused_code_does_not_read_as_a_dead_link() {
         let html = MagicLinkCodeRefusedPage {
             analytics: Some("website-id"),
+            spent: true,
         }
         .render()
         .expect("renders");
@@ -828,6 +845,19 @@ mod tests {
         assert!(html.contains(r#"data-auth-event-reason="code-refused""#));
         // One reason for wrong, spent and wrong-browser alike.
         assert_eq!(html.matches("data-auth-event-reason").count(), 1);
+    }
+
+    #[test]
+    fn a_shape_refusal_does_not_claim_the_attempt_is_gone() {
+        let html = MagicLinkCodeRefusedPage {
+            analytics: None,
+            spent: false,
+        }
+        .render()
+        .expect("renders");
+        assert!(html.contains("Nothing has been used up"));
+        assert!(!html.contains("one attempt"));
+        assert!(html.contains(r#"data-auth-event-reason="code-malformed""#));
     }
 
     #[test]

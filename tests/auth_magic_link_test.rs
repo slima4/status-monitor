@@ -25,6 +25,15 @@ async fn open_pool(db_url: &str) -> sqlx::PgPool {
     common::open_test_pool(db_url).await
 }
 
+/// Setup shorthand: put a row in the state a delivered mail leaves behind.
+async fn mark_sent(pool: &sqlx::PgPool, id: Uuid) {
+    sqlx::query("UPDATE magic_link_tokens SET sent_at = now() WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .expect("mark sent");
+}
+
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
 async fn create_then_consume_roundtrip() {
@@ -302,7 +311,7 @@ async fn the_throttle_counts_what_was_delivered_not_what_was_inserted() {
     )
     .await
     .expect("first create");
-    magic_link::create(
+    let second = magic_link::create(
         &pool,
         magic_link::NewMagicLink {
             email: "throttle@example.test",
@@ -313,29 +322,33 @@ async fn the_throttle_counts_what_was_delivered_not_what_was_inserted() {
     .await
     .expect("second create");
     assert!(
-        !magic_link::sent_within(&pool, "throttle@example.test", 60)
+        magic_link::claim_send(&pool, first.row.id, "throttle@example.test", 60)
             .await
-            .expect("sent_within")
+            .expect("first claim"),
+        "an empty window is the first sender's to take"
+    );
+    assert!(
+        !magic_link::claim_send(&pool, second.row.id, "throttle@example.test", 60)
+            .await
+            .expect("second claim"),
+        "and the one behind it finds the window held"
     );
 
-    magic_link::mark_sent(&pool, first.row.id)
-        .await
-        .expect("send");
+    let other = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "other@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("other create");
     assert!(
-        magic_link::sent_within(&pool, "throttle@example.test", 60)
+        magic_link::claim_send(&pool, other.row.id, "other@example.test", 60)
             .await
-            .expect("sent_within")
-    );
-
-    assert!(
-        !magic_link::sent_within(&pool, "other@example.test", 60)
-            .await
-            .expect("other")
-    );
-    assert!(
-        !magic_link::sent_within(&pool, "throttle@example.test", 0)
-            .await
-            .expect("disabled")
+            .expect("other"),
+        "the window is per address"
     );
 
     sqlx::query(
@@ -345,11 +358,37 @@ async fn the_throttle_counts_what_was_delivered_not_what_was_inserted() {
     .execute(&pool)
     .await
     .unwrap();
+    let third = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "throttle@example.test",
+            expiry_minutes: 15,
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("third create");
     assert!(
-        !magic_link::sent_within(&pool, "throttle@example.test", 60)
+        magic_link::claim_send(&pool, third.row.id, "throttle@example.test", 60)
             .await
-            .expect("past window")
+            .expect("past window"),
+        "once the window lapses the next request sends"
     );
+
+    // Throttle off still stamps, or the code in that mail is unredeemable.
+    assert!(
+        magic_link::claim_send(&pool, second.row.id, "throttle@example.test", 0)
+            .await
+            .expect("disabled"),
+        "a zero window suppresses nothing"
+    );
+    let stamped: bool =
+        sqlx::query_scalar("SELECT sent_at IS NOT NULL FROM magic_link_tokens WHERE id = $1")
+            .bind(second.row.id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(stamped);
 
     pool.close().await;
     drop_pg(&name).await;
@@ -375,7 +414,7 @@ async fn asking_again_does_not_starve_the_next_mail() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, sent.row.id)
+    magic_link::claim_send(&pool, sent.row.id, "again@example.test", 60)
         .await
         .expect("send");
     sqlx::query(
@@ -386,8 +425,9 @@ async fn asking_again_does_not_starve_the_next_mail() {
     .await
     .unwrap();
 
+    let mut latest = sent.row.id;
     for _ in 0..3 {
-        magic_link::create(
+        latest = magic_link::create(
             &pool,
             magic_link::NewMagicLink {
                 email: "again@example.test",
@@ -397,12 +437,14 @@ async fn asking_again_does_not_starve_the_next_mail() {
             },
         )
         .await
-        .expect("resend");
+        .expect("resend")
+        .row
+        .id;
     }
     assert!(
-        !magic_link::sent_within(&pool, "again@example.test", 60)
+        magic_link::claim_send(&pool, latest, "again@example.test", 60)
             .await
-            .expect("sent_within"),
+            .expect("claim"),
         "undelivered rows must never hold the window open"
     );
 
@@ -437,9 +479,7 @@ async fn a_code_nobody_was_sent_is_not_redeemable() {
         magic_link::CodeOutcome::Refused
     ));
 
-    magic_link::mark_sent(&pool, created.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, created.row.id).await;
     assert!(matches!(
         magic_link::consume_code(&pool, "n", &created.code)
             .await
@@ -481,9 +521,7 @@ async fn a_link_with_no_browser_behind_it_survives_a_stranger_asking() {
     )
     .await
     .expect("requested link");
-    magic_link::mark_sent(&pool, asked.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, asked.row.id).await;
     assert_eq!(
         magic_link::supersede_others(&pool, "owner@example.test", asked.row.id)
             .await
@@ -713,9 +751,7 @@ async fn a_wrong_code_burns_itself_and_spares_the_link() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, created.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, created.row.id).await;
 
     assert!(matches!(
         magic_link::consume_code(&pool, nonce, &wrong_code(&created.code))
@@ -763,16 +799,16 @@ async fn a_paste_accident_does_not_spend_the_attempt() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, created.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, created.row.id).await;
 
     for malformed in ["", "  ", "ABC", "4KP9RT77"] {
+        // Malformed, not Refused: the caller keeps the browser's binding on
+        // this one, which is the whole point of spending nothing.
         assert!(matches!(
             magic_link::consume_code(&pool, nonce, malformed)
                 .await
                 .unwrap(),
-            magic_link::CodeOutcome::Refused
+            magic_link::CodeOutcome::Malformed
         ));
     }
     let padded = format!("  {}  ", created.code);
@@ -807,9 +843,7 @@ async fn a_code_is_useless_in_another_browser() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, created.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, created.row.id).await;
     assert!(matches!(
         magic_link::consume_code(&pool, "somebody-elses", &created.code)
             .await
@@ -847,9 +881,7 @@ async fn only_the_newest_credential_is_live() {
     )
     .await
     .expect("first");
-    magic_link::mark_sent(&pool, first.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, first.row.id).await;
     let second = magic_link::create(
         &pool,
         magic_link::NewMagicLink {
@@ -861,9 +893,7 @@ async fn only_the_newest_credential_is_live() {
     )
     .await
     .expect("second");
-    magic_link::mark_sent(&pool, second.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, second.row.id).await;
     let retired = magic_link::supersede_others(&pool, "four@example.test", second.row.id)
         .await
         .expect("supersede");
@@ -913,9 +943,7 @@ async fn the_trail_says_which_credential_opened_the_session() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, by_link.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, by_link.row.id).await;
     magic_link::consume(&pool, &by_link.token).await.unwrap();
     let by_code = magic_link::create(
         &pool,
@@ -928,9 +956,7 @@ async fn the_trail_says_which_credential_opened_the_session() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, by_code.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, by_code.row.id).await;
     magic_link::consume_code(&pool, "b", &by_code.code)
         .await
         .unwrap();
@@ -972,9 +998,7 @@ async fn a_superseded_row_does_not_look_redeemed() {
     )
     .await
     .expect("first");
-    magic_link::mark_sent(&pool, first.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, first.row.id).await;
     let second = magic_link::create(
         &pool,
         magic_link::NewMagicLink {
@@ -986,9 +1010,7 @@ async fn a_superseded_row_does_not_look_redeemed() {
     )
     .await
     .expect("second");
-    magic_link::mark_sent(&pool, second.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, second.row.id).await;
     magic_link::supersede_others(&pool, "s@example.test", second.row.id)
         .await
         .expect("supersede");
@@ -1036,9 +1058,7 @@ async fn an_expired_code_is_refused() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, created.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, created.row.id).await;
     sqlx::query(
         "UPDATE magic_link_tokens SET expires_at = now() - INTERVAL '1 minute' WHERE id = $1",
     )
@@ -1078,9 +1098,7 @@ async fn a_code_opens_the_session_once() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, created.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, created.row.id).await;
     assert!(matches!(
         magic_link::consume_code(&pool, "n", &created.code)
             .await
@@ -1118,9 +1136,7 @@ async fn the_link_dies_with_the_code_that_beat_it() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, created.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, created.row.id).await;
     assert!(matches!(
         magic_link::consume_code(&pool, "n", &created.code)
             .await
@@ -1164,9 +1180,7 @@ async fn a_wrong_guess_spends_only_the_browser_that_made_it() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, mine.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, mine.row.id).await;
     let theirs = magic_link::create(
         &pool,
         magic_link::NewMagicLink {
@@ -1178,9 +1192,7 @@ async fn a_wrong_guess_spends_only_the_browser_that_made_it() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, theirs.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, theirs.row.id).await;
 
     assert!(matches!(
         magic_link::consume_code(&pool, "mine", &wrong_code(&mine.code))
@@ -1194,6 +1206,66 @@ async fn a_wrong_guess_spends_only_the_browser_that_made_it() {
             .unwrap(),
         magic_link::CodeOutcome::Ok(_)
     ));
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn two_sends_that_raced_do_not_retire_each_other() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let older = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "race@example.test",
+            expiry_minutes: 15,
+            nonce: Some("a"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("older");
+    let newer = magic_link::create(
+        &pool,
+        magic_link::NewMagicLink {
+            email: "race@example.test",
+            expiry_minutes: 15,
+            nonce: Some("b"),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("newer");
+
+    // Same created_at is real: it is transaction-start time, not statement time.
+    sqlx::query(
+        "UPDATE magic_link_tokens SET created_at = now() WHERE email = 'race@example.test'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Both winners, each retiring what it found — the interleaving that used to
+    // leave the reader holding two dead links.
+    magic_link::supersede_others(&pool, "race@example.test", newer.row.id)
+        .await
+        .expect("newer sweeps");
+    magic_link::supersede_others(&pool, "race@example.test", older.row.id)
+        .await
+        .expect("older sweeps");
+
+    let live: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM magic_link_tokens WHERE superseded_at IS NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(live.len(), 1, "exactly one link must survive the tie");
 
     pool.close().await;
     drop_pg(&name).await;
@@ -1219,9 +1291,7 @@ async fn the_attempt_is_claimed_before_the_guess_is_judged() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, sent.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, sent.row.id).await;
 
     assert!(matches!(
         magic_link::consume_code(&pool, "mine", &sent.code)
@@ -1264,9 +1334,7 @@ async fn supersede_others_spares_other_addresses_and_spent_rows() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, elsewhere.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, elsewhere.row.id).await;
     let spent = magic_link::create(
         &pool,
         magic_link::NewMagicLink {
@@ -1278,9 +1346,7 @@ async fn supersede_others_spares_other_addresses_and_spent_rows() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, spent.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, spent.row.id).await;
     magic_link::consume(&pool, &spent.token).await.unwrap();
     let earlier = magic_link::create(
         &pool,
@@ -1293,9 +1359,7 @@ async fn supersede_others_spares_other_addresses_and_spent_rows() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, earlier.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, earlier.row.id).await;
     let newest = magic_link::create(
         &pool,
         magic_link::NewMagicLink {
@@ -1307,9 +1371,7 @@ async fn supersede_others_spares_other_addresses_and_spent_rows() {
     )
     .await
     .expect("create");
-    magic_link::mark_sent(&pool, newest.row.id)
-        .await
-        .expect("send");
+    mark_sent(&pool, newest.row.id).await;
 
     let retired = magic_link::supersede_others(&pool, "same@example.test", newest.row.id)
         .await
