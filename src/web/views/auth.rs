@@ -1339,6 +1339,17 @@ mod tests {
     }
 
     #[test]
+    fn the_signup_page_shows_what_signup_records() {
+        // create_signup_user stamps terms_version and privacy_version; a record
+        // of consent needs the documents on the page that produced it.
+        let html = login_page(true, false, false, false, false, true)
+            .render()
+            .unwrap();
+        assert!(html.contains(r#"href="/terms""#));
+        assert!(html.contains(r#"href="/privacy""#));
+    }
+
+    #[test]
     fn login_page_omits_the_passkey_button_where_it_is_off() {
         let html = login_page(true, false, false, false, false, false)
             .render()

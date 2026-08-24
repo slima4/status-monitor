@@ -170,6 +170,15 @@
     </p>
     {% endif %}
 
+    {# Signup records terms_version and privacy_version, so the documents have
+       to be on the page that creates the account. #}
+    <p class="text-center text-xs text-muted">
+        By continuing you agree to our
+        <a href="/terms" class="underline decoration-dotted underline-offset-2">Terms</a>
+        and
+        <a href="/privacy" class="underline decoration-dotted underline-offset-2">Privacy Policy</a>.
+    </p>
+
     {% if let Some(inv) = invitation_hint %}
     <p class="alert-card alert-card--muted text-xs">
       After signing in we&rsquo;ll bring you back to your invitation ({{ inv }}).
