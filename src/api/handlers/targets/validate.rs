@@ -331,8 +331,8 @@ pub(crate) fn validate_group_name(group: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// The DB FK only proves the user exists, not that they're in this org —
-/// without this check a target can be stamped with a cross-tenant user-id.
+/// `targets_owner_is_member_fk` refuses a non-member owner too; this turns that
+/// into a 400 naming the field instead of a constraint violation.
 pub(crate) async fn validate_owner_is_member(
     state: &AppState,
     org: OrgId,

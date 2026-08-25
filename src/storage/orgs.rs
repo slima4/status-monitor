@@ -765,6 +765,18 @@ pub async fn remove_member(
             return Ok(RemoveOutcome::LastOwner);
         }
     }
+    // The FK clears these anyway; doing it here moves updated_at with them and
+    // lets the audit row say how many monitors lost their owner.
+    let disowned = sqlx::query(
+        r#"UPDATE targets SET owner_user_id = NULL, updated_at = now()
+            WHERE org_id = $1 AND owner_user_id = $2"#,
+    )
+    .bind(org.0)
+    .bind(user.0)
+    .execute(&mut *tx)
+    .await
+    .context("remove_member: disown targets")?
+    .rows_affected();
     sqlx::query(r#"DELETE FROM memberships WHERE org_id = $1 AND user_id = $2"#)
         .bind(org.0)
         .bind(user.0)
@@ -776,7 +788,7 @@ pub async fn remove_member(
         org,
         Some(actor),
         "member.removed",
-        serde_json::json!({ "user_id": user.0 }),
+        serde_json::json!({ "user_id": user.0, "monitors_disowned": disowned }),
     )
     .await
     .context("remove_member: audit")?;

@@ -1041,11 +1041,11 @@ async fn the_wiring_ping_starts_the_schedule_live_pg() {
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
 
-/// Removing a membership leaves `targets.owner_user_id` pointing at the person
-/// who left.
+/// Removing a membership clears the monitor's owner with it, so the reminder
+/// reaches the org rather than the person who left.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
-async fn the_nudge_skips_an_owner_who_left_the_org_live_pg() {
+async fn the_nudge_reaches_the_org_after_the_owner_leaves_live_pg() {
     let Some((pool, db)) = isolated_pool("hb_nudge_left").await else {
         return;
     };
@@ -1069,11 +1069,10 @@ async fn the_nudge_skips_an_owner_who_left_the_org_live_pg() {
         .await
         .unwrap();
 
-    // Removal is the production path, and it leaves owner_user_id set.
     let outcome = uptimepage::storage::orgs::remove_member(&pool, org_a, user_a, leaver)
         .await
         .unwrap();
-    let owner_still_set: (Option<Uuid>,) =
+    let owner_after: (Option<Uuid>,) =
         sqlx::query_as("SELECT owner_user_id FROM targets WHERE id = $1")
             .bind(target)
             .fetch_one(&pool)
@@ -1085,7 +1084,7 @@ async fn the_nudge_skips_an_owner_who_left_the_org_live_pg() {
     common::drop_test_db(&db).await;
 
     assert_eq!(outcome, uptimepage::storage::orgs::RemoveOutcome::Removed);
-    assert_eq!(owner_still_set.0, Some(leaver.0));
+    assert_eq!(owner_after.0, None, "the owner left with the membership");
     assert_eq!(sent, 1);
     assert_ne!(to, leaver_email, "they left this org");
     assert_eq!(to, org_owner_email, "the org's owner instead");
@@ -1161,8 +1160,7 @@ async fn nudged_at(pool: &sqlx::PgPool, target: Uuid) -> Option<chrono::DateTime
     row.0
 }
 
-/// A store that reads but refuses writes would otherwise re-send the whole
-/// batch every tick, since nothing is ever marked as reminded.
+/// A store that reads but refuses writes would re-send the whole batch forever.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
 async fn a_store_that_refuses_every_stamp_stops_the_sweep_live_pg() {

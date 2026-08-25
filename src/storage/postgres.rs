@@ -36,6 +36,23 @@ pub struct PostgresTargetStore {
     default_region: Arc<str>,
 }
 
+/// The owner check runs on its own connection, so a membership removed between
+/// it and the write lands here as a constraint violation. Same answer either
+/// way rather than a 500.
+fn owner_left_the_org(e: &sqlx::Error) -> bool {
+    e.as_database_error().is_some_and(|d| {
+        d.code().as_deref() == Some("23503") && d.constraint() == Some("targets_owner_is_member_fk")
+    })
+}
+
+fn owner_not_member() -> AppError {
+    AppError::bad_request_field(
+        crate::api::error::codes::OWNER_NOT_MEMBER,
+        "owner_user_id is not a member of this org",
+        "owner_user_id",
+    )
+}
+
 impl PostgresTargetStore {
     /// Open the pool and run Postgres migrations. Returns just the pool so
     /// startup can provision the default org before constructing the store.
@@ -508,7 +525,10 @@ impl TargetStore for PostgresTargetStore {
         .bind(new.renotify_interval_secs as i32)
         .fetch_one(&mut *tx)
         .await
-        .context("insert target")?;
+        .map_err(|e| match owner_left_the_org(&e) {
+            true => owner_not_member(),
+            false => anyhow::Error::new(e).context("insert target").into(),
+        })?;
         self.assign_default_region(&mut tx, &[row.id]).await?;
         tx.commit().await.context("create target: commit")?;
         self.decode_row(row)
@@ -621,7 +641,10 @@ impl TargetStore for PostgresTargetStore {
             Some(tx) => query.fetch_optional(&mut **tx).await,
             None => query.fetch_optional(&self.pool).await,
         }
-        .context("update target")?;
+        .map_err(|e| match owner_left_the_org(&e) {
+            true => owner_not_member(),
+            false => anyhow::Error::new(e).context("update target").into(),
+        })?;
         if let Some(mut tx) = tx {
             // Only the enabled flip is audited here. The rest of an edit is
             // recoverable from the row itself; a paused monitor stops answering,

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use common::{default_http_check, make_user, unique_slug};
 use uptimepage::domain::{
-    CheckSpec, ExpectedStatus, NewStatusPage, NewTarget, OrgId, Role, WriteSource,
+    CheckSpec, ExpectedStatus, NewStatusPage, NewTarget, OrgId, Role, UserId, WriteSource,
 };
 use uptimepage::storage::orgs as orgs_store;
 use uptimepage::storage::{
@@ -247,6 +247,144 @@ async fn remove_member_succeeds_when_other_owners_exist() {
 
     sqlx::query("DELETE FROM users WHERE id = ANY($1)")
         .bind(&[a.0, b.0][..])
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+fn http_target(name: &str, owner: Option<UserId>) -> NewTarget {
+    NewTarget {
+        name: name.into(),
+        check: CheckSpec::Http(default_http_check(
+            Url::parse("https://example.com/").unwrap(),
+            ExpectedStatus::Exact(200),
+        )),
+        interval: Duration::from_secs(60),
+        enabled: true,
+        tags: vec![],
+        alerts: Default::default(),
+        region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
+        renotify_interval_secs: 3600,
+        group_name: None,
+        owner_user_id: owner.map(|u| u.0),
+    }
+}
+
+/// A monitor's owner is a member by definition, so the two leave together.
+#[tokio::test]
+#[ignore]
+async fn removing_a_member_clears_the_monitors_they_owned() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let owner = make_user(&pool, "orgs-own").await;
+    let member = make_user(&pool, "orgs-own").await;
+    let org = create_org_with_owner(&pool, owner, &unique_slug("own"), "Own", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'member')")
+        .bind(member.0)
+        .bind(org.id.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let theirs = store
+        .create(
+            org.id,
+            http_target("theirs", Some(member)),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .unwrap()
+        .id;
+    let untouched = store
+        .create(
+            org.id,
+            http_target("the owner's", Some(owner)),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .unwrap()
+        .id;
+
+    assert_eq!(
+        remove_member(&pool, org.id, owner, member).await.unwrap(),
+        RemoveOutcome::Removed
+    );
+
+    let owners: std::collections::HashMap<Uuid, Option<Uuid>> =
+        sqlx::query_as("SELECT id, owner_user_id FROM targets WHERE id = ANY($1)")
+            .bind(&[theirs, untouched][..])
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
+    assert_eq!(
+        owners.len(),
+        2,
+        "removal disowns a monitor, never deletes it"
+    );
+    assert_eq!(owners[&theirs], None, "the owner left the org");
+    assert_eq!(owners[&untouched], Some(owner.0), "somebody else's monitor");
+
+    sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+        .bind(&[owner.0, member.0][..])
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// The write-time check runs on another connection, so the constraint is what
+/// stops a monitor being stamped with somebody from another tenant.
+#[tokio::test]
+#[ignore]
+async fn a_monitor_cannot_name_an_owner_from_outside_the_org() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let owner = make_user(&pool, "orgs-out").await;
+    let outsider = make_user(&pool, "orgs-out").await;
+    let org = create_org_with_owner(&pool, owner, &unique_slug("out"), "Out", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let store = PostgresTargetStore::from_pool(pool.clone(), None);
+    let mine = store
+        .create(
+            org.id,
+            http_target("mine", Some(owner)),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .unwrap()
+        .id;
+
+    let rejected = sqlx::query("UPDATE targets SET owner_user_id = $2 WHERE id = $1")
+        .bind(mine)
+        .bind(outsider.0)
+        .execute(&pool)
+        .await
+        .expect_err("a non-member cannot own this monitor");
+    let db = rejected
+        .as_database_error()
+        .expect("a constraint refused it");
+    assert_eq!(db.code().as_deref(), Some("23503"));
+    assert_eq!(db.constraint(), Some("targets_owner_is_member_fk"));
+
+    sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+        .bind(&[owner.0, outsider.0][..])
         .execute(&pool)
         .await
         .unwrap();
