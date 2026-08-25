@@ -20,6 +20,11 @@ const NUDGE_AFTER_DAYS: i32 = 3;
 /// anything over the cap is picked up next tick.
 const BATCH: i64 = 200;
 
+/// Consecutive stamp failures that end the sweep. A store that refuses writes
+/// while accepting reads would otherwise re-send the whole batch every tick,
+/// forever, since nothing gets marked as reminded.
+pub const STAMP_FAILURE_LIMIT: u32 = 3;
+
 /// Everything one reminder needs, resolved in a single statement so the sweep
 /// does not fan out a query per monitor.
 #[derive(sqlx::FromRow)]
@@ -40,10 +45,11 @@ pub struct NudgeConfig {
     pub docs_url: Option<String>,
 }
 
-/// Sends at most one reminder per unwired heartbeat and returns how many went
-/// out. Idempotent: `nudged_at` is stamped only after the provider accepts the
-/// mail, so a transport outage retries on the next tick instead of losing the
-/// only reminder a monitor ever gets.
+/// Sends one reminder per unwired heartbeat and returns how many went out.
+/// `nudged_at` is stamped only after the provider accepts the mail, so a
+/// transport outage retries on the next tick instead of losing the only
+/// reminder a monitor ever gets. A stamp that fails buys a duplicate on the
+/// next tick; [`STAMP_FAILURE_LIMIT`] is what bounds how many.
 pub async fn nudge_unwired_heartbeats(
     pool: &PgPool,
     cfg: &NudgeConfig,
@@ -52,6 +58,7 @@ pub async fn nudge_unwired_heartbeats(
         // The monitor's own owner first; the org's owner only when the monitor
         // names nobody, so exactly one person is told either way. A monitor
         // whose org has no reachable owner is skipped rather than broadcast.
+        // owner_user_id is not cleared when a membership is removed.
         "SELECT hm.org_id, hm.target_id, t.name AS monitor_name, o.name AS org_name, hm.created_at, \
                 COALESCE(mon_owner.email, org_owner.email) AS recipient \
            FROM heartbeat_monitors hm \
@@ -59,6 +66,8 @@ pub async fn nudge_unwired_heartbeats(
            JOIN organizations o ON o.id = hm.org_id AND o.deleted_at IS NULL \
            LEFT JOIN users mon_owner \
                   ON mon_owner.id = t.owner_user_id AND mon_owner.deleted_at IS NULL \
+                 AND EXISTS (SELECT 1 FROM memberships m \
+                              WHERE m.org_id = hm.org_id AND m.user_id = mon_owner.id) \
            LEFT JOIN LATERAL ( \
                 SELECT u.email FROM memberships m \
                   JOIN users u ON u.id = m.user_id \
@@ -79,17 +88,37 @@ pub async fn nudge_unwired_heartbeats(
     .await?;
 
     let mut sent = 0;
+    let mut unstamped = 0;
     for c in candidates {
-        if send_one(&c, cfg).await {
-            sqlx::query(
-                "UPDATE heartbeat_monitors SET nudged_at = now() \
-                 WHERE org_id = $1 AND target_id = $2",
-            )
-            .bind(c.org_id)
-            .bind(c.target_id)
-            .execute(pool)
-            .await?;
-            sent += 1;
+        if !send_one(&c, cfg).await {
+            continue;
+        }
+        sent += 1;
+        // Mail already sent; a failed stamp costs a duplicate next tick.
+        if let Err(err) = sqlx::query(
+            "UPDATE heartbeat_monitors SET nudged_at = now() \
+             WHERE org_id = $1 AND target_id = $2",
+        )
+        .bind(c.org_id)
+        .bind(c.target_id)
+        .execute(pool)
+        .await
+        {
+            unstamped += 1;
+            tracing::warn!(
+                target_id = %c.target_id,
+                error = %err,
+                "heartbeat nudge sent but not stamped"
+            );
+            if unstamped >= STAMP_FAILURE_LIMIT {
+                tracing::error!(
+                    sent,
+                    "heartbeat nudge sweep stopped: stamps are failing, every send repeats next tick"
+                );
+                break;
+            }
+        } else {
+            unstamped = 0;
         }
     }
     Ok(sent)

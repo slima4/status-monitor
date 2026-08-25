@@ -76,6 +76,24 @@ async fn make_heartbeat_target(pool: &sqlx::PgPool, org: OrgId, name: &str, enab
         .id
 }
 
+async fn join_org(pool: &sqlx::PgPool, org: OrgId, user: UserId) {
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'member')")
+        .bind(user.0)
+        .bind(org.0)
+        .execute(pool)
+        .await
+        .expect("join org");
+}
+
+async fn email_of(pool: &sqlx::PgPool, user: UserId) -> String {
+    let row: (String,) = sqlx::query_as("SELECT email FROM users WHERE id = $1")
+        .bind(user.0)
+        .fetch_one(pool)
+        .await
+        .expect("user email");
+    row.0
+}
+
 /// Ids the scheduler would actually evaluate this tick.
 async fn dispatched_heartbeats(repo: &AdminRepo) -> Vec<Uuid> {
     repo.list_enabled_heartbeat_targets()
@@ -548,11 +566,8 @@ async fn the_nudge_tells_the_owner_once_about_an_unwired_heartbeat_live_pg() {
 
     // The monitor names an owner of its own; the org owner must not be used.
     let monitor_owner = make_user(&pool, "hb-nudge-owner").await;
-    let owner_email: (String,) = sqlx::query_as("SELECT email FROM users WHERE id = $1")
-        .bind(monitor_owner.0)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    join_org(&pool, org_a, monitor_owner).await;
+    let owner_email = email_of(&pool, monitor_owner).await;
 
     let stale = make_heartbeat_target(&pool, org_a, "stale", true).await;
     let fresh = make_heartbeat_target(&pool, org_a, "fresh", true).await;
@@ -607,7 +622,7 @@ async fn the_nudge_tells_the_owner_once_about_an_unwired_heartbeat_live_pg() {
     assert_eq!(nudge_unwired_heartbeats(&pool, &cfg).await.unwrap(), 1);
     let sent = sender.sent();
     assert_eq!(sent.len(), 1, "one monitor qualified, so one mail");
-    assert_eq!(sent[0].to.address, owner_email.0, "the monitor's own owner");
+    assert_eq!(sent[0].to.address, owner_email, "the monitor's own owner");
     let EmailTemplate::HeartbeatNeverPinged {
         monitor_name,
         monitor_url,
@@ -633,13 +648,7 @@ async fn the_nudge_tells_the_owner_once_about_an_unwired_heartbeat_live_pg() {
         (paused, "deliberately paused"),
         (wired, "has pinged"),
     ] {
-        let nudged: (Option<chrono::DateTime<chrono::Utc>>,) =
-            sqlx::query_as("SELECT nudged_at FROM heartbeat_monitors WHERE target_id = $1")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        assert!(nudged.0.is_none(), "{why}");
+        assert!(nudged_at(&pool, id).await.is_none(), "{why}");
     }
 
     common::drop_test_db(&db).await;
@@ -656,11 +665,7 @@ async fn the_nudge_falls_back_to_the_org_owner_and_skips_dead_orgs_live_pg() {
     };
     let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-nudge-fb").await;
     let store = PgHeartbeatStore::new(pool.clone(), None);
-    let org_owner_email: (String,) = sqlx::query_as("SELECT email FROM users WHERE id = $1")
-        .bind(user_a.0)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let org_owner_email = email_of(&pool, user_a).await;
 
     let ownerless = make_heartbeat_target(&pool, org_a, "ownerless", true).await;
     let doomed = make_heartbeat_target(&pool, org_b, "doomed", true).await;
@@ -676,15 +681,9 @@ async fn the_nudge_falls_back_to_the_org_owner_and_skips_dead_orgs_live_pg() {
     let (sent, sender) = run_nudge(&pool).await;
     assert_eq!(sent, 1, "the dead org's monitor is not anyone's problem");
     let sent = sender.sent();
-    assert_eq!(sent[0].to.address, org_owner_email.0);
+    assert_eq!(sent[0].to.address, org_owner_email);
 
-    let doomed_nudged: (Option<chrono::DateTime<chrono::Utc>>,) =
-        sqlx::query_as("SELECT nudged_at FROM heartbeat_monitors WHERE target_id = $1")
-            .bind(doomed)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-    assert!(doomed_nudged.0.is_none());
+    assert!(nudged_at(&pool, doomed).await.is_none());
 
     common::drop_test_db(&db).await;
 }
@@ -726,14 +725,8 @@ async fn a_failed_nudge_is_not_stamped_and_retries_live_pg() {
         docs_url: None,
     });
     assert_eq!(nudge_unwired_heartbeats(&pool, &dead).await.unwrap(), 0);
-    let nudged: (Option<chrono::DateTime<chrono::Utc>>,) =
-        sqlx::query_as("SELECT nudged_at FROM heartbeat_monitors WHERE target_id = $1")
-            .bind(target)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
     assert!(
-        nudged.0.is_none(),
+        nudged_at(&pool, target).await.is_none(),
         "an undelivered reminder is not delivered"
     );
 
@@ -1046,6 +1039,171 @@ async fn the_wiring_ping_starts_the_schedule_live_pg() {
     assert!(routine.state.failing().is_none(), "a success clears it");
 
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+/// Removing a membership leaves `targets.owner_user_id` pointing at the person
+/// who left.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn the_nudge_skips_an_owner_who_left_the_org_live_pg() {
+    let Some((pool, db)) = isolated_pool("hb_nudge_left").await else {
+        return;
+    };
+    let (org_a, _org_b, user_a, _user_b) = two_orgs(&pool, "hb-nudge-left").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let leaver = make_user(&pool, "hb-nudge-leaver").await;
+    join_org(&pool, org_a, leaver).await;
+    let leaver_email = email_of(&pool, leaver).await;
+    let org_owner_email = email_of(&pool, user_a).await;
+
+    let target = make_heartbeat_target(&pool, org_a, "left-behind", true).await;
+    store.ensure(org_a, target).await.unwrap();
+    sqlx::query("UPDATE targets SET owner_user_id = $2 WHERE id = $1")
+        .bind(target)
+        .bind(leaver.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE heartbeat_monitors SET created_at = now() - INTERVAL '5 days'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Removal is the production path, and it leaves owner_user_id set.
+    let outcome = uptimepage::storage::orgs::remove_member(&pool, org_a, user_a, leaver)
+        .await
+        .unwrap();
+    let owner_still_set: (Option<Uuid>,) =
+        sqlx::query_as("SELECT owner_user_id FROM targets WHERE id = $1")
+            .bind(target)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+
+    let (sent, sender) = run_nudge(&pool).await;
+    let to = sender.sent()[0].to.address.clone();
+    common::drop_test_db(&db).await;
+
+    assert_eq!(outcome, uptimepage::storage::orgs::RemoveOutcome::Removed);
+    assert_eq!(owner_still_set.0, Some(leaver.0));
+    assert_eq!(sent, 1);
+    assert_ne!(to, leaver_email, "they left this org");
+    assert_eq!(to, org_owner_email, "the org's owner instead");
+}
+
+/// A stamp that fails leaves the rest of the batch to be swept.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn a_lost_stamp_does_not_strand_the_rest_of_the_sweep_live_pg() {
+    let Some((pool, db)) = isolated_pool("hb_nudge_stamp").await else {
+        return;
+    };
+    let (org_a, _org_b, _user_a, _user_b) = two_orgs(&pool, "hb-nudge-stamp").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let first = make_heartbeat_target(&pool, org_a, "aaa-first", true).await;
+    let second = make_heartbeat_target(&pool, org_a, "bbb-second", true).await;
+    for id in [first, second] {
+        store.ensure(org_a, id).await.unwrap();
+    }
+    // Ordered by created_at, so `first` is swept first and is the one that fails.
+    sqlx::query(
+        "UPDATE heartbeat_monitors \
+            SET created_at = now() - CASE WHEN target_id = $1 \
+                                          THEN INTERVAL '6 days' ELSE INTERVAL '5 days' END",
+    )
+    .bind(first)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::raw_sql(&format!(
+        "CREATE FUNCTION refuse_stamp() RETURNS trigger AS $$ \
+         BEGIN RAISE EXCEPTION 'stamp refused'; END $$ LANGUAGE plpgsql; \
+         CREATE TRIGGER refuse_stamp BEFORE UPDATE OF nudged_at ON heartbeat_monitors \
+         FOR EACH ROW WHEN (NEW.target_id = '{first}') EXECUTE FUNCTION refuse_stamp();"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (sent, sender) = run_nudge(&pool).await;
+    let mailed = sender.sent().len();
+    let first_stamp = nudged_at(&pool, first).await;
+    let second_stamp = nudged_at(&pool, second).await;
+
+    // Stamp writable again: only the unstamped one is still eligible, and it
+    // gets the duplicate the lost stamp bought.
+    sqlx::raw_sql("DROP TRIGGER refuse_stamp ON heartbeat_monitors; DROP FUNCTION refuse_stamp();")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let (resent, _) = run_nudge(&pool).await;
+    let first_retry_stamp = nudged_at(&pool, first).await;
+    common::drop_test_db(&db).await;
+
+    assert_eq!(sent, 2, "both mails went out");
+    assert_eq!(mailed, 2);
+    assert!(first_stamp.is_none(), "the stamp is what failed");
+    assert!(
+        second_stamp.is_some(),
+        "the monitor behind it still got stamped"
+    );
+    assert_eq!(resent, 1);
+    assert!(first_retry_stamp.is_some());
+}
+
+async fn nudged_at(pool: &sqlx::PgPool, target: Uuid) -> Option<chrono::DateTime<chrono::Utc>> {
+    let row: (Option<chrono::DateTime<chrono::Utc>>,) =
+        sqlx::query_as("SELECT nudged_at FROM heartbeat_monitors WHERE target_id = $1")
+            .bind(target)
+            .fetch_one(pool)
+            .await
+            .unwrap();
+    row.0
+}
+
+/// A store that reads but refuses writes would otherwise re-send the whole
+/// batch every tick, since nothing is ever marked as reminded.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn a_store_that_refuses_every_stamp_stops_the_sweep_live_pg() {
+    use uptimepage::jobs::heartbeat_nudge::STAMP_FAILURE_LIMIT;
+
+    let Some((pool, db)) = isolated_pool("hb_nudge_wedge").await else {
+        return;
+    };
+    let (org_a, _org_b, _user_a, _user_b) = two_orgs(&pool, "hb-nudge-wedge").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    const POPULATION: usize = 5;
+    assert!(
+        (STAMP_FAILURE_LIMIT as usize) < POPULATION,
+        "the sweep must run out of patience before it runs out of monitors"
+    );
+    for n in 0..POPULATION {
+        let id = make_heartbeat_target(&pool, org_a, &format!("job-{n}"), true).await;
+        store.ensure(org_a, id).await.unwrap();
+    }
+    sqlx::query("UPDATE heartbeat_monitors SET created_at = now() - INTERVAL '5 days'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        "CREATE FUNCTION refuse_stamp() RETURNS trigger AS $$ \
+         BEGIN RAISE EXCEPTION 'stamp refused'; END $$ LANGUAGE plpgsql; \
+         CREATE TRIGGER refuse_stamp BEFORE UPDATE OF nudged_at ON heartbeat_monitors \
+         FOR EACH ROW EXECUTE FUNCTION refuse_stamp();",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let (sent, _) = run_nudge(&pool).await;
+    common::drop_test_db(&db).await;
+
+    assert_eq!(
+        sent, STAMP_FAILURE_LIMIT as u64,
+        "the sweep stops instead of mailing everyone again next tick"
+    );
+    assert!(sent < POPULATION as u64);
 }
 
 /// Wired long after somebody clicked save.
