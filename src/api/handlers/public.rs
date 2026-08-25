@@ -13,6 +13,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use badgelib::Style;
 use serde::Deserialize;
 use utoipa::IntoParams;
 use uuid::Uuid;
@@ -47,8 +48,7 @@ pub struct BadgeQuery {
     /// Optional public component id. When omitted, the badge reflects the
     /// overall page state.
     pub component: Option<Uuid>,
-    /// Reserved for future visual styles. Only `flat` is accepted in v1;
-    /// any other value returns 400.
+    /// Visual style: `flat` (default), `flat-square`, or `for-the-badge`.
     pub style: Option<String>,
 }
 
@@ -261,10 +261,11 @@ pub async fn public_maintenance(
     path = "/api/public/v1/badge.svg",
     tag = "public_status",
     summary = "Embeddable SVG status badge",
-    description = "Returns a shields.io-style flat SVG badge for the overall \
-                   page or a single public component. Reuses the cached page \
-                   payload, so the badge is consistent with the /status view \
-                   within the 10-second cache window. Returns 404 if the \
+    description = "Returns a shields.io-style SVG badge for the overall page \
+                   or a single public component. Supports `flat`, \
+                   `flat-square`, and `for-the-badge` styles. Reuses the cached \
+                   page payload, so the badge is consistent with the /status \
+                   view within the 10-second cache window. Returns 404 if the \
                    `component` id is unknown or its target is not public.",
     security(),
     params(BadgeQuery),
@@ -281,13 +282,13 @@ pub async fn public_badge(
     ResolvedStatusPage(page): ResolvedStatusPage,
     Query(q): Query<BadgeQuery>,
 ) -> Result<Response, PublicAppError> {
-    if let Some(style) = q.style.as_deref()
-        && style != "flat"
-    {
-        return Err(PublicAppError::BadRequest(
-            "Unsupported style. Only 'flat' is recognised.",
-        ));
-    }
+    let style = q
+        .style
+        .as_deref()
+        .map(Style::try_from)
+        .transpose()
+        .map_err(|_| PublicAppError::BadRequest("Unsupported badge style."))?
+        .unwrap_or_default();
 
     let page = state.public_source.page(page).await?;
     let page = &*page;
@@ -307,7 +308,7 @@ pub async fn public_badge(
             (page.site_name.as_str(), text, color)
         }
     };
-    let svg = render_badge(label, status_text, color);
+    let svg = render_badge(label, status_text, color, style);
 
     let mut resp = (StatusCode::OK, svg).into_response();
     resp.headers_mut()

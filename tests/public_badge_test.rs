@@ -5,7 +5,7 @@
 //!     overall page state in the badge text.
 //!   * `?component={id}` returns the per-component status; unknown id
 //!     returns 404 with the public error envelope (no internal detail).
-//!   * `?style=` other than `flat` returns 400.
+//!   * `?style=` accepts every documented badge style and rejects others.
 //!   * Service Unavailable propagates as 503 without leaking response shape.
 
 mod common;
@@ -160,16 +160,18 @@ async fn unknown_component_returns_404_public_envelope() {
 }
 
 #[tokio::test]
-async fn explicit_flat_style_is_accepted() {
+async fn supported_styles_are_accepted() {
     let app = build_test_app_with_public_source(|_| {}, Arc::new(BadgeSource));
-    let req = Request::builder()
-        .uri("/api/public/v1/badge.svg?style=flat")
-        .body(Body::empty())
-        .unwrap();
-    let resp = app.oneshot(req).await.unwrap();
-    let (status, ct, _) = read_body(resp).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(ct.starts_with("image/svg+xml"));
+    for style in ["flat", "flat-square", "for-the-badge"] {
+        let req = Request::builder()
+            .uri(format!("/api/public/v1/badge.svg?style={style}"))
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        let (status, ct, _) = read_body(resp).await;
+        assert_eq!(status, StatusCode::OK, "style {style}");
+        assert!(ct.starts_with("image/svg+xml"));
+    }
 }
 
 #[tokio::test]
