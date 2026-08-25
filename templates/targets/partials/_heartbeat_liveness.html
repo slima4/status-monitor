@@ -12,9 +12,11 @@
     <p># the schedule starts at the first ping, so there is no rush</p>
   </div>
   {% else if let Some(due) = lv.due_at %}
-  <div class="space-y-1 border-l-2 pl-3 font-mono text-xs text-quiet{% if lv.late %} border-[color:var(--theme-state-warn-line)]{% else %} border-[color:var(--theme-line)]{% endif %}">
+  {# The instants ride along so the clock can cross them between polls. #}
+  <div data-hb-due="{{ due|iso_ts }}"{% if let Some(down) = lv.down_at %} data-hb-down="{{ down|iso_ts }}"{% endif %}
+       class="space-y-1 border-l-2 pl-3 font-mono text-xs text-quiet{% if lv.late %} border-[color:var(--theme-state-warn-line)]{% else %} border-[color:var(--theme-line)]{% endif %}">
+    <p class="text-body"{% if !lv.late %} hidden{% endif %} data-hb-late-note><span class="hl">this ping is late</span></p>
     {% if lv.late %}
-    <p class="text-body"><span class="hl">this ping is late</span></p>
     <p># it was due <time datetime="{{ due|iso_ts }}" data-tz="exact">{{ due|human_ts }}</time></p>
     {% else if lv.overdue %}
     <p># nothing since this ping came due <time datetime="{{ due|iso_ts }}" data-tz="exact">{{ due|human_ts }}</time></p>

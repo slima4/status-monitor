@@ -65,6 +65,27 @@
         });
     }
 
+    // The badge is server-rendered on a 60s poll, but a heartbeat crosses its
+    // due time on its own schedule. Promote up→late from the clock; never the
+    // other way, so the server stays the only thing that can clear it.
+    function markLateWhenDue() {
+        const panel = document.querySelector("[data-hb-due]");
+        const badge = document.getElementById("detail-status-badge");
+        if (!panel || !badge || !badge.classList.contains("status-badge--up")) return;
+        const due = Date.parse(panel.dataset.hbDue);
+        const down = panel.dataset.hbDown ? Date.parse(panel.dataset.hbDown) : Infinity;
+        const now = Date.now();
+        if (!(now > due && now <= down)) return;
+        badge.classList.replace("status-badge--up", "status-badge--late");
+        badge.textContent = "late";
+        panel.classList.replace("border-[color:var(--theme-line)]", "border-[color:var(--theme-state-warn-line)]");
+        const note = panel.querySelector("[data-hb-late-note]");
+        if (note) note.hidden = false;
+    }
+    markLateWhenDue();
+    setInterval(markLateWhenDue, 5000);
+    document.body.addEventListener("htmx:afterSwap", markLateWhenDue);
+
     // Region filter: full-page nav (so the chart modules re-init) preserving
     // the current range. Empty value clears the filter back to all regions.
     const regionSel = document.querySelector("[data-region-filter]");

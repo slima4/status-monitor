@@ -338,8 +338,12 @@ fn a_heartbeat_on_time_still_shows_the_window_it_is_inside() {
     let html = p.render().unwrap();
     assert!(html.contains("next ping due"));
     assert!(html.contains("counts as down"));
-    assert!(!html.contains("this ping is late"));
     assert!(!html.contains("status-badge--late"));
+    // The clock crosses the due time between polls, so the note ships hidden
+    // beside the instants that decide when to reveal it.
+    assert!(html.contains("data-hb-due="));
+    assert!(html.contains("data-hb-down="));
+    assert!(html.contains(r#"hidden data-hb-late-note"#));
 }
 
 /// The override belongs to one kind. Every other monitor gets its stored
