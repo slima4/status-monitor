@@ -238,6 +238,19 @@ pub struct HeartbeatCheck {
     pub max_runtime: Option<Duration>,
 }
 
+impl HeartbeatCheck {
+    /// The evaluator's two instants for an anchor. Saturating, so a period
+    /// beyond chrono's range cannot wrap into the past.
+    pub fn window(
+        &self,
+        anchor: chrono::DateTime<chrono::Utc>,
+    ) -> (chrono::DateTime<chrono::Utc>, chrono::DateTime<chrono::Utc>) {
+        let span = |d: Duration| chrono::Duration::from_std(d).unwrap_or(chrono::Duration::MAX);
+        let due = anchor + span(self.period);
+        (due, due + span(self.grace))
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct TlsCertCheck {
     pub host: String,

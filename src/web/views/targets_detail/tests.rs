@@ -138,8 +138,8 @@ fn sample_page() -> DetailPage {
             },
         ]),
         ribbon_oob: false,
-        pending_ping: None,
-        pending_ping_oob: false,
+        liveness: None,
+        liveness_oob: false,
         flow_runs: Vec::new(),
         config_json: r#"{"type":"http"}"#.into(),
         range: "24h",
@@ -185,13 +185,19 @@ fn a_pending_heartbeat_card_explains_the_wait() {
         last_fail_at: None,
         last_exit_code: None,
         last_failure_output: None,
+        due_at: None,
+        down_at: None,
         declared_period_secs: 600,
         observed_period_secs: None,
         cadence_advice: None,
     });
-    p.pending_ping = Some(super::PendingPing {
+    p.liveness = Some(super::HeartbeatLiveness {
         pending: true,
         since: Some(chrono::Utc::now() - chrono::Duration::days(2)),
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
     });
     let html = p.render().unwrap();
     assert!(html.contains("waiting for first ping"));
@@ -204,12 +210,145 @@ fn a_pending_heartbeat_card_explains_the_wait() {
     hb.pending = false;
     hb.first_ping_at = Some(chrono::Utc::now());
     wired.heartbeat = Some(hb);
-    wired.pending_ping = Some(super::PendingPing {
+    wired.liveness = Some(super::HeartbeatLiveness {
         pending: false,
         since: None,
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
     });
     let html = wired.render().unwrap();
     assert!(!html.contains("waiting for first ping"));
+}
+
+fn heartbeat_info(pending: bool) -> crate::api::handlers::targets::HeartbeatInfo {
+    crate::api::handlers::targets::HeartbeatInfo {
+        ping_url: Some("https://app.example.com/ping/tok123".into()),
+        first_ping_at: (!pending).then(chrono::Utc::now),
+        pending,
+        created_at: Some(chrono::Utc::now() - chrono::Duration::days(2)),
+        last_ping_at: None,
+        last_start_at: None,
+        last_fail_at: None,
+        last_exit_code: None,
+        last_failure_output: None,
+        due_at: None,
+        down_at: None,
+        declared_period_secs: 600,
+        observed_period_secs: None,
+        cadence_advice: None,
+    }
+}
+
+/// The projection decides `due_at`/`down_at`; this is what the page makes of them.
+#[test]
+fn liveness_reads_the_window_the_projection_handed_it() {
+    let now = chrono::Utc::now();
+    let due = now - chrono::Duration::minutes(3);
+    let windowed = |due_at, down_at| crate::api::handlers::targets::HeartbeatInfo {
+        pending: false,
+        due_at,
+        down_at,
+        ..heartbeat_info(false)
+    };
+
+    let inside = super::HeartbeatLiveness::derive(
+        &windowed(Some(due), Some(now + chrono::Duration::minutes(7))),
+        now,
+        true,
+    );
+    assert!(inside.late && !inside.overdue);
+
+    let past = super::HeartbeatLiveness::derive(
+        &windowed(Some(due), Some(now - chrono::Duration::minutes(1))),
+        now,
+        true,
+    );
+    assert!(past.overdue && !past.late, "past the window is not late");
+
+    let early = super::HeartbeatLiveness::derive(
+        &windowed(
+            Some(now + chrono::Duration::minutes(2)),
+            Some(now + chrono::Duration::minutes(12)),
+        ),
+        now,
+        true,
+    );
+    assert!(!early.late && !early.overdue);
+
+    let no_grace = super::HeartbeatLiveness::derive(&windowed(Some(due), Some(due)), now, true);
+    assert_eq!(no_grace.down_at, None);
+    assert!(!no_grace.late, "there is no window to be inside");
+    assert!(no_grace.overdue);
+
+    // Pending, paused or failing: the projection withheld the window.
+    let silent = super::HeartbeatLiveness::derive(&windowed(None, None), now, true);
+    assert!(!silent.late && !silent.overdue);
+    assert!(!super::HeartbeatLiveness::derive(&heartbeat_info(true), now, false).pending);
+}
+
+/// Grace is the lateness that does not alert, so the evaluator keeps calling
+/// it up.
+#[test]
+fn a_heartbeat_inside_its_grace_reads_late_not_up() {
+    let now = chrono::Utc::now();
+    let late = super::HeartbeatLiveness {
+        pending: false,
+        since: None,
+        due_at: Some(now - chrono::Duration::minutes(3)),
+        down_at: Some(now + chrono::Duration::minutes(7)),
+        late: true,
+        overdue: false,
+    };
+    assert_eq!(super::badge_status("up", Some(&late)), "late");
+    assert_eq!(super::badge_status("", Some(&late)), "late");
+    // A monitor already failing has a real answer; late would soften it.
+    for worse in ["down", "error", "degraded"] {
+        assert_eq!(super::badge_status(worse, Some(&late)), worse);
+    }
+
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    p.last_status = "late";
+    p.heartbeat = Some(heartbeat_info(false));
+    p.liveness = Some(late);
+    let html = p.render().unwrap();
+    assert!(html.contains("status-badge--late"));
+    assert!(html.contains("this ping is late"));
+    assert!(html.contains("counts as down"));
+}
+
+/// On time, the same panel says when the next ping is due and when silence
+/// would become an incident: the grace window, stated rather than implied.
+#[test]
+fn a_heartbeat_on_time_still_shows_the_window_it_is_inside() {
+    let now = chrono::Utc::now();
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    p.heartbeat = Some(heartbeat_info(false));
+    p.liveness = Some(super::HeartbeatLiveness {
+        pending: false,
+        since: None,
+        due_at: Some(now + chrono::Duration::minutes(2)),
+        down_at: Some(now + chrono::Duration::minutes(12)),
+        late: false,
+        overdue: false,
+    });
+    let html = p.render().unwrap();
+    assert!(html.contains("next ping due"));
+    assert!(html.contains("counts as down"));
+    assert!(!html.contains("this ping is late"));
+    assert!(!html.contains("status-badge--late"));
+}
+
+/// The override belongs to one kind. Every other monitor gets its stored
+/// status back, which is what stops a heartbeat rule leaking across the eight.
+#[test]
+fn no_other_kind_can_be_told_it_is_late() {
+    for status in ["up", "down", "degraded", "error", ""] {
+        assert_eq!(super::badge_status(status, None), status);
+    }
 }
 
 /// The notice lives in the ping card, which the live poll does not own, so the
@@ -218,25 +357,33 @@ fn a_pending_heartbeat_card_explains_the_wait() {
 #[test]
 fn the_live_poll_clears_the_waiting_notice_out_of_band() {
     let mut live = sample_live();
-    live.pending_ping = Some(super::PendingPing {
+    live.liveness = Some(super::HeartbeatLiveness {
         pending: true,
         since: Some(chrono::Utc::now()),
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
     });
     let html = live.render().unwrap();
-    assert!(html.contains(r#"id="hb-pending" hx-swap-oob="true""#));
+    assert!(html.contains(r#"id="hb-liveness" hx-swap-oob="true""#));
     assert!(html.contains("waiting for first ping"));
 
-    live.pending_ping = Some(super::PendingPing {
+    live.liveness = Some(super::HeartbeatLiveness {
         pending: false,
         since: None,
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
     });
     let html = live.render().unwrap();
-    assert!(html.contains(r#"id="hb-pending" hx-swap-oob="true""#));
+    assert!(html.contains(r#"id="hb-liveness" hx-swap-oob="true""#));
     assert!(!html.contains("waiting for first ping"));
 
     // Nothing to clear on a probed monitor, so nothing is swapped at it.
-    live.pending_ping = None;
-    assert!(!live.render().unwrap().contains("hb-pending"));
+    live.liveness = None;
+    assert!(!live.render().unwrap().contains("hb-liveness"));
 }
 
 #[test]
@@ -253,6 +400,8 @@ fn heartbeat_detail_renders_ping_card_without_probe_surfaces() {
         last_fail_at: Some(chrono::Utc::now()),
         last_exit_code: Some(137),
         last_failure_output: Some("rsync: connection unexpectedly closed".into()),
+        due_at: None,
+        down_at: None,
         declared_period_secs: 600,
         observed_period_secs: Some(4980),
         cadence_advice: Some(crate::api::handlers::targets::CadenceAdviceView {
@@ -777,8 +926,8 @@ fn sample_live() -> DetailLive {
         selected_region: None,
         segments: Arc::from(Vec::<StatusSeg>::new()),
         ribbon_oob: true,
-        pending_ping: None,
-        pending_ping_oob: true,
+        liveness: None,
+        liveness_oob: true,
     }
 }
 
@@ -1387,13 +1536,21 @@ fn the_detail_banner_explains_a_held_alert() {
 /// the stored rows keep the target id, the ping state starts empty.
 #[test]
 fn a_pending_heartbeat_with_results_keeps_the_status_it_has() {
-    let wired = super::PendingPing {
+    let wired = super::HeartbeatLiveness {
         pending: false,
         since: None,
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
     };
-    let unwired = super::PendingPing {
+    let unwired = super::HeartbeatLiveness {
         pending: true,
         since: None,
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
     };
     assert_eq!(super::badge_status("up", Some(&unwired)), "up");
     assert_eq!(super::badge_status("down", Some(&unwired)), "down");
@@ -1413,9 +1570,13 @@ fn a_paused_heartbeat_does_not_claim_to_be_waiting() {
     p.kind = "HEARTBEAT";
     p.enabled = false;
     p.last_status = "";
-    p.pending_ping = Some(super::PendingPing {
+    p.liveness = Some(super::HeartbeatLiveness {
         pending: false,
         since: Some(chrono::Utc::now()),
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
     });
     let html = p.render().unwrap();
     assert!(!html.contains("waiting for first ping"));

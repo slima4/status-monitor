@@ -35,8 +35,8 @@ mod tests;
 pub use charts::StatusSeg;
 pub use load::{LiveData, UnconfirmedFailures};
 pub use rows::{
-    DetailCheckRows, DetailLive, FlowEvidenceView, FlowRunRow, FlowStepRow, IncidentRow, KpiTrend,
-    PendingPing, RegionBreakdownRow, ResultRow, UptimeStatsView,
+    DetailCheckRows, DetailLive, FlowEvidenceView, FlowRunRow, FlowStepRow, HeartbeatLiveness,
+    IncidentRow, KpiTrend, RegionBreakdownRow, ResultRow, UptimeStatsView,
 };
 
 pub(crate) use rows::WindowLabels;
@@ -170,9 +170,9 @@ pub struct DetailPage {
     /// Ping-URL card for heartbeat monitors; `None` for every other kind.
     /// Shares the API handler's projection so the two surfaces can't diverge.
     pub heartbeat: Option<crate::api::handlers::targets::HeartbeatInfo>,
-    pub pending_ping: Option<PendingPing>,
+    pub liveness: Option<HeartbeatLiveness>,
     /// The notice renders in place here, not as an OOB swap.
-    pub pending_ping_oob: bool,
+    pub liveness_oob: bool,
     /// Stored runs, newest first. Empty for every kind but flow, which is what
     /// keeps the panel and its query off the other seven.
     pub flow_runs: Vec<FlowRunRow>,
@@ -286,7 +286,14 @@ pub async fn index(
     };
     let heartbeat = match target.check.as_heartbeat() {
         Some(check) => Some(
-            crate::api::handlers::targets::heartbeat_info(&state, org, target.id, check).await?,
+            crate::api::handlers::targets::heartbeat_info(
+                &state,
+                org,
+                target.id,
+                check,
+                target.enabled,
+            )
+            .await?,
         ),
         None => None,
     };
@@ -319,11 +326,11 @@ pub async fn index(
         labeled_regions(&catalog, region_ids)
     };
 
-    let pending_ping = heartbeat.as_ref().map(|h| PendingPing {
-        pending: h.pending && target.enabled,
-        since: h.created_at,
-    });
-    let last_status = badge_status(live.last_status, pending_ping.as_ref());
+    // From the projection, so a ping landing mid-render cannot split the page.
+    let liveness = heartbeat
+        .as_ref()
+        .map(|h| HeartbeatLiveness::derive(h, Utc::now(), target.enabled));
+    let last_status = badge_status(live.last_status, liveness.as_ref());
 
     Ok(DetailPage {
         active_tab: "targets",
@@ -360,8 +367,8 @@ pub async fn index(
         regions,
         selected_region,
         region_breakdown,
-        pending_ping,
-        pending_ping_oob: false,
+        liveness,
+        liveness_oob: false,
         heartbeat,
         flow_runs,
     })
@@ -510,8 +517,8 @@ pub async fn live_partial(
     )
     .await?;
 
-    let pending_ping = read_pending_ping(&state, org, &target).await;
-    let last_status = badge_status(live.last_status, pending_ping.as_ref());
+    let liveness = read_liveness(&state, org, &target).await;
+    let last_status = badge_status(live.last_status, liveness.as_ref());
 
     let page = DetailLive {
         id: target.id.to_string(),
@@ -525,8 +532,8 @@ pub async fn live_partial(
         selected_region,
         segments: Arc::clone(&live.segments),
         ribbon_oob: true,
-        pending_ping,
-        pending_ping_oob: true,
+        liveness,
+        liveness_oob: true,
     };
     let rendered = page
         .render()
@@ -623,7 +630,7 @@ pub async fn incidents(
     let reaches_nobody = alerts_nobody(&state, org, &target).await;
     let last_status = badge_status(
         data.last_status,
-        read_pending_ping(&state, org, &target).await.as_ref(),
+        read_liveness(&state, org, &target).await.as_ref(),
     );
 
     Ok(IncidentsPage {
@@ -661,31 +668,47 @@ pub async fn incidents(
 /// "checking…" an empty status renders for probed monitors.
 const WAITING_FOR_PING: &str = "waiting";
 
-/// `None` for every kind but heartbeat, and on a read error: both leave the
-/// badge and the notice exactly as an ordinary monitor renders them.
-async fn read_pending_ping(
+/// The evaluator calls this up, correctly. The page derives it rather than
+/// storing a status the alerting path would then see.
+const LATE_FOR_PING: &str = "late";
+
+/// The incidents tab has no ping card, so it reads the row itself. `None` for
+/// every other kind, and on a read error.
+async fn read_liveness(
     state: &AppState,
     org: crate::domain::OrgId,
     target: &crate::domain::Target,
-) -> Option<PendingPing> {
-    target.check.as_heartbeat()?;
-    match state.heartbeat_store.get(org, target.id).await {
-        // Paused: the wait is not what is stopping this monitor, and the
-        // notice would promise a schedule that cannot start.
-        Ok(hb) => Some(PendingPing {
-            pending: target.enabled && hb.as_ref().is_none_or(HeartbeatMonitor::is_pending),
-            since: hb.map(|h| h.created_at),
-        }),
+) -> Option<HeartbeatLiveness> {
+    let check = target.check.as_heartbeat()?;
+    let hb = match state.heartbeat_store.get(org, target.id).await {
+        Ok(hb) => hb,
         Err(err) => {
-            tracing::warn!(error = %err, "heartbeat pending state unavailable");
-            None
+            tracing::warn!(error = %err, "heartbeat state unavailable");
+            return None;
         }
-    }
+    };
+    let now = Utc::now();
+    let window = hb
+        .as_ref()
+        .filter(|h| target.enabled && !h.is_pending() && h.ping_state().failing().is_none())
+        .map(|h| check.window(h.ping_state().success_at));
+    Some(HeartbeatLiveness {
+        pending: target.enabled && hb.as_ref().is_none_or(HeartbeatMonitor::is_pending),
+        since: hb.map(|h| h.created_at),
+        due_at: window.map(|(due, _)| due),
+        down_at: window
+            .map(|(_, down)| down)
+            .filter(|d| window.is_some_and(|(due, _)| *d != due)),
+        late: window.is_some_and(|(due, down)| now > due && now <= down),
+        overdue: window.is_some_and(|(_, down)| now > down),
+    })
 }
 
-fn badge_status(last_status: &'static str, pending: Option<&PendingPing>) -> &'static str {
-    match pending {
-        Some(p) if p.pending && last_status.is_empty() => WAITING_FOR_PING,
+/// Every other kind gets its stored status back untouched.
+fn badge_status(last_status: &'static str, hb: Option<&HeartbeatLiveness>) -> &'static str {
+    match hb {
+        Some(h) if h.pending && last_status.is_empty() => WAITING_FOR_PING,
+        Some(h) if h.late && matches!(last_status, "up" | "") => LATE_FOR_PING,
         _ => last_status,
     }
 }

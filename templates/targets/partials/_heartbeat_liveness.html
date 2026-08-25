@@ -1,0 +1,36 @@
+{# Re-rendered out of band by the live poll, so it agrees with the KPIs above.
+   Binds `lv`: the enclosing block already holds the ping card's own `hb`. #}
+{% if let Some(lv) = liveness %}
+<div id="hb-liveness"{% if liveness_oob %} hx-swap-oob="true"{% endif %}>
+  {% if lv.pending %}
+  <div class="space-y-1 border-l-2 border-[color:var(--theme-line)] pl-3 font-mono text-xs text-quiet">
+    <p class="text-body"><span class="hl">waiting for first ping</span></p>
+    {% if let Some(since) = lv.since %}
+    <p># nothing received since <time datetime="{{ since|iso_ts }}" data-tz="exact">{{ since|human_ts }}</time></p>
+    {% endif %}
+    <p># until one lands nothing is watched: no state, no incident, nobody alerted</p>
+    <p># the schedule starts at the first ping, so there is no rush</p>
+  </div>
+  {% else if let Some(due) = lv.due_at %}
+  <div class="space-y-1 border-l-2 pl-3 font-mono text-xs text-quiet{% if lv.late %} border-[color:var(--theme-state-warn-line)]{% else %} border-[color:var(--theme-line)]{% endif %}">
+    {% if lv.late %}
+    <p class="text-body"><span class="hl">this ping is late</span></p>
+    <p># it was due <time datetime="{{ due|iso_ts }}" data-tz="exact">{{ due|human_ts }}</time></p>
+    {% else if lv.overdue %}
+    <p># nothing since this ping came due <time datetime="{{ due|iso_ts }}" data-tz="exact">{{ due|human_ts }}</time></p>
+    {% else %}
+    <p># next ping due <time datetime="{{ due|iso_ts }}" data-tz="exact">{{ due|human_ts }}</time></p>
+    {% endif %}
+    {% if let Some(down) = lv.down_at %}
+    {% if lv.overdue %}
+    <p># silence has counted as down since <time datetime="{{ down|iso_ts }}" data-tz="exact">{{ down|human_ts }}</time></p>
+    {% else %}
+    <p># silence past <time datetime="{{ down|iso_ts }}" data-tz="exact">{{ down|human_ts }}</time> counts as down</p>
+    {% endif %}
+    {% else if !lv.overdue %}
+    <p># no grace, so anything past that counts as down</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}

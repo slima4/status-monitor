@@ -76,13 +76,38 @@ pub struct IncidentRow {
     pub ongoing: bool,
 }
 
-/// Wired-up state of a heartbeat, for the badge and the waiting notice. `Some`
-/// for every heartbeat, wired or not, so the live poll carries the answer that
-/// clears the notice as well as the one that raises it.
-pub struct PendingPing {
+/// What a heartbeat's own clock says. `Some` for every heartbeat, so the live
+/// poll carries the answer that clears a notice as well as the one that raises it.
+pub struct HeartbeatLiveness {
+    /// No ping yet, so nothing to be late for.
     pub pending: bool,
     /// Where the wait is counted from; `None` while the row is provisioning.
     pub since: Option<DateTime<Utc>>,
+    pub due_at: Option<DateTime<Utc>>,
+    /// `None` when a zero grace lands it on `due_at`: one instant, one line.
+    pub down_at: Option<DateTime<Utc>>,
+    /// Past due, still inside grace. The stored status stays up.
+    pub late: bool,
+    /// Past the whole window, so the notice stops promising and speaks in the
+    /// past tense.
+    pub overdue: bool,
+}
+
+impl HeartbeatLiveness {
+    pub fn derive(
+        hb: &crate::api::handlers::targets::HeartbeatInfo,
+        now: DateTime<Utc>,
+        enabled: bool,
+    ) -> Self {
+        Self {
+            pending: hb.pending && enabled,
+            since: hb.created_at,
+            due_at: hb.due_at,
+            down_at: hb.down_at.filter(|d| Some(*d) != hb.due_at),
+            late: hb.due_at.is_some_and(|d| now > d) && hb.down_at.is_some_and(|d| now <= d),
+            overdue: hb.down_at.is_some_and(|d| now > d),
+        }
+    }
 }
 
 #[derive(Template, WebTemplate)]
@@ -103,10 +128,10 @@ pub struct DetailLive {
     pub segments: Arc<[StatusSeg]>,
     /// Marks the ribbon include as an out-of-band swap on the live response.
     pub ribbon_oob: bool,
-    pub pending_ping: Option<PendingPing>,
+    pub liveness: Option<HeartbeatLiveness>,
     /// The notice is only ever out of band here: it lives in the ping card,
     /// which this response does not own.
-    pub pending_ping_oob: bool,
+    pub liveness_oob: bool,
 }
 
 /// Rows for the ribbon drill drawer: a page of raw checks over a bucket window,

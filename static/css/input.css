@@ -2476,7 +2476,10 @@
         background: var(--theme-state-bad-tint);
         color: var(--theme-state-bad-fg-onsoft);
     }
-    .status-badge--degraded {
+    /* --late is a heartbeat past its period but inside its grace: amber for
+       the same reason degraded is, so the two share one declaration. */
+    .status-badge--degraded,
+    .status-badge--late {
         background: var(--theme-state-warn-tint);
         color: var(--theme-state-warn-fg-onsoft);
     }

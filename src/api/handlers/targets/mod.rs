@@ -522,6 +522,11 @@ pub struct HeartbeatInfo {
     pub last_exit_code: Option<u8>,
     /// What the job printed on that failure, while inside its window.
     pub last_failure_output: Option<String>,
+    /// `None` while pending, paused, or already failing on the job's own report.
+    pub due_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// When silence starts reading as down. An incident follows a confirmation
+    /// or two later, so this is the earlier instant.
+    pub down_at: Option<chrono::DateTime<chrono::Utc>>,
     pub declared_period_secs: u64,
     /// Median gap between successes, `null` until a second one gives it a gap.
     pub observed_period_secs: Option<u64>,
@@ -577,6 +582,7 @@ pub(crate) async fn heartbeat_info(
     org: OrgId,
     target_id: Uuid,
     check: &HeartbeatCheck,
+    enabled: bool,
 ) -> Result<HeartbeatInfo> {
     let hb = state.heartbeat_store.get(org, target_id).await?;
     let observed = observed_cadence(state, org, target_id).await;
@@ -590,6 +596,13 @@ pub(crate) async fn heartbeat_info(
                 None
             }),
         None => None,
+    };
+    let (due_at, down_at) = match hb.as_ref().filter(|h| enabled && !h.is_pending()) {
+        Some(h) if h.ping_state().failing().is_none() => {
+            let (due, down) = check.window(h.ping_state().success_at);
+            (Some(due), Some(down))
+        }
+        _ => (None, None),
     };
     Ok(HeartbeatInfo {
         ping_url: hb.as_ref().and_then(|h| h.token.as_deref()).map(|t| {
@@ -607,6 +620,8 @@ pub(crate) async fn heartbeat_info(
         last_fail_at: hb.as_ref().and_then(|h| h.last_fail_at),
         last_exit_code: hb.and_then(|h| h.last_exit_code),
         last_failure_output,
+        due_at,
+        down_at,
         declared_period_secs: check.period.as_secs(),
         observed_period_secs: observed.map(|o| o.median_gap.as_secs()),
         cadence_advice: observed
@@ -640,7 +655,9 @@ pub async fn get_heartbeat(
             "this monitor is not a heartbeat",
         ));
     };
-    Ok(Json(heartbeat_info(&state, org, id, check).await?))
+    Ok(Json(
+        heartbeat_info(&state, org, id, check, target.enabled).await?,
+    ))
 }
 
 #[utoipa::path(

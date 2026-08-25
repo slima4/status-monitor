@@ -13,6 +13,6 @@
   {% include "targets/partials/detail_live_kpi_cards.html" %}
 </section>
 {% include "targets/partials/detail_ribbon.html" %}
-{% include "targets/partials/_heartbeat_pending.html" %}
+{% include "targets/partials/_heartbeat_liveness.html" %}
 {% import "targets/partials/_status_badge.html" as sb %}
 {% call sb::show(last_status, enabled, true) %}{% endcall %}
