@@ -467,6 +467,30 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(body.into_iter().next().filter(|b| !b.is_empty()))
     }
 
+    async fn heartbeat_ping_count(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        range: ClampedRange,
+    ) -> Result<Option<u64>> {
+        let counts: Vec<u64> = self
+            .client
+            .query(&format!(
+                "SELECT count() FROM {HEARTBEAT_PING_TABLE} \
+                 WHERE org_id = ? AND target_id = ? AND signal != 'start' \
+                   AND received_at >= fromUnixTimestamp(?) \
+                   AND received_at < fromUnixTimestamp(?)"
+            ))
+            .bind(org.0)
+            .bind(target_id)
+            .bind(to_unix_secs(range.from))
+            .bind(to_unix_secs(range.to))
+            .fetch_all::<u64>()
+            .await
+            .context("clickhouse heartbeat ping count")?;
+        Ok(counts.into_iter().next())
+    }
+
     async fn heartbeat_cadence(
         &self,
         org: OrgId,

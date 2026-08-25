@@ -33,7 +33,7 @@ mod rows;
 mod tests;
 
 pub use charts::StatusSeg;
-pub use load::{LiveData, UnconfirmedFailures};
+pub use load::{LiveData, PingTally, UnconfirmedFailures};
 pub use rows::{
     DetailCheckRows, DetailLive, FlowEvidenceView, FlowRunRow, FlowStepRow, HeartbeatLiveness,
     IncidentRow, KpiTrend, RegionBreakdownRow, ResultRow, UptimeStatsView,
@@ -145,6 +145,7 @@ pub struct DetailPage {
     pub last_at_iso: Arc<str>,
     pub uptime: Arc<UptimeStatsView>,
     pub kpi: Arc<KpiTrend>,
+    pub pings: Option<PingTally>,
     /// Per-bucket status strip over the selected range, rendered under the header.
     pub segments: Arc<[StatusSeg]>,
     /// Ribbon include renders in place (not an OOB swap) on the full page.
@@ -200,7 +201,7 @@ pub async fn index(
     let live = load_live_data_cached(
         &state,
         org,
-        target.id,
+        &target,
         range_key,
         params.from,
         params.to,
@@ -356,6 +357,7 @@ pub async fn index(
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
+        pings: live.pings,
         segments: Arc::clone(&live.segments),
         ribbon_oob: false,
         registered_domain,
@@ -513,7 +515,7 @@ pub async fn live_partial(
     let live = load_live_data_cached(
         &state,
         org,
-        target.id,
+        &target,
         range_key,
         params.from,
         params.to,
@@ -532,6 +534,7 @@ pub async fn live_partial(
         last_status,
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
+        pings: live.pings,
         last_at_iso: Arc::clone(&live.last_at_iso),
         selected_region,
         segments: Arc::clone(&live.segments),

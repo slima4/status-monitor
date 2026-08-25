@@ -18,7 +18,13 @@
   {% if let Some(d) = kpi.uptime_delta %}
   <p class="dashboard-kpi-card__delta"><span class="{{ d.class }}">{{ d.arrow }} {{ d.body }} vs prior</span></p>
   {% endif %}
-  <p class="dashboard-kpi-card__hint">{{ uptime.total }} checks</p>
+  <p class="dashboard-kpi-card__hint">
+    {%- if let Some(t) = pings -%}
+      {%- if let Some(n) = t.count() %}{{ n }} ping{% if *n != 1 %}s{% endif %} received{% else %}ping count unavailable{% endif -%}
+    {%- else -%}
+      {{ uptime.total }} check{% if uptime.total != 1 %}s{% endif %}
+    {%- endif -%}
+  </p>
 </article>
 <article class="sticker-card dashboard-kpi-card corner-frame">
   <p class="dashboard-kpi-card__label">Up</p>

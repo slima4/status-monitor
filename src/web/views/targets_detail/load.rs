@@ -170,6 +170,24 @@ pub(super) async fn load_flaps(
 /// it so a burst of either kind collapses to one CH round-trip. Inner
 /// fields are `Arc` so a cache hit clones a pointer instead of the
 /// full row vector + uptime struct per request.
+/// What the page can say about a heartbeat's own reports. `Unavailable` keeps
+/// a failed read from falling back to the check count, which is the number the
+/// card exists to stop showing.
+#[derive(Clone, Copy)]
+pub enum PingTally {
+    Counted(u64),
+    Unavailable,
+}
+
+impl PingTally {
+    pub fn count(self) -> Option<u64> {
+        match self {
+            Self::Counted(n) => Some(n),
+            Self::Unavailable => None,
+        }
+    }
+}
+
 pub struct LiveData {
     pub uptime: Arc<UptimeStatsView>,
     pub kpi: Arc<KpiTrend>,
@@ -181,6 +199,8 @@ pub struct LiveData {
     pub last_at_iso: Arc<str>,
     /// Per-bucket status strip over the window; drives the timeline under the header.
     pub segments: Arc<[StatusSeg]>,
+    /// `None` for the kinds nobody pings.
+    pub pings: Option<PingTally>,
 }
 
 /// Cached front door for [`load_live_data`]. Returns a moka-shared
@@ -192,12 +212,14 @@ pub struct LiveData {
 pub(crate) async fn load_live_data_cached(
     state: &AppState,
     org: OrgId,
-    target_id: Uuid,
+    target: &Target,
     range_key: &'static str,
     custom_from: Option<DateTime<Utc>>,
     custom_to: Option<DateTime<Utc>>,
     region: Option<&str>,
 ) -> WebResult<Arc<LiveData>> {
+    let target_id = target.id;
+    let passive = target.check.is_passive();
     // A region-filtered view skips the shared cache (selection is rare, not
     // worth widening the key) — same call as the custom-window path.
     let cacheable = custom_from.is_none() && custom_to.is_none() && region.is_none();
@@ -207,13 +229,14 @@ pub(crate) async fn load_live_data_cached(
             return Ok(data);
         }
         let (from, to) = resolve_window(range_key, custom_from, custom_to);
-        let data = Arc::new(load_live_data(state, org, target_id, from, to, region).await?);
+        let data =
+            Arc::new(load_live_data(state, org, target_id, from, to, region, passive).await?);
         state.live_data_cache.insert(key, data.clone());
         Ok(data)
     } else {
         let (from, to) = resolve_window(range_key, custom_from, custom_to);
         Ok(Arc::new(
-            load_live_data(state, org, target_id, from, to, region).await?,
+            load_live_data(state, org, target_id, from, to, region, passive).await?,
         ))
     }
 }
@@ -261,6 +284,7 @@ async fn load_live_data(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
     region: Option<&str>,
+    passive: bool,
 ) -> WebResult<LiveData> {
     // Cap `to` at now: a monitor has no future samples, and an unbounded `to`
     // would let the span (hence the spark series length) grow without limit.
@@ -290,7 +314,7 @@ async fn load_live_data(
     // filter keeps the raw per-region sample rate and needs no incident reads.
     let confirmed = region.is_none();
 
-    let (mut uptime, mut results, avail, prior, cur_incidents, prior_incidents) = tokio::try_join!(
+    let (mut uptime, mut results, avail, prior, cur_incidents, prior_incidents, pings) = tokio::try_join!(
         state
             .results_store
             .uptime(org, target_id, time_range, region),
@@ -314,6 +338,26 @@ async fn load_live_data(
             .uptime(org, target_id, prior_range, region),
         confirmed_incidents(state, org, target_id, time_range, confirmed),
         confirmed_incidents(state, org, target_id, prior_range, confirmed),
+        // Commentary: losing it must not lose the page.
+        async {
+            if !passive {
+                return Ok(None);
+            }
+            Ok(Some(
+                match state
+                    .results_store
+                    .heartbeat_ping_count(org, target_id, time_range)
+                    .await
+                {
+                    Ok(Some(n)) => PingTally::Counted(n),
+                    Ok(None) => PingTally::Unavailable,
+                    Err(err) => {
+                        tracing::warn!(error = %err, "heartbeat ping count unavailable");
+                        PingTally::Unavailable
+                    }
+                },
+            ))
+        },
     )?;
     if confirmed && uptime.total > 0 {
         uptime.uptime_pct = Some(confirmed_uptime_pct(&cur_incidents, time_range));
@@ -384,6 +428,7 @@ async fn load_live_data(
         last_status,
         last_at_iso,
         segments,
+        pings,
     })
 }
 

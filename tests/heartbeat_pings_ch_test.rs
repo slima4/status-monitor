@@ -208,3 +208,56 @@ async fn observed_cadence_contradicts_a_wrong_declaration() {
         None
     );
 }
+
+/// The count behind "N pings received": its window, its tenant, and the rule
+/// that a start is a run announcing itself rather than another report.
+#[tokio::test]
+#[ignore]
+async fn the_ping_count_holds_its_window_its_tenant_and_skips_starts() {
+    let Some(client) = common::ch_client_from_env().await else {
+        eprintln!("CLICKHOUSE_URL unset; skipping");
+        return;
+    };
+    let org = uptimepage::domain::OrgId(Uuid::new_v4());
+    let neighbour = uptimepage::domain::OrgId(Uuid::new_v4());
+    let target = Uuid::new_v4();
+    let sink =
+        ClickhouseHeartbeatPingSink::new(client.clone(), uptimepage::storage::OrgTtlDays::new());
+    let store = uptimepage::storage::ClickhouseResultsStore::from_client(client);
+
+    let from = chrono::Utc::now() - chrono::Duration::hours(2);
+    let to = chrono::Utc::now() - chrono::Duration::hours(1);
+    let at = |minutes: i64| from + chrono::Duration::minutes(minutes);
+    for (received_at, signal) in [
+        (at(-1), PingSignal::Success), // before the window
+        (from, PingSignal::Success),   // the window includes its start
+        (at(20), PingSignal::Start),   // the run, announcing itself
+        (at(21), PingSignal::Fail),    // the same run, reporting
+        (to, PingSignal::Success),     // the window excludes its end
+        (at(70), PingSignal::Success), // after the window
+    ] {
+        sink.write_ping(&HeartbeatPingRecord {
+            received_at,
+            ..ping(org.0, target, signal)
+        })
+        .await;
+    }
+    // Another tenant, same target id: the count must not see it.
+    sink.write_ping(&HeartbeatPingRecord {
+        received_at: at(30),
+        ..ping(neighbour.0, target, PingSignal::Success)
+    })
+    .await;
+
+    let range =
+        uptimepage::storage::ClampedRange::unclamped(uptimepage::storage::TimeRange { from, to });
+    let counted = store
+        .heartbeat_ping_count(org, target, range)
+        .await
+        .unwrap()
+        .expect("clickhouse answers with a count");
+    assert_eq!(
+        counted, 2,
+        "one success and one fail, no start, no neighbour"
+    );
+}

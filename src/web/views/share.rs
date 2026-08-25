@@ -43,7 +43,7 @@ use crate::web::error::{WebError, WebResult};
 use crate::web::filters;
 use crate::web::views::targets_detail::{
     DEFAULT_RANGE, DetailParams, INCIDENT_DEFAULT_RANGE, INCIDENT_RANGE_KEYS, IncidentRow,
-    KpiTrend, RANGE_KEYS, ResultRow, SUBTAB_INCIDENTS, SUBTAB_MONITOR, UptimeStatsView,
+    KpiTrend, PingTally, RANGE_KEYS, ResultRow, SUBTAB_INCIDENTS, SUBTAB_MONITOR, UptimeStatsView,
     WindowLabels, badge_status, fmt_error_display, load_incidents_data, load_live_data_cached,
     ongoing_for_target, read_liveness, resolve_incident_window, resolve_window,
 };
@@ -107,6 +107,7 @@ pub struct ShareDetailPage {
     pub last_status: &'static str,
     pub last_at_iso: Arc<str>,
     pub uptime: Arc<UptimeStatsView>,
+    pub pings: Option<PingTally>,
     pub kpi: Arc<KpiTrend>,
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
@@ -138,6 +139,7 @@ pub struct ShareLive {
     pub enabled: bool,
     pub last_status: &'static str,
     pub uptime: Arc<UptimeStatsView>,
+    pub pings: Option<PingTally>,
     pub kpi: Arc<KpiTrend>,
     pub results: Arc<[ResultRow]>,
     pub results_has_more: bool,
@@ -201,7 +203,7 @@ pub async fn detail(
     let live = load_live_data_cached(
         &state,
         resolved.org,
-        resolved.target_id,
+        &target,
         range_key,
         params.from,
         params.to,
@@ -239,6 +241,7 @@ pub async fn detail(
         last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
+        pings: live.pings,
         kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
@@ -267,29 +270,24 @@ pub async fn live_partial(
     clamp_window(&mut params);
     let resolved = resolve_share(&state, &token).await?;
     let range_key = resolve_range_key(params.range.as_deref(), &RANGE_KEYS, DEFAULT_RANGE);
-    // Fetch the monitor for its `enabled` flag (drives the badge's empty-state
-    // wording) alongside the cached live region, mirroring the operator partial.
-    let (target, live) = tokio::try_join!(
-        async {
-            state
-                .target_store
-                .get(resolved.org, resolved.target_id)
-                .await
-                .map_err(WebError::from)
-        },
-        load_live_data_cached(
-            &state,
-            resolved.org,
-            resolved.target_id,
-            range_key,
-            params.from,
-            params.to,
-            None,
-        ),
-    )?;
     // Monitor gone (cascade-deleted with its share between resolve and now) →
-    // uniform 404, so the poll stops rather than rendering a dead region.
-    let target = target.ok_or_else(share_not_found)?;
+    // uniform 404, so the poll stops rather than rendering a dead region. Read
+    // first, not alongside: its kind decides what the live read has to fetch.
+    let target = state
+        .target_store
+        .get(resolved.org, resolved.target_id)
+        .await?
+        .ok_or_else(share_not_found)?;
+    let live = load_live_data_cached(
+        &state,
+        resolved.org,
+        &target,
+        range_key,
+        params.from,
+        params.to,
+        None,
+    )
+    .await?;
     let last_status = badge_status(
         live.last_status,
         read_liveness(&state, resolved.org, &target).await.as_ref(),
@@ -301,6 +299,7 @@ pub async fn live_partial(
         enabled: target.enabled,
         last_status,
         uptime: Arc::clone(&live.uptime),
+        pings: live.pings,
         kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
         results_has_more: live.results_has_more,
@@ -500,6 +499,7 @@ mod tests {
                 uptime_pct: Some("100.00".into()),
             }),
             kpi: Arc::new(Default::default()),
+            pings: None,
             results: Arc::from(vec![]),
             results_has_more: false,
             config_json: "{}".into(),

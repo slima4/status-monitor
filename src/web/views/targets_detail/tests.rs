@@ -117,6 +117,7 @@ fn sample_page() -> DetailPage {
             uptime_pct: Some("99.00".into()),
         }),
         kpi: Arc::new(KpiTrend::default()),
+        pings: None,
         segments: Arc::from(vec![
             StatusSeg {
                 class: "op",
@@ -286,6 +287,35 @@ fn liveness_reads_the_window_the_projection_handed_it() {
     let silent = super::HeartbeatLiveness::derive(&windowed(None, None), now, true);
     assert!(!silent.late && !silent.overdue);
     assert!(!super::HeartbeatLiveness::derive(&heartbeat_info(true), now, false).pending);
+}
+
+/// A heartbeat's rows count our evaluations, so "59 checks" read as 59 job runs
+/// on a monitor its owner had told us to expect once a day.
+#[test]
+fn only_a_kind_that_receives_pings_counts_them() {
+    let counted = |n| super::DetailPage {
+        pings: Some(super::PingTally::Counted(n)),
+        ..sample_page()
+    };
+    assert!(counted(3).render().unwrap().contains("3 pings received"));
+    assert!(counted(1).render().unwrap().contains("1 ping received"));
+
+    // A failed read must not fall back to the count this card exists to drop.
+    let blind = super::DetailPage {
+        pings: Some(super::PingTally::Unavailable),
+        ..sample_page()
+    };
+    let html = blind.render().unwrap();
+    assert!(html.contains("ping count unavailable"));
+    assert!(
+        !html.contains("100 checks"),
+        "our evaluations are not its runs"
+    );
+
+    // Probed kinds keep the count they always had.
+    let probed = sample_page().render().unwrap();
+    assert!(probed.contains("100 checks"));
+    assert!(!probed.contains("ping"));
 }
 
 /// Grace is the lateness that does not alert, so the evaluator keeps calling
@@ -926,6 +956,7 @@ fn sample_live() -> DetailLive {
             uptime_pct: Some("99.00".into()),
         }),
         kpi: Arc::new(KpiTrend::default()),
+        pings: None,
         last_at_iso: Arc::from("2026-05-13T12:00:00Z"),
         selected_region: None,
         segments: Arc::from(Vec::<StatusSeg>::new()),

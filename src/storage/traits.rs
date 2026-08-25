@@ -416,6 +416,17 @@ pub trait ResultsStore: Send + Sync {
     ) -> Result<Option<String>> {
         Ok(None)
     }
+    /// Runs the job reported in the window. `/start` is excluded for the same
+    /// reason [`Self::heartbeat_cadence`] excludes it, so the two figures on one
+    /// page cannot disagree. `None` where the store cannot answer.
+    async fn heartbeat_ping_count(
+        &self,
+        _org: OrgId,
+        _target_id: Uuid,
+        _range: ClampedRange,
+    ) -> Result<Option<u64>> {
+        Ok(None)
+    }
     /// Gaps between this heartbeat's successes over the last `days`. A ping
     /// landing inside its window writes no check result, so this log is the
     /// only record of how often the job really runs.

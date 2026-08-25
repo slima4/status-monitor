@@ -5,6 +5,7 @@ use askama_web::WebTemplate;
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
+use super::load::PingTally;
 use crate::domain::agent_wire::StepOutcome;
 use crate::domain::{CheckResult, Incident};
 use crate::storage::UptimeStats;
@@ -120,6 +121,7 @@ pub struct DetailLive {
     pub last_status: &'static str,
     pub uptime: Arc<UptimeStatsView>,
     pub kpi: Arc<KpiTrend>,
+    pub pings: Option<PingTally>,
     pub last_at_iso: Arc<str>,
     /// Carried so the self-rearming live poll keeps the active region filter.
     pub selected_region: Option<String>,
