@@ -44,8 +44,8 @@ use crate::web::filters;
 use crate::web::views::targets_detail::{
     DEFAULT_RANGE, DetailParams, INCIDENT_DEFAULT_RANGE, INCIDENT_RANGE_KEYS, IncidentRow,
     KpiTrend, RANGE_KEYS, ResultRow, SUBTAB_INCIDENTS, SUBTAB_MONITOR, UptimeStatsView,
-    WindowLabels, fmt_error_display, load_incidents_data, load_live_data_cached,
-    ongoing_for_target, resolve_incident_window, resolve_window,
+    WindowLabels, badge_status, fmt_error_display, load_incidents_data, load_live_data_cached,
+    ongoing_for_target, read_liveness, resolve_incident_window, resolve_window,
 };
 use crate::web::views::{RangeOption, build_range_options, describe_check, resolve_range_key};
 
@@ -219,6 +219,13 @@ pub async fn detail(
         .await?
         .is_some_and(|r| r.len() > 1);
 
+    // The same override the owner's page applies, so one monitor cannot read
+    // late on one surface and up on the other.
+    let last_status = badge_status(
+        live.last_status,
+        read_liveness(&state, resolved.org, &target).await.as_ref(),
+    );
+
     Ok(ShareDetailPage {
         token,
         subtab: SUBTAB_MONITOR,
@@ -229,7 +236,7 @@ pub async fn detail(
         interval_s: target.interval.as_secs(),
         enabled: target.enabled,
         tags: target.tags,
-        last_status: live.last_status,
+        last_status,
         last_at_iso: Arc::clone(&live.last_at_iso),
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
@@ -282,13 +289,17 @@ pub async fn live_partial(
     )?;
     // Monitor gone (cascade-deleted with its share between resolve and now) →
     // uniform 404, so the poll stops rather than rendering a dead region.
-    let enabled = target.ok_or_else(share_not_found)?.enabled;
+    let target = target.ok_or_else(share_not_found)?;
+    let last_status = badge_status(
+        live.last_status,
+        read_liveness(&state, resolved.org, &target).await.as_ref(),
+    );
 
     let page = ShareLive {
         token,
         range: range_key,
-        enabled,
-        last_status: live.last_status,
+        enabled: target.enabled,
+        last_status,
         uptime: Arc::clone(&live.uptime),
         kpi: Arc::clone(&live.kpi),
         results: Arc::clone(&live.result_rows),
@@ -339,6 +350,10 @@ pub async fn incidents(
     let (kind, address) = describe_check(&target.check);
     let range_base_path = format!("/m/{token}/incidents");
     let results_base = format!("/m/{token}");
+    let last_status = badge_status(
+        data.last_status,
+        read_liveness(&state, resolved.org, &target).await.as_ref(),
+    );
 
     Ok(ShareIncidentsPage {
         token,
@@ -350,7 +365,7 @@ pub async fn incidents(
         interval_s: target.interval.as_secs(),
         enabled: target.enabled,
         tags: target.tags,
-        last_status: data.last_status,
+        last_status,
         last_at_iso: data.last_at_iso,
         incidents: data.rows,
         incidents_has_more: data.has_more,
@@ -450,6 +465,18 @@ mod tests {
     use super::*;
     use crate::web::views::targets_detail::DetailParams;
     use chrono::{Duration, Utc};
+
+    /// The shared link renders the same monitor, so it must not report health
+    /// the owner's page has already qualified.
+    #[test]
+    fn a_late_heartbeat_reads_late_on_the_shared_link_too() {
+        let mut p = share_page(false);
+        p.kind = "HEARTBEAT";
+        p.last_status = "late";
+        let html = p.render().unwrap();
+        assert!(html.contains("status-badge--late"));
+        assert!(html.contains(">late<"));
+    }
 
     fn share_page(all_regions: bool) -> ShareDetailPage {
         ShareDetailPage {

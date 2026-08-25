@@ -284,17 +284,21 @@ pub async fn index(
     } else {
         Vec::new()
     };
+    // The ping card is one panel on a page that still has uptime, incidents and
+    // history to show, and the incidents tab already degrades on this same read.
+    // The API endpoint keeps propagating: a caller asking for the token must
+    // hear that the answer is unavailable, not receive one without it.
     let heartbeat = match target.check.as_heartbeat() {
-        Some(check) => Some(
-            crate::api::handlers::targets::heartbeat_info(
-                &state,
-                org,
-                target.id,
-                check,
-                target.enabled,
-            )
-            .await?,
-        ),
+        Some(check) => crate::api::handlers::targets::heartbeat_info(
+            &state,
+            org,
+            target.id,
+            check,
+            target.enabled,
+        )
+        .await
+        .map_err(|err| tracing::warn!(error = %err, "heartbeat card unavailable"))
+        .ok(),
         None => None,
     };
     // Only counted when the damper is on, so the banner never promises a hold
@@ -674,7 +678,7 @@ const LATE_FOR_PING: &str = "late";
 
 /// The incidents tab has no ping card, so it reads the row itself. `None` for
 /// every other kind, and on a read error.
-async fn read_liveness(
+pub(crate) async fn read_liveness(
     state: &AppState,
     org: crate::domain::OrgId,
     target: &crate::domain::Target,
@@ -705,7 +709,10 @@ async fn read_liveness(
 }
 
 /// Every other kind gets its stored status back untouched.
-fn badge_status(last_status: &'static str, hb: Option<&HeartbeatLiveness>) -> &'static str {
+pub(crate) fn badge_status(
+    last_status: &'static str,
+    hb: Option<&HeartbeatLiveness>,
+) -> &'static str {
     match hb {
         Some(h) if h.pending && last_status.is_empty() => WAITING_FOR_PING,
         Some(h) if h.late && matches!(last_status, "up" | "") => LATE_FOR_PING,
