@@ -227,6 +227,8 @@ const EMBEDS: &[(&str, &str)] = &[
     ("mk-embed-stagger", "js/marketing/stagger.js"),
     ("mk-embed-supersede", "js/marketing/supersede.js"),
     ("mk-embed-measured-week", "js/marketing/measured_week.js"),
+    ("mk-embed-blind", "js/marketing/blind.js"),
+    ("mk-embed-grace", "js/marketing/grace.js"),
 ];
 
 /// Sanitising Markdown render. CommonMark + tables → HTML → ammonia

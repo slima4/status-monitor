@@ -3454,7 +3454,7 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
 }
 /* A select takes no pseudo-element of its own, so the caret hangs on a wrapper
    and the control keeps the seat geometry either side of it. */
-.mk-fig__pickwrap { position: relative; display: inline-flex; min-width: 0; }
+.mk-fig__pickwrap { position: relative; display: inline-flex; max-width: 100%; min-width: 0; vertical-align: middle; }
 .mk-fig__pickwrap::after {
     position: absolute;
     top: 50%;
@@ -3468,11 +3468,15 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     pointer-events: none;
     transition: border-color 160ms cubic-bezier(.2,0,0,1);
 }
-.mk-fig__pickwrap:hover::after { border-color: var(--mk-ink); }
+.mk-fig__pickwrap:hover::after,
+.mk-fig__pickwrap:focus-within::after { border-color: var(--mk-ink); }
 .mk-fig__pick {
+    /* A select takes its width from the longest option, so it has to be
+       allowed to clip rather than push the head past the card. */
+    max-width: 100%;
     min-width: 0;
-    height: 22px;
-    padding: 0 1.1rem 0 0.4rem;
+    height: 28px;
+    padding: 0 1.4rem 0 0.5rem;
     border: 1px solid var(--mk-rule);
     border-radius: 1px;
     color: var(--mk-ink);
@@ -3480,6 +3484,11 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     appearance: none;
     font: inherit;
     font-size: 0.63rem;
+    /* Selects centre their text off the box, not the line, so state it. */
+    line-height: 26px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
     cursor: pointer;
     transition-property: border-color, background-color;
     transition-duration: 160ms;
@@ -3570,7 +3579,11 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     color: var(--mk-ink-soft);
     font-size: 0.68rem;
     line-height: 1.55;
+    text-wrap: pretty;
 }
+/* Figures that hang the verdict off the card rather than inside a padded flow
+   have to carry the gutter themselves, or the text runs into the border. */
+.mk-fig > .mk-fig__verdict { padding: 0 1rem 0.85rem; }
 .mk-fig.is-open .mk-fig__verdict { color: var(--mk-down); font-weight: 600; }
 
 /* The check in flight, and the vote it earns. */
@@ -3635,11 +3648,13 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     color: var(--mk-quiet);
     font-size: 0.68rem;
     line-height: 1.6;
+    text-wrap: pretty;
 }
 
 /* ── transport ── */
 .mk-fig__tp { display: flex; align-items: center; gap: 0.4rem; }
 .mk-fig__btn {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -3649,10 +3664,15 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     border-radius: 2px;
     color: var(--mk-quiet);
     background: var(--mk-bg);
-    transition-property: color, border-color, background-color;
+    cursor: pointer;
+    transition-property: color, border-color, background-color, transform;
     transition-duration: 160ms;
     transition-timing-function: cubic-bezier(.2,0,0,1);
 }
+/* Thumb-sized target without growing the button, and narrow enough that the
+   next one's target still cannot touch it. */
+.mk-fig__btn::after { position: absolute; inset: -8px -2px; content: ""; }
+.mk-fig__btn:active:not(:disabled) { transform: scale(0.96); }
 .mk-fig__btn svg { width: 13px; height: 13px; fill: currentColor; }
 .mk-fig__stroke { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .mk-fig__btn:hover:not(:disabled) { color: var(--mk-ink); border-color: var(--mk-rule-hover); }
@@ -3814,9 +3834,160 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
 .mk-silence.is-open .mk-silence__stat--rule { border-top-color: var(--mk-down); }
 .mk-silence.is-open .mk-silence__down { color: var(--mk-down); }
 
+/* ── blind lane vs heartbeat lane ── */
+/* --mk-steps and --mk-bars are set by the scripts that draw them, so the grid
+   and the marks cannot disagree with the data. */
+.mk-blind__flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 1.1rem;
+    padding: 0 1rem 0.85rem;
+}
+.mk-blind__col { min-width: 0; }
+.mk-blind__log {
+    /* Reserved so the card does not jump as lines land. */
+    min-height: 5.4rem;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--mk-rule-soft);
+    border-radius: 1px;
+    background: var(--mk-bg);
+}
+.mk-blind .mk-blind__line {
+    display: flex;
+    gap: 0.55rem;
+    color: var(--mk-ink-soft);
+    font-size: 0.66rem;
+    line-height: 1.55;
+}
+.mk-blind .mk-blind__line + .mk-blind__line { margin-top: 0.25rem; }
+.mk-blind__line span { color: var(--mk-faint); font-variant-numeric: tabular-nums; }
+.mk-blind .mk-blind__line.is-empty { color: var(--mk-faint); font-style: italic; }
+.mk-blind .mk-blind__tally {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+    color: var(--mk-quiet);
+    font-size: 0.66rem;
+}
+.mk-blind__tally b { color: var(--mk-ink); font-size: 0.85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.mk-blind__word.is-late { color: var(--mk-mark); }
+.mk-blind__word.is-down { color: var(--mk-down); }
+.mk-blind.is-open .mk-fig__need { color: var(--mk-down); }
+
+.mk-blind__track { position: relative; padding-bottom: 1.15rem; }
+.mk-blind__ticks {
+    display: grid;
+    grid-template-columns: repeat(var(--mk-steps), minmax(0, 1fr));
+    gap: 2px;
+    height: 2.6rem;
+    align-items: end;
+}
+.mk-blind__tick {
+    height: 0.5rem;
+    border-radius: 1px;
+    background: var(--mk-rule-soft);
+    transition: height 200ms cubic-bezier(.2,0,0,1), background-color 200ms cubic-bezier(.2,0,0,1);
+}
+/* A ping is a full bar: the job spoke. Silence is the floor it leaves behind. */
+.mk-blind__tick.is-ping { height: 2.6rem; background: var(--mk-ok); }
+.mk-blind__tick.is-quiet { background: var(--mk-rule); }
+.mk-blind__tick.is-late { background: var(--mk-mark); }
+.mk-blind__tick.is-over { background: var(--mk-down); }
+/* The keys are filled to match the ticks they stand for, not outlined. */
+.mk-blind .mk-fig__key--idle { border-color: var(--mk-rule); background: var(--mk-rule); }
+.mk-blind .mk-fig__key--late { border-color: var(--mk-mark); background: color-mix(in oklch, var(--mk-mark) 42%, transparent); }
+.mk-blind__marks { position: absolute; inset: 0; pointer-events: none; }
+.mk-blind__mark {
+    position: absolute;
+    top: 0;
+    bottom: 1.15rem;
+    left: calc(var(--at) / var(--mk-steps) * 100%);
+    border-left: 1px dashed var(--mk-faint);
+}
+.mk-blind__mark b {
+    position: absolute;
+    top: 100%;
+    left: 0.2rem;
+    color: var(--mk-faint);
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+.mk-blind__mark--down { border-left-color: color-mix(in oklch, var(--mk-down) 70%, transparent); }
+.mk-blind__mark--down b { color: var(--mk-down); }
+/* The two modes the heartbeat cannot see: say so on the card rather than
+   letting a green track imply the job was fine. */
+.mk-blind.is-blindspot .mk-blind__word { color: var(--mk-mark); }
+
+/* ── grace dial ── */
+.mk-grace__flow { padding: 0 1rem 0.4rem; }
+.mk-grace__chart { position: relative; height: 7rem; }
+.mk-grace__bars {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    grid-template-columns: repeat(var(--mk-bars), minmax(0, 1fr));
+    gap: 3px;
+    align-items: end;
+}
+.mk-grace__bar {
+    height: 0;
+    border-radius: 1px 1px 0 0;
+    background: var(--mk-rule-soft);
+    transition: height 260ms cubic-bezier(.2,0,0,1), background-color 200ms cubic-bezier(.2,0,0,1);
+}
+.mk-grace__bar.is-in { height: calc(var(--h) * 100%); background: var(--mk-ok); }
+.mk-grace__bar.is-over { background: var(--mk-down); }
+/* The night it stops: no bar to draw, so the column is the whole height, empty. */
+.mk-grace .mk-grace__bar--dead.is-in {
+    background: repeating-linear-gradient(135deg, var(--mk-down) 0 2px, transparent 2px 6px);
+}
+.mk-grace__line {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--h) * 100%);
+    border-top: 1px dashed var(--mk-mark);
+    transition: bottom 260ms cubic-bezier(.2,0,0,1);
+}
+/* Crosses the bars at low grace, so it sits on a cut-out rather than on red. */
+.mk-grace__linelab {
+    position: absolute;
+    right: 0;
+    bottom: 0.15rem;
+    padding: 0 0.25rem;
+    background: var(--mk-surface);
+    color: var(--mk-mark);
+    font-size: 0.6rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.mk-grace__stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.75rem;
+    padding: 0 1rem 0.6rem;
+}
+.mk-grace .mk-grace__stat {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    color: var(--mk-quiet);
+    font-size: 0.66rem;
+}
+.mk-grace__stat b { color: var(--mk-ink); font-size: 0.85rem; font-weight: 650; font-variant-numeric: tabular-nums; }
+.mk-grace__stat b.is-bad { color: var(--mk-down); }
+/* Red belongs on the false-page count, never on a clean zero. */
+.mk-grace.is-open .mk-fig__big { color: var(--mk-ink); }
+.mk-grace .mk-fig__big.is-bad { color: var(--mk-down); }
+
 @media (max-width: 940px) {
     .mk-quorum__flow { grid-template-columns: minmax(0, 1fr); }
     .mk-silence__flow { grid-template-columns: minmax(0, 1fr); }
+    .mk-blind__flow { grid-template-columns: minmax(0, 1fr); }
     .mk-silence__side { padding: 0.9rem 0 0; border-left: 0; border-top: 1px solid var(--mk-rule); }
     .mk-quorum__ballot { padding: 0.9rem 0 0; border-left: 0; border-top: 1px solid var(--mk-rule); }
     /* Full width here, so the verdict needs far fewer reserved lines. */
@@ -3860,8 +4031,9 @@ ol.mk-quorum__seats, ol.mk-quorum__seats > li { list-style: none; }
     .mk-quorum__seat, .mk-fig__btn, .mk-fig__big, .mk-fig__chip,
     .mk-quorum__bar, .mk-quorum__barneed, .mk-fig__pick, .mk-fig__opt span,
     .mk-fig__pickwrap::after, .mk-gate__lane, .mk-gate__cell,
-    .mk-silence__lane, .mk-silence__tick, .mk-silence__brain { transition: none; }
-    .mk-fig__opt:active span { transform: none; }
+    .mk-silence__lane, .mk-silence__tick, .mk-silence__brain,
+    .mk-blind__tick, .mk-grace__bar, .mk-grace__line { transition: none; }
+    .mk-fig__opt:active span, .mk-fig__btn:active:not(:disabled) { transform: none; }
 }
 
 /* ---- Browser-flow figures (landing) ------------------------------------ */

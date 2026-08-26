@@ -164,6 +164,28 @@ async fn post_with_a_figure_loads_only_its_own_script() {
         "a post that embeds the figure must load the script that fills it"
     );
 
+    // Two figures on one post: each mount survives sanitising and pulls in
+    // exactly the script that fills it.
+    let (status, body, _) = get("/blog/cron-jobs-fail-silently").await;
+    assert_eq!(status, StatusCode::OK);
+    for (mount, script) in [
+        ("mk-embed-blind", "blind.js"),
+        ("mk-embed-grace", "grace.js"),
+    ] {
+        assert!(
+            body.contains(&format!(r#"class="{mount}""#)),
+            "{mount}: the figure's mount must survive sanitising all the way to the page"
+        );
+        assert!(
+            body.contains(&format!("/static/js/marketing/{script}")),
+            "{script}: a post that embeds the figure must load the script that fills it"
+        );
+    }
+    assert!(
+        !body.contains("quorum.js"),
+        "a post must load only the figures it embeds"
+    );
+
     let (status, body, _) = get("/blog/monitor-the-login-not-the-login-page").await;
     assert_eq!(status, StatusCode::OK);
     assert!(
@@ -194,7 +216,9 @@ async fn post_with_a_figure_loads_only_its_own_script() {
     assert!(
         !other.contains("quorum.js")
             && !other.contains("flow_break.js")
-            && !other.contains("ci_vs_prod.js"),
+            && !other.contains("ci_vs_prod.js")
+            && !other.contains("blind.js")
+            && !other.contains("grace.js"),
         "a post without the figure must not pay for its script"
     );
 }
