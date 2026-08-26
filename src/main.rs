@@ -692,6 +692,14 @@ async fn main() -> Result<()> {
         uptimepage::storage::subscriber_deliveries::purge_old,
     ));
 
+    let heartbeat_prev_token_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
+        pg_pool_for_stores.clone(),
+        root.clone(),
+        Duration::from_secs(6 * 60 * 60),
+        "heartbeat_prev_token_cleanup",
+        uptimepage::storage::heartbeats::purge_expired_prev_tokens,
+    ));
+
     // 6h, not daily: the three-day age is the real gate, and the tick only
     // bounds how late the reminder lands.
     let heartbeat_nudge_handle: JoinHandle<()> = {
@@ -913,6 +921,7 @@ async fn main() -> Result<()> {
             subscriber_dispatch_handle,
             subscriber_token_cleanup_handle,
             subscriber_delivery_cleanup_handle,
+            heartbeat_prev_token_cleanup_handle,
             heartbeat_nudge_handle,
         );
         if let Some(h) = magic_link_cleanup_handle {

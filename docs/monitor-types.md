@@ -89,6 +89,12 @@ Pick grace with your deployment in mind. A ping sent while the control plane is 
 
 Heartbeats never run on regional probes, and test and check-now do not apply to them: there is nothing on our side to probe.
 
+### Rotating the ping URL
+
+The URL is a bearer credential. Anyone holding it can mark the job healthy, which also means anyone holding it can keep a real outage invisible. It spreads by design, pasted into crontabs, CI config and runbooks, so when it leaks, or when someone who knew it leaves, rotate it from the monitor page or with `POST /api/v1/targets/{id}/heartbeat/rotate`. The monitor keeps its incidents, history, share links and status-page placement, and rotation does not restart the silence clock.
+
+By default the old URL keeps working for 24 hours, because a URL that dies instantly does not alert: the job just goes quiet and pages you a full period plus grace later, long after you have moved on. Roll the new URL out, watch the monitor page say when the old one was last used, and end the overlap early once it goes quiet. If the URL actually leaked, do not wait the window out. Rotate, then end the overlap straight away from the same card, or pass `revoke_previous_immediately` to the API to skip it entirely. Either way a job still carrying the old URL reads as down until you update it.
+
 ## TLS certificate
 
 Connects, reads the certificate, and reports how many days remain.

@@ -1,0 +1,19 @@
+{# Binds the ping card's own `hb`. Included from both branches: an
+   unreadable current URL is the case that most needs the overlap ended. #}
+{% if let Some(prev_exp) = hb.previous_url_expires_at %}
+<div class="space-y-1.5 border-l-2 border-[color:var(--theme-state-warn-line)] pl-3">
+  <p class="text-xs">
+    The pre-rotation URL still works until
+    <time class="font-mono" datetime="{{ prev_exp|iso_ts }}" data-tz="exact">{{ prev_exp|human_ts }}</time>.
+    {% if let Some(used) = hb.previous_url_last_used_at %}
+    It was last used <time class="font-mono" datetime="{{ used|iso_ts }}" data-tz="exact">{{ used|human_ts }}</time>,
+    so something still carries it.
+    {% else %}
+    It has not been called since the rotation. Confirm every job uses the new
+    URL before revoking the old one.
+    {% endif %}
+  </p>
+  <button type="button" data-hb-revoke-prev data-target-id="{{ id }}"
+          class="btn-ghost btn-ghost--danger px-3 py-1.5 text-xs font-medium">revoke old url now</button>
+</div>
+{% endif %}

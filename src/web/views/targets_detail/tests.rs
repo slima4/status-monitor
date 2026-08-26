@@ -191,6 +191,9 @@ fn a_pending_heartbeat_card_explains_the_wait() {
         declared_period_secs: 600,
         observed_period_secs: None,
         cadence_advice: None,
+        rotated_at: None,
+        previous_url_expires_at: None,
+        previous_url_last_used_at: None,
     });
     p.liveness = Some(super::HeartbeatLiveness {
         pending: true,
@@ -239,6 +242,9 @@ fn heartbeat_info(pending: bool) -> crate::api::handlers::targets::HeartbeatInfo
         declared_period_secs: 600,
         observed_period_secs: None,
         cadence_advice: None,
+        rotated_at: None,
+        previous_url_expires_at: None,
+        previous_url_last_used_at: None,
     }
 }
 
@@ -442,6 +448,9 @@ fn heartbeat_detail_renders_ping_card_without_probe_surfaces() {
             kind: "too_tight".into(),
             suggested_period_secs: 5400,
         }),
+        rotated_at: None,
+        previous_url_expires_at: None,
+        previous_url_last_used_at: None,
     });
     let html = p.render().unwrap();
     assert!(html.contains("https://app.example.com/ping/tok123"));
@@ -465,6 +474,63 @@ fn heartbeat_detail_renders_ping_card_without_probe_surfaces() {
     // No probe surfaces for a passive kind.
     assert!(!html.contains("data-detail-test-now"));
     assert!(!html.contains("latency (p50/p95/p99)"));
+    assert!(
+        html.contains("data-hb-rotate"),
+        "the rotate control is offered"
+    );
+    assert!(
+        !html.contains("data-hb-revoke-prev"),
+        "no overlap open, nothing to end early"
+    );
+}
+
+#[test]
+fn an_open_rotation_overlap_shows_its_window_and_last_use() {
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    let mut hb = heartbeat_info(false);
+    hb.rotated_at = Some(chrono::Utc::now());
+    hb.previous_url_expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(23));
+    p.heartbeat = Some(hb);
+    let html = p.render().unwrap();
+    assert!(html.contains("pre-rotation URL still works until"));
+    assert!(
+        html.contains("has not been called since the rotation"),
+        "silence is reported without being read as a verdict"
+    );
+    assert!(html.contains("Confirm every job uses the new"));
+    assert!(html.contains("data-hb-revoke-prev"));
+
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    let mut hb = heartbeat_info(false);
+    hb.previous_url_expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(23));
+    hb.previous_url_last_used_at = Some(chrono::Utc::now() - chrono::Duration::minutes(4));
+    p.heartbeat = Some(hb);
+    let html = p.render().unwrap();
+    assert!(
+        html.contains("something still carries it"),
+        "a live old URL warns against ending the overlap"
+    );
+}
+
+/// An unreadable current URL is the case that most needs the overlap ended,
+/// so the notice cannot live inside the branch that has a URL to show.
+#[test]
+fn an_unreadable_url_still_offers_to_end_the_overlap() {
+    let mut p = sample_page();
+    p.kind = "HEARTBEAT";
+    let mut hb = heartbeat_info(false);
+    hb.ping_url = None;
+    hb.previous_url_expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(23));
+    p.heartbeat = Some(hb);
+    let html = p.render().unwrap();
+    assert!(
+        html.contains("Ping URL not available yet"),
+        "the KEK branch"
+    );
+    assert!(html.contains("pre-rotation URL still works until"));
+    assert!(html.contains("data-hb-revoke-prev"));
 }
 
 #[test]

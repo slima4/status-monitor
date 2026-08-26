@@ -152,6 +152,79 @@
         });
     }
 
+    async function hbCall(path, method, body) {
+        try {
+            const r = await fetch(path, {
+                method,
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "X-Requested-With": "uptimepage",
+                },
+                body: body ? JSON.stringify(body) : undefined,
+            });
+            if (r.ok) {
+                window.location.reload();
+                return true;
+            }
+            let msg = `HTTP ${r.status}`;
+            try {
+                const b = await r.json();
+                if (b && b.error && b.error.message) msg = b.error.message;
+            } catch { /* empty */ }
+            window.smToast({ message: msg });
+        } catch (err) {
+            window.smToast({ message: `network: ${String(err.message || err)}` });
+        }
+        return false;
+    }
+
+    const hbRotateBtn = document.querySelector("[data-hb-rotate]");
+    if (hbRotateBtn) {
+        hbRotateBtn.addEventListener("click", async () => {
+            const id = hbRotateBtn.dataset.targetId;
+            if (!id) return;
+            // One overlap slot: rotating again drops the token already in it.
+            const ok = await window.smConfirm({
+                title: "Rotate ping URL?",
+                body: document.querySelector("[data-hb-revoke-prev]")
+                    ? "An overlap is already open. Rotating again revokes the " +
+                      "previous URL immediately rather than in 24 hours, so " +
+                      "anything still calling it stops counting now."
+                    : "A new URL is minted immediately. The old one keeps " +
+                      "working for 24 hours so you can update the job first; " +
+                      "this card will show when it was last used.",
+                confirmLabel: "Rotate",
+            });
+            if (!ok) return;
+            // Stays disabled on success so the pending reload can't double-fire.
+            hbRotateBtn.disabled = true;
+            const done = await hbCall(`/api/v1/targets/${id}/heartbeat/rotate`, "POST",
+                { revoke_previous_immediately: false });
+            if (!done) hbRotateBtn.disabled = false;
+        });
+    }
+
+    const hbRevokePrevBtn = document.querySelector("[data-hb-revoke-prev]");
+    if (hbRevokePrevBtn) {
+        hbRevokePrevBtn.addEventListener("click", async () => {
+            const id = hbRevokePrevBtn.dataset.targetId;
+            if (!id) return;
+            const ok = await window.smConfirm({
+                title: "Revoke the old URL now?",
+                body: "Anything still pinging the old URL stops counting " +
+                    "immediately and will read as down once the period and " +
+                    "grace run out.",
+                confirmLabel: "Revoke",
+                danger: true,
+            });
+            if (!ok) return;
+            hbRevokePrevBtn.disabled = true;
+            const done = await hbCall(`/api/v1/targets/${id}/heartbeat/previous`, "DELETE");
+            if (!done) hbRevokePrevBtn.disabled = false;
+        });
+    }
+
     // Result-row timing expansion: delegated from document so it works for
     // server-rendered rows in the ribbon drill drawer and the share table.
     document.addEventListener("click", (ev) => {

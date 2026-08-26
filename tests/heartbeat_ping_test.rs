@@ -1,5 +1,7 @@
-//! Integration contract for the inbound heartbeat surface. InMemory-backed, no
-//! DB. Requests carry no session or CSRF header, proving bare curl/cron works.
+//! Integration contract for the heartbeat surface. InMemory-backed, no DB.
+//! Ping requests carry no session or CSRF header, proving bare curl/cron works;
+//! the rotation routes below are the authenticated half, driven over HTTP so
+//! the URL a caller is handed is the one the inbound route accepts.
 
 mod common;
 
@@ -261,4 +263,296 @@ async fn ping_flood_trips_the_per_monitor_rate_limit() {
         assert_eq!(res.status(), StatusCode::OK);
     }
     assert!(saw_429, "a tight ping loop must eventually 429");
+}
+
+fn authed(state: &uptimepage::app::AppState) -> axum::Router {
+    common::with_session(
+        uptimepage::build_app_router(state.clone(), CancellationToken::new()),
+        common::test_user_id(),
+        Some(common::test_org_id()),
+        Some("test-owner-session"),
+    )
+}
+
+async fn create_heartbeat(router: &axum::Router, name: &str) -> String {
+    let body = serde_json::json!({
+        "name": name,
+        "interval": 60,
+        "enabled": true,
+        "tags": [],
+        "alerts": [],
+        "check": { "type": "heartbeat", "period": 300000, "grace": 300000 }
+    });
+    let res = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .header("X-Requested-With", "uptimepage")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED, "create heartbeat target");
+    common::body_json(res).await["id"]
+        .as_str()
+        .expect("id")
+        .to_string()
+}
+
+async fn heartbeat_of(router: &axum::Router, id: &str) -> serde_json::Value {
+    let res = router
+        .clone()
+        .oneshot(
+            Request::get(format!("/api/v1/targets/{id}/heartbeat"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    common::body_json(res).await
+}
+
+async fn rotate(
+    router: &axum::Router,
+    id: &str,
+    body: Option<serde_json::Value>,
+) -> axum::http::Response<Body> {
+    let mut req = Request::post(format!("/api/v1/targets/{id}/heartbeat/rotate"))
+        .header("X-Requested-With", "uptimepage");
+    if body.is_some() {
+        req = req.header("content-type", "application/json");
+    }
+    let payload = body.map_or_else(Body::empty, |b| Body::from(b.to_string()));
+    router
+        .clone()
+        .oneshot(req.body(payload).unwrap())
+        .await
+        .unwrap()
+}
+
+async fn end_overlap(router: &axum::Router, id: &str) -> StatusCode {
+    router
+        .clone()
+        .oneshot(
+            Request::delete(format!("/api/v1/targets/{id}/heartbeat/previous"))
+                .header("X-Requested-With", "uptimepage")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+/// The ping URL is absolute; the inbound route only wants its last segment.
+fn token_of(ping_url: &serde_json::Value) -> String {
+    ping_url
+        .as_str()
+        .expect("ping_url")
+        .rsplit('/')
+        .next()
+        .expect("token segment")
+        .to_string()
+}
+
+async fn ping(router: &axum::Router, token: &str) -> StatusCode {
+    router
+        .clone()
+        .oneshot(
+            Request::get(format!("/ping/{token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn rotation_moves_the_url_and_the_old_one_pings_through_the_overlap() {
+    let state = common::build_test_app_state(|_| {});
+    let router = authed(&state);
+    let id = create_heartbeat(&router, "rotating").await;
+    let old = token_of(&heartbeat_of(&router, &id).await["ping_url"]);
+
+    let res = rotate(&router, &id, Some(serde_json::json!({}))).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let info = common::body_json(res).await;
+    let new = token_of(&info["ping_url"]);
+    assert_ne!(new, old, "rotation mints a different URL");
+    assert!(
+        info["previous_url_expires_at"].is_string(),
+        "the overlap is open and dated"
+    );
+    assert!(info["rotated_at"].is_string());
+
+    assert_eq!(ping(&router, &old).await, StatusCode::OK, "overlap accepts");
+    assert_eq!(ping(&router, &new).await, StatusCode::OK);
+    assert!(
+        heartbeat_of(&router, &id).await["previous_url_last_used_at"].is_string(),
+        "the card can say the old URL is still carried"
+    );
+
+    assert_eq!(end_overlap(&router, &id).await, StatusCode::NO_CONTENT);
+    assert_eq!(
+        ping(&router, &old).await,
+        StatusCode::NOT_FOUND,
+        "ended overlap 404s like an unknown token"
+    );
+    assert_eq!(ping(&router, &new).await, StatusCode::OK);
+    assert_eq!(
+        end_overlap(&router, &id).await,
+        StatusCode::NO_CONTENT,
+        "ending nothing is still a 204"
+    );
+}
+
+#[tokio::test]
+async fn revoke_now_kills_the_old_url_in_the_same_commit() {
+    let state = common::build_test_app_state(|_| {});
+    let router = authed(&state);
+    let id = create_heartbeat(&router, "leaked").await;
+    let old = token_of(&heartbeat_of(&router, &id).await["ping_url"]);
+
+    let res = rotate(
+        &router,
+        &id,
+        Some(serde_json::json!({ "revoke_previous_immediately": true })),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let info = common::body_json(res).await;
+    assert!(
+        info["previous_url_expires_at"].is_null(),
+        "no overlap was opened"
+    );
+    assert_eq!(ping(&router, &old).await, StatusCode::NOT_FOUND);
+    assert_eq!(
+        ping(&router, &token_of(&info["ping_url"])).await,
+        StatusCode::OK
+    );
+}
+
+/// Reading a typeless body as "take the defaults" would answer 200 while
+/// downgrading a leaked URL's revoke into a 24-hour overlap.
+#[tokio::test]
+async fn a_rotate_without_a_json_content_type_is_refused_not_defaulted() {
+    let state = common::build_test_app_state(|_| {});
+    let router = authed(&state);
+    let id = create_heartbeat(&router, "bodyless").await;
+    let before = token_of(&heartbeat_of(&router, &id).await["ping_url"]);
+
+    let res = rotate(&router, &id, None).await;
+    assert_eq!(res.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(
+        token_of(&heartbeat_of(&router, &id).await["ping_url"]),
+        before,
+        "a refused rotation rotates nothing"
+    );
+}
+
+/// A mistyped flag must not read as "take the overlap": the caller asked to
+/// kill a leaked URL, and a 200 would leave it live for a day.
+#[tokio::test]
+async fn rotate_refuses_an_unknown_field_rather_than_ignoring_it() {
+    let state = common::build_test_app_state(|_| {});
+    let router = authed(&state);
+    let id = create_heartbeat(&router, "typo").await;
+    let before = token_of(&heartbeat_of(&router, &id).await["ping_url"]);
+
+    let res = rotate(
+        &router,
+        &id,
+        Some(serde_json::json!({ "revoke_immediately": true })),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        token_of(&heartbeat_of(&router, &id).await["ping_url"]),
+        before,
+        "a refused rotation rotates nothing"
+    );
+}
+
+#[tokio::test]
+async fn rotation_routes_refuse_a_monitor_that_is_not_a_heartbeat() {
+    let state = common::build_test_app_state(|_| {});
+    let router = authed(&state);
+    let body = serde_json::json!({
+        "name": "probed",
+        "interval": 180,
+        "enabled": true,
+        "tags": [],
+        "alerts": [],
+        "check": {
+            "type": "http",
+            "url": "https://example.com/",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true
+        }
+    });
+    let res = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets")
+                .header("content-type", "application/json")
+                .header("X-Requested-With", "uptimepage")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let id = common::body_json(res).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let res = rotate(&router, &id, Some(serde_json::json!({}))).await;
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        common::body_json(res).await["error"]["code"],
+        "HEARTBEAT_NOT_CONFIGURED"
+    );
+    assert_eq!(end_overlap(&router, &id).await, StatusCode::NOT_FOUND);
+}
+
+/// A row lost to a partial create has never shown a URL, so rotate mints one
+/// and stops rather than spending the overlap slot on a token nobody holds.
+#[tokio::test]
+async fn rotating_a_healed_row_mints_without_parking_a_phantom_overlap() {
+    let state = common::build_test_app_state(|_| {});
+    let router = authed(&state);
+    let id = create_heartbeat(&router, "healed").await;
+    let target_id = Uuid::parse_str(&id).unwrap();
+    assert!(
+        state
+            .heartbeat_store
+            .remove(common::test_org_id(), target_id)
+            .await
+            .unwrap(),
+        "drop the row the way a partial create would"
+    );
+
+    let res = rotate(&router, &id, Some(serde_json::json!({}))).await;
+    assert_eq!(res.status(), StatusCode::OK);
+    let info = common::body_json(res).await;
+    assert!(info["ping_url"].is_string(), "the heal minted a URL");
+    assert!(
+        info["previous_url_expires_at"].is_null(),
+        "nothing was superseded, so no overlap is advertised"
+    );
+    assert!(info["rotated_at"].is_null(), "a mint is not a rotation");
+    assert_eq!(
+        ping(&router, &token_of(&info["ping_url"])).await,
+        StatusCode::OK
+    );
 }

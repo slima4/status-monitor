@@ -10,11 +10,14 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::domain::{OrgId, PingSignal};
+use crate::domain::{OrgId, PingSignal, UserId};
 use crate::error::{AppError, Result};
 use crate::security::Cipher;
 use crate::storage::capability_token;
 use crate::worker::heartbeat::{Failure, PingState};
+
+/// Long enough for a daily deploy cycle, short enough for a leaked URL.
+pub const PREV_TOKEN_OVERLAP: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 #[derive(Debug, Clone)]
 pub struct HeartbeatMonitor {
@@ -34,9 +37,15 @@ pub struct HeartbeatMonitor {
     pub last_start_at: Option<DateTime<Utc>>,
     pub last_fail_at: Option<DateTime<Utc>>,
     pub last_exit_code: Option<u8>,
+    pub token_rotated_at: Option<DateTime<Utc>>,
+    pub prev_token_expires_at: Option<DateTime<Utc>>,
+    pub prev_token_last_used_at: Option<DateTime<Utc>>,
 }
 
 impl HeartbeatMonitor {
+    pub fn open_overlap(&self) -> Option<DateTime<Utc>> {
+        self.prev_token_expires_at.filter(|t| *t > Utc::now())
+    }
     /// No ping of any signal yet: not evaluated, not alerting, no data. Single
     /// owner of the rule, since the API projection and the badge both ask.
     pub fn is_pending(&self) -> bool {
@@ -116,6 +125,22 @@ pub trait HeartbeatStore: Send + Sync {
     async fn get(&self, org: OrgId, target_id: Uuid) -> Result<Option<HeartbeatMonitor>>;
     /// Target deletes cascade via the FK; this is for a kind switched away.
     async fn remove(&self, org: OrgId, target_id: Uuid) -> Result<bool>;
+    /// Same row, new token. The old one keeps pinging for
+    /// [`PREV_TOKEN_OVERLAP`] unless `revoke_previous`. `None` outside `org`.
+    async fn rotate(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        revoke_previous: bool,
+        actor: Option<UserId>,
+    ) -> Result<Option<HeartbeatMonitor>>;
+    /// Ends an open overlap early. `false` when none was open.
+    async fn revoke_previous(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        actor: Option<UserId>,
+    ) -> Result<bool>;
     /// `None` for unknown tokens and soft-deleted orgs, so both 404 the same way.
     async fn record_signal_by_token(
         &self,
@@ -146,6 +171,9 @@ struct HeartbeatRow {
     last_start_at: Option<DateTime<Utc>>,
     last_fail_at: Option<DateTime<Utc>>,
     last_exit_code: Option<i16>,
+    token_rotated_at: Option<DateTime<Utc>>,
+    prev_token_expires_at: Option<DateTime<Utc>>,
+    prev_token_last_used_at: Option<DateTime<Utc>>,
 }
 
 impl HeartbeatRow {
@@ -159,12 +187,16 @@ impl HeartbeatRow {
             last_start_at: self.last_start_at,
             last_fail_at: self.last_fail_at,
             last_exit_code: exit_code_of(self.last_exit_code),
+            token_rotated_at: self.token_rotated_at,
+            prev_token_expires_at: self.prev_token_expires_at,
+            prev_token_last_used_at: self.prev_token_last_used_at,
         }
     }
 }
 
 const HB_COLUMNS: &str = "token_enc, last_ping_at, armed_at, first_ping_at, created_at, \
-     last_start_at, last_fail_at, last_exit_code";
+     last_start_at, last_fail_at, last_exit_code, token_rotated_at, \
+     prev_token_expires_at, prev_token_last_used_at";
 
 #[async_trait]
 impl HeartbeatStore for PgHeartbeatStore {
@@ -214,6 +246,83 @@ impl HeartbeatStore for PgHeartbeatStore {
         Ok(res.rows_affected() > 0)
     }
 
+    async fn rotate(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        revoke_previous: bool,
+        actor: Option<UserId>,
+    ) -> Result<Option<HeartbeatMonitor>> {
+        let minted = capability_token::mint(self.cipher.as_deref())?;
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        // Overwriting prev_* kills a twice-superseded token immediately.
+        let row: Option<HeartbeatRow> = sqlx::query_as(&format!(
+            "UPDATE heartbeat_monitors SET \
+                 prev_token_hash         = CASE WHEN $3 THEN NULL ELSE token_hash END, \
+                 prev_token_expires_at   = CASE WHEN $3 THEN NULL \
+                                           ELSE now() + make_interval(secs => $4) END, \
+                 prev_token_last_used_at = NULL, \
+                 token_hash = $5, token_enc = $6, token_rotated_at = now() \
+             WHERE org_id = $1 AND target_id = $2 \
+             RETURNING {HB_COLUMNS}"
+        ))
+        .bind(org.0)
+        .bind(target_id)
+        .bind(revoke_previous)
+        .bind(PREV_TOKEN_OVERLAP.as_secs_f64())
+        .bind(&minted.hash)
+        .bind(&minted.sealed)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if row.is_some() {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "heartbeat.token_rotated",
+                serde_json::json!({ "target_id": target_id, "revoked_previous": revoke_previous }),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(db_err)?;
+        Ok(row.map(|r| r.into_monitor(self.cipher.as_deref())))
+    }
+
+    async fn revoke_previous(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        actor: Option<UserId>,
+    ) -> Result<bool> {
+        let mut tx = self.pool.begin().await.map_err(db_err)?;
+        let closed: Option<(Uuid,)> = sqlx::query_as(
+            "UPDATE heartbeat_monitors SET \
+                 prev_token_hash = NULL, prev_token_expires_at = NULL, \
+                 prev_token_last_used_at = NULL \
+             WHERE org_id = $1 AND target_id = $2 \
+               AND prev_token_expires_at > now() \
+             RETURNING target_id",
+        )
+        .bind(org.0)
+        .bind(target_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(db_err)?;
+        if closed.is_some() {
+            crate::storage::orgs::record_audit_tx(
+                &mut tx,
+                org,
+                actor,
+                "heartbeat.prev_token_revoked",
+                serde_json::json!({ "target_id": target_id }),
+            )
+            .await?;
+        }
+        tx.commit().await.map_err(db_err)?;
+        Ok(closed.is_some())
+    }
+
     async fn record_signal_by_token(
         &self,
         raw_token: &str,
@@ -224,6 +333,7 @@ impl HeartbeatStore for PgHeartbeatStore {
         // shows the new row. FOR UPDATE pins the CTE against inlining and makes
         // a statement that waited on a concurrent ping re-read what it
         // committed, instead of timing the run against a start already closed.
+        // A superseded-token ping counts fully: the job is alive.
         let row: Option<AcceptedRow> = sqlx::query_as(
             "WITH prev AS ( \
                  SELECT hm.target_id, hm.last_ping_at, hm.last_start_at, hm.last_fail_at, \
@@ -232,9 +342,12 @@ impl HeartbeatStore for PgHeartbeatStore {
                  JOIN organizations o ON o.id = hm.org_id AND o.deleted_at IS NULL \
                  JOIN targets t ON t.id = hm.target_id \
                  WHERE hm.token_hash = $1 \
+                    OR (hm.prev_token_hash = $1 AND hm.prev_token_expires_at > now()) \
                  FOR UPDATE OF hm \
              ) \
              UPDATE heartbeat_monitors hm SET \
+                 prev_token_last_used_at = CASE WHEN hm.prev_token_hash = $1 \
+                                           THEN now() ELSE hm.prev_token_last_used_at END, \
                  armed_at       = CASE WHEN hm.first_ping_at IS NULL AND $2 <> 'fail' \
                                        THEN now() ELSE hm.armed_at END, \
                  last_ping_at   = CASE WHEN $2 = 'success' THEN now() ELSE hm.last_ping_at END, \
@@ -312,6 +425,21 @@ impl AcceptedRow {
     }
 }
 
+/// Index hygiene only; expiry is enforced by timestamp at resolution time.
+pub async fn purge_expired_prev_tokens(pool: &PgPool) -> sqlx::Result<u64> {
+    let res = sqlx::query(
+        "UPDATE heartbeat_monitors SET \
+             /* SAFE: platform-wide sweep — expiry already fenced these tokens \
+                off at resolution, this only keeps the unique index small */ \
+             prev_token_hash = NULL, prev_token_expires_at = NULL, \
+             prev_token_last_used_at = NULL \
+         WHERE prev_token_expires_at < now()",
+    )
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
 fn db_err(e: sqlx::Error) -> AppError {
     AppError::Other(anyhow::anyhow!("heartbeat_monitors: {e}"))
 }
@@ -323,6 +451,7 @@ struct MemHeartbeat {
     target_id: Uuid,
     monitor: HeartbeatMonitor,
     token_hash: String,
+    prev_token_hash: Option<String>,
 }
 
 /// No target/org tables here, so the org-membership and soft-delete guards are
@@ -355,12 +484,16 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             last_start_at: None,
             last_fail_at: None,
             last_exit_code: None,
+            token_rotated_at: None,
+            prev_token_expires_at: None,
+            prev_token_last_used_at: None,
         };
         st.push(MemHeartbeat {
             org,
             target_id,
             monitor: monitor.clone(),
             token_hash: minted.hash,
+            prev_token_hash: None,
         });
         Ok(Some(monitor))
     }
@@ -382,6 +515,55 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
         Ok(st.len() < before)
     }
 
+    async fn rotate(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        revoke_previous: bool,
+        _actor: Option<UserId>,
+    ) -> Result<Option<HeartbeatMonitor>> {
+        let minted = capability_token::mint(None)?;
+        let mut st = self.inner.lock().unwrap();
+        Ok(st
+            .iter_mut()
+            .find(|m| m.org == org && m.target_id == target_id)
+            .map(|m| {
+                let now = Utc::now();
+                if revoke_previous {
+                    m.prev_token_hash = None;
+                    m.monitor.prev_token_expires_at = None;
+                } else {
+                    m.prev_token_hash = Some(std::mem::take(&mut m.token_hash));
+                    m.monitor.prev_token_expires_at = Some(now + PREV_TOKEN_OVERLAP);
+                }
+                m.token_hash = minted.hash;
+                m.monitor.token = Some(minted.raw);
+                m.monitor.token_rotated_at = Some(now);
+                m.monitor.prev_token_last_used_at = None;
+                m.monitor.clone()
+            }))
+    }
+
+    async fn revoke_previous(
+        &self,
+        org: OrgId,
+        target_id: Uuid,
+        _actor: Option<UserId>,
+    ) -> Result<bool> {
+        let mut st = self.inner.lock().unwrap();
+        Ok(st
+            .iter_mut()
+            .find(|m| {
+                m.org == org && m.target_id == target_id && m.monitor.open_overlap().is_some()
+            })
+            .map(|m| {
+                m.prev_token_hash = None;
+                m.monitor.prev_token_expires_at = None;
+                m.monitor.prev_token_last_used_at = None;
+            })
+            .is_some())
+    }
+
     async fn record_signal_by_token(
         &self,
         raw_token: &str,
@@ -395,8 +577,15 @@ impl HeartbeatStore for InMemoryHeartbeatStore {
             .lock()
             .unwrap()
             .iter_mut()
-            .find(|m| m.token_hash == hash)
+            .find(|m| {
+                m.token_hash == hash
+                    || (m.prev_token_hash.as_deref() == Some(hash.as_str())
+                        && m.monitor.open_overlap().is_some())
+            })
             .map(|m| {
+                if m.prev_token_hash.as_deref() == Some(hash.as_str()) {
+                    m.monitor.prev_token_last_used_at = Some(now);
+                }
                 let prev = m.monitor.ping_state();
                 let first = m.monitor.is_pending();
                 if first && signal != PingSignal::Fail {
@@ -539,6 +728,181 @@ mod tests {
         assert!(
             store
                 .record_signal_by_token(m.token.as_deref().unwrap(), PingSignal::Success, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn rotation_mints_a_new_url_and_keeps_the_wiring() {
+        let store = InMemoryHeartbeatStore::new();
+        let org = OrgId(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        let before = store.ensure(org, target).await.unwrap().unwrap();
+        let old_token = before.token.clone().unwrap();
+        store
+            .record_signal_by_token(&old_token, PingSignal::Success, None)
+            .await
+            .unwrap()
+            .unwrap();
+        let wired = store.get(org, target).await.unwrap().unwrap();
+
+        let rotated = store
+            .rotate(org, target, false, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_ne!(rotated.token, Some(old_token.clone()));
+        assert_eq!(rotated.first_ping_at, wired.first_ping_at);
+        assert_eq!(rotated.armed_at, wired.armed_at, "rotation is not a re-arm");
+        assert!(rotated.open_overlap().is_some());
+        assert!(rotated.prev_token_last_used_at.is_none());
+
+        let on_prev = store
+            .record_signal_by_token(&old_token, PingSignal::Success, None)
+            .await
+            .unwrap()
+            .expect("superseded token pings through the overlap");
+        let after = store.get(org, target).await.unwrap().unwrap();
+        assert_eq!(after.prev_token_last_used_at, Some(on_prev.at));
+        assert_eq!(
+            after.last_ping_at,
+            Some(on_prev.at),
+            "it is an ordinary ping"
+        );
+
+        store
+            .record_signal_by_token(rotated.token.as_deref().unwrap(), PingSignal::Success, None)
+            .await
+            .unwrap()
+            .expect("the new token pings");
+    }
+
+    #[tokio::test]
+    async fn revoke_now_kills_the_old_url_at_once() {
+        let store = InMemoryHeartbeatStore::new();
+        let org = OrgId(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        let old_token = store
+            .ensure(org, target)
+            .await
+            .unwrap()
+            .unwrap()
+            .token
+            .unwrap();
+        let rotated = store
+            .rotate(org, target, true, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(rotated.open_overlap().is_none());
+        assert!(
+            store
+                .record_signal_by_token(&old_token, PingSignal::Success, None)
+                .await
+                .unwrap()
+                .is_none(),
+            "revoked token 404s like an unknown one"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_second_rotation_leaves_only_one_previous_token() {
+        let store = InMemoryHeartbeatStore::new();
+        let org = OrgId(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        let a = store
+            .ensure(org, target)
+            .await
+            .unwrap()
+            .unwrap()
+            .token
+            .unwrap();
+        let b = store
+            .rotate(org, target, false, None)
+            .await
+            .unwrap()
+            .unwrap()
+            .token
+            .unwrap();
+        let c = store
+            .rotate(org, target, false, None)
+            .await
+            .unwrap()
+            .unwrap()
+            .token
+            .unwrap();
+        assert!(
+            store
+                .record_signal_by_token(&a, PingSignal::Success, None)
+                .await
+                .unwrap()
+                .is_none(),
+            "twice-superseded token is dead immediately"
+        );
+        for live in [&b, &c] {
+            assert!(
+                store
+                    .record_signal_by_token(live, PingSignal::Success, None)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn rotating_a_never_pinged_monitor_leaves_it_pending() {
+        let store = InMemoryHeartbeatStore::new();
+        let org = OrgId(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        store.ensure(org, target).await.unwrap().unwrap();
+        let rotated = store
+            .rotate(org, target, false, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(rotated.is_pending());
+    }
+
+    #[tokio::test]
+    async fn ending_the_overlap_early_revokes_the_previous_token() {
+        let store = InMemoryHeartbeatStore::new();
+        let org = OrgId(Uuid::new_v4());
+        let target = Uuid::new_v4();
+        let old_token = store
+            .ensure(org, target)
+            .await
+            .unwrap()
+            .unwrap()
+            .token
+            .unwrap();
+        store
+            .rotate(org, target, false, None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(store.revoke_previous(org, target, None).await.unwrap());
+        assert!(
+            store
+                .record_signal_by_token(&old_token, PingSignal::Success, None)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            !store.revoke_previous(org, target, None).await.unwrap(),
+            "nothing left to end"
+        );
+    }
+
+    #[tokio::test]
+    async fn rotating_an_absent_row_rotates_nothing() {
+        let store = InMemoryHeartbeatStore::new();
+        assert!(
+            store
+                .rotate(OrgId(Uuid::new_v4()), Uuid::new_v4(), false, None)
                 .await
                 .unwrap()
                 .is_none()

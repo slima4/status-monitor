@@ -532,6 +532,11 @@ pub struct HeartbeatInfo {
     pub observed_period_secs: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cadence_advice: Option<CadenceAdviceView>,
+    pub rotated_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// While set, the pre-rotation URL still pings, and dies at this instant.
+    pub previous_url_expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Evidence the old URL is still carried. `null` once the overlap ends.
+    pub previous_url_last_used_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
@@ -585,6 +590,19 @@ pub(crate) async fn heartbeat_info(
     enabled: bool,
 ) -> Result<HeartbeatInfo> {
     let hb = state.heartbeat_store.get(org, target_id).await?;
+    Ok(heartbeat_info_from(state, org, target_id, check, enabled, hb).await)
+}
+
+/// Infallible on purpose: a writer that has committed must not lose its
+/// response to a read, since the retry supersedes the token it just minted.
+pub(crate) async fn heartbeat_info_from(
+    state: &AppState,
+    org: OrgId,
+    target_id: Uuid,
+    check: &HeartbeatCheck,
+    enabled: bool,
+    hb: Option<HeartbeatMonitor>,
+) -> HeartbeatInfo {
     let observed = observed_cadence(state, org, target_id).await;
     let last_failure_output = match hb.as_ref().and_then(|h| h.last_fail_at) {
         Some(at) => state
@@ -604,7 +622,7 @@ pub(crate) async fn heartbeat_info(
         }
         _ => (None, None),
     };
-    Ok(HeartbeatInfo {
+    HeartbeatInfo {
         ping_url: hb.as_ref().and_then(|h| h.token.as_deref()).map(|t| {
             format!(
                 "{}/ping/{t}",
@@ -618,6 +636,11 @@ pub(crate) async fn heartbeat_info(
         created_at: hb.as_ref().map(|h| h.created_at),
         last_start_at: hb.as_ref().and_then(|h| h.last_start_at),
         last_fail_at: hb.as_ref().and_then(|h| h.last_fail_at),
+        rotated_at: hb.as_ref().and_then(|h| h.token_rotated_at),
+        previous_url_expires_at: hb.as_ref().and_then(|h| h.open_overlap()),
+        previous_url_last_used_at: hb
+            .as_ref()
+            .and_then(|h| h.open_overlap().and(h.prev_token_last_used_at)),
         last_exit_code: hb.and_then(|h| h.last_exit_code),
         last_failure_output,
         due_at,
@@ -627,7 +650,7 @@ pub(crate) async fn heartbeat_info(
         cadence_advice: observed
             .and_then(|o| o.advice(check.period + check.grace))
             .map(Into::into),
-    })
+    }
 }
 
 #[utoipa::path(
@@ -658,6 +681,108 @@ pub async fn get_heartbeat(
     Ok(Json(
         heartbeat_info(&state, org, id, check, target.enabled).await?,
     ))
+}
+
+#[derive(Debug, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RotateHeartbeatRequest {
+    /// `true` revokes the old URL in the same commit (for a leaked token);
+    /// the default keeps it pinging for 24 hours.
+    #[serde(default)]
+    pub revoke_previous_immediately: bool,
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/targets/{id}/heartbeat/rotate", tag = "targets",
+    summary = "Rotate a heartbeat monitor's ping URL",
+    description = "Mints a replacement ping URL on the same monitor: incidents, \
+                   history, share links and status-page bindings are untouched, \
+                   and the silence clock is not re-armed. Unless \
+                   `revoke_previous_immediately`, the old URL keeps working for \
+                   24 hours; `previous_url_last_used_at` in the response shows \
+                   whether anything still calls it.",
+    params(("id" = Uuid, Path)),
+    request_body = RotateHeartbeatRequest,
+    responses(
+        (status = 200, body = HeartbeatInfo),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn rotate_heartbeat(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<TargetsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+    Json(req): Json<RotateHeartbeatRequest>,
+) -> Result<Json<HeartbeatInfo>> {
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
+    let Some(check) = target.check.as_heartbeat() else {
+        return Err(AppError::not_found(
+            codes::HEARTBEAT_NOT_CONFIGURED,
+            "this monitor is not a heartbeat",
+        ));
+    };
+    // A row lost to a partial create has never shown a URL, so minting one is
+    // the whole job; superseding it would spend the one overlap slot on a
+    // token nobody holds.
+    if state.heartbeat_store.get(org, id).await?.is_none() {
+        let healed = state
+            .heartbeat_store
+            .ensure(org, id)
+            .await?
+            .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
+        return Ok(Json(
+            heartbeat_info_from(&state, org, id, check, target.enabled, Some(healed)).await,
+        ));
+    }
+    let rotated = state
+        .heartbeat_store
+        .rotate(org, id, req.revoke_previous_immediately, Some(user))
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
+    Ok(Json(
+        heartbeat_info_from(&state, org, id, check, target.enabled, Some(rotated)).await,
+    ))
+}
+
+#[utoipa::path(
+    delete, path = "/api/v1/targets/{id}/heartbeat/previous", tag = "targets",
+    summary = "End a rotation's overlap window early",
+    description = "Revokes the pre-rotation ping URL now instead of at \
+                   `previous_url_expires_at`. Idempotent: 204 whether or not an \
+                   overlap was open.",
+    params(("id" = Uuid, Path)),
+    responses(
+        (status = 204, description = "No overlap remains"),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub async fn revoke_heartbeat_previous(
+    State(state): State<AppState>,
+    Authorized(org, _): Authorized<TargetsWrite>,
+    CurrentUser(user): CurrentUser,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode> {
+    let target = state
+        .target_store
+        .get(org, id)
+        .await?
+        .ok_or_else(|| AppError::not_found(codes::TARGET_NOT_FOUND, "target not found"))?;
+    if target.check.as_heartbeat().is_none() {
+        return Err(AppError::not_found(
+            codes::HEARTBEAT_NOT_CONFIGURED,
+            "this monitor is not a heartbeat",
+        ));
+    }
+    state
+        .heartbeat_store
+        .revoke_previous(org, id, Some(user))
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(

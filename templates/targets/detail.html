@@ -48,12 +48,17 @@
               class="min-w-0 flex-1 break-all rounded-sm bg-[color:var(--theme-surface-sunk)] px-2 py-1.5 font-mono text-xs">{{ url }}</code>
         <button type="button" data-copy="#hb-ping-url" aria-label="Copy ping URL"
                 class="sticker-btn px-3 py-1.5 text-sm font-medium">copy</button>
+        <button type="button" data-hb-rotate data-target-id="{{ id }}" aria-label="Rotate ping URL"
+                class="sticker-btn gap-1.5 px-3 py-1.5 text-sm font-medium">
+          <svg class="mp-icon" aria-hidden="true"><use href="#i-rotate" /></svg>rotate</button>
       </div>
       <p class="text-xs text-muted">
         Call it as the last step of the job, for example <code class="font-mono">curl -fsS</code>.
         GET and POST both count, and a POST body is kept as that run's output.
       </p>
     </div>
+
+    {% include "targets/partials/_heartbeat_overlap.html" %}
 
     <div class="space-y-1.5 border-t border-[color:var(--theme-line)] pt-3">
       <p class="panel-label">signals</p>
@@ -67,8 +72,13 @@
     <p class="text-xs text-muted">
       Ping URL not available yet. It is provisioned within moments of
       creation (refresh shortly). If this persists after an encryption-key
-      rotation, recreate the monitor to mint a new token.
+      rotation, rotate the ping URL to mint a readable one; pings on the
+      current URL keep counting until you do.
     </p>
+    <button type="button" data-hb-rotate data-target-id="{{ id }}"
+            class="sticker-btn gap-1.5 px-3 py-1.5 text-sm font-medium">
+      <svg class="mp-icon" aria-hidden="true"><use href="#i-rotate" /></svg>rotate ping url</button>
+    {% include "targets/partials/_heartbeat_overlap.html" %}
     {% endif %}
 
     <dl class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-1.5 border-t border-[color:var(--theme-line)] pt-3 text-xs">

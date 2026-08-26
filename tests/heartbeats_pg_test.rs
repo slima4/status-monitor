@@ -1,8 +1,8 @@
 //! Live-Postgres contract for `heartbeat_monitors`: idempotent token minting,
 //! single-statement ping recording (unknown / deleted-target / deleted-org →
 //! None), the store-level disabled→enabled re-arm, per-org isolation, the
-//! refresh-time row self-heal, the never-pinged dispatch gate, and
-//! migrations 031 and 047.
+//! refresh-time row self-heal, the never-pinged dispatch gate, token rotation
+//! (overlap, revoke-now, expiry, audit), and migrations 031 and 047.
 //!
 //! Live-PG ignored: needs `DATABASE_URL`. Migrations auto-apply on first
 //! connect. Point it at a throwaway DB to also validate migration 031.
@@ -1223,4 +1223,284 @@ async fn token_of(store: &PgHeartbeatStore, org: OrgId, target: Uuid) -> String 
         .expect("row")
         .token
         .expect("plaintext without cipher")
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn rotation_keeps_the_row_and_overlaps_the_old_token_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-rot").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let target = make_heartbeat_target(&pool, org_a, "rotated", true).await;
+    let old_token = token_of(&store, org_a, target).await;
+    store
+        .record_signal_by_token(&old_token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("wire the monitor up");
+    let wired = store.get(org_a, target).await.unwrap().expect("row");
+
+    assert!(
+        store
+            .rotate(org_b, target, false, Some(user_b))
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let rotated = store
+        .rotate(org_a, target, false, Some(user_a))
+        .await
+        .unwrap()
+        .expect("row");
+    let new_token = rotated.token.clone().expect("plaintext without cipher");
+    assert_ne!(new_token, old_token);
+    assert_eq!(rotated.first_ping_at, wired.first_ping_at);
+    assert_eq!(rotated.armed_at, wired.armed_at, "rotation is not a re-arm");
+    assert!(rotated.open_overlap().is_some());
+    assert!(rotated.prev_token_last_used_at.is_none());
+
+    let on_prev = store
+        .record_signal_by_token(&old_token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("superseded token still records");
+    let read = store.get(org_a, target).await.unwrap().expect("row");
+    assert_eq!(read.prev_token_last_used_at, Some(on_prev.at));
+    assert_eq!(read.last_ping_at, Some(on_prev.at));
+    store
+        .record_signal_by_token(&new_token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("new token records");
+
+    let audits: Vec<(Option<Uuid>,)> = sqlx::query_as(
+        "SELECT actor_id FROM org_audit_log \
+         WHERE org_id = $1 AND action = 'heartbeat.token_rotated'",
+    )
+    .bind(org_a.0)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(audits.len(), 1, "one rotation, one audit row");
+    assert_eq!(audits[0].0, Some(user_a.0));
+
+    assert!(
+        store
+            .revoke_previous(org_a, target, Some(user_a))
+            .await
+            .unwrap()
+    );
+    assert!(
+        store
+            .record_signal_by_token(&old_token, PingSignal::Success, None)
+            .await
+            .unwrap()
+            .is_none(),
+        "revoked token 404s like an unknown one"
+    );
+    assert!(
+        !store
+            .revoke_previous(org_a, target, Some(user_a))
+            .await
+            .unwrap(),
+        "nothing left to end"
+    );
+
+    let revokes: Vec<(Option<Uuid>,)> = sqlx::query_as(
+        "SELECT actor_id FROM org_audit_log \
+         WHERE org_id = $1 AND action = 'heartbeat.prev_token_revoked'",
+    )
+    .bind(org_a.0)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        revokes.len(),
+        1,
+        "one overlap ended, and the no-op call audits nothing"
+    );
+    assert_eq!(revokes[0].0, Some(user_a.0));
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn overlap_expiry_is_by_timestamp_and_the_sweep_only_tidies_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-exp").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let target = make_heartbeat_target(&pool, org_a, "expiring", true).await;
+    let old_token = token_of(&store, org_a, target).await;
+    let rotated = store
+        .rotate(org_a, target, false, Some(user_a))
+        .await
+        .unwrap()
+        .expect("row");
+
+    sqlx::query(
+        "UPDATE heartbeat_monitors \
+         SET prev_token_expires_at = now() - interval '1 minute' WHERE target_id = $1",
+    )
+    .bind(target)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(
+        store
+            .record_signal_by_token(&old_token, PingSignal::Success, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let read = store.get(org_a, target).await.unwrap().expect("row");
+    assert!(read.open_overlap().is_none());
+
+    assert!(
+        uptimepage::storage::heartbeats::purge_expired_prev_tokens(&pool)
+            .await
+            .unwrap()
+            >= 1
+    );
+    let bare: (Option<String>, Option<chrono::DateTime<chrono::Utc>>) = sqlx::query_as(
+        "SELECT prev_token_hash, prev_token_expires_at FROM heartbeat_monitors \
+         WHERE target_id = $1",
+    )
+    .bind(target)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(bare, (None, None));
+
+    let current = rotated.token.expect("plaintext without cipher");
+    let re = store
+        .rotate(org_a, target, true, Some(user_a))
+        .await
+        .unwrap()
+        .expect("row");
+    assert!(re.open_overlap().is_none());
+    assert!(
+        store
+            .record_signal_by_token(&current, PingSignal::Success, None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
+}
+
+/// Rotating a leaked secret must not cost the record that proves the outage
+/// happened, which is the whole reason this exists instead of delete-recreate.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL; run via DATABASE_URL=... cargo test -- --ignored"]
+async fn rotation_keeps_the_incidents_shares_and_page_binding_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org_a, org_b, user_a, user_b) = two_orgs(&pool, "hb-keep").await;
+    let store = PgHeartbeatStore::new(pool.clone(), None);
+    let target = make_heartbeat_target(&pool, org_a, "wired-up", true).await;
+    let old_token = token_of(&store, org_a, target).await;
+    store
+        .record_signal_by_token(&old_token, PingSignal::Success, None)
+        .await
+        .unwrap()
+        .expect("wire the monitor up");
+
+    let (incident,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, origin, visibility) \
+         VALUES ($1, $2, now() - INTERVAL '2 hours', 'down', 'monitor', 'public') RETURNING id",
+    )
+    .bind(org_a.0)
+    .bind(target)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let share_hash = format!("share-{}", Uuid::new_v4().simple());
+    let (share,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO monitor_shares (org_id, target_id, token_hash, token_enc, created_by) \
+         VALUES ($1, $2, $3, 'sealed', $4) RETURNING id",
+    )
+    .bind(org_a.0)
+    .bind(target)
+    .bind(&share_hash)
+    .bind(user_a.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+
+    let (page,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO status_pages (org_id, slug, name) VALUES ($1, $2, $3) RETURNING id",
+    )
+    .bind(org_a.0)
+    .bind(unique_slug("hb-keep"))
+    .bind("Keep")
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO status_page_components (org_id, status_page_id, target_id, public_name) \
+         VALUES ($1, $2, $3, 'Nightly backup')",
+    )
+    .bind(org_a.0)
+    .bind(page)
+    .bind(target)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let before = store.get(org_a, target).await.unwrap().expect("row");
+    let rotated = store
+        .rotate(org_a, target, false, Some(user_a))
+        .await
+        .unwrap()
+        .expect("row");
+    assert_ne!(
+        rotated.token.clone().expect("plaintext without cipher"),
+        old_token
+    );
+    assert_eq!(rotated.first_ping_at, before.first_ping_at);
+    assert_eq!(rotated.armed_at, before.armed_at);
+
+    let (open_incidents,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM incidents WHERE id = $1 AND target_id = $2")
+            .bind(incident)
+            .bind(target)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(open_incidents, 1, "the outage record survives the rotation");
+
+    let (live_hash, revoked): (String, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as("SELECT token_hash, revoked_at FROM monitor_shares WHERE id = $1")
+            .bind(share)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        live_hash, share_hash,
+        "share links rotate on their own clock"
+    );
+    assert!(revoked.is_none());
+
+    let (bound,): (i64,) = sqlx::query_as(
+        "SELECT count(*) FROM status_page_components \
+         WHERE status_page_id = $1 AND target_id = $2",
+    )
+    .bind(page)
+    .bind(target)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(bound, 1, "the monitor keeps its place on the status page");
+
+    cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }

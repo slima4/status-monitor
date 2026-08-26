@@ -111,6 +111,14 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             "/targets/{id}/heartbeat",
             get(handlers::targets::get_heartbeat),
         )
+        .route(
+            "/targets/{id}/heartbeat/rotate",
+            axum::routing::post(handlers::targets::rotate_heartbeat),
+        )
+        .route(
+            "/targets/{id}/heartbeat/previous",
+            axum::routing::delete(handlers::targets::revoke_heartbeat_previous),
+        )
         .route("/regions", get(handlers::targets::list_regions))
         .route(
             "/targets/{id}/incidents",
