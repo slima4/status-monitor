@@ -98,9 +98,10 @@
             // Re-localize the whole document, not just the swap target: htmx
             // OOB swaps land outside the primary target (e.g. the detail
             // page's results rows), so a target-scoped pass would miss them.
-            document.body.addEventListener("htmx:afterSettle", function () {
-                decorate(document);
-            });
+            // Settle is timer-deferred, long enough to paint the UTC fallback.
+            var relocalize = function () { decorate(document); };
+            document.body.addEventListener("htmx:afterSwap", relocalize);
+            document.body.addEventListener("htmx:afterSettle", relocalize);
         }
     }
 

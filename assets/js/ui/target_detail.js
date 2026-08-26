@@ -72,8 +72,10 @@
         const panel = document.querySelector("[data-hb-due]");
         const badge = document.getElementById("detail-status-badge");
         if (!panel || !badge || !badge.classList.contains("status-badge--up")) return;
+        // Absent means zero grace: no late window, and down is the server's call.
+        if (!panel.dataset.hbDown) return;
         const due = Date.parse(panel.dataset.hbDue);
-        const down = panel.dataset.hbDown ? Date.parse(panel.dataset.hbDown) : Infinity;
+        const down = Date.parse(panel.dataset.hbDown);
         const now = Date.now();
         if (!(now > due && now <= down)) return;
         badge.classList.replace("status-badge--up", "status-badge--late");
