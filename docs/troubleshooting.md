@@ -177,3 +177,13 @@ The failure evidence is where you confirm it: the URL is still the login path an
 `step_timeout` does not apply to them. `fill` and `click` look for their element once and fail on the spot; only `wait_for`, `assert_text` and `assert_url` poll until the timeout runs out. Raising `step_timeout` will not help a field that renders late.
 
 Put a `wait_for` on that selector ahead of the step that needs it.
+
+## A heartbeat monitor flaps overnight for a job that ran fine
+
+The declared period is shorter than the job's real cadence. A heartbeat goes down at `period + grace`, so if the job genuinely runs less often than you declared, every ping buys one window and then expires before the next one arrives. The monitor alternates down and up on each run, and the job was never broken.
+
+A real case: `period=600` with `grace=300` on a job that actually ran about every 80 minutes. Every up interval lasted exactly period plus grace. The evaluator was correct and the declaration was wrong.
+
+The monitor page tells you this once it has enough pings. It takes the median gap between successful pings inside a 14-day window and needs at least five gaps before it will judge, so an hourly job has a verdict within hours and a nightly one after about five days. A job running less often than every three days cannot fit five gaps into the window and gets no verdict at all. The same three values are on the API as `declared_period_secs`, `observed_period_secs` and `cadence_advice`. The advice is judged against `period + grace` rather than the bare period, because a job sitting inside its grace window is not late and does not page anyone.
+
+Set the period to how often the job really runs and keep the grace wide enough for normal jitter. The opposite error is quieter and worse: a period much longer than the real cadence leaves a dead job unnoticed for far longer than it needs to be, and `cadence_advice` flags that direction too. See [Heartbeat](monitor-types.md#heartbeat).

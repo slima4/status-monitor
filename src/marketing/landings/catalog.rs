@@ -560,6 +560,107 @@ docker compose up -d"#,
         cta: "Start free",
     },
     Landing {
+        path: "/cron-job-monitoring",
+        created: "2026-08-27",
+        lastmod: "2026-08-27",
+        title: "Cron Job Monitoring and Heartbeat Checks",
+        eyebrow: "heartbeat checks",
+        h1: "Find out when a scheduled job stops running",
+        meta_description: "Heartbeat monitoring for cron jobs, backups, queue workers and pipelines. Your job calls a ping URL, we alert when it goes quiet. Free to start, no card.",
+        lede: "A cron job that stops running produces no error and leaves nothing to poll, because the thing you want to check is a job that is not there. A heartbeat reverses the direction: your job calls a URL we give it, and we tell you when the calls stop.",
+        features: &[
+            Feature {
+                label: "Direction",
+                value: "your job calls us",
+            },
+            Feature {
+                label: "Signals",
+                value: "start, success, fail, exit code",
+            },
+            Feature {
+                label: "Run output",
+                value: "POST body kept per run",
+            },
+            Feature {
+                label: "Late job",
+                value: "period plus a grace window",
+            },
+            Feature {
+                label: "Ping URL",
+                value: "rotatable, 24h overlap",
+            },
+            Feature {
+                label: "Price to start",
+                value: "free, no card",
+            },
+        ],
+        sections: &[
+            Section {
+                heading: "The failure nothing reports",
+                body: "A job that fails loudly is the easy case. It exits nonzero, something catches it, someone gets paged. The costly case is the job that stops being run at all, because a crontab was edited away or the container holding it no longer starts. There is no process left to fail, so nothing is reported, and the dashboard stays as green as it was while the job still worked. GitLab found their nightly backup that way, months late.",
+            },
+            Section {
+                heading: "A period and a grace, set to what the job really does",
+                body: "You say how often you expect the ping and how late it may be before it counts as failed. A job that runs hourly with a ten-minute grace flips to failing ten minutes after the missed run, and the alert follows once the confirmation count is met. Set the period to how often the job actually runs, not how often you wish it did: a period shorter than the real cadence means every run is already late when the next one starts, and the monitor flaps all night for a job that is fine.",
+            },
+            Section {
+                heading: "You do not have to get the period right first time",
+                body: "Once five gaps between successful pings are on record, the monitor compares what you declared against what the job really does, and says so when the two disagree, in either direction. An hourly job earns that verdict the same day and a nightly one after about five days. A period set too tight pages you for nothing. One set too loose leaves a dead job unnoticed for longer than it needs to be.",
+            },
+            Section {
+                heading: "Say more than \"alive\"",
+                body: "The bare URL says the job reached the end. A path segment after it says what the ping means. Calling /start before the work times the run. If you pass the exit code instead, a nonzero one fails the monitor straight away rather than waiting out the period, which is the difference between hearing about it at 03:05 and at 04:15. A POST body is kept as that run's output, so the exit code and the last thing the job printed sit next to the failure instead of on a machine you have to go and find.",
+            },
+            Section {
+                heading: "The job that started and hung",
+                body: "A plain heartbeat cannot see this one. The job began, hung, and will never ping again. Pairing /start with a finish gives the run a duration, and a max run time then catches it while it is still hanging. Without that you wait out the whole period before anything is said, which for a nightly job is a day.",
+            },
+            Section {
+                heading: "The ping URL is a credential",
+                body: "Anyone holding it can mark the job healthy, which means anyone holding it can keep a real outage invisible. It spreads by design into crontabs, CI config and runbooks, so it needs rotating when it leaks or when someone who knew it leaves. Rotate from the monitor page or the API and the monitor keeps its incidents, history, share links and status-page placement. The old URL keeps working for 24 hours by default, because a URL that dies instantly does not alert, it just goes quiet. Watch when the old one was last used and end the overlap early. If it genuinely leaked, end it straight away.",
+            },
+            Section {
+                heading: "Run it beside the checks watching your front door",
+                body: "A heartbeat knows one thing, whether your job reported in. It can never tell you your website is down. It sits in the same monitor list as the HTTP, TLS and domain checks watching the front door, and it reaches the same status page and the same alert channels. Heartbeat is one of the eight check kinds here, not a separate tool to run.",
+            },
+        ],
+        code: Some(CodeSample {
+            caption: "A nightly backup, reporting for itself",
+            body: r#"curl -fsS $URL/start          # before the work
+
+./nightly-backup.sh > backup.log 2>&1
+
+curl -fsS --data-binary @backup.log $URL/$?"#,
+        }),
+        resources: &[
+            ResourceLink {
+                label: "All eight check types",
+                href: "/docs/monitor-types",
+            },
+            ResourceLink {
+                label: "Six ways a cron job fails without telling you",
+                href: "/blog/cron-jobs-fail-silently",
+            },
+            ResourceLink {
+                label: "Cron expression generator",
+                href: "/tools/cron-expression-generator",
+            },
+            ResourceLink {
+                label: "Uptime Kuma and Healthchecks compared",
+                href: "/compare/uptime-kuma-vs-healthchecks",
+            },
+            ResourceLink {
+                label: "Stop one bad probe waking you at 3 a.m.",
+                href: "/blog/stop-false-uptime-alerts",
+            },
+            ResourceLink {
+                label: "Monitoring as code",
+                href: "/terraform-uptime-monitoring",
+            },
+        ],
+        cta: "Start free",
+    },
+    Landing {
         path: "/browser-login-monitoring",
         created: "2026-07-30",
         lastmod: "2026-07-31",

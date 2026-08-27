@@ -1,11 +1,13 @@
 +++
 title = "Your cron job can fail for months and nothing will tell you"
 date = "2026-08-26"
+updated = "2026-08-27"
 slug = "cron-jobs-fail-silently"
 excerpt = "A scheduled job that stops running produces no error and no alert. GitLab's nightly backup failed for months before anyone noticed. Why, with sources."
 tags = ["cron", "heartbeat", "monitoring", "backups", "reliability"]
 draft = false
 og_image = "/static/marketing/og-cron-jobs-fail-silently.png"
+cta_label = "Put a heartbeat on a job"
 
 list_items = [
   "The job never started",

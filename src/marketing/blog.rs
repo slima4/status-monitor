@@ -675,6 +675,7 @@ mod tests {
             "best-self-hosted-uptime-monitoring-tools",
             "pingdom-alternatives",
             "do-i-need-an-uptime-monitor",
+            "cron-jobs-fail-silently",
         ];
         for post in load_posts() {
             match &post.cta_label {

@@ -21,6 +21,7 @@ pub(super) const FAQ_PATHS: &[&str] = &[
     "/compare/uptime-kuma-vs-gatus",
     "/open-source-status-page",
     "/open-source-uptime-monitoring",
+    "/cron-job-monitoring",
     "/white-label-uptime-monitoring",
     "/uptime-monitoring-for-developers",
     "/vs/uptimerobot",
@@ -382,6 +383,32 @@ pub(super) fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             (
                 "Is it free?",
                 "Self-hosting under AGPL is free. The hosted tier is also $0 a month if you prefer not to run it yourself.",
+            ),
+        ],
+        "/cron-job-monitoring" => &[
+            (
+                "How do I monitor a cron job?",
+                "Create a heartbeat monitor, which mints a ping URL, and call that URL at the end of each successful run. Appending curl -fsS $URL to the job is usually the whole change. You set how often you expect the ping and how late it may be, and the monitor alerts when the calls stop arriving.",
+            ),
+            (
+                "Why do cron jobs fail without alerting anyone?",
+                "Because a job that is never run produces nothing to catch. Error alerting fires on a job that runs and fails. It cannot fire on a crontab that was edited away, or on a container that stopped starting. There is no request to watch and no exit code to read, so a heartbeat has to come from the job itself.",
+            ),
+            (
+                "What period and grace should I use?",
+                "The period is how often the job actually runs, not how often you would like it to. A period shorter than the real cadence means every run is already late when the next one starts, and the monitor flaps all night for a healthy job. Once five gaps between successful pings are on record, the monitor compares your declared period against the real one and tells you when they disagree, which for an hourly job is the same day.",
+            ),
+            (
+                "Can it catch a job that starts and then hangs?",
+                "Yes, with a start signal and a max run time. Call /start before the work, finish with the exit code, and the run is timed. A job that started and will never finish is caught while it is still hanging rather than a whole period later.",
+            ),
+            (
+                "Can I see why the job failed?",
+                "Yes. Pass the exit code on the finishing ping and POST the log with it, and the monitor keeps the tail of that output. The last failure shows the exit code and what the job printed, so you read the cause on the monitor page instead of going to find the machine that ran it.",
+            ),
+            (
+                "What happens if the ping URL leaks?",
+                "Rotate it from the monitor page or the API. Anyone holding the URL can mark the job healthy, which means they can keep a real outage invisible. Rotation keeps the monitor's incidents, history, share links and status-page placement. The old URL keeps working for 24 hours by default so nothing goes silently quiet, and you can end that overlap immediately when the URL really leaked.",
             ),
         ],
         "/white-label-uptime-monitoring" => &[
