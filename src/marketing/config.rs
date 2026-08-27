@@ -37,6 +37,12 @@ pub const MCP_REGISTRY_URL: &str =
 pub const TERRAFORM_URL: &str = "https://registry.terraform.io/providers/uptimepage/uptimepage";
 pub const SOURCE_URL: &str = "https://github.com/uptimepage/uptimepage";
 
+/// Must match the GitHub org profile and the about page, or the brand resolves
+/// to more than one entity.
+pub const CONTACT_EMAIL: &str = "hello@uptimepage.dev";
+pub const ORG_LOCALITY: &str = "Nicosia";
+pub const ORG_COUNTRY: &str = "CY";
+
 /// Named blog author — a verifiable Person for search-engine E-E-A-T.
 #[derive(Debug, Clone)]
 pub struct Author {

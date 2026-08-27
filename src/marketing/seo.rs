@@ -19,7 +19,8 @@ use serde::Serialize;
 
 use super::blog::list_published;
 use super::config::{
-    AUTHOR, BRAND, META_DESCRIPTION, MarketingCfg, SOURCE_URL, TAGLINE, TERRAFORM_URL,
+    AUTHOR, BRAND, CONTACT_EMAIL, META_DESCRIPTION, MarketingCfg, ORG_COUNTRY, ORG_LOCALITY,
+    SOURCE_URL, TAGLINE, TERRAFORM_URL,
 };
 use super::gallery;
 use super::landings;
@@ -188,6 +189,12 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
         "name": BRAND,
         "url": canonical_origin,
         "logo": absolute_asset(canonical_origin, "/static/img/favicon-512.png"),
+        "email": CONTACT_EMAIL,
+        "address": {
+            "@type": "PostalAddress",
+            "addressLocality": ORG_LOCALITY,
+            "addressCountry": ORG_COUNTRY,
+        },
         "sameAs": ORG_SAME_AS,
     });
     JsonLd::from_value(payload)
@@ -1035,6 +1042,33 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
         assert_eq!(v["@type"], "Organization");
         assert_eq!(v["url"], "https://uptimepage.dev");
+    }
+
+    /// Reaches for /about too: the JSON-LD is invisible on the page, so it
+    /// goes stale unnoticed when the contact rows change.
+    #[test]
+    fn the_organization_node_carries_the_contact_facts() {
+        let jl = json_ld_organization("https://uptimepage.dev");
+        let v: serde_json::Value = serde_json::from_str(jl.as_str()).unwrap();
+        assert_eq!(v["email"], CONTACT_EMAIL);
+        assert_eq!(v["address"]["@type"], "PostalAddress");
+        assert_eq!(v["address"]["addressLocality"], ORG_LOCALITY);
+        assert_eq!(v["address"]["addressCountry"], ORG_COUNTRY);
+        let about = landings::LANDINGS
+            .iter()
+            .find(|l| l.path == "/about")
+            .expect("/about is a landing");
+        assert!(
+            about
+                .features
+                .iter()
+                .any(|f| f.value.contains(ORG_LOCALITY)),
+            "/about no longer says where the company is; the JSON-LD still claims {ORG_LOCALITY}"
+        );
+        assert!(
+            about.features.iter().any(|f| f.value == CONTACT_EMAIL),
+            "/about no longer lists {CONTACT_EMAIL}; the JSON-LD still claims it"
+        );
     }
 
     #[test]
