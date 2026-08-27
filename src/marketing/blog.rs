@@ -273,7 +273,10 @@ pub fn render(markdown: &str) -> String {
     safe.clean(&html).to_string()
 }
 
-const VOID_TAGS: [&str; 7] = ["area", "br", "col", "hr", "img", "input", "wbr"];
+const VOID_TAGS: [&str; 14] = [
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
+];
 
 /// Exact on sanitised output; a heuristic on raw source, where a
 /// commented-out tag still counts.
@@ -283,7 +286,14 @@ fn tag_balance(html: &str) -> isize {
     while let Some(off) = rest.find('<') {
         rest = &rest[off + 1..];
         if let Some(after) = rest.strip_prefix('/') {
-            if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
+            let closed: String = after
+                .chars()
+                .take_while(char::is_ascii_alphanumeric)
+                .flat_map(char::to_lowercase)
+                .collect();
+            // A void tag's opener is skipped, so honouring `</br>` here would
+            // drive the balance negative against an opener that never counted.
+            if !closed.is_empty() && !VOID_TAGS.contains(&closed.as_str()) {
                 balance -= 1;
             }
             continue;
@@ -366,6 +376,17 @@ fn render_with_band(markdown: &str) -> (String, Option<usize>) {
 /// brackets escaped, so the name alone must not pull in a script.
 fn has_mount(body_html: &str, mount: &str) -> bool {
     body_html.contains(&format!("<div class=\"{mount}\""))
+}
+
+/// Whether a real element carries `class` as one of its class tokens. The bare
+/// name also matches escaped prose, and a whole-attribute match misses the
+/// class sharing the attribute with another.
+#[cfg(test)]
+fn carries_class(html: &str, class: &str) -> bool {
+    html.split("class=\"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .any(|list| list.split_whitespace().any(|c| c == class))
 }
 
 /// Scripts this post needs, read back off the rendered body: an embed exists
@@ -772,20 +793,22 @@ mod tests {
         );
     }
 
+    /// Posts that carry a CTA, and so the ones that must also carry a band.
+    const IN_MARKET: &[&str] = &[
+        "uptime-sla",
+        "statuspage-alternatives",
+        "is-98-uptime-good",
+        "how-much-downtime-is-99-9-uptime",
+        "how-much-downtime-is-99-95-uptime",
+        "how-much-downtime-is-99-99-uptime",
+        "best-self-hosted-uptime-monitoring-tools",
+        "pingdom-alternatives",
+        "do-i-need-an-uptime-monitor",
+        "cron-jobs-fail-silently",
+    ];
+
     #[test]
     fn only_in_market_posts_carry_a_cta() {
-        const IN_MARKET: &[&str] = &[
-            "uptime-sla",
-            "statuspage-alternatives",
-            "is-98-uptime-good",
-            "how-much-downtime-is-99-9-uptime",
-            "how-much-downtime-is-99-95-uptime",
-            "how-much-downtime-is-99-99-uptime",
-            "best-self-hosted-uptime-monitoring-tools",
-            "pingdom-alternatives",
-            "do-i-need-an-uptime-monitor",
-            "cron-jobs-fail-silently",
-        ];
         for post in load_posts() {
             match &post.cta_label {
                 Some(label) => {
@@ -841,10 +864,42 @@ mod tests {
     }
 
     #[test]
+    fn carries_class_reads_tokens_not_substrings() {
+        assert!(carries_class(r#"<div class="mk-band"></div>"#, BAND_CLASS));
+        assert!(carries_class(
+            r#"<div class="mk-band mk-table-scroll">"#,
+            BAND_CLASS
+        ));
+        // A post may name the class in prose; that is not the band rendering.
+        assert!(!carries_class("<p>the mk-band class</p>", BAND_CLASS));
+        assert!(!carries_class(r#"<div class="mk-bandit">"#, BAND_CLASS));
+    }
+
+    /// `render_with_band` drops the band on a non-zero prefix, so a sign error
+    /// here silently un-bands a post rather than failing anything.
+    #[test]
+    fn tag_balance_counts_a_void_tag_the_same_however_it_is_written() {
+        assert_eq!(tag_balance("<div></div>"), 0);
+        assert_eq!(tag_balance("<div>"), 1);
+        assert_eq!(tag_balance("</div>"), -1);
+        for void in ["br", "embed", "source", "track", "link", "meta", "img"] {
+            assert_eq!(tag_balance(&format!("<{void}>")), 0, "<{void}>");
+            assert_eq!(
+                tag_balance(&format!("<{void}></{void}>")),
+                0,
+                "<{void}> pair"
+            );
+        }
+    }
+
+    #[test]
     fn the_band_mark_is_cut_out_and_leaves_a_heading_boundary() {
         for post in all() {
+            // Token inside a real `class` attribute: the bare name also matches
+            // prose, which a post is allowed to write, and an exact
+            // `class="mk-band"` misses the class sharing an attribute.
             assert!(
-                !post.body_html.contains(BAND_CLASS),
+                !carries_class(&post.body_html, BAND_CLASS),
                 "{}: band mark survived into the body",
                 post.slug
             );
@@ -868,6 +923,7 @@ mod tests {
             blog_enabled: true,
             mcp_url: None,
         };
+        let mut rendered = 0usize;
         for post in all().iter().filter(|p| !p.draft) {
             let html = String::from_utf8(render_post(&cfg, post).body.to_vec()).expect("utf8");
             let bands = html
@@ -876,7 +932,16 @@ mod tests {
             // `band_at` is computed for every post; the template gates on the CTA.
             let want = usize::from(post.cta_label.is_some() && post.band_at.is_some());
             assert_eq!(bands, want, "{}: wrong number of start bands", post.slug);
+            rendered += bands;
         }
+        // Deriving `want` from `band_at` alone passes when placement stops
+        // working: every post wants zero and every post gets zero. Pinned to
+        // the in-market list so losing one post trips it, not just losing all.
+        assert_eq!(
+            rendered,
+            IN_MARKET.len(),
+            "a published in-market post stopped rendering its band"
+        );
     }
 
     /// A parse failure only logs, so a broken post disappears from the site
