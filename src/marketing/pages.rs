@@ -83,6 +83,7 @@ struct LandingPage {
     faqs: &'static [(&'static str, &'static str)],
     show_gallery: bool,
     shots: Vec<ShotView>,
+    start_band_position: &'static str,
 }
 
 /// One source for the rendered FAQ and its `FAQPage` schema, so they can't drift.
@@ -163,6 +164,7 @@ fn render_landing(cfg: &MarketingCfg) -> CachedRender {
         faqs: FAQS,
         show_gallery: super::config::GALLERY_VISIBLE,
         shots: shot_views(),
+        start_band_position: "band-url",
     };
     let body = page
         .render()
@@ -658,6 +660,15 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The band arrives through an include resolved by name, so a rename would
+    /// drop the apex's only URL capture without failing anything else.
+    #[test]
+    fn the_landing_carries_the_start_band() {
+        let html = landing_html("https://uptimepage.dev");
+        assert_eq!(html.matches(r#"action="/start""#).count(), 1);
+        assert!(html.contains(r#"data-umami-event-position="band-url""#));
     }
 
     /// Both attributes are pure opt-ins in the tracker, and their absence is

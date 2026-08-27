@@ -467,6 +467,8 @@ html:has(.marketing-shell) {
    Tailwind v4 wraps space-y in :where(), so a plain class overrides it. */
 .mk-hero:has(+ .mk-start-band) { margin-block-end: 2.5rem; }
 .mk-start-band { margin-block-end: 2.5rem; }
+/* Mid-article the band interrupts prose, so it needs a gap above it too. */
+.mk-article .mk-start-band { margin-block-start: 2.5rem; }
 .mk-start {
     display: flex;
     flex-wrap: wrap;

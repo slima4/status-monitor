@@ -57,6 +57,8 @@ pub struct Post {
     /// Unset on engineering posts: that audience is not choosing a monitor.
     pub cta_label: Option<String>,
     pub body_html: String,
+    /// Byte offset in `body_html` where the mid-article start band belongs.
+    pub band_at: Option<usize>,
     pub embed_scripts: Vec<&'static str>,
     /// Source markdown, pre-render — inlined verbatim into `llms-full.txt`.
     pub body_md: String,
@@ -187,7 +189,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
             "og_image must be a /static/-rooted path, got {img:?}"
         );
     }
-    let body_html = render(body);
+    let (body_html, band_at) = render_with_band(body);
     Ok(Post {
         slug: fm.slug.unwrap_or_else(|| stem.to_string()),
         title: fm.title,
@@ -202,6 +204,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
         cta_label: fm.cta_label,
         embed_scripts: embed_scripts(&body_html),
         body_html,
+        band_at,
         body_md: body.trim().to_string(),
         images: collect_images(body),
     })
@@ -244,7 +247,7 @@ pub fn render(markdown: &str) -> String {
     let mut safe = ammonia::Builder::default();
     safe.link_rel(Some("noopener noreferrer"))
         .add_tags(["details", "summary"])
-        .add_allowed_classes("div", &["mk-table-scroll", "mk-faq__body"])
+        .add_allowed_classes("div", &["mk-table-scroll", "mk-faq__body", "mk-band"])
         .add_allowed_classes("details", &["mk-faq"])
         .add_tag_attributes("div", &["tabindex"]);
     // Token spans and the `language-*` class the wrap rules key off. A class
@@ -252,6 +255,58 @@ pub fn render(markdown: &str) -> String {
     super::highlight::allow_markup(&mut safe);
     safe.add_allowed_classes("div", &mounts);
     safe.clean(&html).to_string()
+}
+
+/// Fewer and the band would land a heading away from the closing CTA.
+const MIN_HEADINGS_FOR_BAND: usize = 3;
+
+/// Injected into the Markdown to carry the band's position through rendering,
+/// then cut back out. A serialised tag survives ammonia; a comment would not.
+const BAND_MARK: &str = "<div class=\"mk-band\"></div>";
+
+/// Source offset of the second top-level `##`, where most readers still are;
+/// the closing CTA below the article reaches about a fifth of them.
+fn band_offset(markdown: &str) -> Option<usize> {
+    use pulldown_cmark::{Event, HeadingLevel, Tag, TagEnd};
+    let mut depth = 0usize;
+    let mut heads = Vec::new();
+    for (ev, range) in parser(markdown).into_offset_iter() {
+        match ev {
+            Event::Start(Tag::Heading {
+                level: HeadingLevel::H2,
+                ..
+            }) => {
+                if depth == 0 {
+                    heads.push(range.start);
+                }
+                depth += 1;
+            }
+            Event::Start(_) => depth += 1,
+            Event::End(TagEnd::Heading(_)) | Event::End(_) => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+    (heads.len() >= MIN_HEADINGS_FOR_BAND).then(|| heads[1])
+}
+
+/// Renders the body and locates the band in the output. Marking the Markdown
+/// and cutting the mark out afterwards keeps the offset on a block boundary
+/// the renderer chose, rather than one guessed from serialised HTML.
+fn render_with_band(markdown: &str) -> (String, Option<usize>) {
+    let Some(at) = band_offset(markdown) else {
+        return (render(markdown), None);
+    };
+    let marked = format!("{}\n\n{BAND_MARK}\n\n{}", &markdown[..at], &markdown[at..]);
+    let html = render(&marked);
+    match html.find(BAND_MARK) {
+        // The renderer's own newline would otherwise sit between the offset and
+        // the heading it points at.
+        Some(i) => {
+            let rest = html[i + BAND_MARK.len()..].trim_start();
+            (format!("{}{rest}", &html[..i]), Some(i))
+        }
+        None => (render(markdown), None),
+    }
 }
 
 /// A figure counts as embedded only where the sanitiser left a real element.
@@ -350,7 +405,9 @@ struct BlogPostPage {
     updated: Option<String>,
     author: &'static Author,
     tags: Vec<String>,
-    body_html: String,
+    body_before: String,
+    body_after: Option<String>,
+    start_band_position: &'static str,
     cta_label: Option<String>,
     embed_scripts: Vec<&'static str>,
     related: Vec<RelatedLink>,
@@ -463,6 +520,13 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
             .collect();
         json_ld_faqpage(&pairs)
     });
+    let (body_before, body_after) = match post.band_at.filter(|_| post.cta_label.is_some()) {
+        Some(at) => (
+            post.body_html[..at].to_string(),
+            Some(post.body_html[at..].to_string()),
+        ),
+        None => (post.body_html.clone(), None),
+    };
     let body = BlogPostPage {
         slug: post.slug.clone(),
         canonical_url,
@@ -476,7 +540,9 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         updated: post.updated.clone().filter(|u| u != &post.date),
         author: &AUTHOR,
         tags: post.tags.clone(),
-        body_html: post.body_html.clone(),
+        body_before,
+        body_after,
+        start_band_position: "blog-band",
         cta_label: post.cta_label.clone(),
         embed_scripts: post.embed_scripts.clone(),
         related: related_posts(post, RELATED_LIMIT),
@@ -627,6 +693,78 @@ mod tests {
                     post.slug
                 ),
             }
+        }
+    }
+
+    #[test]
+    fn a_short_post_gets_no_mid_article_band() {
+        assert!(
+            band_offset("lede\n\n## a\n\none\n\n## b\n").is_none(),
+            "two headings is not enough to split"
+        );
+    }
+
+    #[test]
+    fn the_band_lands_before_the_second_heading() {
+        let md = "lede\n\n## a\n\none\n\n## b\n\ntwo\n\n## c\n";
+        let at = band_offset(md).expect("three headings splits");
+        assert_eq!(&md[at..], "## b\n\ntwo\n\n## c\n");
+    }
+
+    #[test]
+    fn a_heading_inside_a_container_is_not_a_split_point() {
+        let md = "lede\n\n## a\n\n- item\n\n  ## nested\n\n## b\n\nx\n\n## c\n";
+        let at = band_offset(md).expect("three top-level headings splits");
+        assert!(
+            md[at..].starts_with("## b"),
+            "split landed at {:?}",
+            &md[at..at + 20]
+        );
+    }
+
+    #[test]
+    fn a_phantom_tag_in_an_attribute_does_not_move_the_split() {
+        let md =
+            "![the <h2> outline](/static/marketing/x.webp)\n\n## a\n\none\n\n## b\n\ntwo\n\n## c\n";
+        let at = band_offset(md).expect("three headings splits");
+        assert!(md[at..].starts_with("## b"));
+    }
+
+    #[test]
+    fn the_band_mark_is_cut_out_and_leaves_a_heading_boundary() {
+        for post in all() {
+            assert!(
+                !post.body_html.contains("mk-band"),
+                "{}: band mark survived into the body",
+                post.slug
+            );
+            if let Some(at) = post.band_at {
+                assert!(
+                    post.body_html[at..].starts_with("<h2"),
+                    "{}: band lands mid-element",
+                    post.slug
+                );
+            }
+        }
+    }
+
+    /// The include is resolved by name, so assert on rendered HTML — the unit
+    /// tests above still pass if it is renamed away.
+    #[test]
+    fn a_rendered_post_carries_exactly_one_start_band() {
+        let cfg = MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: true,
+            mcp_url: None,
+        };
+        for post in all().iter().filter(|p| !p.draft) {
+            let html = String::from_utf8(render_post(&cfg, post).body.to_vec()).expect("utf8");
+            let bands = html
+                .matches(r#"data-umami-event-position="blog-band""#)
+                .count();
+            let want = usize::from(post.cta_label.is_some());
+            assert_eq!(bands, want, "{}: wrong number of start bands", post.slug);
         }
     }
 
