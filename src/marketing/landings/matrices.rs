@@ -46,6 +46,27 @@ static OPEN_SOURCE_MONITOR_MATRIX: Matrix = Matrix {
             ],
         },
         MatrixRow {
+            label: "check kinds",
+            cells: &[
+                (
+                    "HTTP, TCP, DNS, TLS, domain expiry, ping, heartbeat, browser flow",
+                    "yes",
+                ),
+                ("HTTP, TCP, DNS, ping, push, browser, and more", "yes"),
+                ("HTTP, TCP, DNS, ICMP", "part"),
+                ("HTTP, TCP, DNS, ICMP, gRPC, TLS", "part"),
+            ],
+        },
+        MatrixRow {
+            label: "watches a cron job",
+            cells: &[
+                ("heartbeat, period + grace", "yes"),
+                ("push monitor", "yes"),
+                ("no", "no"),
+                ("no, outside-in only", "no"),
+            ],
+        },
+        MatrixRow {
             label: "customer status page",
             cells: &[
                 ("branded, subscribers", "yes"),
@@ -93,6 +114,7 @@ static OPEN_SOURCE_MONITOR_MATRIX: Matrix = Matrix {
     ],
     notes: &[
         "Uptime Kuma is MIT; OpenStatus and Uptimepage are AGPL-3.0; Prometheus and Blackbox exporter are Apache 2.0.",
+        "Check kinds read from source on 2026-08-27: Uptime Kuma's push monitor in server/model/monitor.js, the OpenStatus checker's handlers (dns, icmp, ping, tcp), and Blackbox exporter's prober modules. Only Uptimepage and Uptime Kuma accept an inbound ping; the other two probe from outside and cannot see a job that never ran.",
         "OpenStatus's 28-region checking is on its hosted tier; self-hosting runs several Docker services.",
         "Verified July 2026 against each project's repository and docs.",
     ],

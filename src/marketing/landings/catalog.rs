@@ -275,7 +275,7 @@ docker compose up -d"#,
     Landing {
         path: "/open-source-uptime-monitoring",
         created: "2026-07-11",
-        lastmod: "2026-08-11",
+        lastmod: "2026-08-27",
         title: "Open-Source Uptime Monitoring, Self-Hosted",
         eyebrow: "open source",
         h1: "An open-source uptime monitor you run yourself",
@@ -609,7 +609,7 @@ docker compose up -d"#,
             },
             Section {
                 heading: "Say more than \"alive\"",
-                body: "The bare URL says the job reached the end. A path segment after it says what the ping means. Calling /start before the work times the run. If you pass the exit code instead, a nonzero one fails the monitor straight away rather than waiting out the period, which is the difference between hearing about it at 03:05 and at 04:15. A POST body is kept as that run's output, so the exit code and the last thing the job printed sit next to the failure instead of on a machine you have to go and find.",
+                body: "The bare URL says the job reached the end. A path segment after it says what the ping means. Calling /start before the work times the run. If you pass the exit code instead, a nonzero one fails the monitor straight away rather than waiting out the period, which is the difference between hearing about it at 03:05 and at 04:15. The first 4 KB of a POST body is kept as that run's output, so piping the end of the log in puts the exit code and the lines around the failure together, instead of on a machine you have to go and find.",
             },
             Section {
                 heading: "The job that started and hung",
@@ -629,8 +629,9 @@ docker compose up -d"#,
             body: r#"curl -fsS $URL/start          # before the work
 
 ./nightly-backup.sh > backup.log 2>&1
+code=$?
 
-curl -fsS --data-binary @backup.log $URL/$?"#,
+tail -c 4000 backup.log | curl -fsS --data-binary @- "$URL/$code""#,
         }),
         resources: &[
             ResourceLink {

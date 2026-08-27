@@ -404,7 +404,7 @@ pub(super) fn page_faqs(path: &str) -> &'static [(&'static str, &'static str)] {
             ),
             (
                 "Can I see why the job failed?",
-                "Yes. Pass the exit code on the finishing ping and POST the log with it, and the monitor keeps the tail of that output. The last failure shows the exit code and what the job printed, so you read the cause on the monitor page instead of going to find the machine that ran it.",
+                "Yes. Pass the exit code on the finishing ping and POST the log with it. The monitor keeps the first 4 KB of that body, so pipe the end of the log in and the last failure carries the exit code beside the lines around it, read on the monitor page instead of on the machine that ran it.",
             ),
             (
                 "What happens if the ping URL leaks?",

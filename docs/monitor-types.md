@@ -83,7 +83,7 @@ curl -fsS $URL/$?        # 0 succeeds, anything else fails with that exit code
 
 Pairing `/start` with a finish also times the run. Setting **max run time** then catches the case a plain heartbeat cannot see: a job that started, hung, and will never ping again. Without it you wait out the whole period before anything is said, which for a daily job is a day.
 
-A POST body is kept as that run's output, so `curl -fsS --data-binary @backup.log $URL/$?` puts the tail of the log next to the failure. The monitor page then shows the exit code and that output on the last failure, which is usually the difference between reading the cause and going to find the machine that ran it. Whatever the job prints is what we store, so do not print secrets to it.
+The first 4 KB of a POST body is kept as that run's output, so piping the end of the log in with `tail -c 4000 backup.log | curl -fsS --data-binary @- "$URL/$code"` puts the lines around the failure next to it. The monitor page then shows the exit code and that output on the last failure, which is usually the difference between reading the cause and going to find the machine that ran it. Whatever the job prints is what we store, so do not print secrets to it.
 
 Pick grace with your deployment in mind. A ping sent while the control plane is unreachable is lost, so on a single-node self-host keep grace comfortably above your restart window.
 
