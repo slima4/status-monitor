@@ -564,6 +564,13 @@ analytics.{$UPTIMEPAGE_DOMAIN} {
 	}
 	respond @foreign_beacon 403
 
+	# GHSA-3xx8-742v-m4mq, unpatched in every release: the cache JWT that
+	# /api/send hands anyone is accepted as a share token and reads every
+	# website's data. That header is the only carrier and we publish no
+	# share links, so refusing it costs nothing. Revisit if we ever share.
+	@share_replay header x-umami-share-token *
+	respond @share_replay 403
+
 	reverse_proxy umami:3000
 
 	header {

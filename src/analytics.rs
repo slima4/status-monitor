@@ -194,6 +194,21 @@ mod tests {
     }
 
     #[test]
+    fn the_edge_allows_the_origin_the_beacon_sends() {
+        let caddy =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/deployment/Caddyfile"))
+                .expect("read Caddyfile");
+        let domain = APP_ORIGIN
+            .strip_prefix("https://app.")
+            .expect("app origin is a subdomain of the product domain");
+        let templated = APP_ORIGIN.replace(domain, "{$UPTIMEPAGE_DOMAIN}");
+        assert!(
+            caddy.contains(&format!("header Origin {templated}")),
+            "the edge must allow {templated}, or every funnel beacon 403s with only a warn log"
+        );
+    }
+
+    #[test]
     fn payload_carries_the_visitor_ip_and_method() {
         let body = SendBody {
             kind: "event",
