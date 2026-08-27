@@ -247,9 +247,6 @@ const BAND_CLASS: &str = band_class!();
 /// then cut back out. A serialised tag survives ammonia; a comment would not.
 const BAND_MARK: &str = concat!("<div class=\"", band_class!(), "\"></div>");
 
-/// Fewer and the band would land a heading away from the closing CTA.
-const MIN_HEADINGS_FOR_BAND: usize = 3;
-
 /// Sanitising Markdown render. CommonMark + tables → HTML → ammonia
 /// allowlist. Third-party PR content never reaches a browser as raw
 /// HTML; every `<script>`, `onerror=`, and `javascript:` href is
@@ -310,15 +307,11 @@ fn tag_balance(html: &str) -> isize {
     balance
 }
 
-/// Source offset of the second top-level `##`, where most readers still are;
-/// the closing CTA below the article reaches about a fifth of them.
-///
 /// Markdown resumes inside a raw block, so a `##` in a FAQ answer arrives at
-/// depth zero and would split the `<details>` around it.
-fn band_offset(markdown: &str) -> Option<usize> {
+/// depth zero and is listed too; the render decides whether it is usable.
+fn heading_offsets(markdown: &str) -> Vec<usize> {
     use pulldown_cmark::{Event, HeadingLevel, Tag};
     let mut depth = 0usize;
-    let mut raw_depth = 0isize;
     let mut heads = Vec::new();
     for (ev, range) in parser(markdown).into_offset_iter() {
         match ev {
@@ -326,49 +319,52 @@ fn band_offset(markdown: &str) -> Option<usize> {
                 level: HeadingLevel::H2,
                 ..
             }) => {
-                if depth == 0 && raw_depth == 0 {
+                if depth == 0 {
                     heads.push(range.start);
                 }
                 depth += 1;
             }
             Event::Start(_) => depth += 1,
             Event::End(_) => depth = depth.saturating_sub(1),
-            // Clamped: a stray closing tag would otherwise hide every
-            // heading after it.
-            // Block-level only: inline HTML lives in text (an `<h2>` written
-            // in alt text) and opens no container a heading could fall into.
-            Event::Html(html) => raw_depth = (raw_depth + tag_balance(&html)).max(0),
             _ => {}
         }
     }
-    (heads.len() >= MIN_HEADINGS_FOR_BAND).then(|| heads[1])
+    heads
 }
 
-/// Renders the body and locates the band in the output. Marking the Markdown
-/// and cutting the mark out afterwards keeps the offset on a block boundary
-/// the renderer chose, rather than one guessed from serialised HTML.
+/// `None` when the split would land inside an element the renderer left open.
+fn band_at(markdown: &str, at: usize) -> Option<(String, usize)> {
+    let marked = format!("{}\n\n{BAND_MARK}\n\n{}", &markdown[..at], &markdown[at..]);
+    let html = render(&marked);
+    let i = html.find(BAND_MARK)?;
+    // The renderer's own newline would otherwise sit between the offset and
+    // the heading it points at.
+    let rest = html[i + BAND_MARK.len()..].trim_start();
+    let joined = format!("{}{rest}", &html[..i]);
+    (tag_balance(&joined[..i]) == 0).then_some((joined, i))
+}
+
+/// Marking the Markdown and cutting the mark out afterwards keeps the offset on
+/// a block boundary the renderer chose, rather than one guessed from serialised
+/// HTML. Sanitised output is the only judge, so a heading nested in raw markup
+/// moves the band down rather than costing the post one.
 fn render_with_band(markdown: &str) -> (String, Option<usize>) {
     // A post writing the marker would capture the split point.
     if markdown.contains(BAND_CLASS) {
         return (render(markdown), None);
     }
-    let Some(at) = band_offset(markdown) else {
-        return (render(markdown), None);
-    };
-    let marked = format!("{}\n\n{BAND_MARK}\n\n{}", &markdown[..at], &markdown[at..]);
-    let html = render(&marked);
-    let Some(i) = html.find(BAND_MARK) else {
-        return (render(markdown), None);
-    };
-    // The renderer's own newline would otherwise sit between the offset and
-    // the heading it points at.
-    let rest = html[i + BAND_MARK.len()..].trim_start();
-    let joined = format!("{}{rest}", &html[..i]);
-    // The source scan can be fooled, so the rendered prefix decides.
-    if tag_balance(&joined[..i]) != 0 {
-        return (joined, None);
+    let heads = heading_offsets(markdown);
+    // Not the first, and not the last: the band needs a heading after it to
+    // reach readers who stop before the closing CTA.
+    let candidates = heads
+        .get(1..heads.len().saturating_sub(1))
+        .unwrap_or_default();
+    for &at in candidates {
+        if let Some((html, i)) = band_at(markdown, at) {
+            return (html, Some(i));
+        }
     }
-    (joined, Some(i))
+    (render(markdown), None)
 }
 
 /// A figure counts as embedded only where the sanitiser left a real element.
@@ -736,40 +732,7 @@ mod tests {
         }
     }
 
-    /// The rendered heading is indistinguishable from a real one, so the
-    /// `starts_with("<h2")` guard cannot catch this.
-    #[test]
-    fn a_heading_inside_a_raw_block_is_not_a_split_point() {
-        let md = concat!(
-            "intro\n\n## One\n\ntext\n\n",
-            "<details class=\"mk-faq\">\n<summary>Q</summary>\n<div class=\"mk-faq__body\">\n\n",
-            "## Nested\n\nanswer\n\n</div>\n</details>\n\n",
-            "## Two\n\nmore\n\n## Three\n\nend\n",
-        );
-        let at = band_offset(md).expect("three top-level headings remain");
-        assert!(
-            md[at..].starts_with("## Two"),
-            "split landed inside the raw block: {:?}",
-            &md[at..at + 20.min(md.len() - at)]
-        );
-        let (html, band) = render_with_band(md);
-        let at = band.expect("a band was placed");
-        assert_eq!(tag_balance(&html[..at]), 0, "band splits an open element");
-    }
-
-    /// The sanitiser keeps more container tags than the FAQ markup uses.
-    #[test]
-    fn a_heading_inside_any_raw_container_is_not_a_split_point() {
-        let md = concat!(
-            "intro\n\n## One\n\ntext\n\n",
-            "<blockquote>\n\n## Quoted\n\nsaid\n\n</blockquote>\n\n",
-            "## Two\n\nmore\n\n## Three\n\nend\n",
-        );
-        let at = band_offset(md).expect("three top-level headings remain");
-        assert!(md[at..].starts_with("## Two"), "split landed in the quote");
-    }
-
-    /// A commented-out close tag defeats the source scan.
+    /// Exact on sanitised output, which is what `render_with_band` gates on.
     #[test]
     fn an_unbalanced_render_drops_the_band() {
         assert_eq!(tag_balance("<div><p>text</p>"), 1);
@@ -829,38 +792,85 @@ mod tests {
         }
     }
 
+    /// Asserts the band's own contract on the way past.
+    fn banded_heading(md: &str) -> Option<String> {
+        let (html, at) = render_with_band(md);
+        let at = at?;
+        assert_eq!(tag_balance(&html[..at]), 0, "band splits an open element");
+        let rest = &html[at..];
+        assert!(
+            rest.starts_with("<h2"),
+            "band is not at a heading: {rest:.40}"
+        );
+        let inner = rest
+            .split_once('>')
+            .unwrap()
+            .1
+            .split_once("</h2>")
+            .unwrap()
+            .0;
+        Some(strip_tags(inner))
+    }
+
+    fn strip_tags(html: &str) -> String {
+        let mut out = String::new();
+        let mut inside = false;
+        for c in html.chars() {
+            match c {
+                '<' => inside = true,
+                '>' => inside = false,
+                _ if !inside => out.push(c),
+                _ => {}
+            }
+        }
+        out.trim().to_string()
+    }
+
+    #[test]
+    fn the_band_lands_before_the_first_heading_that_survives_rendering() {
+        let details = concat!(
+            "intro\n\n## One\n\ntext\n\n",
+            "<details class=\"mk-faq\">\n<summary>Q</summary>\n<div class=\"mk-faq__body\">\n\n",
+            "## Nested\n\nanswer\n\n</div>\n</details>\n\n",
+            "## Two\n\nmore\n\n## Three\n\nend\n",
+        );
+        let blockquote = concat!(
+            "intro\n\n## One\n\ntext\n\n",
+            "<blockquote>\n\n## Quoted\n\nsaid\n\n</blockquote>\n\n",
+            "## Two\n\nmore\n\n## Three\n\nend\n",
+        );
+        let cases: [(&str, &str, &str); 5] = [
+            ("plain", "lede\n\n## a\n\none\n\n## b\n\ntwo\n\n## c\n", "b"),
+            (
+                "markdown container",
+                "lede\n\n## a\n\n- item\n\n  ## nested\n\n## b\n\nx\n\n## c\n",
+                "b",
+            ),
+            (
+                "phantom tag in alt text",
+                "![the <h2> outline](/static/marketing/x.webp)\n\n## a\n\none\n\n## b\n\ntwo\n\n## c\n",
+                "b",
+            ),
+            ("raw details block", details, "Two"),
+            ("raw blockquote", blockquote, "Two"),
+        ];
+        for (name, md, want) in cases {
+            assert_eq!(
+                banded_heading(md).as_deref(),
+                Some(want),
+                "{name}: band landed on the wrong heading"
+            );
+        }
+    }
+
     #[test]
     fn a_short_post_gets_no_mid_article_band() {
         assert!(
-            band_offset("lede\n\n## a\n\none\n\n## b\n").is_none(),
-            "two headings is not enough to split"
+            render_with_band("lede\n\n## a\n\none\n\n## b\n")
+                .1
+                .is_none(),
+            "two headings leaves no heading after the band"
         );
-    }
-
-    #[test]
-    fn the_band_lands_before_the_second_heading() {
-        let md = "lede\n\n## a\n\none\n\n## b\n\ntwo\n\n## c\n";
-        let at = band_offset(md).expect("three headings splits");
-        assert_eq!(&md[at..], "## b\n\ntwo\n\n## c\n");
-    }
-
-    #[test]
-    fn a_heading_inside_a_container_is_not_a_split_point() {
-        let md = "lede\n\n## a\n\n- item\n\n  ## nested\n\n## b\n\nx\n\n## c\n";
-        let at = band_offset(md).expect("three top-level headings splits");
-        assert!(
-            md[at..].starts_with("## b"),
-            "split landed at {:?}",
-            &md[at..at + 20]
-        );
-    }
-
-    #[test]
-    fn a_phantom_tag_in_an_attribute_does_not_move_the_split() {
-        let md =
-            "![the <h2> outline](/static/marketing/x.webp)\n\n## a\n\none\n\n## b\n\ntwo\n\n## c\n";
-        let at = band_offset(md).expect("three headings splits");
-        assert!(md[at..].starts_with("## b"));
     }
 
     #[test]
