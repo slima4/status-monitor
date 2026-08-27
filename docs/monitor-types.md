@@ -67,7 +67,7 @@ Because a monitor waiting for its first ping is silent, one that is never wired 
 
 Set the period to how often the job *actually* runs, not how often you would like it to. A period shorter than the real cadence means every run is late by the time the next one arrives, and the monitor flaps all night for a job that is fine.
 
-You do not have to get this right first time. Once five gaps between successful pings are on record, its page compares what you declared against what the job really does and says so if the two disagree, in either direction. Gaps are measured inside a 14-day window, so an hourly job is judged within hours and a nightly one after about five days, while a job that runs less often than every three days never accumulates enough gaps to be judged at all. A period shorter than the real cadence pages you for nothing; a period much longer than it leaves a dead job unnoticed for far longer than it needs to be.
+You do not have to get this right first time. Once five gaps between successful pings are on record, its page compares what you declared against what the job really does and says so if the two disagree, in either direction. Gaps are measured inside a 14-day window, so an hourly job is judged within hours and a nightly one after about five days. A job too slow to fit five gaps into a fortnight is never judged at all. A period shorter than the real cadence pages you for nothing; a period much longer than it leaves a dead job unnoticed for far longer than it needs to be.
 
 ### Telling us more than "alive"
 

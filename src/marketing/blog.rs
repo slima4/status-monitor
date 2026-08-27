@@ -234,6 +234,22 @@ const EMBEDS: &[(&str, &str)] = &[
     ("mk-embed-grace", "js/marketing/grace.js"),
 ];
 
+/// A macro, not a const: `concat!` needs a literal to build [`BAND_MARK`]
+/// from the same source.
+macro_rules! band_class {
+    () => {
+        "mk-band"
+    };
+}
+const BAND_CLASS: &str = band_class!();
+
+/// Injected into the Markdown to carry the band's position through rendering,
+/// then cut back out. A serialised tag survives ammonia; a comment would not.
+const BAND_MARK: &str = concat!("<div class=\"", band_class!(), "\"></div>");
+
+/// Fewer and the band would land a heading away from the closing CTA.
+const MIN_HEADINGS_FOR_BAND: usize = 3;
+
 /// Sanitising Markdown render. CommonMark + tables → HTML → ammonia
 /// allowlist. Third-party PR content never reaches a browser as raw
 /// HTML; every `<script>`, `onerror=`, and `javascript:` href is
@@ -247,7 +263,7 @@ pub fn render(markdown: &str) -> String {
     let mut safe = ammonia::Builder::default();
     safe.link_rel(Some("noopener noreferrer"))
         .add_tags(["details", "summary"])
-        .add_allowed_classes("div", &["mk-table-scroll", "mk-faq__body", "mk-band"])
+        .add_allowed_classes("div", &["mk-table-scroll", "mk-faq__body", BAND_CLASS])
         .add_allowed_classes("details", &["mk-faq"])
         .add_tag_attributes("div", &["tabindex"]);
     // Token spans and the `language-*` class the wrap rules key off. A class
@@ -257,18 +273,42 @@ pub fn render(markdown: &str) -> String {
     safe.clean(&html).to_string()
 }
 
-/// Fewer and the band would land a heading away from the closing CTA.
-const MIN_HEADINGS_FOR_BAND: usize = 3;
+const VOID_TAGS: [&str; 7] = ["area", "br", "col", "hr", "img", "input", "wbr"];
 
-/// Injected into the Markdown to carry the band's position through rendering,
-/// then cut back out. A serialised tag survives ammonia; a comment would not.
-const BAND_MARK: &str = "<div class=\"mk-band\"></div>";
+/// Exact on sanitised output; a heuristic on raw source, where a
+/// commented-out tag still counts.
+fn tag_balance(html: &str) -> isize {
+    let mut balance = 0isize;
+    let mut rest = html;
+    while let Some(off) = rest.find('<') {
+        rest = &rest[off + 1..];
+        if let Some(after) = rest.strip_prefix('/') {
+            if after.starts_with(|c: char| c.is_ascii_alphabetic()) {
+                balance -= 1;
+            }
+            continue;
+        }
+        let name: String = rest
+            .chars()
+            .take_while(char::is_ascii_alphanumeric)
+            .flat_map(char::to_lowercase)
+            .collect();
+        if !name.is_empty() && !VOID_TAGS.contains(&name.as_str()) {
+            balance += 1;
+        }
+    }
+    balance
+}
 
 /// Source offset of the second top-level `##`, where most readers still are;
 /// the closing CTA below the article reaches about a fifth of them.
+///
+/// Markdown resumes inside a raw block, so a `##` in a FAQ answer arrives at
+/// depth zero and would split the `<details>` around it.
 fn band_offset(markdown: &str) -> Option<usize> {
-    use pulldown_cmark::{Event, HeadingLevel, Tag, TagEnd};
+    use pulldown_cmark::{Event, HeadingLevel, Tag};
     let mut depth = 0usize;
+    let mut raw_depth = 0isize;
     let mut heads = Vec::new();
     for (ev, range) in parser(markdown).into_offset_iter() {
         match ev {
@@ -276,13 +316,18 @@ fn band_offset(markdown: &str) -> Option<usize> {
                 level: HeadingLevel::H2,
                 ..
             }) => {
-                if depth == 0 {
+                if depth == 0 && raw_depth == 0 {
                     heads.push(range.start);
                 }
                 depth += 1;
             }
             Event::Start(_) => depth += 1,
-            Event::End(TagEnd::Heading(_)) | Event::End(_) => depth = depth.saturating_sub(1),
+            Event::End(_) => depth = depth.saturating_sub(1),
+            // Clamped: a stray closing tag would otherwise hide every
+            // heading after it.
+            // Block-level only: inline HTML lives in text (an `<h2>` written
+            // in alt text) and opens no container a heading could fall into.
+            Event::Html(html) => raw_depth = (raw_depth + tag_balance(&html)).max(0),
             _ => {}
         }
     }
@@ -293,20 +338,27 @@ fn band_offset(markdown: &str) -> Option<usize> {
 /// and cutting the mark out afterwards keeps the offset on a block boundary
 /// the renderer chose, rather than one guessed from serialised HTML.
 fn render_with_band(markdown: &str) -> (String, Option<usize>) {
+    // A post writing the marker would capture the split point.
+    if markdown.contains(BAND_CLASS) {
+        return (render(markdown), None);
+    }
     let Some(at) = band_offset(markdown) else {
         return (render(markdown), None);
     };
     let marked = format!("{}\n\n{BAND_MARK}\n\n{}", &markdown[..at], &markdown[at..]);
     let html = render(&marked);
-    match html.find(BAND_MARK) {
-        // The renderer's own newline would otherwise sit between the offset and
-        // the heading it points at.
-        Some(i) => {
-            let rest = html[i + BAND_MARK.len()..].trim_start();
-            (format!("{}{rest}", &html[..i]), Some(i))
-        }
-        None => (render(markdown), None),
+    let Some(i) = html.find(BAND_MARK) else {
+        return (render(markdown), None);
+    };
+    // The renderer's own newline would otherwise sit between the offset and
+    // the heading it points at.
+    let rest = html[i + BAND_MARK.len()..].trim_start();
+    let joined = format!("{}{rest}", &html[..i]);
+    // The source scan can be fooled, so the rendered prefix decides.
+    if tag_balance(&joined[..i]) != 0 {
+        return (joined, None);
     }
+    (joined, Some(i))
 }
 
 /// A figure counts as embedded only where the sanitiser left a real element.
@@ -663,6 +715,63 @@ mod tests {
         }
     }
 
+    /// The rendered heading is indistinguishable from a real one, so the
+    /// `starts_with("<h2")` guard cannot catch this.
+    #[test]
+    fn a_heading_inside_a_raw_block_is_not_a_split_point() {
+        let md = concat!(
+            "intro\n\n## One\n\ntext\n\n",
+            "<details class=\"mk-faq\">\n<summary>Q</summary>\n<div class=\"mk-faq__body\">\n\n",
+            "## Nested\n\nanswer\n\n</div>\n</details>\n\n",
+            "## Two\n\nmore\n\n## Three\n\nend\n",
+        );
+        let at = band_offset(md).expect("three top-level headings remain");
+        assert!(
+            md[at..].starts_with("## Two"),
+            "split landed inside the raw block: {:?}",
+            &md[at..at + 20.min(md.len() - at)]
+        );
+        let (html, band) = render_with_band(md);
+        let at = band.expect("a band was placed");
+        assert_eq!(tag_balance(&html[..at]), 0, "band splits an open element");
+    }
+
+    /// The sanitiser keeps more container tags than the FAQ markup uses.
+    #[test]
+    fn a_heading_inside_any_raw_container_is_not_a_split_point() {
+        let md = concat!(
+            "intro\n\n## One\n\ntext\n\n",
+            "<blockquote>\n\n## Quoted\n\nsaid\n\n</blockquote>\n\n",
+            "## Two\n\nmore\n\n## Three\n\nend\n",
+        );
+        let at = band_offset(md).expect("three top-level headings remain");
+        assert!(md[at..].starts_with("## Two"), "split landed in the quote");
+    }
+
+    /// A commented-out close tag defeats the source scan.
+    #[test]
+    fn an_unbalanced_render_drops_the_band() {
+        assert_eq!(tag_balance("<div><p>text</p>"), 1);
+        assert_eq!(tag_balance("<div><p>text</p></div>"), 0);
+        assert_eq!(tag_balance("<p>a<br>b</p><img src=\"x\">"), 0);
+        assert_eq!(tag_balance("&lt;div&gt; escaped text"), 0);
+    }
+
+    /// The class survives sanitising, so post content can reach the split.
+    #[test]
+    fn a_post_writing_the_marker_class_gets_no_band() {
+        let md = concat!(
+            "intro\n\n<div class=\"mk-band\"></div>\n\n",
+            "## One\n\na\n\n## Two\n\nb\n\n## Three\n\nc\n",
+        );
+        let (html, band) = render_with_band(md);
+        assert_eq!(band, None, "a post that writes the marker gets no band");
+        assert!(
+            !html.contains(BAND_MARK) || html.matches(BAND_MARK).count() == 1,
+            "the injected mark must not be added on top of the author's"
+        );
+    }
+
     #[test]
     fn only_in_market_posts_carry_a_cta() {
         const IN_MARKET: &[&str] = &[
@@ -735,7 +844,7 @@ mod tests {
     fn the_band_mark_is_cut_out_and_leaves_a_heading_boundary() {
         for post in all() {
             assert!(
-                !post.body_html.contains("mk-band"),
+                !post.body_html.contains(BAND_CLASS),
                 "{}: band mark survived into the body",
                 post.slug
             );
@@ -764,7 +873,8 @@ mod tests {
             let bands = html
                 .matches(r#"data-umami-event-position="blog-band""#)
                 .count();
-            let want = usize::from(post.cta_label.is_some());
+            // `band_at` is computed for every post; the template gates on the CTA.
+            let want = usize::from(post.cta_label.is_some() && post.band_at.is_some());
             assert_eq!(bands, want, "{}: wrong number of start bands", post.slug);
         }
     }
