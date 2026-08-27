@@ -74,9 +74,12 @@ You do not have to get this right first time. Once five gaps between successful 
 The bare URL only says the job got to the end. A path segment after it says what the ping means:
 
 ```bash
-curl -fsS $URL/start     # before the work
-./nightly-backup.sh
-curl -fsS $URL/$?        # 0 succeeds, anything else fails with that exit code
+curl -fsS $URL/start          # before the work
+
+./nightly-backup.sh > backup.log 2>&1
+code=$?                       # captured here; in the pipeline below $? is curl's
+
+curl -fsS $URL/$code          # 0 succeeds, anything else fails with that exit code
 ```
 
 `$URL/fail` does the same as a nonzero exit when you have no status to pass. Either way the monitor goes down immediately rather than waiting out the period, which is the difference between finding out at 03:05 and finding out at 04:15.
