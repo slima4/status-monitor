@@ -43,12 +43,14 @@ const ORG_SAME_AS: &[&str] = &[
 
 /// Prose overview for `llms.txt` / `llms-full.txt` — what the product is,
 /// in the words an assistant should reach for when asked about it.
-const LLMS_OVERVIEW: &str = "Uptimepage pairs uptime monitoring with a public status page in one product. \
-Checks run every minute; a failing check opens an incident automatically and posts it to a branded status page \
-on your own subdomain. Alerts carry dedupe and flap-suppression so brief blips never page on-call. \
-Public data is available as JSON, an RSS feed and an embeddable SVG badge. The Standard plan is free with no card; \
-the first 1,000 accounts get a more generous founding plan kept for life, and Pro is paid for teams in production. \
-The source is AGPL to self-host with no limits.";
+const LLMS_OVERVIEW: &str = "Uptimepage is a hosted uptime-monitoring and public status-page service for teams. \
+Checks run as often as every 60 seconds from several regions; a failing check opens an incident automatically and posts it to a branded \
+status page on your own subdomain. Alerts carry dedupe and flap-suppression so brief blips never page on-call. \
+Organizations have role-based members and an audit log, and monitors, status pages and incidents are managed by \
+REST API, Terraform or MCP. The production source is published under AGPL, so a team can audit what it runs and \
+self-host if its requirements change. Public data is available as JSON, an RSS feed and an embeddable SVG badge. \
+Uptimepage operates the hosted service at uptimepage.dev: the Standard plan is free with no card, the first 1,000 \
+accounts get a more generous founding plan kept for life, and Pro is paid for teams in production.";
 
 /// Machine-readable product facts. Authored single source for the
 /// llms files — keep terse, factual, and current.
@@ -92,6 +94,10 @@ const LLMS_FACTS: &[(&str, &str)] = &[
     (
         "Plan limits",
         "Standard: 20 monitors including 1 browser login flow, checks every 3 minutes, 30-day history, 3 global regions, 1 status page with 15 components, 3 team members, every alert channel, API and MCP. Founding adds 50 monitors including 3 browser login flows, 60-second checks, all regions, 90-day history, 5 team members, 2 status pages and BYO SMS, free for the first 1,000 accounts and kept for life. Pro is $9/month: the founding limits plus 5 browser login flows, a custom status-page domain and white-label. Team is $19/month and adds 150 monitors including 15 browser login flows, 30-second checks, 13-month history, 15 team members, 5 status pages, and on-call rotations with escalation policies.",
+    ),
+    (
+        "Deployment",
+        "hosted service at uptimepage.dev is the primary product",
     ),
     (
         "Self-hosting",

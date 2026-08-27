@@ -2468,20 +2468,20 @@ resource "uptimepage_target" "api" {
     Landing {
         path: "/about",
         created: "2026-07-21",
-        lastmod: "2026-07-21",
+        lastmod: "2026-08-27",
         title: "About Uptimepage",
         eyebrow: "about",
-        h1: "Who builds Uptimepage, and why",
-        meta_description: "Uptimepage is an open-source uptime monitor and status page in one product, built and run by one engineer in Nicosia, Cyprus. AGPL, self-host or hosted.",
-        lede: "Uptimepage is an uptime monitor and a public status page in the same product, built and run by one engineer. The source is AGPL, so you can read every line, run it on your own servers, or let us host it.",
+        h1: "Hosted uptime monitoring, built in the open",
+        meta_description: "Who builds and operates Uptimepage: a hosted uptime monitoring and status page service run from Nicosia, Cyprus, with production source public under AGPL.",
+        lede: "Uptimepage is a hosted uptime-monitoring and public status-page service for teams, built and operated from Nicosia, Cyprus. The production source is public under AGPL. Teams can inspect it and move to a self-hosted deployment if their requirements change.",
         features: &[
             Feature {
                 label: "Based in",
                 value: "Nicosia, Cyprus",
             },
             Feature {
-                label: "Built by",
-                value: "one engineer",
+                label: "Founder",
+                value: "Artem Senenko",
             },
             Feature {
                 label: "Licence",
@@ -2502,8 +2502,8 @@ resource "uptimepage_target" "api" {
         ],
         sections: &[
             Section {
-                heading: "Who builds it",
-                body: "Uptimepage is built and run from Nicosia, Cyprus by Artem Senenko, a software engineer with more than twenty years spent building and running production systems: microservice architecture on Kubernetes, cloud infrastructure on AWS and Terraform, and security-critical SaaS in fintech. One person writes the code, answers the email and carries the pager.",
+                heading: "Who operates Uptimepage",
+                body: "Uptimepage is built and operated from Nicosia, Cyprus by founder Artem Senenko, a software engineer with more than twenty years of experience building and running production systems across Kubernetes, AWS, Terraform, and security-critical fintech SaaS. Artem writes the code, answers support, and carries the pager.",
             },
             Section {
                 heading: "Why it exists",
@@ -2515,7 +2515,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "Why AGPL",
-                body: "The hosted service runs the same binary you can download. No enterprise edition holds back the parts that matter, and no feature appears only after a sales call. If the hosted tier stops suiting you, leaving is a migration rather than a rewrite, because the API and the Terraform provider are identical either way.",
+                body: "The hosted service runs the same production binary that is published under AGPL. No enterprise edition holds back the parts that matter, and no feature appears only after a sales call. If the hosted plan stops suiting your team, leaving is a migration rather than a rewrite, because the API and the Terraform provider are identical on both deployments.",
             },
             Section {
                 heading: "How it is paid for",

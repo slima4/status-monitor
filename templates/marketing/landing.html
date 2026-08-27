@@ -1,5 +1,5 @@
 {% extends "marketing/base.html" %}
-{% block title %}Uptimepage: open-source uptime monitoring & status pages{% endblock %}
+{% block title %}Uptimepage: uptime monitoring and status pages in one{% endblock %}
 {% block head %}
 <script type="application/ld+json">{{ org_json_ld.as_str()|safe }}</script>
 <script type="application/ld+json">{{ website_json_ld.as_str()|safe }}</script>
@@ -17,14 +17,16 @@
     <section class="mk-hero">
         <div class="mk-hero__copy space-y-7">
             <h1 class="mk-display">
-                Uptime monitoring and a status page <span class="mk-display-em">in one</span>.
+                An uptime monitor and status page <span class="mk-display-em">in one</span>.
             </h1>
 
             <p class="mk-lede">
-                Uptimepage checks your websites and APIs every minute from
-                several regions, alerts your team the second one goes down,
-                and gives customers a live public status page. Free, open
-                source, and running in about a minute.
+                Uptimepage is an uptime monitor for websites and APIs. It checks
+                them every minute from several regions, alerts your team the
+                second one goes down, and gives customers a live public status
+                page. Start free with no card and have your first monitor
+                running in about a minute. The source is public under AGPL, so
+                nothing here sits behind a sales call.
             </p>
 
             <div class="flex flex-wrap items-center gap-3 pt-1">
@@ -578,12 +580,12 @@
                 </p>
             </article>
             <article class="mk-grid__cell space-y-2">
-                <p class="mk-eyebrow">indie hackers</p>
-                <h3 class="mk-h3">a status page from day one</h3>
+                <p class="mk-eyebrow">startups</p>
+                <h3 class="mk-h3">a status page before your first incident</h3>
                 <p class="mk-body">
-                    Ship a polished status page on day one, hosted free or
+                    Ship a polished status page from day one, hosted free or
                     <a href="/open-source-status-page" class="mk-footer-link mk-footer-link--inline">self-hosted</a>.
-                    No real-company invoice.
+                    Nothing to build, nothing to bill.
                 </p>
             </article>
             <article class="mk-grid__cell space-y-2">
@@ -614,10 +616,56 @@
         </p>
     </section>
 
+    {# ── Hosted service & open-source transparency ────────────── #}
+    <section aria-labelledby="mk-company-trust-title" class="space-y-8">
+        <header class="mx-auto max-w-2xl space-y-3 text-center">
+            <h2 id="mk-company-trust-title" class="mk-h2">Managed for your team. Open where it matters.</h2>
+            <p class="mk-body">
+                Use the hosted service and let Uptimepage run the monitoring
+                stack. The source is public, so your team can verify how it
+                works and keep a self-hosted path if your requirements change.
+            </p>
+        </header>
+
+        <div class="mk-grid mk-grid--3">
+            <article class="mk-grid__cell space-y-2">
+                <p class="mk-eyebrow">accountability</p>
+                <h3 class="mk-h3">changes have an owner</h3>
+                <p class="mk-body">
+                    Invite teammates with owner and member roles. Pauses,
+                    deletions and channel changes land in the audit log with
+                    the person who made them.
+                </p>
+            </article>
+            <article class="mk-grid__cell space-y-2">
+                <p class="mk-eyebrow">portability</p>
+                <h3 class="mk-h3">your reliability data can leave</h3>
+                <p class="mk-body">
+                    Export monitors and incidents as JSON. Public incidents
+                    stay available through RSS, with an API and Terraform
+                    provider for workflows your team owns.
+                </p>
+            </article>
+            <article class="mk-grid__cell space-y-2">
+                <p class="mk-eyebrow">no lock-in</p>
+                <h3 class="mk-h3">leaving is a migration, not a rewrite</h3>
+                <p class="mk-body">
+                    Read the
+                    <a href="https://github.com/uptimepage/uptimepage" class="mk-footer-link mk-footer-link--inline" rel="noopener" target="_blank">public source</a>,
+                    the system
+                    <a href="/architecture" class="mk-footer-link mk-footer-link--inline">architecture</a>,
+                    and the <a href="/security-policy" class="mk-footer-link mk-footer-link--inline">security policy</a>.
+                    The API and Terraform provider are identical hosted or
+                    self-hosted.
+                </p>
+            </article>
+        </div>
+    </section>
+
     {# ── Pricing ───────────────────────────────────────────────── #}
     <section id="pricing" class="mx-auto max-w-3xl space-y-5 text-center">
         <header class="space-y-3">
-            <h2 class="mk-h2">Free to start. <em class="mk-h2-em">Open source</em> to keep.</h2>
+            <h2 class="mk-h2">Start free. <em class="mk-h2-em">Scale when your team does.</em></h2>
             <p class="mk-priceline"><b>$0</b> with no expiry · paid tiers from <b>$9</b>, soon</p>
         </header>
         <div class="flex flex-wrap items-center justify-center gap-2">
@@ -629,7 +677,7 @@
             </a>
             <a href="/pricing" class="mk-cta mk-cta--ghost">see all plans</a>
         </div>
-        <p class="mk-mono mk-quiet text-xs mk-ls-04">AGPL · self-host with no limits · no credit card</p>
+        <p class="mk-mono mk-quiet text-xs mk-ls-04">no card to start · AGPL source · export or self-host any time</p>
     </section>
 
     {# ── FAQ ───────────────────────────────────────────────────── #}
