@@ -550,6 +550,20 @@ www.{$UPTIMEPAGE_DOMAIN} {
 analytics.{$UPTIMEPAGE_DOMAIN} {
 	encode gzip zstd
 
+	# /api/send takes no auth and the website id ships in public HTML. A
+	# browser cannot lie about Origin, so this turns away other sites and
+	# stale self-host builds; a client that forges the header still gets in.
+	# `beacon_headers` in src/analytics.rs names the app host to match.
+	@foreign_beacon {
+		path /api/send
+		method POST
+		not {
+			header Origin https://{$UPTIMEPAGE_DOMAIN}
+			header Origin https://app.{$UPTIMEPAGE_DOMAIN}
+		}
+	}
+	respond @foreign_beacon 403
+
 	reverse_proxy umami:3000
 
 	header {

@@ -11,7 +11,7 @@ use std::net::IpAddr;
 use std::time::Duration;
 
 use axum::http::HeaderMap;
-use axum::http::header::USER_AGENT;
+use axum::http::header::{ORIGIN, USER_AGENT};
 use serde::Serialize;
 
 use crate::app::AppState;
@@ -83,7 +83,7 @@ pub fn track_login(state: &AppState, login: Login<'_>, ip: IpAddr, headers: &Hea
         let Ok(url) = ENDPOINT.parse() else {
             return;
         };
-        let headers = BTreeMap::from([(USER_AGENT.to_string(), user_agent)]);
+        let headers = beacon_headers(user_agent);
         let sent = tokio::time::timeout(
             SEND_TIMEOUT,
             crate::http_outbound::post_json_with_headers(&client, &url, &body, &headers),
@@ -95,6 +95,16 @@ pub fn track_login(state: &AppState, login: Login<'_>, ip: IpAddr, headers: &Hea
             Err(_) => tracing::warn!("analytics send timed out (non-fatal)"),
         }
     });
+}
+
+/// A send made off a browser carries no `Origin` of its own, and the edge
+/// turns away beacons from hosts it does not know — keep this in step with
+/// the `@foreign_beacon` allowlist in `deployment/Caddyfile`.
+fn beacon_headers(user_agent: String) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (USER_AGENT.to_string(), user_agent),
+        (ORIGIN.to_string(), APP_ORIGIN.to_string()),
+    ])
 }
 
 /// `via` is absent rather than a filler value: Umami charts every value a
@@ -174,6 +184,13 @@ mod tests {
         assert_eq!(website_id("https://status.acme.example"), None);
         assert_eq!(website_id("https://app.uptimepage.dev.evil.example"), None);
         assert_eq!(website_id("http://app.uptimepage.dev"), None);
+    }
+
+    #[test]
+    fn beacon_names_the_origin_the_edge_allows() {
+        let headers = beacon_headers("Mozilla/5.0".to_string());
+        assert_eq!(headers[ORIGIN.as_str()], APP_ORIGIN);
+        assert_eq!(headers[USER_AGENT.as_str()], "Mozilla/5.0");
     }
 
     #[test]
