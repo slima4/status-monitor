@@ -3,7 +3,7 @@
 The public status page is the customer-facing surface — an unauthenticated
 HTML page at `/status` plus a small JSON + RSS API under
 `/api/public/v1/*`. It's the only part of uptimepage that's safe to
-expose on the open internet without basic auth in front of it.
+hand to the public, since nothing on it is org-private.
 
 This page is for operators: how to publish a component, narrate an
 incident, and schedule a maintenance window. For the wire-level details
@@ -244,7 +244,7 @@ else is plain HTML.
 
 ## Caddy and the rate-limit plugin
 
-The public surface bypasses basic auth at the Caddy layer through an
+The public surface gets its own per-IP rate-limit zone through an
 `@public` matcher in `deployment/Caddyfile`. The matcher also applies a
 per-IP rate limit (60 requests / minute), which requires the
 [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) plugin.

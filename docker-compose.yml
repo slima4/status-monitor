@@ -1,6 +1,7 @@
-# Try-it and local development. Ports are published to the host and there is no
-# auth in front of the API. For production (TLS + basic auth + internal-only
-# databases), see ./deployment/.
+# Try-it and local development. Not safe to expose: nothing terminates TLS,
+# /metrics on 9090 has no auth at any layer, and both databases are published
+# with the dev credentials. For production (TLS, internal-only databases,
+# per-IP rate limits), see ./deployment/.
 #
 # Pulls the published image. To build from this checkout instead:
 #   docker compose -f docker-compose.yml -f compose.build.yml up -d --build

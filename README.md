@@ -104,7 +104,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 
 ## Public status page
 
-A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binary. Per-target opt-in via `public_status`; the page bypasses basic auth at the Caddy layer with a per-IP rate limit, caches for 10 s in-process, and degrades gracefully if ClickHouse is unreachable. Operators narrate incidents (`PATCH /api/v1/incidents/{id}`, `POST /api/v1/incidents/{id}/updates`) and schedule maintenance windows (`POST /api/v1/maintenance`). Visitors subscribe for email or webhook updates. See [docs/public-status.md](docs/public-status.md).
+A customer-facing `/status` page (HTML + JSON + RSS 2.0) is built into the binary. Per-target opt-in via `public_status`; the page's routes carry no auth extractor, so it is public wherever the binary runs, with a per-IP rate limit at the edge, caches for 10 s in-process, and degrades gracefully if ClickHouse is unreachable. Operators narrate incidents (`PATCH /api/v1/incidents/{id}`, `POST /api/v1/incidents/{id}/updates`) and schedule maintenance windows (`POST /api/v1/maintenance`). Visitors subscribe for email or webhook updates. See [docs/public-status.md](docs/public-status.md).
 
 <div align="center">
 
@@ -288,7 +288,7 @@ curl http://127.0.0.1:9090/metrics
 
 ### Production deployment
 
-Anything reachable from the internet should run this stack, not the one above. It adds a Caddy edge with automatic TLS, basic auth on the operator host, internal-only Postgres and ClickHouse, per-IP rate limits, and blue/green restarts. It pulls the same published image. Setup runbook is in [`deployment/README.md`](deployment/README.md), with the architecture in [docs/deployment.md](docs/deployment.md).
+Anything reachable from the internet should run this stack, not the one above. It adds a Caddy edge with automatic TLS, internal-only Postgres and ClickHouse, per-IP rate limits, and blue/green restarts. The operator host is guarded by the app's own sign-in, not by an edge credential. It pulls the same published image. Setup runbook is in [`deployment/README.md`](deployment/README.md), with the architecture in [docs/deployment.md](docs/deployment.md).
 
 ### Kubernetes
 

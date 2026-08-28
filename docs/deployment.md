@@ -2,12 +2,12 @@
 
 Running on Kubernetes instead? See [Kubernetes](kubernetes.md) for the Helm charts.
 
-## Production deployment with Caddy + basic auth
+## Production deployment with Caddy
 
 For real-world operation, use the production stack under `deployment/` in the repo. It puts a Caddy reverse proxy in front of the Rust service with:
 
 - Automatic TLS via Let's Encrypt (HTTP/2 and HTTP/3 on by default)
-- Basic auth on the UI and API
+- The app's own sign-in guarding the UI and API; the edge adds no second credential
 - Postgres and ClickHouse on the internal docker network — **no published ports**
 - ClickHouse memory-capped at ~2 GB (see `deployment/clickhouse-config.xml`)
 
@@ -16,15 +16,15 @@ Setup:
 ```bash
 cd deployment
 cp .env.example .env
-$EDITOR .env            # set domain, ACME email, bcrypt hash, DB passwords, KEK
+$EDITOR .env            # set domain, ACME email, OAuth app, DB passwords, KEK
 docker compose up -d
 ```
 
-`deployment/README.md` is the authoritative source for setup, user management, password rotation, backups, and troubleshooting.
+`deployment/README.md` is the authoritative source for setup, signing in, backups, and troubleshooting.
 
 ### Authentication boundary
 
-The Rust service ships an in-binary auth stack (GitHub, Google, Microsoft and GitLab OAuth, opaque API tokens, and magic-link sign-in, all enabled by default and each individually configurable). The native auth is the boundary; a basic-auth layer in front of Caddy would double-prompt. Single-tenant deploys behave the same way — sign up as the first user and the operator surface is yours.
+The Rust service ships an in-binary auth stack (GitHub, Google, Microsoft and GitLab OAuth, opaque API tokens, and magic-link sign-in, all enabled by default and each individually configurable). The native auth is the boundary; a basic-auth layer in front of Caddy would double-prompt. Single-tenant deploys behave the same way. Note that OAuth sign-up provisions an org for any identity that completes the flow, so an internet-facing instance that should not accept strangers needs a network or edge restriction of its own.
 
 `/healthz` and `/readyz` are intentionally exposed without auth so
 uptime probes, load balancers, and orchestrators can hit them.
@@ -72,7 +72,7 @@ non-empty API key — fail-fast over send-time surprise.
 
 ### Public status surface
 
-The Caddyfile carries an `@public` matcher that short-circuits `basic_auth` for the public status paths and adds a per-IP rate limit (60 req/min) via the [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) plugin. The stock `caddy:2-alpine` image doesn't include that plugin, so the production deployment uses a custom `custom-caddy:2` image built with `xcaddy`:
+The Caddyfile carries an `@public` matcher that handles the public status paths ahead of the catch-all and adds a per-IP rate limit (60 req/min) via the [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) plugin. The stock `caddy:2-alpine` image doesn't include that plugin, so the production deployment uses a custom `custom-caddy:2` image built with `xcaddy`:
 
 ```bash
 docker build -t custom-caddy:2 - <<'EOF'
@@ -124,7 +124,7 @@ UPTIMEPAGE_SERVER__METRICS_BIND=0.0.0.0:9090 \
 ./uptimepage
 ```
 
-There is no built-in auth on the API port. Front it with a proxy or keep it on a private network. The ready-made Caddy stack under [`deployment/`](#production-deployment-with-caddy--basic-auth) does this for you.
+The app authenticates its own routes, so this port is not open season, but it speaks plain HTTP and applies no per-IP limits. Terminate TLS in front of it or keep it on a private network. The ready-made Caddy stack under [`deployment/`](#production-deployment-with-caddy) does both.
 
 ## Metrics shipping (Grafana Cloud)
 

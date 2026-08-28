@@ -1,9 +1,8 @@
 //! Operator endpoints for maintenance window CRUD.
 //!
 //! Standard `ApiError` envelope. Mounted under `/api/v1/maintenance` so the
-//! existing auth boundary (basic auth at Caddy in v1) applies. The public
-//! surface reads maintenance through `PublicSource::maintenance`, never
-//! through this handler.
+//! app's own auth boundary applies. The public surface reads maintenance
+//! through `PublicSource::maintenance`, never through this handler.
 
 use axum::Json;
 use axum::extract::{Path, Query, State};

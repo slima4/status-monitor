@@ -24,7 +24,7 @@ ssh your-server "uptime"
 ssh your-server "cd /opt/uptimepage/deployment && docker compose ps"
 
 # Recent logs?
-ssh your-server "cd /opt/uptimepage/deployment && docker compose logs --tail=200 uptimepage"
+ssh your-server "cd /opt/uptimepage/deployment && docker compose logs --tail=200 uptimepage_blue uptimepage_green"
 ```
 
 ### Step 2 — Identify (~5 minutes)
@@ -32,8 +32,8 @@ ssh your-server "cd /opt/uptimepage/deployment && docker compose logs --tail=200
 | Symptom | Likely cause | First fix |
 |---|---|---|
 | `/readyz` returns 503 | DB unreachable | `docker compose ps postgres clickhouse` |
-| All endpoints return 502 from Caddy | App down | `docker compose logs uptimepage` then restart |
-| Login fails | GitHub OAuth misconfig | check `UPTIMEPAGE_AUTH__GITHUB__CLIENT_ID` |
+| All endpoints return 502 from Caddy | App down | `docker compose logs uptimepage_blue uptimepage_green` then restart |
+| Login fails | GitHub OAuth misconfig | check `UPTIMEPAGE_AUTH_GITHUB_CLIENT_ID` |
 | Wildcard cert errors | Hetzner DNS token issue | rotate the `HETZNER_DNS_API_TOKEN` |
 | Slow responses | DB overload or ClickHouse merge | check `docker stats` |
 | Status pages all 404 | App can't reach DB | check connection from container |
@@ -54,13 +54,17 @@ If the outage is longer than 5 minutes and affects multiple users:
 cd /opt/uptimepage/deployment && docker compose restart
 
 # Restart just the app
-cd /opt/uptimepage/deployment && docker compose restart uptimepage
+cd /opt/uptimepage/deployment && docker compose restart uptimepage_$(cat .active_color)
 
-# Pull latest image and restart
-cd /opt/uptimepage/deployment && docker compose pull && docker compose up -d
+# Pull latest image and restart. Scoped to the app on purpose: a bare
+# `pull` also rolls postgres and clickhouse, which must not move underneath
+# a schema migration.
+cd /opt/uptimepage/deployment && svc=uptimepage_$(cat .active_color) \
+  && docker compose pull "$svc" && docker compose up -d "$svc"
 
 # Roll back to a previous image (if the last deploy broke things)
-cd /opt/uptimepage/deployment && docker compose pull uptimepage:<previous-tag>
+cd /opt/uptimepage/deployment && UPTIMEPAGE_IMAGE=ghcr.io/uptimepage/uptimepage:<previous-tag> \
+  docker compose up -d uptimepage_$(cat .active_color)
 ```
 
 ### Step 5 — Post-incident
@@ -112,19 +116,9 @@ Record the result in the ops repo, in the same form as prior entries:
 
 Annual rotations (set calendar reminders).
 
-### `UPTIMEPAGE_ADMIN_HASH` (basic-auth password)
-
-```bash
-# Generate a new hash
-docker run --rm caddy:2-alpine caddy hash-password --plaintext "new-password"
-
-# Update .env
-ssh your-server "cd /opt/uptimepage/deployment && nano .env"
-# Replace UPTIMEPAGE_ADMIN_HASH=...
-
-# Reload Caddy (no downtime)
-ssh your-server "cd /opt/uptimepage/deployment && docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile"
-```
+There is no edge password to rotate: the operator surface is gated by the
+app's own session, not by Caddy. Revoking one person's access is a team
+removal in the app, and an API token is revoked by deleting it there.
 
 ### `HETZNER_DNS_API_TOKEN`
 
@@ -143,8 +137,10 @@ Most disruptive — users may need to sign in again.
 
 1. GitHub → Settings → Developer settings → OAuth Apps → uptimepage →
    Generate a new client secret
-2. Update `UPTIMEPAGE_AUTH__GITHUB__CLIENT_SECRET` in `.env`
-3. Restart the app: `docker compose up -d uptimepage`
+2. Update `UPTIMEPAGE_AUTH_GITHUB_CLIENT_SECRET` in `.env` on the box. This
+   one is not deploy-managed: `deploy.yml` plumbs Google, Microsoft and
+   GitLab, but no GitHub OAuth secret, so a repo secret changes nothing here.
+3. Restart the app: `docker compose up -d uptimepage_$(cat .active_color)`
 4. Test sign-in
 5. Delete the old secret in GitHub
 

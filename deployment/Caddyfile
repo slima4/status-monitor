@@ -1,7 +1,8 @@
 # Caddyfile — Production reverse proxy for uptimepage (SaaS layout)
 #
 # Subdomain layout (UPTIMEPAGE_DOMAIN is the BASE domain, e.g. example.com):
-#   app.{domain}              → Operator UI + API (basic auth), plus the
+#   app.{domain}              → Operator UI + API (the app gates its own
+#                               routes; no edge credential), plus the
 #                               single-org /status page in self-host mode
 #   *.{domain}                → Per-org public status pages (wildcard cert,
 #                               apex-wildcard shape — `acme.{domain}`, not
@@ -118,8 +119,9 @@ app.{$UPTIMEPAGE_DOMAIN} {
 
 	# ─── Public status surface (self-host, no auth) ─────────────────────
 	# Self-host serves its single org's status page, public JSON API, and
-	# bundled assets here. `handle` short-circuits the basic_auth directive
-	# below — only requests matching no `handle` fall through to auth. In
+	# bundled assets here. `handle` is terminal, so these get their own
+	# rate-limit zone instead of the catch-all's; what makes them public is
+	# that the routes carry no auth extractor, not anything at the edge. In
 	# SaaS the Host is `app.{domain}` (no slug), so the app 404s these and
 	# the wildcard site is the real public surface — keeping this block is
 	# harmless there. Distinct rate-limit zone from the wildcard site (zone
@@ -375,10 +377,12 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	# those routes itself (GitHub OAuth → signed cookie); an edge
 	# basic_auth would double-prompt and break the app's OAuth round-trip.
 	#
-	# SELF-HOST CAVEAT: with tenancy disabled the app does NOT authenticate
-	# the operator UI/API (single implicit org, no login). This Caddyfile
-	# is the SaaS layout; do not expose a self-host operator surface to the
-	# public internet without adding your own gate.
+	# Self-host works the same way, regardless of tenancy: `AuthedBrowser`
+	# redirects unauthenticated page loads to /login, and the /api/v1
+	# extractors reject them with a 401 envelope. NOTE this is a lock, not
+	# an allowlist — OAuth sign-up creates an org for any identity that
+	# completes the flow, so an internet-facing self-host wants a network
+	# or edge restriction if strangers should not be able to register.
 
 	# ─── Security headers ───────────────────────────────────────────────
 	# The operator app is a private surface: keep it out of search indexes so

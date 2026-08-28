@@ -1,7 +1,7 @@
 # Uptimepage — Production Deployment
 
 This directory contains the production deployment for uptimepage:
-**Caddy reverse proxy** (TLS + basic auth) in front of the Rust service,
+**Caddy reverse proxy** (TLS, rate limits) in front of the Rust service,
 PostgreSQL, and ClickHouse.
 
 ## What this gives you
@@ -10,11 +10,11 @@ PostgreSQL, and ClickHouse.
 |---|---|
 | TLS certificates | Automatic via Let's Encrypt — no manual renewal |
 | HTTP/2 + HTTP/3 | Enabled by default in Caddy |
-| Authentication | Basic auth at the proxy layer on `app.{domain}` (UI + operator API) |
+| Authentication | The app's own sign-in on `app.{domain}` (UI + operator API). The edge adds no second gate |
 | Public status surface | Self-host: `/status` on `app.{domain}`. SaaS: each org at `{slug}.{domain}` (apex wildcard) |
 | TLS for status pages | Wildcard cert for `*.{domain}` via Let's Encrypt + Hetzner DNS-01; `app.{domain}` kept on its own per-host HTTP-01 cert |
 | Public rate limit | Per-IP 60 req/min on the public surface (custom Caddy image, built automatically) |
-| Auth-endpoint rate limit | Per-IP 10 req/min on `/auth/*`, `/api/v1/me`, invitation accept |
+| Auth-endpoint rate limit | Per-IP 10 req/min on `/auth/*` and `/api/v1/me`; invitation accept has its own zone at 30/min |
 | Org-creation rate limit | Per-IP 3 per 24 h on `POST /api/v1/orgs` (signup-abuse speedbump) |
 | Public health probes | `/healthz` and `/readyz` exposed without auth |
 | Metrics scraping | Internal-only — `/metrics` returns 404 publicly |
@@ -81,22 +81,7 @@ $EDITOR .env
 
 Fill in every value. The file has inline instructions for each variable.
 
-### 3. Generate your admin password hash
-
-```bash
-docker run --rm caddy:2-alpine caddy hash-password
-# Enter password, get bcrypt hash
-```
-
-Copy the output (starts with `$2a$14$...`) into `UPTIMEPAGE_ADMIN_HASH`
-in `.env`. **Wrap it in single quotes** to prevent docker-compose from
-treating `$` as variable interpolation:
-
-```
-UPTIMEPAGE_ADMIN_HASH='$2a$14$abc...xyz'
-```
-
-### 4. Generate database passwords and KEK
+### 3. Generate database passwords and KEK
 
 ```bash
 # Run all three at once
@@ -109,7 +94,7 @@ UPTIMEPAGE_ADMIN_HASH='$2a$14$abc...xyz'
 
 Copy the output into `.env`.
 
-### 5. Validate the config
+### 4. Validate the config
 
 ```bash
 docker compose config
@@ -118,7 +103,7 @@ docker compose config
 This expands all env vars and prints the effective config. If any required
 variable is unset, you'll see a warning.
 
-### 6. Start the stack
+### 5. Start the stack
 
 ```bash
 docker compose up -d
@@ -246,67 +231,73 @@ auth as the sole barrier.
 
 ## Operations
 
-### Adding a user
+### Signing in
 
-1. Generate a hash:
-   ```bash
-   docker run --rm caddy:2-alpine caddy hash-password
-   ```
+The stack carries no edge credential. The app gates its own routes: a page
+load without a session redirects to `/login`, and `/api/v1` answers with a
+401 envelope. There is nothing to configure at the proxy for it.
 
-2. Add to `.env`:
-   ```
-   UPTIMEPAGE_OPERATOR_HASH='$2a$14$...'
-   ```
-
-3. Uncomment the corresponding line in `Caddyfile`:
-   ```caddy
-   basic_auth {
-       admin {$UPTIMEPAGE_ADMIN_HASH}
-       operator {$UPTIMEPAGE_OPERATOR_HASH}   # <-- uncomment
-   }
-   ```
-
-4. Reload Caddy (no downtime, no restart):
-   ```bash
-   docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile
-   ```
-
-### Removing a user
-
-Delete the line from `Caddyfile`, then reload Caddy as above. The variable
-in `.env` can stay; nothing references it once removed from Caddyfile.
-
-### Rotating a password
-
-Generate a new hash, update the value in `.env`, then:
+Sign in with the GitHub OAuth app from step 2. If you have not registered
+one yet, or it is misconfigured, claim the instance from the host instead:
 
 ```bash
-docker compose up -d caddy   # picks up new env, restarts only caddy
+docker compose run --rm uptimepage_blue bootstrap-owner --email you@example.com
 ```
 
-Active sessions are not invalidated — basic auth is stateless, so the
-next request from clients using the old password fails with 401.
+It prints a one-time sign-in URL and a full-access API token. The service is
+colour-suffixed because deploys are blue/green; either colour will do, since
+both run the same image against the same database.
+
+Use the same address as the account you are recovering: a different one
+inserts a *new* user with a fresh empty org and says nothing about it. The
+sign-in URL appears only while magic-link is among `auth.enabled_methods`
+(it is by default) and `UPTIMEPAGE_AUTH_PUBLIC_BASE_URL` is set; otherwise
+you get the token alone.
+
+Other providers use the same `UPTIMEPAGE_AUTH_<PROVIDER>_*` shape; the keys
+are listed in `docker-compose.yml` on the `uptimepage_blue` service, which
+`uptimepage_green` inherits.
+
+**Signing in is a lock, not an allowlist.** OAuth sign-up provisions an org
+for any identity that completes the flow, so on an internet-facing host any
+GitHub account can register. `auth.open_signup = false` does *not* stop this:
+it is read only on the magic-link path, never in the OAuth callback. Keep the
+operator host on a private network or add an IP allowlist at the edge.
+
+### Adding and removing people
+
+Invite them from the app (Settings, then Team), and remove them the same
+way. Nothing in `.env` or `Caddyfile` changes, and no restart is involved.
 
 ### Calling the API from scripts / CI
 
-```bash
-curl -u admin:password https://app.example.com/api/v1/targets
-```
-
-Or with an explicit header:
+Mint an API token in the app and send it as a bearer token. Tokens are
+scoped `resource:action`, so a CI token can be read-only.
 
 ```bash
-curl -H "Authorization: Basic $(echo -n admin:password | base64)" \
+curl -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
      https://app.example.com/api/v1/targets
 ```
 
-If/when the service grows native auth (API tokens, session cookies), the
-basic auth layer at the Caddy edge can stay in place during the transition.
+A token bound to one org needs nothing else. A token minted for *all my
+organizations* has no org to assume, so it must name one per request:
+
+```bash
+curl -H "Authorization: Bearer $UPTIMEPAGE_TOKEN" \
+     -H "X-Uptimepage-Org: my-org-slug" \
+     https://app.example.com/api/v1/targets
+```
+
+Rotating one means minting a replacement and deleting the old token in the
+app. Passwords and bcrypt hashes are not part of this stack.
 
 ### Per-IP rate limits (Caddy)
 
-The edge enforces three per-IP zones (keyed on `{remote_host}`) in
-`Caddyfile`, on top of the per-org / per-user budgets the app enforces from
+The edge enforces fifteen per-IP zones (keyed on `{remote_host}`) in
+`Caddyfile`; the three most load-bearing are below, and the rest cover
+`/login`, invitations, share links, heartbeat pings, on-demand checks,
+channel verification, status-page subscribe, delegate connect and the three
+inbound webhooks. They sit on top of the per-org / per-user budgets the app enforces from
 the org's plan (see [Quotas & rate limits](../docs/quotas.md)). Per-IP is
 the edge's job because behind the proxy the app sees only the proxy as the
 peer; the two tiers are complementary, not redundant.
@@ -314,7 +305,7 @@ peer; the two tiers are complementary, not redundant.
 | Zone | Matches | Limit | Why |
 |---|---|---|---|
 | `status_path` | public status surface (`/status`, `/api/public/*`, assets) | 60 / 1 min | Cheap unauthenticated reads, bot-heavy |
-| `auth_endpoints` | `/auth/*`, `/api/v1/me`, `/api/v1/orgs/*/invitations/accept` | 10 / 1 min | Throttle credential stuffing / token probing |
+| `auth_endpoints` | `/auth/*`, `/api/v1/me` | 10 / 1 min | Throttle credential stuffing / token probing |
 | `org_creation` | `POST /api/v1/orgs` | 3 / 24 h | Signup-abuse speedbump; with email verification, mass org creation needs many real mailboxes |
 
 These blocks already exist in the shipped `Caddyfile` — no manual step.
@@ -457,9 +448,10 @@ balancer (Caddy supports this with multiple upstreams).
 - Hit Let's Encrypt rate limit? Switch to staging (above) while you fix things
 - Cloud firewall rules? Check security groups / firewall settings
 
-**"Invalid credentials" but the password is correct**
-- Bcrypt hash in `.env` not wrapped in single quotes? `$` got interpolated. Wrap it.
-- Hash was generated for a different cost? Caddy accepts any valid bcrypt hash. Regenerate.
+**Sign-in bounces back to `/login`**
+- OAuth callback URL mismatch? It must match `UPTIMEPAGE_AUTH_GITHUB_REDIRECT_URL` exactly.
+- `UPTIMEPAGE_AUTH_PUBLIC_BASE_URL` wrong? The app builds OAuth links from it.
+- Locked out entirely? `docker compose run --rm uptimepage_blue bootstrap-owner --email <the-address-on-the-account>` prints a one-time sign-in URL.
 
 **Caddy can't reach uptimepage**
 ```bash
@@ -530,14 +522,17 @@ This deployment is right-sized for **single-tenant, small-team operator use**:
   the service degrades to read-only or stops accepting writes. For HA,
   switch to managed Postgres (Neon, RDS) and managed ClickHouse (ClickHouse
   Cloud, Altinity) — but you lose the single-VM simplicity.
-- **No SSO.** Basic auth is the current auth boundary. Native session
-  cookies or API tokens are not part of this stack.
-- **Rate limiting only on the public surface.** The operator UI/API has no
-  per-IP throttle — basic auth is the gate. Add `caddy-ratelimit` zones to
-  the auth-gated `reverse_proxy` block if you need it.
+- **No SAML / enterprise SSO.** Sign-in is OAuth (GitHub, Google,
+  Microsoft, GitLab), passkeys and magic-link mail. No SCIM provisioning.
+- **Per-IP throttling is targeted, not blanket.** Fifteen named zones cover
+  the surfaces worth bounding (see the table above); everything else falls
+  through unthrottled. To bound another path, add its own `handle` block
+  with a matcher, a `rate_limit` and `import app_upstream` — do not put
+  `rate_limit` at site scope or inside the shared snippet, since either
+  applies it to `/healthz` and the public status surface too. Zone names are
+  global to the Caddy process, so pick a fresh one.
 - **No WAF / DDoS protection.** Front this with Cloudflare (free tier) if
-  you need that — Caddy's basic_auth is not designed to absorb
-  credential-stuffing attacks at scale.
+  you need that.
 
 These are deliberate omissions, each documented as a known gap.
 
