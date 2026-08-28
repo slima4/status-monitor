@@ -209,6 +209,17 @@ mod tests {
     }
 
     #[test]
+    fn the_edge_refuses_replayed_share_tokens() {
+        let caddy =
+            std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/deployment/Caddyfile"))
+                .expect("read Caddyfile");
+        assert!(
+            caddy.contains("header x-umami-share-token *"),
+            "the edge must refuse this header, or an analytics build older than 3.2.0 reads out              every website to anyone holding a public website id"
+        );
+    }
+
+    #[test]
     fn payload_carries_the_visitor_ip_and_method() {
         let body = SendBody {
             kind: "event",

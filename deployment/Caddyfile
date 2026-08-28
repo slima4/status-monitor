@@ -564,12 +564,15 @@ analytics.{$UPTIMEPAGE_DOMAIN} {
 	}
 	respond @foreign_beacon 403
 
-	# GHSA-3xx8-742v-m4mq, unpatched in every release: the cache JWT that
-	# /api/send hands anyone is accepted as a share token and reads every
-	# website's data. That header is the only carrier and we publish no
-	# share links, so refusing it costs nothing. Revisit if we ever share.
+	# A cache JWT from the auth-free /api/send used to pass as a share token
+	# (GHSA-3xx8-742v-m4mq, whose record still wrongly reads patched: none).
+	# Upstream added a type claim check in 3.2.0, but both tokens are still
+	# signed with one secret, and 2.x ships on without the check — so this
+	# covers anything older. The header is the replay's only carrier. Cost:
+	# every shared view (website, board, pixel, link) 403s for whoever opens
+	# it, while creating one still appears to work. We publish none.
 	@share_replay header x-umami-share-token *
-	respond @share_replay 403
+	respond @share_replay "share tokens are refused at the edge" 403
 
 	reverse_proxy umami:3000
 
