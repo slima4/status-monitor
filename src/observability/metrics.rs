@@ -127,6 +127,18 @@ fn register_descriptions() {
         "uptimepage_users_active",
         "Non-deleted user accounts counted from Postgres. Slow-cadence inventory gauge, scrape-cached"
     );
+    describe_gauge!(
+        "uptimepage_notification_channels",
+        "Enabled notification channels counted from Postgres, labelled by kind. The kind values are the ones uptimepage_notifications_total carries as transport. Slow-cadence inventory gauge, scrape-cached"
+    );
+    describe_gauge!(
+        "uptimepage_notification_channel_orgs",
+        "Organisations with at least one enabled channel of a kind, labelled by kind. Not summable across kinds: an org using two transports is counted in both"
+    );
+    describe_gauge!(
+        "uptimepage_orgs_with_channels",
+        "Organisations with at least one enabled notification channel, counted once over all kinds"
+    );
     describe_gauge!("uptimepage_workers_in_flight", "Checks currently executing");
     describe_gauge!(
         "uptimepage_result_queue_depth",
@@ -347,6 +359,9 @@ pub mod names {
     pub const TARGETS_TOTAL: &str = "uptimepage_targets_total";
     pub const TARGETS_ENABLED: &str = "uptimepage_targets_enabled";
     pub const USERS_ACTIVE: &str = "uptimepage_users_active";
+    pub const NOTIFICATION_CHANNELS: &str = "uptimepage_notification_channels";
+    pub const NOTIFICATION_CHANNEL_ORGS: &str = "uptimepage_notification_channel_orgs";
+    pub const ORGS_WITH_CHANNELS: &str = "uptimepage_orgs_with_channels";
     pub const WORKERS_IN_FLIGHT: &str = "uptimepage_workers_in_flight";
     pub const RESULT_QUEUE_DEPTH: &str = "uptimepage_result_queue_depth";
     pub const BREAKERS_OPEN: &str = "uptimepage_circuit_breakers_open";

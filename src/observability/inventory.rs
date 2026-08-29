@@ -1,5 +1,6 @@
-//! Configured-monitor and active-user counts from Postgres, refreshed on a
-//! slow cadence and scrape-cached so request load never reaches Postgres.
+//! Configured-monitor, active-user and notification-channel counts from
+//! Postgres, refreshed on a slow cadence and scrape-cached so request load
+//! never reaches Postgres.
 
 use std::time::Duration;
 
@@ -8,7 +9,7 @@ use sqlx::PgPool;
 use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::CheckSpec;
+use crate::domain::{ChannelKind, CheckSpec};
 use crate::error::Result;
 use crate::observability::metrics::names;
 
@@ -52,6 +53,37 @@ async fn sweep(pg: &PgPool) -> Result<()> {
             .await
             .context("count active users")?;
     metrics::gauge!(names::USERS_ACTIVE).set(active_users as f64);
+
+    let channels: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT c.kind, count(*), count(DISTINCT c.org_id) FROM notification_channels c \
+             JOIN organizations o ON o.id = c.org_id AND o.deleted_at IS NULL \
+             WHERE c.enabled GROUP BY c.kind \
+             /* SAFE: operator-wide inventory gauge, counts every live org by design */",
+    )
+    .fetch_all(pg)
+    .await
+    .context("count enabled notification channels by kind")?;
+    // Emit every kind so one nobody uses reads 0 rather than going absent.
+    for kind in ChannelKind::ALL {
+        let db_str = kind.as_db_str();
+        let row = channels.iter().find(|(k, _, _)| k == db_str);
+        metrics::gauge!(names::NOTIFICATION_CHANNELS, "kind" => db_str)
+            .set(row.map_or(0, |(_, n, _)| *n) as f64);
+        metrics::gauge!(names::NOTIFICATION_CHANNEL_ORGS, "kind" => db_str)
+            .set(row.map_or(0, |(_, _, orgs)| *orgs) as f64);
+    }
+
+    // Summing the per-kind org counts double-counts an org using two transports.
+    let orgs_with_channels: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT c.org_id) FROM notification_channels c \
+             JOIN organizations o ON o.id = c.org_id AND o.deleted_at IS NULL \
+             WHERE c.enabled \
+             /* SAFE: operator-wide inventory gauge, counts every live org by design */",
+    )
+    .fetch_one(pg)
+    .await
+    .context("count orgs with a notification channel")?;
+    metrics::gauge!(names::ORGS_WITH_CHANNELS).set(orgs_with_channels as f64);
 
     Ok(())
 }
