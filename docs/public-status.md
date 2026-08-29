@@ -272,9 +272,10 @@ operators can embed in README files or external dashboards. Two modes:
 ```
 
 The badge reuses the cached page payload, so it tracks the `/status`
-view inside the 10-second cache window. Unknown component ids return
-`404` with the public error envelope; only `style=flat` is recognised
-(others return `400`).
+view inside the 10-second cache window. It uses `style=flat` by default;
+`style=flat-square` and `style=for-the-badge` are also available. Unknown
+component ids return `404` with the public error envelope, and unsupported
+styles return `400`.
 
 The page editor renders ready-to-copy markdown for the overall badge and
 each on-page component. The copyable URL is built from the page's public

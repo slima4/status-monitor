@@ -86,6 +86,9 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "compression-gzip", "compression-br", "cors", "fs", "set-header"] }
 tower-cookies = "0.11"
 
+# SVG status badges
+badgelib = "0.5.1"
+
 # Server-rendered web UI (askama templates + askama_web axum bridge)
 askama = { version = "0.16", features = ["serde_json"] }
 askama_web = { version = "0.16", features = ["axum-0.8"] }
