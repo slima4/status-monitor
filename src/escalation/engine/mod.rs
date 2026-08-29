@@ -231,6 +231,10 @@ impl EscalationEngine {
         self.w.page(org, incident_id, reason).await
     }
     #[cfg(test)]
+    async fn page_target_paused(&self, ack: &crate::storage::EmergencyAck) -> bool {
+        self.w.page_target_paused(ack).await
+    }
+    #[cfg(test)]
     async fn escalate_due(&self) {
         self.w.escalate_due().await
     }

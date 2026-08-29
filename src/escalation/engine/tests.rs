@@ -297,6 +297,135 @@ async fn no_policy_falls_back_to_bound_channels_once() {
 }
 
 #[tokio::test]
+async fn an_outstanding_page_reads_its_monitors_paused_flag() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let mut target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let ack = |channel_id| crate::storage::EmergencyAck {
+        id: Uuid::now_v7(),
+        org: org(),
+        incident_id: id,
+        channel_id,
+        receipt: "rcpt".into(),
+    };
+
+    let watched = Arc::new(InMemoryTargetStore::from_vec(vec![target.clone()]));
+    let eng = engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        watched,
+        channels.clone(),
+    );
+    assert!(!eng.page_target_paused(&ack(cid)).await);
+
+    target.enabled = false;
+    let paused = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let eng = engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        paused,
+        channels,
+    );
+    assert!(eng.page_target_paused(&ack(cid)).await);
+}
+
+#[tokio::test]
+async fn a_page_with_no_readable_monitor_keeps_polling() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let targetless = seed_incident(&ops, None);
+    let missing_target = seed_incident(&ops, Some(Uuid::now_v7()));
+    let eng = engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        Arc::new(InMemoryTargetStore::new()),
+        channels,
+    );
+
+    for incident_id in [targetless, missing_target, Uuid::now_v7()] {
+        let ack = crate::storage::EmergencyAck {
+            id: Uuid::now_v7(),
+            org: org(),
+            incident_id,
+            channel_id: cid,
+            receipt: "rcpt".into(),
+        };
+        assert!(!eng.page_target_paused(&ack).await);
+    }
+}
+
+#[tokio::test]
+async fn a_paused_monitor_is_never_paged() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let mut target = target_with_channel(cid);
+    target.enabled = false;
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let eng = engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        Arc::new(InMemoryTargetStore::from_vec(vec![target])),
+        channels,
+    );
+
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    eng.renotify_one(&DueIncident {
+        id,
+        org: org(),
+        target_id: Some(tid),
+        escalation_policy_id: None,
+        escalation_level: 0,
+        escalation_round: 0,
+    })
+    .await
+    .unwrap();
+    assert!(ops.notifications_for(org(), id).await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn a_resolve_still_reaches_a_paused_monitors_channels() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let mut target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+
+    let watched = engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        Arc::new(InMemoryTargetStore::from_vec(vec![target.clone()])),
+        channels.clone(),
+    );
+    watched
+        .page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+
+    target.enabled = false;
+    let paused = engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        Arc::new(InMemoryTargetStore::from_vec(vec![target])),
+        channels,
+    );
+    paused
+        .page(org(), id, NotificationReason::Resolved)
+        .await
+        .unwrap();
+    assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
 async fn unverified_email_channel_records_failure_without_sending() {
     let channels = Arc::new(InMemoryNotificationChannelStore::new());
     let cid = channels

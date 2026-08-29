@@ -223,6 +223,7 @@ impl Worker {
             return Ok(());
         };
         match reason {
+            _ if !target.enabled && reason != NotificationReason::Resolved => Ok(()),
             NotificationReason::Opened | NotificationReason::Reopened => {
                 self.open_episode(org, &incident, &target, reason, damper)
                     .await
@@ -528,6 +529,17 @@ impl Worker {
         }
     }
 
+    /// A failed lookup reads as still-watched, so an error never cancels.
+    pub(super) async fn page_target_paused(&self, ack: &EmergencyAck) -> bool {
+        let Ok(Some(incident)) = self.ops.get(ack.org, ack.incident_id).await else {
+            return false;
+        };
+        let Some(target_id) = incident.target_id else {
+            return false;
+        };
+        matches!(self.targets.get(ack.org, target_id).await, Ok(Some(t)) if !t.enabled)
+    }
+
     /// Poll outstanding emergency receipts: record acknowledgement on the
     /// timeline, drop the receipt once acked or expired so it leaves the poll
     /// set.
@@ -585,6 +597,11 @@ impl Worker {
             }
             let _ = self.ops.mark_acked(ack.org, ack.id, Utc::now()).await;
         } else if state.expired {
+            let _ = self.ops.clear_receipt(ack.org, ack.id).await;
+        } else if self.page_target_paused(&ack).await {
+            if let Err(err) = client.cancel(&ack.receipt).await {
+                tracing::warn!(incident_id = %ack.incident_id, error = %err, "pushover emergency cancel failed");
+            }
             let _ = self.ops.clear_receipt(ack.org, ack.id).await;
         }
     }

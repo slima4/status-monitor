@@ -209,7 +209,7 @@ impl Worker {
         let Some(target) = self.targets.get(d.org, target_id).await? else {
             return Ok(());
         };
-        if target.renotify_interval_secs == 0 {
+        if !target.enabled || target.renotify_interval_secs == 0 {
             return Ok(());
         }
         let channels = resolvable_channels(&self.ops.notifications_for(d.org, d.id).await?);
@@ -266,6 +266,9 @@ impl Worker {
                 let Some(target) = self.targets.get(d.org, target_id).await? else {
                     return Ok(());
                 };
+                if !target.enabled {
+                    return Ok(());
+                }
                 let notice = self.notice(&incident, &target, NotificationReason::Escalated, None);
                 let targets = self
                     .resolve_targets(d.org, &policy, level, Utc::now())
