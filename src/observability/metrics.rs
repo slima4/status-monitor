@@ -36,6 +36,7 @@ pub fn init(bind: &str) -> Result<MetricsHandle> {
         .context("install prometheus exporter")?;
 
     register_descriptions();
+    prime_event_counters();
     metrics::counter!("uptimepage_build_info", "version" => env!("CARGO_PKG_VERSION")).absolute(1);
     tracing::info!(
         // SAFE: operator metrics bind address, not a peer/user IP
@@ -43,6 +44,13 @@ pub fn init(bind: &str) -> Result<MetricsHandle> {
         "metrics listening"
     );
     Ok(MetricsHandle)
+}
+
+fn prime_event_counters() {
+    // increase() cannot see the first increment of a series that appears
+    // mid-range, and these fire rarely enough that it usually does.
+    metrics::counter!(names::ACCOUNT_DELETIONS_REQUESTED).increment(0);
+    metrics::counter!(names::ORGS_EMPTIED).increment(0);
 }
 
 fn register_descriptions() {
