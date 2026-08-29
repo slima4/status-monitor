@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::domain::{AppTheme, DisplayPrefs, OrgId, TimeFormat, UserId};
 use crate::error::Result;
+use crate::security::EmailRisk;
 
 /// Any user at all, soft-deleted included, so first-run seeding stays one-shot.
 pub async fn any_exist(pool: &PgPool) -> Result<bool> {
@@ -86,17 +87,27 @@ pub async fn set_theme(pool: &PgPool, user: UserId, theme: AppTheme) -> Result<b
 /// User, their own org and the membership that owns it, in one transaction.
 /// `created == false` means a concurrent signup won the partial-unique-index
 /// race, so the existing account is returned and no second org is made.
-pub async fn create_signup_user(pool: &PgPool, email: &str) -> Result<(UserId, bool)> {
+///
+/// `risk` records what the address looked like at this moment. It is stamped
+/// on the insert rather than derived later because the disposable corpus moves
+/// under us — an address listed today may be delisted next week, and churn
+/// analysis needs to know which it was when the account opened.
+pub async fn create_signup_user(
+    pool: &PgPool,
+    email: &str,
+    risk: Option<EmailRisk>,
+) -> Result<(UserId, bool)> {
     let mut tx = pool.begin().await.context("create_signup_user: begin")?;
     let inserted: Option<(Uuid,)> = sqlx::query_as(
-        "INSERT INTO users (email, email_verified_at, terms_version, privacy_version) \
-         VALUES ($1, now(), $2, $3) \
+        "INSERT INTO users (email, email_verified_at, terms_version, privacy_version, email_risk) \
+         VALUES ($1, now(), $2, $3, $4) \
          ON CONFLICT (email) WHERE deleted_at IS NULL DO NOTHING \
          RETURNING id",
     )
     .bind(email)
     .bind(crate::auth::consent::TERMS_VERSION)
     .bind(crate::auth::consent::PRIVACY_VERSION)
+    .bind(risk.map(EmailRisk::as_db_str))
     .fetch_optional(&mut *tx)
     .await
     .context("create_signup_user: insert user")?;
@@ -127,16 +138,21 @@ pub async fn create_signup_user(pool: &PgPool, email: &str) -> Result<(UserId, b
 /// resolved via oldest membership. `created == false` means a concurrent
 /// bootstrap won the partial-unique-index race; the caller must NOT
 /// compensate-delete a row it didn't create.
-pub async fn create_invited_user(pool: &PgPool, email: &str) -> Result<(UserId, bool)> {
+pub async fn create_invited_user(
+    pool: &PgPool,
+    email: &str,
+    risk: Option<EmailRisk>,
+) -> Result<(UserId, bool)> {
     let inserted: Option<(Uuid,)> = sqlx::query_as(
-        "INSERT INTO users (email, email_verified_at, terms_version, privacy_version) \
-         VALUES ($1, now(), $2, $3) \
+        "INSERT INTO users (email, email_verified_at, terms_version, privacy_version, email_risk) \
+         VALUES ($1, now(), $2, $3, $4) \
          ON CONFLICT (email) WHERE deleted_at IS NULL DO NOTHING \
          RETURNING id",
     )
     .bind(email)
     .bind(crate::auth::consent::TERMS_VERSION)
     .bind(crate::auth::consent::PRIVACY_VERSION)
+    .bind(risk.map(EmailRisk::as_db_str))
     .fetch_optional(pool)
     .await
     .context("users::create_invited_user")?;

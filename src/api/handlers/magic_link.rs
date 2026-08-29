@@ -152,10 +152,26 @@ pub async fn request(
         let throttle_email = email.to_string();
         let created_id = created.row.id;
         let rate_limit = cfg.rate_limit_seconds;
+        let policy = state.email_policy.clone();
+        let refuses_listed =
+            state.cfg.email_policy.signup_policy() == Some(crate::config::SignupPolicy::Block);
         // Spawn so SMTP duration doesn't leak via response time and so the
         // per-email throttle below also runs off the response path. The
         // handler returns the anti-enum response immediately.
         tokio::spawn(async move {
+            // Only under `block`, where /verify would refuse this address
+            // anyway. Under `flag` the mail must go out or the account could
+            // never open to be marked. The row is written either way, so timing
+            // cannot tell a listed domain from an unknown one.
+            if refuses_listed
+                && let Some(risk) = policy
+                    .disposable_domain(&throttle_email)
+                    .map(|_| crate::security::EmailRisk::Disposable)
+            {
+                crate::security::email_policy::record("magic_link_send", "refused", risk);
+                tracing::info!("magic_link: listed domain refused by policy, suppressing email");
+                return;
+            }
             // Fail open on DB error: a transient hiccup must not swallow a
             // legitimate sign-in attempt.
             match magic_link::claim_send(&throttle_pool, created_id, &throttle_email, rate_limit)
@@ -705,7 +721,14 @@ async fn bootstrap_invited_user(
         tracing::warn!(error = %err, %invitation_id, "invited bootstrap pre-flight failed");
         return Ok(None);
     }
-    let (user_id, created) = crate::storage::users::create_invited_user(pool, &row.email).await?;
+    // Stamped, never refused: a member vouched, and the click already proved
+    // the address takes mail. The mark is only for later churn analysis.
+    let risk = state.listed_disposable(&row.email);
+    if let Some(risk) = risk {
+        crate::security::email_policy::record("invite_accept", "flagged", risk);
+    }
+    let (user_id, created) =
+        crate::storage::users::create_invited_user(pool, &row.email, risk).await?;
     if created {
         tracing::info!(user_id = %user_id.0, via = "invitation", "magic-link bootstrap created account");
     }
@@ -741,8 +764,23 @@ async fn bootstrap_unknown_email(
     if !state.cfg.auth.open_signup_enabled() {
         return Ok(None);
     }
+    // The one place open signup mints an account, so the one place a verdict
+    // can be spent without touching anybody who already has one. A refusal
+    // returns `None`, so the caller renders the same invalid page as any other
+    // failed redemption rather than naming which addresses it will take.
+    let risk = match state
+        .admit_email(&row.email)
+        .await
+        .allow_new("email", "signup_magic_link")
+    {
+        Ok(risk) => risk,
+        Err(err) => {
+            tracing::info!(error = %err, "magic-link signup refused, address not usable");
+            return Ok(None);
+        }
+    };
     let (user_id, created) =
-        crate::storage::users::create_signup_user(state.require_db()?, &row.email).await?;
+        crate::storage::users::create_signup_user(state.require_db()?, &row.email, risk).await?;
     if created {
         tracing::info!(user_id = %user_id.0, via = "open_signup", "magic-link bootstrap created account");
     }

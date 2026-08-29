@@ -135,10 +135,14 @@ async fn upsert_creates_user_and_signup_org_for_new_identity() {
         verified_email: Some("Alice@Example.test".into()),
         display_name: Some("Alice".into()),
     };
-    let resolved =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
-            .await
-            .expect("upsert");
+    let resolved = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &identity,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("upsert");
     assert!(resolved.is_new_user);
     assert!(resolved.signup_org_id.is_some());
 
@@ -153,10 +157,14 @@ async fn upsert_creates_user_and_signup_org_for_new_identity() {
     // Idempotent re-callback with same identity must NOT create a second
     // user. Returns is_new_user=false; signup_org_id resolves to the org
     // the first call created.
-    let again =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
-            .await
-            .expect("re-upsert");
+    let again = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &identity,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("re-upsert");
     assert!(!again.is_new_user);
     assert_eq!(again.signup_org_id, resolved.signup_org_id);
     assert_eq!(again.user_id.0, resolved.user_id.0);
@@ -188,10 +196,14 @@ async fn upsert_links_existing_user_on_email_match() {
         verified_email: Some("bob@example.test".into()),
         display_name: None,
     };
-    let resolved =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
-            .await
-            .expect("upsert");
+    let resolved = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &identity,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("upsert");
     assert!(!resolved.is_new_user);
     // Bob existed with no memberships → signup_org_id is None.
     assert!(resolved.signup_org_id.is_none());
@@ -249,10 +261,14 @@ async fn upsert_reports_pending_deletion_without_restoring_on_reauth() {
         verified_email: Some("carol@example.test".into()),
         display_name: Some("Carol".into()),
     };
-    let resolved =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &identity)
-            .await
-            .expect("soft-deleted identity resolves on re-auth");
+    let resolved = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &identity,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("soft-deleted identity resolves on re-auth");
     assert_eq!(resolved.user_id.0, user_id);
     assert!(
         resolved.pending_deletion.is_some(),
@@ -297,10 +313,14 @@ async fn upsert_links_a_second_provider_and_reports_it_for_the_notice() {
         verified_email: Some("Dora@Example.test".into()),
         display_name: Some("Dora".into()),
     };
-    let first =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
-            .await
-            .expect("github signup");
+    let first = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &github_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("github signup");
     assert!(first.is_new_user);
 
     // Same verified email arriving via Google lands on the SAME user — one
@@ -312,10 +332,14 @@ async fn upsert_links_a_second_provider_and_reports_it_for_the_notice() {
         verified_email: Some("dora@example.test".into()),
         display_name: Some("Dora".into()),
     };
-    let second =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &google_id)
-            .await
-            .expect("google link");
+    let second = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Google,
+        &google_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("google link");
     assert!(!second.is_new_user);
     assert!(second.newly_linked, "the account must be told");
     assert_eq!(second.user_id.0, first.user_id.0);
@@ -331,10 +355,14 @@ async fn upsert_links_a_second_provider_and_reports_it_for_the_notice() {
 
     // Signing in again with a provider already on file is not a new link, so
     // it must not send mail every time.
-    let again =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &google_id)
-            .await
-            .expect("google re-auth");
+    let again = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Google,
+        &google_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("google re-auth");
     assert!(!again.newly_linked);
 
     pool.close().await;
@@ -362,6 +390,7 @@ async fn an_identity_on_file_outranks_a_matching_address() {
             verified_email: Some("first@example.test".into()),
             display_name: None,
         },
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("owner signup");
@@ -384,6 +413,7 @@ async fn an_identity_on_file_outranks_a_matching_address() {
             verified_email: Some("second@example.test".into()),
             display_name: None,
         },
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("identity match");
@@ -424,10 +454,14 @@ async fn upsert_matches_tombstoned_user_by_email_on_new_provider() {
         verified_email: Some("gail@example.test".into()),
         display_name: None,
     };
-    let first =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
-            .await
-            .expect("github signup");
+    let first = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &github_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("github signup");
     sqlx::query("UPDATE users SET deleted_at = now() WHERE id = $1")
         .bind(first.user_id.0)
         .execute(&pool)
@@ -440,10 +474,14 @@ async fn upsert_matches_tombstoned_user_by_email_on_new_provider() {
         verified_email: Some("gail@example.test".into()),
         display_name: None,
     };
-    let resolved =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &google_id)
-            .await
-            .expect("google email-match");
+    let resolved = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Google,
+        &google_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("google email-match");
     assert_eq!(resolved.user_id.0, first.user_id.0);
     assert!(resolved.pending_deletion.is_some());
     assert!(!resolved.is_new_user);
@@ -475,10 +513,14 @@ async fn link_adds_a_second_provider_to_a_signed_in_account() {
         verified_email: Some("ivy@example.test".into()),
         display_name: None,
     };
-    let owner =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
-            .await
-            .expect("github signup");
+    let owner = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &github_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("github signup");
 
     // Whatever address the second provider attests is irrelevant here: the
     // session already proved who this is, which is what makes a link safe.
@@ -511,10 +553,14 @@ async fn link_adds_a_second_provider_to_a_signed_in_account() {
 
     // Signing in with the linked provider now opens the account it was
     // attached to, without touching the email path at all.
-    let resolved =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Gitlab, &gitlab_id)
-            .await
-            .expect("gitlab sign-in");
+    let resolved = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Gitlab,
+        &gitlab_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("gitlab sign-in");
     assert_eq!(resolved.user_id.0, owner.user_id.0);
     assert!(!resolved.is_new_user);
 
@@ -541,6 +587,7 @@ async fn link_refuses_a_provider_account_that_opens_someone_else() {
         &pool,
         OauthProvider::Github,
         &mk("a-1", "a@example.test"),
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("a signup");
@@ -548,6 +595,7 @@ async fn link_refuses_a_provider_account_that_opens_someone_else() {
         &pool,
         OauthProvider::Github,
         &mk("b-1", "b@example.test"),
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("b signup");
@@ -591,10 +639,14 @@ async fn unlink_holds_the_last_way_in_only_when_email_cannot_open_it() {
         verified_email: Some("finn@example.test".into()),
         display_name: None,
     };
-    let owner =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
-            .await
-            .expect("github signup");
+    let owner = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &github_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("github signup");
 
     // Magic link off: this row is the only way in, so it stays.
     let err = oauth_identities::unlink(
@@ -684,9 +736,14 @@ async fn unlink_without_a_subject_cannot_empty_the_account() {
         verified_email: Some("two@example.test".into()),
         display_name: None,
     };
-    let owner = oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &first)
-        .await
-        .expect("github signup");
+    let owner = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &first,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("github signup");
     let second = RemoteIdentity {
         provider_user_id: "gh-b".into(),
         provider_username: Some("personal".into()),
@@ -763,10 +820,14 @@ async fn unlink_reports_a_method_that_is_not_on_the_account() {
         verified_email: Some("nan@example.test".into()),
         display_name: None,
     };
-    let owner =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Github, &github_id)
-            .await
-            .expect("github signup");
+    let owner = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Github,
+        &github_id,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("github signup");
 
     // Not "you would lock yourself out" — this method was never here.
     let err = oauth_identities::unlink(
@@ -822,10 +883,14 @@ async fn upsert_reports_pending_deletion_on_google_reauth() {
         verified_email: Some("erin@example.test".into()),
         display_name: None,
     };
-    let resolved =
-        oauth_login::upsert_identity_and_signup_org(&pool, OauthProvider::Google, &identity)
-            .await
-            .expect("google re-auth resolves");
+    let resolved = oauth_login::upsert_identity_and_signup_org(
+        &pool,
+        OauthProvider::Google,
+        &identity,
+        uptimepage::security::Admission::Clear,
+    )
+    .await
+    .expect("google re-auth resolves");
     assert_eq!(resolved.user_id.0, user_id);
     assert!(resolved.pending_deletion.is_some());
 
@@ -1214,6 +1279,7 @@ async fn a_disabled_provider_is_a_row_not_a_way_in() {
             verified_email: Some("off@example.test".into()),
             display_name: None,
         },
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("signup");
@@ -1286,6 +1352,7 @@ async fn signup_and_a_later_link_both_leave_a_trail() {
             verified_email: Some("trail@example.test".into()),
             display_name: None,
         },
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("signup");

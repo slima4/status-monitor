@@ -136,6 +136,9 @@ async fn main() -> Result<()> {
     // Same contract for the abuse rules: a malformed URL-pattern regex or
     // deny-list YAML fails fast here, not as a runtime panic.
     uptimepage::security::AbuseGuard::validate(&cfg.abuse)?;
+    // Same for the email-admission knobs: an unrecognised signup_policy
+    // would otherwise degrade to "let everything through" in silence.
+    cfg.validate_email_policy()?;
     // Marketing host/URL/cookie invariants. Skipped wholesale when
     // marketing.enabled = false (the default).
     cfg.validate_marketing()?;
@@ -770,6 +773,22 @@ async fn main() -> Result<()> {
         root.clone(),
     );
 
+    // Fill the disposable-email corpus before the listener binds, so the first
+    // signup after a restart is judged by the same set as the last one before
+    // it. The refresh job then keeps it current on its own cadence.
+    if let Some(pool) = state.db.as_ref() {
+        uptimepage::jobs::disposable_refresh::load_persisted(pool, &state.email_policy).await;
+    }
+    let disposable_refresh_handle: Option<JoinHandle<()>> = state.db.as_ref().and_then(|pool| {
+        uptimepage::jobs::disposable_refresh::spawn(
+            pool.clone(),
+            state.outbound_http.clone(),
+            Arc::new(state.cfg.email_policy.clone()),
+            state.email_policy.clone(),
+            root.clone(),
+        )
+    });
+
     let snitch_handle: Option<JoinHandle<()>> = observability::snitch::spawn(&state, root.clone());
 
     // All-in-one mode: when this process probes its own region in-process
@@ -928,6 +947,9 @@ async fn main() -> Result<()> {
             let _ = h.await;
         }
         if let Some(h) = abuse_reload_handle {
+            let _ = h.await;
+        }
+        if let Some(h) = disposable_refresh_handle {
             let _ = h.await;
         }
         if let Some(h) = snitch_handle {

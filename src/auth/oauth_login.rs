@@ -194,6 +194,7 @@ pub async fn upsert_identity_and_signup_org(
     pool: &PgPool,
     provider: OauthProvider,
     identity: &RemoteIdentity,
+    admission: crate::security::Admission,
 ) -> Result<ResolvedIdentity> {
     let mut tx = pool.begin().await.context("phase C: begin tx")?;
 
@@ -341,15 +342,21 @@ pub async fn upsert_identity_and_signup_org(
 
     // 3. Brand-new user. Insert user, identity, signup org + owner
     //    membership all in this tx so a rollback leaves zero orphans.
+    //
+    //    The admission verdict is spent here and nowhere earlier: branches 1
+    //    and 2 above are existing accounts, and an address that joined before
+    //    its domain was listed must keep signing in.
+    let email_risk = admission.allow_new("email", "signup_oauth")?;
     let (new_user_id,): (Uuid,) = sqlx::query_as(
         "INSERT INTO users (email, display_name, email_verified_at, \
-                            terms_version, privacy_version) \
-         VALUES ($1, $2, now(), $3, $4) RETURNING id",
+                            terms_version, privacy_version, email_risk) \
+         VALUES ($1, $2, now(), $3, $4, $5) RETURNING id",
     )
     .bind(email)
     .bind(identity.display_name.as_deref())
     .bind(crate::auth::consent::TERMS_VERSION)
     .bind(crate::auth::consent::PRIVACY_VERSION)
+    .bind(email_risk.map(crate::security::EmailRisk::as_db_str))
     .fetch_one(&mut *tx)
     .await
     .context("phase C: insert user")?;

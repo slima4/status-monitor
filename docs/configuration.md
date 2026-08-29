@@ -24,6 +24,7 @@ Override `UPTIMEPAGE_CONFIG_PATH` to point at an alternate base config file.
 | `flow` | `enabled`, `lightpanda_path`, `max_concurrency`, `mem_limit_mb`, `block_private_networks`, `block_cidrs`, `v8_max_heap_mb`, `max_response_mb`, `user_agent_suffix` | Browser-driven flow monitors (Lightpanda engine). Off by default. See [Browser flow monitors](#browser-flow-monitors) below |
 | `rate_limits` | `per_ip.*`, `janitor.*` | Mirrors of the per-IP numbers the reverse proxy enforces, plus the in-process limiter-map janitor cadence. Per-org/per-user limits come from the plans table |
 | `abuse` | `url_patterns_denied`, `domain_denylist_path`, `reputation_source_path`, `hot_reload_enabled` | Deny-list of attack-recon URL patterns and domains checked at target creation. `hot_reload_enabled` lets SIGHUP swap the rules in without a restart |
+| `email_policy` | `enabled`, `sources`, `refresh_interval_hours`, `signup_policy`, `require_mx`, `min_domains`, `max_domains`, `max_shrink_pct` | Disposable-address admission control. See [Disposable email addresses](#disposable-email-addresses) below |
 | `circuit_breaker` | `failure_threshold`, `success_threshold`, `open_duration_secs`, `half_open_max_calls` | per-host breaker state machine |
 | `storage` | `allow_default_credentials` | the shipped `monitor` database credentials are published in a public repo, so boot refuses them. Off by default; the local dev stacks turn it on. Set your own `storage.postgres.url` and `storage.clickhouse.password` anywhere else |
 | `storage.postgres` | `url`, `max_connections`, `min_connections`, `acquire_timeout_secs` | target metadata store |
@@ -173,6 +174,84 @@ request, verify and code endpoints along with the login-page email form.
 Rotating the value mid-deployment refuses to boot unless the override
 env var documented in `docs/troubleshooting.md` is set — this is
 deliberate so audit-trail breakage is loud.
+
+## Disposable email addresses
+
+Signup by emailed link or code means anyone can open an account with a
+throwaway address. Two signals under `[email_policy]` decide what happens:
+
+- a **disposable-domain corpus**, refreshed from the configured `sources` and
+  held in memory, and
+- an **MX check**, asking whether the domain accepts mail at all.
+
+**Off by default.** The MX check resolves through the public servers in
+`[dns] servers`, so an install whose staff mail lives on an internal domain
+would get "no mail exchanger" for its own addresses and refuse them
+everywhere. Set `enabled = true` when the addresses you serve are public
+ones. Nothing is fetched and no lookup happens while it is off.
+
+The default sources are two public lists — one regenerated every 24 hours
+(~75k domains, MIT), one curated by pull request (~8k, CC0). Their union is
+refreshed on `refresh_interval_hours`, stored in Postgres, and reloaded at
+boot, so a restart never leaves a window where every address passes. Across
+replicas an advisory lock means only one process fetches per interval.
+
+### What happens where
+
+| Surface | Behaviour |
+|---|---|
+| Signup (magic link, OAuth) | `signup_policy` — `flag` (default), `block`, or `allow` |
+| Sign-in for an existing account | Never refused |
+| Magic-link send | Skipped for a listed domain under `block` only |
+| Invitation sent | Refused |
+| Invitation accepted | Opened and marked, never refused |
+| Status-page subscription | Refused |
+| Email notification channel | Refused, unless already verified |
+
+The split is deliberate. The surfaces that mail an address somebody handed us
+always refuse, for two reasons: an address with no exchanger bounces, and
+bounce rate is a sender-reputation number shared by every tenant on the
+instance; and a throwaway inbox nobody reads means the alert never lands,
+which is worse than no channel at all because it looks configured. Signup
+defaults to `flag` instead: the account opens and carries
+`users.email_risk`, visible in the back-office user list. A corpus of 75k
+domains will eventually contain one it should not, and losing a paying
+customer to a false positive costs more than the account it would have
+stopped. Move to `block` once you have watched the flags for a while.
+
+Under `block` the magic link is not sent to a listed domain at all, since
+`/verify` would refuse it and the link could never be redeemed. Under `flag`
+it is sent: the account has to open for the mark to exist. This saves a
+pointless mail, not a bounce — listed throwaway domains generally do accept
+mail, and it is the MX check that catches the addresses that bounce.
+
+An address with **no MX at all** is refused everywhere regardless, including
+under `flag`: an account there could never receive the alerts it exists to
+send. The lookup fails open, so a resolver outage cannot close signups.
+
+Two exemptions keep the gate from stranding people. An address a tenant has
+already verified as a notification channel stays editable and testable even
+if a list later names its domain — the channel is still delivering, and the
+pinned floor is compile-time, so there would otherwise be no way to clear a
+false positive without a release. And an account that existed before its
+domain was listed keeps signing in: the corpus governs who may open an
+account, not who may come back.
+
+### Guards
+
+The corpus is third-party data on the signup path, so an upstream edit is an
+upstream write to admission control. Two independent limits bound that:
+
+- **By size.** A fetched list below `min_domains`, above `max_domains`, or
+  more than `max_shrink_pct` below the stored one is rejected and the previous
+  corpus stays live. This catches a truncated or half-published upstream,
+  which otherwise arrives as a perfectly well-formed short file.
+- **By name.** `security::email_policy::NEVER_DISPOSABLE` pins mainstream mail
+  providers, privacy relays (SimpleLogin, addy.io, Firefox Relay, DuckDuckGo,
+  Apple Hide My Email), and multi-label public suffixes such as `co.uk`. No
+  upstream entry can reach any of them. This is not hypothetical: the stricter
+  upstream variants already list several relay domains, and relays are
+  permanent forwarding addresses people pay for, not burners.
 
 ## First-run owner
 

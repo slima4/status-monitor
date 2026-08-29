@@ -88,7 +88,7 @@ pub async fn create(
     // works in the app is refused over the API.
     new.config.normalize();
     validate_config(&new.config)?;
-    check_channel_abuse(&state, org, &new.config)?;
+    check_channel_abuse(&state, org, &new.config, false).await?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically
     // under a per-org advisory lock.
     state
@@ -196,7 +196,21 @@ pub async fn update(
         reject_managed_kind(cfg)?;
         cfg.normalize();
         validate_config(cfg)?;
-        check_channel_abuse(&state, org, cfg)?;
+        // A different address is a new destination and gets the full gate.
+        let established = match &*cfg {
+            ChannelConfig::Email(new) => state
+                .notification_channel_store
+                .get(org, id)
+                .await?
+                .is_some_and(|c| match &c.config {
+                    ChannelConfig::Email(old) => {
+                        !c.awaiting_verification() && old.to.eq_ignore_ascii_case(&new.to)
+                    }
+                    _ => false,
+                }),
+            _ => false,
+        };
+        check_channel_abuse(&state, org, cfg, established).await?;
     }
     let updated = state
         .notification_channel_store
@@ -319,7 +333,8 @@ pub async fn test_send(
         .await?
         .ok_or_else(channel_not_found)?;
     // A stored config can predate a deny-list entry — gate the test too.
-    check_channel_abuse(&state, org, &channel.config)?;
+    let established = !channel.awaiting_verification();
+    check_channel_abuse(&state, org, &channel.config, established).await?;
     if channel.awaiting_verification() {
         return Err(AppError::unprocessable(
             codes::CHANNEL_UNVERIFIED,
@@ -380,7 +395,7 @@ pub async fn test_config(
     // Same cleaning a save would do, or a paste that saves fine fails its test.
     req.config.normalize();
     validate_config(&req.config)?;
-    check_channel_abuse(&state, org, &req.config)?;
+    check_channel_abuse(&state, org, &req.config, false).await?;
     // An unsaved email config can never have proven its inbox — testing it
     // would mail an arbitrary caller-supplied address.
     if matches!(req.config, ChannelConfig::Email(_)) {
@@ -1203,10 +1218,13 @@ pub(crate) fn validate_config(cfg: &crate::domain::ChannelConfig) -> Result<()> 
 /// test path: a hit is recorded as an `abuse_blocked` quota event and
 /// rejected. Transports with a fixed vendor endpoint expose no URL and
 /// pass through.
-pub(crate) fn check_channel_abuse(
+/// `established` skips the deliverability gate only; the deny-list is a
+/// security control and always applies.
+pub(crate) async fn check_channel_abuse(
     state: &AppState,
     org: crate::domain::OrgId,
     config: &ChannelConfig,
+    established: bool,
 ) -> Result<()> {
     if let ChannelConfig::Email(cfg) = config {
         let ops = crate::security::abuse::operator_domains(
@@ -1228,6 +1246,27 @@ pub(crate) fn check_channel_abuse(
                 detail,
                 "config.to",
             ));
+        }
+        // Refused whatever `signup_policy` says: an alert nobody can read is
+        // worse than no channel, because it looks configured. Not for an
+        // already-verified address — a list changing its mind would lock the
+        // owner out of a channel that is still delivering, and the pinned floor
+        // is compile-time, so nothing short of a release could clear it.
+        if !established
+            && let Some(risk) = state
+                .undeliverable_email(&cfg.to, "notification_channel")
+                .await
+        {
+            crate::quotas::service::record_quota_event(
+                state.db.clone(),
+                Some(org),
+                None,
+                "abuse_blocked",
+                Some("email_destination"),
+                serde_json::json!({ "detail": risk.as_db_str() }),
+                None,
+            );
+            return Err(risk.into_app_error("config.to"));
         }
         return Ok(());
     }

@@ -225,6 +225,32 @@ pub async fn get_ok(client: &OutboundHttpClient, url: &Url) -> Result<()> {
     Ok(())
 }
 
+/// GET a plain-text document, bounded by an explicit `max_bytes` rather than
+/// the shared [`MAX_RESPONSE_BYTES`]. Feeds are legitimately larger than any
+/// notification payload — the disposable-domain corpus is over a megabyte — so
+/// the caller states the ceiling it is prepared to hold in memory.
+pub async fn get_text(client: &OutboundHttpClient, url: &Url, max_bytes: usize) -> Result<String> {
+    let req = Request::get(url.as_str())
+        .header(ACCEPT, "text/plain")
+        .body(Full::new(Bytes::new()))
+        .context("building request")?;
+    let resp = with_request_timeout(url, client.request(req)).await?;
+    let status = resp.status();
+    let collected = Limited::new(resp.into_body(), max_bytes).collect().await;
+    if !status.is_success() {
+        return Err(AppError::Other(anyhow::anyhow!("{url} returned {status}")));
+    }
+    let bytes = collected
+        .map_err(|e| {
+            AppError::Other(anyhow::anyhow!(
+                "{url} body exceeded {max_bytes} bytes or read failed: {e}"
+            ))
+        })?
+        .to_bytes();
+    String::from_utf8(bytes.to_vec())
+        .map_err(|e| AppError::Other(anyhow::anyhow!("{url}: body is not UTF-8: {e}")))
+}
+
 pub async fn get_json<T: DeserializeOwned>(client: &OutboundHttpClient, url: &Url) -> Result<T> {
     let req = Request::get(url.as_str())
         .header(ACCEPT, "application/json")

@@ -198,7 +198,7 @@ pub async fn create(
     reject_managed_kind(&req.config)?;
     req.config.normalize();
     validate_config(&req.config)?;
-    check_channel_abuse(&state, link.org_id, &req.config)?;
+    check_channel_abuse(&state, link.org_id, &req.config, false).await?;
     if let Some(name) = req.name.as_deref().filter(|n| !n.trim().is_empty()) {
         validate_name(name)?;
     }

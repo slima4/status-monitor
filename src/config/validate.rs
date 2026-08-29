@@ -258,6 +258,52 @@ impl AppConfig {
         Ok(())
     }
 
+    /// An unrecognised `signup_policy` must not fall back to a permissive
+    /// default: a typo would silently disable the gate the operator thought
+    /// they turned on. Same contract for the source URLs — a malformed one is
+    /// a startup error rather than a warning nobody reads at 03:00.
+    pub fn validate_email_policy(&self) -> Result<()> {
+        fn err(msg: String) -> crate::error::AppError {
+            crate::error::AppError::Other(anyhow::anyhow!(msg))
+        }
+        let p = &self.email_policy;
+        if !p.enabled {
+            return Ok(());
+        }
+        if p.signup_policy().is_none() {
+            return Err(err(format!(
+                "email_policy.signup_policy must be one of allow/flag/block (got {:?})",
+                p.signup_policy
+            )));
+        }
+        if p.sources.is_empty() {
+            return Err(err(
+                "email_policy.enabled = true needs at least one entry in email_policy.sources"
+                    .to_string(),
+            ));
+        }
+        for raw in &p.sources {
+            match url::Url::parse(raw) {
+                Ok(u) if u.scheme() == "https" => {}
+                _ => {
+                    return Err(err(format!(
+                        "email_policy.sources entries must be https:// URLs (got {raw:?})"
+                    )));
+                }
+            }
+        }
+        if p.min_domains == 0 || p.min_domains >= p.max_domains {
+            return Err(err(format!(
+                "email_policy.min_domains ({}) must be > 0 and below max_domains ({})",
+                p.min_domains, p.max_domains
+            )));
+        }
+        if p.max_shrink_pct > 100 {
+            return Err(err("email_policy.max_shrink_pct must be 0-100".to_string()));
+        }
+        Ok(())
+    }
+
     /// A half-configured Resend sender is a clean startup error, not a
     /// per-send failure after cutover. The webhook secret alone is fine —
     /// the bounce receiver works regardless of the sending provider.

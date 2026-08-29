@@ -233,6 +233,9 @@ jobs:
           # + the token to switch prod to brain-only + a co-located agent (see
           # deployment/AGENT.md). All absent = unchanged all-in-one.
           HOME_AGENT_TOKEN: ${{ secrets.HOME_AGENT_TOKEN }}
+          # allow / flag / block — see docs/configuration.md. Absent = unchanged.
+          UPTIMEPAGE_EMAIL_POLICY_ENABLED: ${{ vars.UPTIMEPAGE_EMAIL_POLICY_ENABLED }}
+          UPTIMEPAGE_EMAIL_POLICY_SIGNUP_POLICY: ${{ vars.UPTIMEPAGE_EMAIL_POLICY_SIGNUP_POLICY }}
           UPTIMEPAGE_SCHEDULER_ENABLED: ${{ vars.UPTIMEPAGE_SCHEDULER_ENABLED }}
           UPTIMEPAGE_SCHEDULER_REGION: ${{ vars.UPTIMEPAGE_SCHEDULER_REGION }}
           UPTIMEPAGE_SCHEDULER_DEFAULT_REGION: ${{ vars.UPTIMEPAGE_SCHEDULER_DEFAULT_REGION }}
@@ -294,6 +297,8 @@ jobs:
                EMAIL_FROM_ADDRESS='${EMAIL_FROM_ADDRESS}' \
                EMAIL_SUPPORT_ADDRESS='${EMAIL_SUPPORT_ADDRESS}' \
                HOME_AGENT_TOKEN='${HOME_AGENT_TOKEN}' \
+               UPTIMEPAGE_EMAIL_POLICY_ENABLED='${UPTIMEPAGE_EMAIL_POLICY_ENABLED}' \
+               UPTIMEPAGE_EMAIL_POLICY_SIGNUP_POLICY='${UPTIMEPAGE_EMAIL_POLICY_SIGNUP_POLICY}' \
                UPTIMEPAGE_SCHEDULER_ENABLED='${UPTIMEPAGE_SCHEDULER_ENABLED}' \
                UPTIMEPAGE_SCHEDULER_REGION='${UPTIMEPAGE_SCHEDULER_REGION}' \
                UPTIMEPAGE_SCHEDULER_DEFAULT_REGION='${UPTIMEPAGE_SCHEDULER_DEFAULT_REGION}' \
@@ -637,7 +642,8 @@ jobs:
           # the blocks above.
           for k in HOME_AGENT_TOKEN UPTIMEPAGE_SCHEDULER_ENABLED \
                    UPTIMEPAGE_SCHEDULER_REGION UPTIMEPAGE_SCHEDULER_DEFAULT_REGION \
-                   AGENT_FLOW_ENABLED; do
+                   AGENT_FLOW_ENABLED UPTIMEPAGE_EMAIL_POLICY_ENABLED \
+                   UPTIMEPAGE_EMAIL_POLICY_SIGNUP_POLICY; do
             v=$(printenv "$k" || true)
             [ -n "$v" ] || continue
             cp .env ".env.bak.$(date +%s).split.${k}"

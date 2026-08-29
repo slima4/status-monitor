@@ -320,6 +320,9 @@ pub struct AppState {
     /// Compiled URL-pattern + domain deny-list. Built once from `cfg.abuse`;
     /// `main` validates the patterns/YAML first so this build is total.
     pub abuse: Arc<AbuseGuard>,
+    /// Starts empty, and an empty set means "no opinion", never "block
+    /// everything". `main` fills it from Postgres before serving.
+    pub email_policy: Arc<crate::security::EmailPolicy>,
     /// Escalation-engine signal channel. `Some` only when paging is enabled;
     /// lifecycle handlers (declare/resolve/reopen) nudge the engine through it.
     pub incident_signal_tx: Option<tokio::sync::mpsc::Sender<crate::escalation::IncidentSignal>>,
@@ -436,6 +439,46 @@ impl AppState {
         })
     }
 
+    /// `signup_policy` was validated at boot, so the fallback is unreachable;
+    /// `Flag` is the reading that neither blocks nor forgets if it ever fires.
+    pub async fn admit_email(&self, email: &str) -> crate::security::Admission {
+        let policy = self
+            .cfg
+            .email_policy
+            .signup_policy()
+            .unwrap_or(crate::config::SignupPolicy::Flag);
+        self.email_policy
+            .admit(email, self.http_clients.resolver(), policy)
+            .await
+    }
+
+    /// For an address we would send mail *to*. Independent of `signup_policy`:
+    /// an address that takes no mail bounces, and bounce rate is a
+    /// sender-reputation number every tenant shares.
+    /// No DNS. For paths where the verdict cannot refuse anyway, and for
+    /// unauthenticated forms, where a caller could otherwise drive uncached
+    /// lookups through the resolver the monitoring workers share.
+    pub fn listed_disposable(&self, email: &str) -> Option<crate::security::EmailRisk> {
+        self.email_policy
+            .disposable_domain(email)
+            .map(|_| crate::security::EmailRisk::Disposable)
+    }
+
+    pub async fn undeliverable_email(
+        &self,
+        email: &str,
+        surface: &'static str,
+    ) -> Option<crate::security::EmailRisk> {
+        let risk = self
+            .email_policy
+            .assess(email, self.http_clients.resolver())
+            .await;
+        if let Some(risk) = risk {
+            crate::security::email_policy::record(surface, "refused", risk);
+        }
+        risk
+    }
+
     /// Enabled-regions catalog, cached so polled readers skip the `regions` query.
     pub async fn regions_detailed(
         &self,
@@ -547,6 +590,7 @@ impl AppState {
         };
         let rate_limits = Arc::new(RateLimitService::new());
         let abuse = Arc::new(AbuseGuard::from_config(&cfg.abuse));
+        let email_policy = Arc::new(crate::security::EmailPolicy::from_config(&cfg.email_policy));
         Self {
             cfg: Arc::new(cfg),
             db,
@@ -593,6 +637,7 @@ impl AppState {
             quotas,
             rate_limits,
             abuse,
+            email_policy,
             incident_signal_tx: None,
             cipher,
             agent_ingest_dedup: build_agent_ingest_dedup(),

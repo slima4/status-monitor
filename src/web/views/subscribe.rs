@@ -124,6 +124,16 @@ pub async fn subscribe(
             "That address can't be used to subscribe.",
         ));
     }
+    // Regardless of `signup_policy`: an open form on a public page is the
+    // cheapest way to point our sending domain at a pile of dead addresses.
+    if let Some(risk) = state.listed_disposable(&email) {
+        crate::security::email_policy::record("status_page_subscribe", "refused", risk);
+        return Ok(SubscribeNotice::bad(
+            StatusCode::BAD_REQUEST,
+            "Check the address",
+            risk.message(),
+        ));
+    }
 
     let sub = subscribers::subscribe(
         pool,

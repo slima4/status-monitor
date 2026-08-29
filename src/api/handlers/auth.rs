@@ -641,8 +641,25 @@ async fn finish_login(
     // Phase C: materialise user + identity, auto-create signup org for new
     // users, and resolve their default-org id for the session row. Fresh
     // transaction; no upstream calls.
-    let resolved = match oauth_login::upsert_identity_and_signup_org(pool, provider, &identity)
-        .await
+    // Judged here, enforced inside phase C on the brand-new-user branch only:
+    // an account that predates its domain landing on a list keeps working.
+    let admission = match identity.verified_email.as_deref() {
+        Some(email)
+            if crate::storage::orgs::find_user_by_email(pool, email)
+                .await?
+                .is_none() =>
+        {
+            state.admit_email(email).await
+        }
+        // Somebody already holds this address, so phase C takes the identity or
+        // email-match branch and never looks at a verdict. Asking for one would
+        // put a DNS round trip on every returning sign-in.
+        Some(_) | None => crate::security::Admission::Clear,
+    };
+    let resolved = match oauth_login::upsert_identity_and_signup_org(
+        pool, provider, &identity, admission,
+    )
+    .await
     {
         Ok(resolved) => resolved,
         // Provider setup, not a server fault — a 500 here would read as an outage.
@@ -657,6 +674,24 @@ async fn finish_login(
                 ip_hash.as_deref(),
                 ua_hash.as_deref(),
                 "no_verified_email",
+            )
+            .await;
+            return Ok(Redirect::to("/login").into_response());
+        }
+        // A page, not a JSON body, and an audit row so refusals are countable.
+        Err(AppError::BadRequest { code, .. })
+            if code == crate::api::error::codes::EMAIL_DESTINATION_BLOCKED =>
+        {
+            tracing::info!(
+                provider = provider.as_db_str(),
+                "oauth callback: signup refused, address not usable"
+            );
+            login_audit::record_failure_anon(
+                pool,
+                method,
+                ip_hash.as_deref(),
+                ua_hash.as_deref(),
+                "email_destination_blocked",
             )
             .await;
             return Ok(Redirect::to("/login").into_response());

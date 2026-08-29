@@ -165,3 +165,68 @@ pub struct CorsConfig {
     /// with `allowed_origins`.
     pub allow_any_origin: bool,
 }
+
+/// `[email_policy]`. Signup is a judgement call the operator owns, so it
+/// defaults to `flag` and a list false-positive cannot lock out a paying
+/// customer; the surfaces that mail an address always refuse.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct EmailPolicyConfig {
+    /// Off leaves both signals inert and starts no refresh job.
+    pub enabled: bool,
+    /// Union is taken, so a domain listed by any source counts.
+    pub sources: Vec<String>,
+    pub refresh_interval_hours: u64,
+    /// `flag`, `block`, or `allow`.
+    pub signup_policy: String,
+    /// A bare A/AAAA counts, per RFC 5321. Fails open on resolver error: a
+    /// DNS outage must not close signups.
+    pub require_mx: bool,
+    /// A list outside these bounds is rejected and the previous corpus stays
+    /// live. Catches an upstream that breaks or truncates.
+    pub min_domains: usize,
+    pub max_domains: usize,
+    pub max_shrink_pct: u8,
+}
+
+impl Default for EmailPolicyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            sources: vec![
+                "https://raw.githubusercontent.com/disposable/disposable-email-domains/master/domains.txt".into(),
+                "https://raw.githubusercontent.com/disposable-email-domains/disposable-email-domains/main/disposable_email_blocklist.conf".into(),
+            ],
+            refresh_interval_hours: 24,
+            signup_policy: "flag".into(),
+            require_mx: true,
+            min_domains: 5_000,
+            max_domains: 500_000,
+            max_shrink_pct: 20,
+        }
+    }
+}
+
+/// Parsed at config validation, so a typo is a startup error rather than a
+/// silently-permissive runtime default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignupPolicy {
+    Allow,
+    Flag,
+    Block,
+}
+
+impl EmailPolicyConfig {
+    pub fn signup_policy(&self) -> Option<SignupPolicy> {
+        match self.signup_policy.trim() {
+            "allow" => Some(SignupPolicy::Allow),
+            "flag" => Some(SignupPolicy::Flag),
+            "block" => Some(SignupPolicy::Block),
+            _ => None,
+        }
+    }
+
+    pub fn refresh_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.refresh_interval_hours.max(1) * 3600)
+    }
+}

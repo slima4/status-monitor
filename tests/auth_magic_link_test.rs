@@ -673,7 +673,7 @@ async fn a_stranger_opening_an_account_gets_an_org_of_their_own() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let (user, created) =
-        uptimepage::storage::users::create_signup_user(&pool, "cold@example.test")
+        uptimepage::storage::users::create_signup_user(&pool, "cold@example.test", None)
             .await
             .expect("signup");
     assert!(created, "a brand-new account");
@@ -709,12 +709,13 @@ async fn a_second_account_on_one_address_is_refused() {
     let pool = open_pool(&db).await;
     MIGRATOR.run(&pool).await.unwrap();
 
-    let (first, _) = uptimepage::storage::users::create_signup_user(&pool, "dup@example.test")
-        .await
-        .expect("first");
+    let (first, _) =
+        uptimepage::storage::users::create_signup_user(&pool, "dup@example.test", None)
+            .await
+            .expect("first");
     // Two links racing resolve to one account, not an error and not a second org.
     let (second, created) =
-        uptimepage::storage::users::create_signup_user(&pool, "dup@example.test")
+        uptimepage::storage::users::create_signup_user(&pool, "dup@example.test", None)
             .await
             .expect("the loser resolves the winner");
     assert!(!created, "it created nothing");

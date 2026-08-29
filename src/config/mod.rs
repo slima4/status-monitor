@@ -31,8 +31,8 @@ pub use auth::{
     MagicLinkConfig, MicrosoftOauthConfig, OauthClientConfig, SessionConfig,
 };
 pub use limits::{
-    AbuseConfig, ApiConfig, CorsConfig, PerIpRateLimits, QuotasConfig, RateLimitJanitorConfig,
-    RateLimitsConfig,
+    AbuseConfig, ApiConfig, CorsConfig, EmailPolicyConfig, PerIpRateLimits, QuotasConfig,
+    RateLimitJanitorConfig, RateLimitsConfig, SignupPolicy,
 };
 pub use notify::{
     ConnectOauthConfig, ResendConfig, TelegramBotConfig, TransactionalEmailConfig,
@@ -106,6 +106,8 @@ pub struct AppConfig {
     pub rate_limits: RateLimitsConfig,
     #[serde(default)]
     pub abuse: AbuseConfig,
+    #[serde(default)]
+    pub email_policy: EmailPolicyConfig,
     #[serde(default)]
     pub marketing: MarketingConfig,
     #[serde(default)]

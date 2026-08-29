@@ -81,6 +81,12 @@ pub async fn create(
             "user is already a member of this org",
         ));
     }
+    // Last of the checks: this one costs a DNS round trip, and the cheaper ones
+    // above own their own diagnostics.
+    if let Some(risk) = state.undeliverable_email(email, "invite_send").await {
+        return Err(risk.into_app_error("email"));
+    }
+
     // Dedupe + pending-cap are enforced atomically inside `inv::create`
     // (one transaction, per-org advisory lock) — a pre-check here would
     // just be a racy duplicate of the real gate.

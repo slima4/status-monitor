@@ -147,6 +147,7 @@ async fn an_auto_link_is_told_apart_from_a_deliberate_one() {
         &pool,
         uptimepage::auth::OauthProvider::Github,
         &github,
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("signup");
@@ -166,6 +167,7 @@ async fn an_auto_link_is_told_apart_from_a_deliberate_one() {
         &pool,
         uptimepage::auth::OauthProvider::Google,
         &google,
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("email match");
@@ -630,6 +632,7 @@ async fn removing_a_method_records_it_and_leaves_the_others() {
             verified_email: Some("remove@example.test".into()),
             display_name: None,
         },
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("signup");
@@ -702,6 +705,7 @@ async fn removing_a_method_that_was_never_there_is_a_404() {
             verified_email: Some("only@example.test".into()),
             display_name: None,
         },
+        uptimepage::security::Admission::Clear,
     )
     .await
     .expect("signup");

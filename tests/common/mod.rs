@@ -80,6 +80,16 @@ pub fn build_test_outbound_and_email() -> (OutboundHttpClient, Arc<dyn EmailSend
 /// value just needs to be stable. Live-DB integration tests must NOT reuse
 /// this id — they provision their own org via `storage::create_org_with_owner`
 /// so the FK on tenant tables resolves.
+/// Email admission off unless a test asks for it in `mutate`: fixtures address
+/// `@example.test`, which has no mail exchanger, so leaving it on would fail
+/// unrelated tests and make them depend on the network to do it.
+pub fn test_config(mutate: impl FnOnce(&mut AppConfig)) -> AppConfig {
+    let mut cfg = AppConfig::load().expect("config");
+    cfg.email_policy.enabled = false;
+    mutate(&mut cfg);
+    cfg
+}
+
 pub fn test_org_id() -> OrgId {
     OrgId(Uuid::from_u128(0x0000_0000_0000_0000_0000_0000_0000_0001))
 }
@@ -176,8 +186,7 @@ pub fn build_test_app(mutate: impl FnOnce(&mut AppConfig)) -> Router {
 pub fn build_test_app_with_seedable_incidents(
     mutate: impl FnOnce(&mut AppConfig),
 ) -> (Router, Arc<InMemoryIncidentNarrationStore>) {
-    let mut cfg = AppConfig::load().expect("config");
-    mutate(&mut cfg);
+    let cfg = test_config(mutate);
     let target_store = Arc::new(InMemoryTargetStore::new());
     let sink = Arc::new(InMemorySink::new());
     let results_store: Arc<dyn ResultsStore> = sink.clone();
@@ -252,8 +261,7 @@ fn build_test_app_with_public_source_inner(
     public_source: Arc<dyn PublicSource>,
     with_web: bool,
 ) -> Router {
-    let mut cfg = AppConfig::load().expect("config");
-    mutate(&mut cfg);
+    let cfg = test_config(mutate);
     let target_store = Arc::new(InMemoryTargetStore::new());
     let sink = Arc::new(InMemorySink::new());
     let results_store: Arc<dyn ResultsStore> = sink.clone();
@@ -321,8 +329,17 @@ pub async fn build_test_app_with_pg(
     pool: PgPool,
     mutate: impl FnOnce(&mut AppConfig),
 ) -> (Router, OrgId) {
-    let mut cfg = AppConfig::load().expect("config");
-    mutate(&mut cfg);
+    let (app, org, _state) = build_test_app_with_pg_state(pool, mutate).await;
+    (app, org)
+}
+
+/// [`build_test_app_with_pg`] plus a clone of the router's `AppState`. Shares
+/// every `Arc`, so a test can seed state the router then reads.
+pub async fn build_test_app_with_pg_state(
+    pool: PgPool,
+    mutate: impl FnOnce(&mut AppConfig),
+) -> (Router, OrgId, AppState) {
+    let cfg = test_config(mutate);
     let slug = format!("test-{}", uuid::Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (org_uuid,): (uuid::Uuid,) = sqlx::query_as(
@@ -370,8 +387,8 @@ pub async fn build_test_app_with_pg(
         build_test_outbound_and_email().1,
         None,
     );
-    let app = uptimepage::build_app_router(state, CancellationToken::new());
-    (app, provisioned_org)
+    let app = uptimepage::build_app_router(state.clone(), CancellationToken::new());
+    (app, provisioned_org, state)
 }
 
 /// Like [`build_test_app_with_pg`] but the target store is the real
@@ -407,8 +424,7 @@ pub async fn build_test_app_with_pg_store_anon(
     pool: PgPool,
     mutate: impl FnOnce(&mut AppConfig),
 ) -> (Router, OrgId) {
-    let mut cfg = AppConfig::load().expect("config");
-    mutate(&mut cfg);
+    let cfg = test_config(mutate);
     let slug = format!("qt{}", uuid::Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (org_uuid,): (uuid::Uuid,) = sqlx::query_as(
@@ -439,7 +455,7 @@ pub async fn build_saas_router_with_pg_cfg(
     pool: PgPool,
     mutate: impl FnOnce(&mut AppConfig),
 ) -> Router {
-    let mut cfg = AppConfig::load().expect("config");
+    let mut cfg = test_config(|_| {});
     cfg.tenancy.path_based_public_routes = false;
     cfg.tenancy.subdomain_public_routes = true;
     mutate(&mut cfg);
@@ -578,8 +594,7 @@ pub fn build_test_app_state_with_email(
     mutate: impl FnOnce(&mut AppConfig),
     email_sender: Arc<dyn EmailSender>,
 ) -> AppState {
-    let mut cfg = AppConfig::load().expect("config");
-    mutate(&mut cfg);
+    let cfg = test_config(mutate);
     let target_store = Arc::new(InMemoryTargetStore::new());
     let sink = Arc::new(InMemorySink::new());
     let results_store: Arc<dyn ResultsStore> = sink.clone();

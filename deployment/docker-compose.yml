@@ -92,6 +92,12 @@ services:
       UPTIMEPAGE_SCHEDULER__DEFAULT_REGION: ${UPTIMEPAGE_SCHEDULER_DEFAULT_REGION:-}
       UPTIMEPAGE_SECURITY__CREDENTIALS_KEK_BASE64: ${UPTIMEPAGE_CREDENTIALS_KEK_BASE64}
       UPTIMEPAGE_SECURITY__TRUSTED_PROXIES: ${UPTIMEPAGE_SECURITY__TRUSTED_PROXIES:-172.16.0.0/12,127.0.0.0/8,::1/128}
+      # Disposable-email admission. "flag" (the image default) opens the
+      # account and marks users.email_risk; "block" refuses it. Plumbed as an
+      # env var so the decision can be flipped from the deploy workflow after
+      # watching the flags, without cutting a release.
+      UPTIMEPAGE_EMAIL_POLICY__ENABLED: ${UPTIMEPAGE_EMAIL_POLICY_ENABLED:-false}
+      UPTIMEPAGE_EMAIL_POLICY__SIGNUP_POLICY: ${UPTIMEPAGE_EMAIL_POLICY_SIGNUP_POLICY:-flag}
       # Empty disables the /operator/* surface (routes 404).
       UPTIMEPAGE_OPERATOR__ADMIN_TOKEN: ${UPTIMEPAGE_OPERATOR_ADMIN_TOKEN:-}
       # Central Telegram bot (one-tap channel linking). Empty token = the

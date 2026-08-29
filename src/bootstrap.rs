@@ -79,7 +79,8 @@ async fn ensure_owner_org(
     email: &str,
     org_name: &str,
 ) -> Result<(UserId, OrgId)> {
-    let (user, _) = users::create_invited_user(pool, email).await?;
+    // The operator's own address from config, not a stranger's from a form.
+    let (user, _) = users::create_invited_user(pool, email, None).await?;
 
     let org = match orgs::oldest_membership_for_user(pool, user).await? {
         Some(existing) => existing,

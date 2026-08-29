@@ -308,6 +308,18 @@ fn register_descriptions() {
         "uptimepage_orgs_emptied_total",
         "Deletes that took an organisation from having monitors to having none. The shape a customer walking out leaves behind when they clear the account by hand instead of deleting it"
     );
+    describe_gauge!(
+        "uptimepage_disposable_corpus_domains",
+        "Domains in the live disposable-email corpus"
+    );
+    describe_gauge!(
+        "uptimepage_disposable_corpus_updated_timestamp_seconds",
+        "Unix time of the last refresh that actually replaced the disposable-email corpus. A timestamp rather than an age so `time() - value` stays correct between refreshes, which are hours apart. Only successful refreshes move it, so a stalled upstream or a list the sanity guards keep rejecting shows up here as an age that keeps climbing. Absent until the first refresh lands"
+    );
+    describe_counter!(
+        "uptimepage_email_admission_total",
+        "Addresses the email-admission gate acted on, labelled by `surface`, `outcome` (flagged | refused), and `risk` (disposable | no_mx). Only acted-on addresses are counted, so this is a rate to alert on, not a funnel: a clean address increments nothing. `refused` on a signup surface rising sharply is the shape of scripted abuse; a slow trickle of `flagged` is ordinary"
+    );
 }
 
 pub mod names {
@@ -397,4 +409,13 @@ pub mod names {
     pub const FLOW_RUNS: &str = "uptimepage_flow_runs_total";
     pub const FLOW_STEP_DURATION_MS: &str = "uptimepage_flow_step_duration_ms";
     pub const AI_CRAWLER_REQUESTS: &str = "uptimepage_ai_crawler_requests_total";
+    pub const DISPOSABLE_CORPUS_DOMAINS: &str = "uptimepage_disposable_corpus_domains";
+    /// Unix seconds of the last refresh that replaced the corpus. Staleness is
+    /// `time() - value`; a gauge holding an age would be wrong between the
+    /// hours-apart refreshes that set it.
+    pub const DISPOSABLE_CORPUS_UPDATED: &str =
+        "uptimepage_disposable_corpus_updated_timestamp_seconds";
+    /// Labelled `surface` + `outcome` (flagged | refused) + `risk`. Counts only
+    /// addresses the gate acted on; a clean address increments nothing.
+    pub const EMAIL_ADMISSION: &str = "uptimepage_email_admission_total";
 }
