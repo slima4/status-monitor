@@ -405,8 +405,12 @@ async fn finalize(
         // Bound at the byte-budget *before* allocation: Limited streams frames
         // and errors mid-read once the cap is exceeded, so an oversized response
         // never sits fully in memory.
-        let body_fut = Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect();
-        let collected = match tokio::time::timeout(body_remaining, body_fut).await {
+        let collected = match tokio::time::timeout(
+            body_remaining,
+            Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect(),
+        )
+        .await
+        {
             Err(_) => return err_with_ttfb("body timeout"),
             Ok(Ok(c)) => Some(c),
             // Only a body assertion needs these bytes. Without one the status

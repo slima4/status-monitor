@@ -44,6 +44,9 @@ use crate::worker::rdap_singleflight::RdapSingleflight;
 use crate::worker::{ResultFanout, WorkerDeps, WorkerPool};
 
 const MAX_PULL_BYTES: usize = 32 << 20;
+/// One exchange with the control plane, headers and body together. A stall
+/// mid-body wedges this loop, and the region then stops probing while still
+/// reporting itself connected.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 struct PullCache {
@@ -108,7 +111,8 @@ impl EnabledTargetSource for AgentPullSource {
             .body(Full::new(Bytes::new()))
             .context("building config-pull request")?;
 
-        let resp = match tokio::time::timeout(HTTP_TIMEOUT, self.client.request(req)).await {
+        let at = tokio::time::Instant::now() + HTTP_TIMEOUT;
+        let resp = match tokio::time::timeout_at(at, self.client.request(req)).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
                 return self
@@ -149,11 +153,22 @@ impl EnabledTargetSource for AgentPullSource {
             .get(header::ETAG)
             .and_then(|v| v.to_str().ok())
             .map(str::to_owned);
-        let bytes = Limited::new(resp.into_body(), MAX_PULL_BYTES)
-            .collect()
-            .await
-            .map_err(|e| AppError::Other(anyhow::anyhow!("reading config-pull body: {e}")))?
-            .to_bytes();
+        let bytes = match tokio::time::timeout_at(
+            at,
+            Limited::new(resp.into_body(), MAX_PULL_BYTES).collect(),
+        )
+        .await
+        {
+            Ok(r) => {
+                r.map_err(|e| AppError::Other(anyhow::anyhow!("reading config-pull body: {e}")))?
+            }
+            Err(_) => {
+                return self
+                    .cached_or_err("config pull body timed out".into())
+                    .await;
+            }
+        }
+        .to_bytes();
         let parsed: AgentTargetsResponse =
             serde_json::from_slice(&bytes).context("decoding config-pull response")?;
         let targets: Vec<(OrgId, Target)> = parsed
@@ -339,7 +354,8 @@ impl AgentDispatchClient {
             .header(AUTHORIZATION, format!("Bearer {}", self.token))
             .body(Full::new(Bytes::new()))
             .context("building dispatch-claim request")?;
-        let resp = match tokio::time::timeout(HTTP_TIMEOUT, self.client.request(req)).await {
+        let at = tokio::time::Instant::now() + HTTP_TIMEOUT;
+        let resp = match tokio::time::timeout_at(at, self.client.request(req)).await {
             Ok(Ok(r)) => r,
             Ok(Err(e)) => {
                 return Err(AppError::Other(anyhow::anyhow!(
@@ -359,11 +375,12 @@ impl AgentDispatchClient {
                 "control plane returned {status} on dispatch claim"
             )));
         }
-        let bytes = Limited::new(resp.into_body(), MAX_PULL_BYTES)
-            .collect()
-            .await
-            .map_err(|e| AppError::Other(anyhow::anyhow!("reading dispatch-claim body: {e}")))?
-            .to_bytes();
+        let bytes =
+            tokio::time::timeout_at(at, Limited::new(resp.into_body(), MAX_PULL_BYTES).collect())
+                .await
+                .map_err(|_| AppError::Other(anyhow::anyhow!("dispatch claim body timed out")))?
+                .map_err(|e| AppError::Other(anyhow::anyhow!("reading dispatch-claim body: {e}")))?
+                .to_bytes();
         let parsed: DispatchBatch =
             serde_json::from_slice(&bytes).context("decoding dispatch-claim response")?;
         Ok(parsed.checks)

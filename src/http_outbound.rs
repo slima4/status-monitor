@@ -33,14 +33,9 @@ pub type OutboundHttpClient = Client<HttpsConnector<SsrfHttpConnector>, Full<Byt
 // so we never allocate a multi-MB buffer just to reject it.
 const MAX_RESPONSE_BYTES: usize = 1 << 20;
 
-/// Total budget for a single outbound request (connect + headers + body). The
-/// `SsrfHttpConnector` already caps the connect phase at 10 s, but `hyper`'s
-/// client has no built-in read timeout — a hostile endpoint that ACKs the
-/// connect then drips one byte per second would pin a notifier task forever.
-/// 30 s is generous enough for slow Slack/Telegram acks under load, tight
-/// enough that a stuck request frees the worker before the next notification
-/// cycle.
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+/// One outbound exchange: connect, headers and body together. Per-phase budgets
+/// would let an endpoint slow at each hold a task for twice this long.
+pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn build_outbound_client(guard: SsrfGuard) -> OutboundHttpClient {
     crate::http_client::client::install_default_crypto_provider();
@@ -134,19 +129,13 @@ async fn post_bytes_ct(
     let req = builder
         .body(Full::new(Bytes::from(payload)))
         .context("building request")?;
-    let resp = with_request_timeout(url, client.request(req)).await?;
+    let at = exchange_deadline();
+    let resp = with_request_timeout(url, at, client.request(req)).await?;
     let status = resp.status();
     if !status.is_success() {
-        // Even on the error path we bound the diagnostic body: a hostile
-        // endpoint that returns 500 with a 10 GiB body would OOM the
-        // notifier otherwise. Limited rejects mid-stream, so we don't
-        // allocate the full payload just to truncate it.
-        let limited = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES);
-        let bytes = limited
-            .collect()
-            .await
-            .map(|c| c.to_bytes())
-            .unwrap_or_default();
+        // Losing the body costs a diagnostic; losing the status costs the
+        // retry decision the escalation engine reads from it.
+        let bytes = diagnostic_body(url, at, resp.into_body(), MAX_RESPONSE_BYTES).await;
         let body = String::from_utf8_lossy(&bytes);
         return Err(AppError::Other(anyhow::anyhow!(
             "endpoint returned {status}: {body}"
@@ -169,38 +158,76 @@ pub async fn post_json_capture<T: Serialize, R: DeserializeOwned>(
         .header(ACCEPT, "application/json")
         .body(Full::new(Bytes::from(payload)))
         .context("building request")?;
-    let resp = with_request_timeout(url, client.request(req)).await?;
+    let at = exchange_deadline();
+    let resp = with_request_timeout(url, at, client.request(req)).await?;
     let status = resp.status();
-    let bytes = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
-        .collect()
-        .await
-        .map(|c| c.to_bytes())
-        .unwrap_or_default();
+    let collected = read_body_within(url, at, resp.into_body(), MAX_RESPONSE_BYTES).await;
     if !status.is_success() {
+        let bytes = collected
+            .ok()
+            .and_then(std::result::Result::ok)
+            .unwrap_or_default();
         let snippet = String::from_utf8_lossy(&bytes);
         return Err(AppError::Other(anyhow::anyhow!(
             "endpoint returned {status}: {snippet}"
         )));
     }
+    let bytes = collected?.unwrap_or_default();
     serde_json::from_slice(&bytes).map_err(|e| AppError::Other(anyhow::anyhow!("{url}: {e}")))
 }
 
-/// Wrap an outbound request future in [`REQUEST_TIMEOUT`]. Returns the same
-/// `Result<Response, AppError>` shape callers already match on; on timeout we
-/// surface a context that identifies the URL so the notifier audit log shows
-/// *which* webhook stalled.
-async fn with_request_timeout<F, T, E>(url: &Url, fut: F) -> Result<T>
+fn exchange_deadline() -> tokio::time::Instant {
+    tokio::time::Instant::now() + REQUEST_TIMEOUT
+}
+
+async fn with_request_timeout<F, T, E>(url: &Url, at: tokio::time::Instant, fut: F) -> Result<T>
 where
     F: std::future::Future<Output = std::result::Result<T, E>>,
     E: std::fmt::Display,
 {
-    match tokio::time::timeout(REQUEST_TIMEOUT, fut).await {
+    match tokio::time::timeout_at(at, fut).await {
         Ok(Ok(v)) => Ok(v),
         Ok(Err(e)) => Err(AppError::Other(anyhow::anyhow!(
             "sending request to {url}: {e}"
         ))),
         Err(_) => Err(AppError::Other(anyhow::anyhow!(
             "request to {url} exceeded {REQUEST_TIMEOUT:?}"
+        ))),
+    }
+}
+
+/// The status already answered the caller, so neither a stall nor a read
+/// failure may replace it.
+async fn diagnostic_body(
+    url: &Url,
+    at: tokio::time::Instant,
+    body: hyper::body::Incoming,
+    max_bytes: usize,
+) -> Bytes {
+    read_body_within(url, at, body, max_bytes)
+        .await
+        .ok()
+        .and_then(std::result::Result::ok)
+        .unwrap_or_default()
+}
+
+/// `Limited` bounds bytes, not seconds, so without a clock an endpoint that
+/// answers and then stalls mid-body holds the caller forever — and some of
+/// these callers hold one of sixteen global paging permits.
+///
+/// Outer `Err` is that timeout and is fatal; inner is the size or read failure
+/// each caller already handles.
+async fn read_body_within(
+    url: &Url,
+    at: tokio::time::Instant,
+    body: hyper::body::Incoming,
+    max_bytes: usize,
+) -> Result<std::result::Result<Bytes, String>> {
+    match tokio::time::timeout_at(at, Limited::new(body, max_bytes).collect()).await {
+        Ok(Ok(collected)) => Ok(Ok(collected.to_bytes())),
+        Ok(Err(e)) => Ok(Err(e.to_string())),
+        Err(_) => Err(AppError::Other(anyhow::anyhow!(
+            "reading the response from {url} exceeded {REQUEST_TIMEOUT:?}"
         ))),
     }
 }
@@ -214,11 +241,11 @@ pub async fn get_ok(client: &OutboundHttpClient, url: &Url) -> Result<()> {
     let req = Request::get(url.as_str())
         .body(Full::new(Bytes::new()))
         .context("building request")?;
-    let resp = with_request_timeout(url, client.request(req)).await?;
+    let at = exchange_deadline();
+    let resp = with_request_timeout(url, at, client.request(req)).await?;
     let status = resp.status();
-    let _ = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
-        .collect()
-        .await;
+    // Drained so the connection can be pooled; only status was promised.
+    diagnostic_body(url, at, resp.into_body(), MAX_RESPONSE_BYTES).await;
     if !status.is_success() {
         return Err(AppError::Other(anyhow::anyhow!("{url} returned {status}")));
     }
@@ -234,19 +261,18 @@ pub async fn get_text(client: &OutboundHttpClient, url: &Url, max_bytes: usize) 
         .header(ACCEPT, "text/plain")
         .body(Full::new(Bytes::new()))
         .context("building request")?;
-    let resp = with_request_timeout(url, client.request(req)).await?;
+    let at = exchange_deadline();
+    let resp = with_request_timeout(url, at, client.request(req)).await?;
     let status = resp.status();
-    let collected = Limited::new(resp.into_body(), max_bytes).collect().await;
+    let collected = read_body_within(url, at, resp.into_body(), max_bytes).await;
     if !status.is_success() {
         return Err(AppError::Other(anyhow::anyhow!("{url} returned {status}")));
     }
-    let bytes = collected
-        .map_err(|e| {
-            AppError::Other(anyhow::anyhow!(
-                "{url} body exceeded {max_bytes} bytes or read failed: {e}"
-            ))
-        })?
-        .to_bytes();
+    let bytes = collected?.map_err(|e| {
+        AppError::Other(anyhow::anyhow!(
+            "{url} body exceeded {max_bytes} bytes or read failed: {e}"
+        ))
+    })?;
     String::from_utf8(bytes.to_vec())
         .map_err(|e| AppError::Other(anyhow::anyhow!("{url}: body is not UTF-8: {e}")))
 }
@@ -256,18 +282,18 @@ pub async fn get_json<T: DeserializeOwned>(client: &OutboundHttpClient, url: &Ur
         .header(ACCEPT, "application/json")
         .body(Full::new(Bytes::new()))
         .context("building request")?;
-    let resp = with_request_timeout(url, client.request(req)).await?;
+    let at = exchange_deadline();
+    let resp = with_request_timeout(url, at, client.request(req)).await?;
     let status = resp.status();
-    let collected = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
-        .collect()
-        .await;
+    let collected = read_body_within(url, at, resp.into_body(), MAX_RESPONSE_BYTES).await;
 
     // Report a non-2xx from the status alone: an unframed body (no
-    // Content-Length, closed mid-read) must not mask it with a read error.
+    // Content-Length, closed mid-read) or one that stalls must not mask it.
     if !status.is_success() {
         let detail = collected
             .ok()
-            .map(|c| error_body_summary(&c.to_bytes()))
+            .and_then(std::result::Result::ok)
+            .map(|b| error_body_summary(&b))
             .filter(|s| !s.is_empty())
             .map(|s| format!(": {s}"))
             .unwrap_or_default();
@@ -276,13 +302,11 @@ pub async fn get_json<T: DeserializeOwned>(client: &OutboundHttpClient, url: &Ur
         )));
     }
 
-    let bytes = collected
-        .map_err(|e| {
-            AppError::Other(anyhow::anyhow!(
-                "{url} body exceeded {MAX_RESPONSE_BYTES} bytes or read failed: {e}"
-            ))
-        })?
-        .to_bytes();
+    let bytes = collected?.map_err(|e| {
+        AppError::Other(anyhow::anyhow!(
+            "{url} body exceeded {MAX_RESPONSE_BYTES} bytes or read failed: {e}"
+        ))
+    })?;
     serde_json::from_slice(&bytes).map_err(|e| AppError::Other(anyhow::anyhow!("{url}: {e}")))
 }
 
@@ -321,6 +345,54 @@ fn error_body_summary(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One byte of a much longer declared body, then nothing.
+    async fn stalling_body_server() -> Url {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut scratch = [0u8; 1024];
+                    let _ = sock.read(&mut scratch).await;
+                    let _ = sock
+                        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1000000\r\n\r\nx")
+                        .await;
+                    let _ = sock.flush().await;
+                    std::future::pending::<()>().await;
+                });
+            }
+        });
+        Url::parse(&format!("http://{addr}/list.txt")).unwrap()
+    }
+
+    /// Real clock, short deadline: a paused clock races the server's headers
+    /// and fires the *header* timeout instead, which passes an assertion that
+    /// only looks for a timeout.
+    #[tokio::test]
+    async fn a_body_that_never_finishes_is_cut_off() {
+        let url = stalling_body_server().await;
+        let client = build_outbound_client(crate::security::SsrfGuard::relaxed_for_tests());
+        let req = Request::get(url.as_str())
+            .body(Full::new(Bytes::new()))
+            .unwrap();
+
+        let resp = tokio::time::timeout(Duration::from_secs(5), client.request(req))
+            .await
+            .expect("headers are answered at once")
+            .expect("request");
+
+        let at = tokio::time::Instant::now() + Duration::from_millis(100);
+        let err = read_body_within(&url, at, resp.into_body(), MAX_RESPONSE_BYTES)
+            .await
+            .expect_err("a body that never finishes must not be waited on forever");
+
+        assert!(
+            err.to_string().contains("reading the response from"),
+            "want the body-read timeout, got: {err}"
+        );
+    }
 
     #[test]
     fn error_summary_prefers_rdap_description_over_tos_notices() {

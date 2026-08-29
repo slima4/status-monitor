@@ -13,7 +13,7 @@ use serde::Deserialize;
 use crate::auth::url::url_encode;
 use crate::config::ConnectOauthConfig;
 use crate::error::{AppError, Result};
-use crate::http_outbound::OutboundHttpClient;
+use crate::http_outbound::{OutboundHttpClient, REQUEST_TIMEOUT};
 
 const SLACK_AUTHORIZE_URL: &str = "https://slack.com/oauth/v2/authorize";
 const SLACK_TOKEN_URL: &str = "https://slack.com/api/oauth.v2.access";
@@ -69,16 +69,28 @@ pub async fn exchange_code(
         .header(USER_AGENT, UA)
         .body(Full::new(Bytes::from(payload)))
         .map_err(|e| AppError::Other(anyhow::anyhow!("slack token request: {e}")))?;
-    let resp = http
-        .request(req)
+    let at = tokio::time::Instant::now() + REQUEST_TIMEOUT;
+    let resp = tokio::time::timeout_at(at, http.request(req))
         .await
+        .map_err(|_| {
+            AppError::Other(anyhow::anyhow!(
+                "slack token endpoint: no response within {REQUEST_TIMEOUT:?}"
+            ))
+        })?
         .map_err(|e| AppError::Other(anyhow::anyhow!("slack request: {e}")))?;
     let status = resp.status();
-    let body = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
-        .collect()
-        .await
-        .map_err(|e| AppError::Other(anyhow::anyhow!("slack body read: {e}")))?
-        .to_bytes();
+    let body = tokio::time::timeout_at(
+        at,
+        Limited::new(resp.into_body(), MAX_RESPONSE_BYTES).collect(),
+    )
+    .await
+    .map_err(|_| {
+        AppError::Other(anyhow::anyhow!(
+            "slack token endpoint: no body within {REQUEST_TIMEOUT:?}"
+        ))
+    })?
+    .map_err(|e| AppError::Other(anyhow::anyhow!("slack body read: {e}")))?
+    .to_bytes();
     if !status.is_success() {
         return Err(AppError::Other(anyhow::anyhow!(
             "slack token endpoint: http {status}"

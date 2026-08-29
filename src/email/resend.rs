@@ -9,7 +9,7 @@ use serde_json::json;
 
 use super::templates::single_line;
 use super::trait_def::{EmailError, EmailResult, EmailSender, MessageId, TransactionalEmail};
-use crate::http_outbound::OutboundHttpClient;
+use crate::http_outbound::{OutboundHttpClient, REQUEST_TIMEOUT};
 
 const RESEND_API_URL: &str = "https://api.resend.com/emails";
 const MAX_RESEND_RESPONSE_BYTES: usize = 64 * 1024;
@@ -87,26 +87,38 @@ impl EmailSender for ResendEmailSender {
             .body(Full::new(Bytes::from(payload)))
             .map_err(|e| EmailError::Transport(format!("build request: {e}")))?;
 
-        let resp = self
-            .http
-            .request(req)
+        // Runs while the caller holds one of sixteen global paging permits, so
+        // a provider that answers and then stalls stops alerting for everyone.
+        let at = tokio::time::Instant::now() + REQUEST_TIMEOUT;
+        let resp = tokio::time::timeout_at(at, self.http.request(req))
             .await
+            .map_err(|_| EmailError::Transport(format!("no response within {REQUEST_TIMEOUT:?}")))?
             .map_err(|e| EmailError::Transport(e.to_string()))?;
         let status = resp.status();
-        let limited = Limited::new(resp.into_body(), MAX_RESEND_RESPONSE_BYTES);
-        let body = limited
-            .collect()
-            .await
-            .map_err(|e| EmailError::Transport(format!("read body: {e}")))?
-            .to_bytes();
+        let collected = tokio::time::timeout_at(
+            at,
+            Limited::new(resp.into_body(), MAX_RESEND_RESPONSE_BYTES).collect(),
+        )
+        .await;
 
         if !status.is_success() {
+            // A stalled body must not replace a 429: the retry decision
+            // reads this.
+            let body = collected
+                .ok()
+                .and_then(std::result::Result::ok)
+                .map(|c| c.to_bytes())
+                .unwrap_or_default();
             // Provider body may echo recipient/subject; surface enough for
             // operator triage without committing to a stable schema.
             let text = String::from_utf8_lossy(&body);
             return Err(EmailError::ProviderRejected(format!("{status}: {text}")));
         }
 
+        let body = collected
+            .map_err(|_| EmailError::Transport(format!("no body within {REQUEST_TIMEOUT:?}")))?
+            .map_err(|e| EmailError::Transport(format!("read body: {e}")))?
+            .to_bytes();
         let parsed: ResendResponse = serde_json::from_slice(&body)
             .map_err(|e| EmailError::Transport(format!("parse body: {e}")))?;
         Ok(MessageId(parsed.id))

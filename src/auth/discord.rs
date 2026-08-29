@@ -14,7 +14,7 @@ use serde::Deserialize;
 use crate::auth::url::url_encode;
 use crate::config::ConnectOauthConfig;
 use crate::error::{AppError, Result};
-use crate::http_outbound::OutboundHttpClient;
+use crate::http_outbound::{OutboundHttpClient, REQUEST_TIMEOUT};
 
 const DISCORD_AUTHORIZE_URL: &str = "https://discord.com/oauth2/authorize";
 const DISCORD_TOKEN_URL: &str = "https://discord.com/api/oauth2/token";
@@ -72,16 +72,28 @@ pub async fn exchange_code(
         .header(USER_AGENT, UA)
         .body(Full::new(Bytes::from(payload)))
         .map_err(|e| AppError::Other(anyhow::anyhow!("discord token request: {e}")))?;
-    let resp = http
-        .request(req)
+    let at = tokio::time::Instant::now() + REQUEST_TIMEOUT;
+    let resp = tokio::time::timeout_at(at, http.request(req))
         .await
+        .map_err(|_| {
+            AppError::Other(anyhow::anyhow!(
+                "discord token endpoint: no response within {REQUEST_TIMEOUT:?}"
+            ))
+        })?
         .map_err(|e| AppError::Other(anyhow::anyhow!("discord request: {e}")))?;
     let status = resp.status();
-    let body = Limited::new(resp.into_body(), MAX_RESPONSE_BYTES)
-        .collect()
-        .await
-        .map_err(|e| AppError::Other(anyhow::anyhow!("discord body read: {e}")))?
-        .to_bytes();
+    let body = tokio::time::timeout_at(
+        at,
+        Limited::new(resp.into_body(), MAX_RESPONSE_BYTES).collect(),
+    )
+    .await
+    .map_err(|_| {
+        AppError::Other(anyhow::anyhow!(
+            "discord token endpoint: no body within {REQUEST_TIMEOUT:?}"
+        ))
+    })?
+    .map_err(|e| AppError::Other(anyhow::anyhow!("discord body read: {e}")))?
+    .to_bytes();
     let parsed: TokenResponse = match serde_json::from_slice(&body) {
         Ok(p) => p,
         Err(_) if !status.is_success() => {

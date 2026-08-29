@@ -1,0 +1,18 @@
+id: bounded-body-reads
+language: rust
+severity: error
+message: >-
+  A `Limited::new(..).collect()` that is not inside `tokio::time::timeout_at`.
+  `Limited` bounds bytes, not seconds: an endpoint that answers headers and then
+  stalls mid-body holds the caller forever. Several of these run while holding a
+  permit from a small global semaphore, so one stall becomes an outage. Share
+  the deadline with the header phase rather than starting a second one.
+rule:
+  pattern: Limited::new($$$ARGS).collect()
+  not:
+    inside:
+      kind: call_expression
+      stopBy: end
+      has:
+        field: function
+        regex: 'time::timeout'
