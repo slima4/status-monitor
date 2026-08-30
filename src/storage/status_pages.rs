@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::domain::{
-    NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle, StatusPage,
-    StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, UserId,
-    WriteSource,
+    MonitorShareId, NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle,
+    StatusPage, StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,
+    UserId, WriteSource,
 };
 use crate::error::{AppError, Result};
 use crate::storage::locks::{advisory_xact_lock, org_lock_key};
@@ -94,6 +94,18 @@ pub trait StatusPageStore: Send + Sync {
         page: StatusPageId,
         target_id: Uuid,
         upd: StatusPageComponentUpdate,
+    ) -> Result<bool>;
+    /// Separate from [`update_component`](Self::update_component): the share is
+    /// minted by the handler, not supplied by the caller. Compare-and-swap on
+    /// `expected`, so two concurrent mints can't both claim the component —
+    /// the loser gets `false` and revokes what it minted.
+    async fn attach_share(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+        expected: Option<MonitorShareId>,
+        share: MonitorShareId,
     ) -> Result<bool>;
     async fn remove_component(
         &self,
@@ -192,6 +204,9 @@ struct ComponentRow {
     public_description: Option<String>,
     public_group: Option<String>,
     sort_order: i32,
+    detail_link_enabled: bool,
+    share_id: Option<MonitorShareId>,
+    share_live: bool,
 }
 
 #[async_trait]
@@ -341,9 +356,14 @@ impl StatusPageStore for PgStatusPageStore {
     ) -> Result<Vec<StatusPageComponent>> {
         let rows: Vec<ComponentRow> = sqlx::query_as(
             r#"SELECT spc.target_id, t.name AS monitor_name,
-                      spc.public_name, spc.public_description, spc.public_group, spc.sort_order
+                      spc.public_name, spc.public_description, spc.public_group, spc.sort_order,
+                      spc.detail_link_enabled, spc.share_id, ms.id IS NOT NULL AS share_live
                FROM status_page_components spc
                JOIN targets t ON t.id = spc.target_id AND t.org_id = spc.org_id
+               LEFT JOIN monitor_shares ms
+                      ON ms.id = spc.share_id
+                     AND ms.revoked_at IS NULL
+                     AND (ms.expires_at IS NULL OR ms.expires_at > now())
                WHERE spc.status_page_id = $1 AND spc.org_id = $2
                ORDER BY spc.public_group NULLS LAST, spc.sort_order, t.name"#,
         )
@@ -361,6 +381,9 @@ impl StatusPageStore for PgStatusPageStore {
                 public_description: r.public_description,
                 public_group: r.public_group,
                 sort_order: r.sort_order,
+                detail_link_enabled: r.detail_link_enabled,
+                share_id: r.share_id,
+                share_live: r.share_live,
             })
             .collect())
     }
@@ -422,8 +445,9 @@ impl StatusPageStore for PgStatusPageStore {
         // ON CONFLICT is a race backstop only — already_on_page handled above.
         sqlx::query(
             r#"INSERT INTO status_page_components
-                   (org_id, status_page_id, target_id, public_name, public_description, public_group, sort_order)
-               VALUES ($1, $2, $3, $4, $5, $6, $7)
+                   (org_id, status_page_id, target_id, public_name, public_description,
+                    public_group, sort_order, detail_link_enabled)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                ON CONFLICT (status_page_id, target_id) DO NOTHING"#,
         )
         .bind(org.0)
@@ -433,6 +457,7 @@ impl StatusPageStore for PgStatusPageStore {
         .bind(new.public_description)
         .bind(new.public_group)
         .bind(new.sort_order)
+        .bind(new.detail_link_enabled)
         .execute(&mut *tx)
         .await
         .map_err(db_err)?;
@@ -461,6 +486,7 @@ impl StatusPageStore for PgStatusPageStore {
                  public_description = CASE WHEN $6::bool THEN $7 ELSE public_description END,
                  public_group = CASE WHEN $8::bool THEN $9 ELSE public_group END,
                  sort_order = COALESCE($10, sort_order),
+                 detail_link_enabled = COALESCE($11, detail_link_enabled),
                  updated_at = now()
                WHERE status_page_id = $1 AND target_id = $2 AND org_id = $3"#,
         )
@@ -474,6 +500,31 @@ impl StatusPageStore for PgStatusPageStore {
         .bind(upd.public_group.is_some())
         .bind(upd.public_group.flatten())
         .bind(upd.sort_order)
+        .bind(upd.detail_link_enabled)
+        .execute(&self.pool)
+        .await
+        .map_err(db_err)?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    async fn attach_share(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+        expected: Option<MonitorShareId>,
+        share: MonitorShareId,
+    ) -> Result<bool> {
+        let res = sqlx::query(
+            "UPDATE status_page_components SET share_id = $4, updated_at = now() \
+             WHERE status_page_id = $1 AND target_id = $2 AND org_id = $3 \
+               AND share_id IS NOT DISTINCT FROM $5",
+        )
+        .bind(page.0)
+        .bind(target_id)
+        .bind(org.0)
+        .bind(share.0)
+        .bind(expected.map(|s| s.0))
         .execute(&self.pool)
         .await
         .map_err(db_err)?;
@@ -576,6 +627,8 @@ struct MemComponent {
     public_description: Option<String>,
     public_group: Option<String>,
     sort_order: i32,
+    detail_link_enabled: bool,
+    share_id: Option<MonitorShareId>,
 }
 
 #[derive(Default)]
@@ -726,6 +779,9 @@ impl StatusPageStore for InMemoryStatusPageStore {
                 public_description: c.public_description.clone(),
                 public_group: c.public_group.clone(),
                 sort_order: c.sort_order,
+                detail_link_enabled: c.detail_link_enabled,
+                share_id: c.share_id,
+                share_live: c.share_id.is_some(),
             })
             .collect();
         // Mirror the Pg `ORDER BY public_group NULLS LAST, sort_order`: Rust's
@@ -796,6 +852,8 @@ impl StatusPageStore for InMemoryStatusPageStore {
             public_description: new.public_description,
             public_group: new.public_group,
             sort_order: new.sort_order,
+            detail_link_enabled: new.detail_link_enabled,
+            share_id: None,
         });
         Ok(AddComponentOutcome::Added)
     }
@@ -827,6 +885,32 @@ impl StatusPageStore for InMemoryStatusPageStore {
         if let Some(v) = upd.sort_order {
             c.sort_order = v;
         }
+        if let Some(v) = upd.detail_link_enabled {
+            c.detail_link_enabled = v;
+        }
+        Ok(true)
+    }
+
+    async fn attach_share(
+        &self,
+        org: OrgId,
+        page: StatusPageId,
+        target_id: Uuid,
+        expected: Option<MonitorShareId>,
+        share: MonitorShareId,
+    ) -> Result<bool> {
+        let mut st = self.inner.lock().unwrap();
+        let Some(c) = st
+            .components
+            .iter_mut()
+            .find(|c| c.page == page && c.org == org && c.target_id == target_id)
+        else {
+            return Ok(false);
+        };
+        if c.share_id != expected {
+            return Ok(false);
+        }
+        c.share_id = Some(share);
         Ok(true)
     }
 

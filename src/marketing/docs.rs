@@ -238,7 +238,7 @@ pub const DOCS: &[DocPage] = &[
         blurb: "Read-only capability URLs that open one monitor's full dashboard without an account.",
         section: Section::Guide,
         scope: Scope::Everyone,
-        lastmod: "2026-07-25",
+        lastmod: "2026-08-30",
         source: include_str!("../../docs/share-links.md"),
         dir: "",
     },

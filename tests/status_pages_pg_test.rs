@@ -17,13 +17,13 @@ use std::time::Duration;
 
 use uptimepage::api::error::codes;
 use uptimepage::domain::{
-    CheckSpec, ExpectedStatus, NewStatusPage, NewStatusPageComponent, NewTarget, OrgId,
-    StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, UserId, WriteSource,
+    CheckSpec, ExpectedStatus, NewMonitorShare, NewStatusPage, NewStatusPageComponent, NewTarget,
+    OrgId, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate, UserId, WriteSource,
 };
 use uptimepage::error::AppError;
 use uptimepage::storage::{
-    AddComponentOutcome, PgStatusPageStore, PostgresTargetStore, StatusPageStore, TargetStore,
-    create_org_with_owner,
+    AddComponentOutcome, CreateShareOutcome, MonitorShareStore, PgMonitorShareStore,
+    PgStatusPageStore, PostgresTargetStore, StatusPageStore, TargetStore, create_org_with_owner,
 };
 use uuid::Uuid;
 
@@ -44,6 +44,7 @@ fn component(target_id: Uuid) -> NewStatusPageComponent {
         public_description: None,
         public_group: None,
         sort_order: 0,
+        detail_link_enabled: false,
     }
 }
 
@@ -288,6 +289,245 @@ async fn public_component_cap_counts_distinct_targets_live_pg() {
     );
 
     cleanup(&pool, &[org_a, _org_b], &[user_a, user_b]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn detail_link_survives_untick_and_share_revoke_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org, _org_b, user, user_b) = two_orgs(&pool, "sp-dl").await;
+    let store = PgStatusPageStore::new(pool.clone());
+    let shares = PgMonitorShareStore::new(pool.clone(), None);
+    let p = store
+        .create(
+            org,
+            page(&unique_slug("dl")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let t = make_target(&pool, org, "dl").await;
+    store
+        .add_component(org, p.id, component(t), i64::MAX, None)
+        .await
+        .unwrap();
+
+    let only = |v: Vec<uptimepage::domain::StatusPageComponent>| v.into_iter().next().unwrap();
+    let c = only(store.list_components(org, p.id).await.unwrap());
+    assert!(!c.detail_link_enabled, "off by default");
+    assert!(c.share_id.is_none());
+
+    let CreateShareOutcome::Created(created) = shares
+        .create(org, t, NewMonitorShare::default(), Some(user), None, None)
+        .await
+        .unwrap()
+    else {
+        panic!("share mint refused");
+    };
+    store
+        .update_component(
+            org,
+            p.id,
+            t,
+            StatusPageComponentUpdate {
+                detail_link_enabled: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    store
+        .attach_share(org, p.id, t, None, created.share.id)
+        .await
+        .unwrap();
+    let c = only(store.list_components(org, p.id).await.unwrap());
+    assert!(c.detail_link_enabled);
+    assert_eq!(c.share_id, Some(created.share.id));
+
+    store
+        .update(
+            org,
+            p.id,
+            StatusPageUpdate {
+                name: Some("Renamed".into()),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .unwrap();
+    let listed = shares.list_for_target(org, t).await.unwrap();
+    let backing = listed
+        .iter()
+        .find(|s| s.id == created.share.id)
+        .expect("minted share listed");
+    assert!(backing.label.is_none(), "page mints carry no label");
+    assert_eq!(
+        backing
+            .used_by_pages
+            .iter()
+            .map(|u| u.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["Renamed"],
+        "page use follows the rename"
+    );
+
+    store
+        .update_component(
+            org,
+            p.id,
+            t,
+            StatusPageComponentUpdate {
+                detail_link_enabled: Some(false),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    let c = only(store.list_components(org, p.id).await.unwrap());
+    assert!(!c.detail_link_enabled);
+    assert_eq!(
+        c.share_id,
+        Some(created.share.id),
+        "untick must not drop the share"
+    );
+
+    // Unticking must also drop the page from the share's attribution, or the
+    // share modal claims a link the page no longer renders.
+    assert!(
+        shares
+            .list_for_target(org, t)
+            .await
+            .unwrap()
+            .iter()
+            .find(|s| s.id == created.share.id)
+            .expect("share still listed")
+            .used_by_pages
+            .is_empty(),
+        "an unticked page must not still claim the link"
+    );
+
+    // Back on, so the revoke below hits a live link.
+    store
+        .update_component(
+            org,
+            p.id,
+            t,
+            StatusPageComponentUpdate {
+                detail_link_enabled: Some(true),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(only(store.list_components(org, p.id).await.unwrap()).share_live);
+
+    assert!(
+        shares
+            .revoke(org, t, created.share.id, Some(user))
+            .await
+            .unwrap()
+    );
+    let c = only(store.list_components(org, p.id).await.unwrap());
+    assert!(
+        c.detail_link_enabled && c.share_id.is_some(),
+        "revoke leaves the binding alone"
+    );
+    assert!(
+        !c.share_live,
+        "a revoked share must read as dead, not as a live link"
+    );
+
+    cleanup(&pool, &[org, _org_b], &[user, user_b]).await;
+}
+
+/// Two mints racing for one component: the swap is decided by the value each
+/// caller read, so the loser is told to clean up rather than silently
+/// overwriting the winner and stranding a live URL.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn attach_share_swaps_on_the_value_the_caller_read_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org, org_b, user, user_b) = two_orgs(&pool, "sp-cas").await;
+    let store = PgStatusPageStore::new(pool.clone());
+    let shares = PgMonitorShareStore::new(pool.clone(), None);
+    let p = store
+        .create(
+            org,
+            page(&unique_slug("cas")),
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let t = make_target(&pool, org, "cas").await;
+    store
+        .add_component(org, p.id, component(t), i64::MAX, None)
+        .await
+        .unwrap();
+
+    let mint = async || {
+        let CreateShareOutcome::Created(c) = shares
+            .create(org, t, NewMonitorShare::default(), Some(user), None, None)
+            .await
+            .unwrap()
+        else {
+            panic!("mint refused");
+        };
+        c
+    };
+    // Both racers read share_id = NULL, then both mint.
+    let a = mint().await;
+    let b = mint().await;
+
+    assert!(
+        store
+            .attach_share(org, p.id, t, None, a.share.id)
+            .await
+            .unwrap(),
+        "first swap from NULL wins"
+    );
+    assert!(
+        !store
+            .attach_share(org, p.id, t, None, b.share.id)
+            .await
+            .unwrap(),
+        "second swap still expecting NULL must lose"
+    );
+    assert_eq!(
+        store
+            .list_components(org, p.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
+            .share_id,
+        Some(a.share.id),
+        "winner keeps the slot"
+    );
+
+    // Re-minting over a known-dead share still works: the caller passes what it
+    // read, not NULL.
+    let c = mint().await;
+    assert!(
+        store
+            .attach_share(org, p.id, t, Some(a.share.id), c.share.id)
+            .await
+            .unwrap(),
+        "swap from the observed value succeeds"
+    );
+
+    cleanup(&pool, &[org, org_b], &[user, user_b]).await;
 }
 
 #[tokio::test]

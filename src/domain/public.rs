@@ -53,6 +53,9 @@ pub struct PublicComponent {
     pub current_status: PublicComponentStatus,
     /// Daily history, oldest first.
     pub history: Vec<DayState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = true)]
+    pub detail_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

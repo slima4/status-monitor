@@ -17,11 +17,12 @@ use axum::http::{Request, StatusCode};
 use chrono::Utc;
 use tower::ServiceExt;
 use uptimepage::domain::{
-    CheckSpec, CreatedShare, ExpectedStatus, NewMonitorShare, NewTarget, OrgId, UserId, WriteSource,
+    CheckSpec, CreatedShare, ExpectedStatus, NewMonitorShare, NewStatusPage,
+    NewStatusPageComponent, NewTarget, OrgId, UserId, WriteSource,
 };
 use uptimepage::storage::{
-    CreateShareOutcome, MonitorShareStore, PgMonitorShareStore, PostgresTargetStore, TargetStore,
-    create_org_with_owner,
+    CreateShareOutcome, MonitorShareStore, PgMonitorShareStore, PgStatusPageStore,
+    PostgresTargetStore, StatusPageStore, TargetStore, create_org_with_owner,
 };
 use uuid::Uuid;
 
@@ -46,7 +47,7 @@ async fn mk_share(
     new: NewMonitorShare,
 ) -> CreatedShare {
     match store
-        .create(org, target, new, None, i64::MAX, i64::MAX)
+        .create(org, target, new, None, Some(i64::MAX), Some(i64::MAX))
         .await
         .unwrap()
     {
@@ -207,6 +208,80 @@ async fn create_resolve_revoke_roundtrip_live_pg() {
     cleanup(&pool, &[org_a, org_b], &[user_a, user_b]).await;
 }
 
+/// A share a status page minted is not one the operator spent quota on, so it
+/// must not consume a slot in either cap.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
+async fn page_minted_shares_do_not_consume_the_operator_caps_live_pg() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "ms-pgcap").await;
+    let org = create_org_with_owner(&pool, user, &unique_slug("ms-pgcap"), "O", 3)
+        .await
+        .unwrap()
+        .expect("org")
+        .id;
+    let store = PgMonitorShareStore::new(pool.clone(), None);
+    let pages = PgStatusPageStore::new(pool.clone());
+    let t = make_target(&pool, org, "a").await;
+
+    let page = pages
+        .create(
+            org,
+            NewStatusPage {
+                slug: unique_slug("pgcap"),
+                name: "P".into(),
+                enabled: true,
+            },
+            WriteSource::Ui,
+            i64::MAX,
+            None,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    pages
+        .add_component(
+            org,
+            page.id,
+            NewStatusPageComponent {
+                target_id: t,
+                public_name: None,
+                public_description: None,
+                public_group: None,
+                sort_order: 0,
+                detail_link_enabled: true,
+            },
+            i64::MAX,
+            None,
+        )
+        .await
+        .unwrap();
+
+    let CreateShareOutcome::Created(minted) = store
+        .create(org, t, share(None), Some(user), None, None)
+        .await
+        .unwrap()
+    else {
+        panic!("page mint refused");
+    };
+    pages
+        .attach_share(org, page.id, t, None, minted.share.id)
+        .await
+        .unwrap();
+
+    // Free-plan shape. The page's link is attached, so the operator still has
+    // their own slot on this monitor and on the org.
+    assert!(matches!(
+        store
+            .create(org, t, share(None), Some(user), Some(1), Some(2))
+            .await
+            .unwrap(),
+        CreateShareOutcome::Created(_)
+    ));
+}
+
 #[tokio::test]
 #[ignore = "requires DATABASE_URL — run via DATABASE_URL=... cargo test -- --ignored"]
 async fn create_enforces_per_monitor_and_per_org_caps_live_pg() {
@@ -226,7 +301,7 @@ async fn create_enforces_per_monitor_and_per_org_caps_live_pg() {
         make_target(&pool, org, "c").await,
     );
     // Free-plan shape: 1 link per monitor, 2 shared monitors per org.
-    let mk = |t| store.create(org, t, share(None), Some(user), 1, 2);
+    let mk = |t| store.create(org, t, share(None), Some(user), Some(1), Some(2));
 
     // Monitor A's first link fits; a second hits the per-monitor cap.
     let first_a = match mk(a).await.unwrap() {
@@ -446,8 +521,8 @@ async fn deleted_target_cascades_and_cross_org_create_is_rejected_live_pg() {
                     target_a,
                     share(None),
                     Some(user_b),
-                    i64::MAX,
-                    i64::MAX
+                    Some(i64::MAX),
+                    Some(i64::MAX)
                 )
                 .await
                 .unwrap(),

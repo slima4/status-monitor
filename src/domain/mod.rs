@@ -54,7 +54,7 @@ pub use maintenance::{
 };
 pub use membership::{Membership, Role};
 pub use monitor_share::{
-    CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, ResolvedShare,
+    CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, ResolvedShare, SharePageUse,
 };
 pub use notification_channel::{
     ChannelConfig, ChannelKind, DiscordConfig, DiscordMention, EmailConfig, GoogleChatConfig,

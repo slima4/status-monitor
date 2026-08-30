@@ -380,6 +380,7 @@ async fn two_tenants_never_see_each_others_data() {
                 public_description: None,
                 public_group: None,
                 sort_order: 0,
+                detail_link_enabled: false,
             },
             i64::MAX,
             None,

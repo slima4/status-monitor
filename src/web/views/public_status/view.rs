@@ -55,6 +55,7 @@ pub struct ComponentView {
     pub history: Vec<DayCell>,
     pub uptime_pct: String,
     pub history_summary: String,
+    pub detail_url: Option<String>,
 }
 
 pub struct DayCell {
@@ -234,6 +235,7 @@ pub(super) fn build_component(
         history,
         uptime_pct,
         history_summary: summary,
+        detail_url: c.detail_url.clone(),
     }
 }
 

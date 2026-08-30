@@ -96,8 +96,8 @@ pub async fn create_share(
             target_id,
             new,
             Some(user),
-            i64::from(plan.max_share_links_per_monitor),
-            i64::from(plan.max_shared_monitors),
+            Some(i64::from(plan.max_share_links_per_monitor)),
+            Some(i64::from(plan.max_shared_monitors)),
         )
         .await?;
     // A cap hit is recorded to quota_events (like every other quota block) so

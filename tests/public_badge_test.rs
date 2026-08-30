@@ -45,6 +45,7 @@ impl PublicSource for BadgeSource {
             description: None,
             current_status: PublicComponentStatus::Degraded,
             history: vec![DayState::Operational; 90],
+            detail_url: None,
         };
         Ok(Arc::new(PublicStatusPage {
             overall: OverallStatus {

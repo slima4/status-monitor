@@ -106,7 +106,14 @@ async fn mk_share(
     new: NewMonitorShare,
 ) -> CreatedShare {
     match store
-        .create(org, target, new, Some(user()), i64::MAX, i64::MAX)
+        .create(
+            org,
+            target,
+            new,
+            Some(user()),
+            Some(i64::MAX),
+            Some(i64::MAX),
+        )
         .await
         .unwrap()
     {

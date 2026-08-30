@@ -28,14 +28,14 @@ use chrono::Utc;
 use futures::FutureExt;
 use sqlx::PgPool;
 use uptimepage::domain::{
-    CheckResult, CheckSpec, CheckStatus, DayState, ExpectedStatus, NewStatusPage,
-    NewStatusPageComponent, NewTarget, OrgId, OverallState, PublicComponentStatus, StatusPageId,
-    WriteSource,
+    CheckResult, CheckSpec, CheckStatus, DayState, ExpectedStatus, NewMonitorShare, NewStatusPage,
+    NewStatusPageComponent, NewTarget, OrgId, OverallState, PublicComponentStatus,
+    StatusPageComponentUpdate, StatusPageId, WriteSource,
 };
 use uptimepage::public_status::{AggregatorConfig, OrgAggregator};
 use uptimepage::storage::{
-    ClickhouseResultSink, PgStatusPageStore, PostgresTargetStore, ResultSink, StatusPageStore,
-    TargetStore,
+    ClickhouseResultSink, CreateShareOutcome, MonitorShareStore, PgMonitorShareStore,
+    PgStatusPageStore, PostgresTargetStore, ResultSink, StatusPageStore, TargetStore,
 };
 use url::Url;
 use uuid::Uuid;
@@ -73,6 +73,7 @@ async fn seed_page_with_target(pool: &PgPool, org: OrgId, target_id: Uuid) -> St
                 public_description: None,
                 public_group: None,
                 sort_order: 0,
+                detail_link_enabled: false,
             },
             i64::MAX,
             None,
@@ -208,7 +209,7 @@ async fn build_round_trips_seeded_data() {
         sink.write_batch(&rows).await.expect("ch insert");
 
         let page_id = seed_page_with_target(&pool, org_id, target_id).await;
-        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default(), None);
         let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
         let component = page
@@ -221,6 +222,112 @@ async fn build_round_trips_seeded_data() {
         // No open confirmed incident → operational.
         assert_eq!(component.current_status, PublicComponentStatus::Operational);
         assert_eq!(component.history.len(), 90);
+    })
+    .await;
+}
+
+/// Detail link needs both the opt-in and a live share.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL + CLICKHOUSE_URL — run via `docker compose -f compose.dev.yml up -d` then `cargo test -- --ignored`"]
+async fn detail_link_renders_only_for_a_live_share() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        eprintln!("skipped: DATABASE_URL not set");
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        eprintln!("skipped: CLICKHOUSE_URL not set");
+        return;
+    };
+    let org_id = seed_org(&pool, "agg-dl").await;
+    let targets = PostgresTargetStore::from_pool(pool.clone(), None);
+    let target = targets
+        .create(
+            org_id,
+            public_target("dl"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create target");
+    let target_id = target.id;
+    let pool_for_cleanup = pool.clone();
+
+    with_cleanup(&pool_for_cleanup, target_id, async move {
+        let page_id = seed_page_with_target(&pool, org_id, target_id).await;
+        let pages = PgStatusPageStore::new(pool.clone());
+        let shares = PgMonitorShareStore::new(pool.clone(), None);
+        let cfg = AggregatorConfig {
+            app_base_url: "https://app.example.com".into(),
+            ..AggregatorConfig::default()
+        };
+        let detail_url = |page: &uptimepage::domain::PublicStatusPage| {
+            page.groups
+                .iter()
+                .flat_map(|g| &g.components)
+                .find(|c| c.id == target_id)
+                .expect("seeded component")
+                .detail_url
+                .clone()
+        };
+
+        let CreateShareOutcome::Created(created) = shares
+            .create(
+                org_id,
+                target_id,
+                NewMonitorShare {
+                    label: None,
+                    expires_at: None,
+                },
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("mint share")
+        else {
+            panic!("share mint refused");
+        };
+        pages
+            .attach_share(org_id, page_id, target_id, None, created.share.id)
+            .await
+            .expect("attach share");
+
+        let agg = OrgAggregator::new(pool.clone(), ch.clone(), cfg.clone(), None);
+        let (page, _, _) = agg.build(page_id, org_id).await.expect("build");
+        assert_eq!(detail_url(&page), None, "flag off means no link");
+
+        pages
+            .update_component(
+                org_id,
+                page_id,
+                target_id,
+                StatusPageComponentUpdate {
+                    detail_link_enabled: Some(true),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("enable detail link");
+        let agg = OrgAggregator::new(pool.clone(), ch.clone(), cfg.clone(), None);
+        let (page, _, _) = agg.build(page_id, org_id).await.expect("build");
+        assert_eq!(
+            detail_url(&page),
+            Some(format!("https://app.example.com/m/{}", created.token)),
+            "opted-in component links at the share token"
+        );
+
+        shares
+            .revoke(org_id, target_id, created.share.id, None)
+            .await
+            .expect("revoke share");
+        let agg = OrgAggregator::new(pool.clone(), ch.clone(), cfg, None);
+        let (page, _, _) = agg.build(page_id, org_id).await.expect("build");
+        assert_eq!(
+            detail_url(&page),
+            None,
+            "revoking the share unlinks without removing the component"
+        );
     })
     .await;
 }
@@ -260,7 +367,7 @@ async fn a_component_that_recorded_nothing_is_no_data_not_operational() {
     with_cleanup(&pool_for_cleanup, target_id, async move {
         // Deliberately no ClickHouse rows and no incident.
         let page_id = seed_page_with_target(&pool, org_id, target_id).await;
-        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default(), None);
         let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
         let component = page
@@ -330,7 +437,7 @@ async fn component_history_returns_strip_for_public_target() {
             .expect("ch insert");
 
         let page_id = seed_page_with_target(&pool, org_id, target_id).await;
-        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default(), None);
         let resp = agg
             .component_history(page_id, org_id, target_id, 7)
             .await
@@ -418,6 +525,7 @@ async fn build_excludes_internal_incidents() {
                     public_description: None,
                     public_group: None,
                     sort_order: 1,
+                    detail_link_enabled: false,
                 },
                 i64::MAX,
                 None,
@@ -425,7 +533,7 @@ async fn build_excludes_internal_incidents() {
             .await
             .expect("add internal component");
 
-        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default(), None);
         let (page, markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
         let active: Vec<Uuid> = page.active_incidents.iter().map(|i| i.id).collect();
@@ -547,6 +655,7 @@ async fn build_component_state_follows_confirmed_incidents() {
                     public_description: None,
                     public_group: None,
                     sort_order: 1,
+                    detail_link_enabled: false,
                 },
                 i64::MAX,
                 None,
@@ -554,7 +663,7 @@ async fn build_component_state_follows_confirmed_incidents() {
             .await
             .expect("add major component");
 
-        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default(), None);
         let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
         let component = |id: Uuid| {
@@ -671,6 +780,7 @@ async fn internal_auto_incident_paints_strip_manual_stays_hidden() {
                     public_description: None,
                     public_group: None,
                     sort_order: 1,
+                    detail_link_enabled: false,
                 },
                 i64::MAX,
                 None,
@@ -678,7 +788,7 @@ async fn internal_auto_incident_paints_strip_manual_stays_hidden() {
             .await
             .expect("add manual component");
 
-        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default());
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default(), None);
         let (page, markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
 
         let component = |id: Uuid| {
@@ -783,7 +893,7 @@ async fn published_postmortem_surfaces_on_public_incident() {
 
         let page_id = seed_page_with_target(&pool, org_id, target_id).await;
         let cfg = uptimepage::config::PublicStatusConfig::default();
-        let agg = Arc::new(OrgAggregator::new(pool.clone(), ch, AggregatorConfig::default()));
+        let agg = Arc::new(OrgAggregator::new(pool.clone(), ch, AggregatorConfig::default(), None));
         let source = OrgPublicSource::new(agg, PageCache::new(&cfg), pool.clone(), "uptimepage");
         let page_ref = PageRef { page: page_id, org: org_id };
 

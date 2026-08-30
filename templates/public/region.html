@@ -143,6 +143,15 @@
                         <p class="flex min-w-0 items-center gap-2">
                             <span aria-hidden="true" class="shrink-0 {{ c.status_class }}">{{ c.status_icon }}</span>
                             <span class="min-w-0 break-words font-medium text-body">{{ c.name }}</span>
+                            {% if let Some(url) = c.detail_url %}
+                            <a href="{{ url }}" target="_blank" rel="noopener" class="public-cmp-link">
+                                <svg class="public-cmp-link__icon h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 12h3l2.5 5 3-10 2.5 5h5"/>
+                                </svg>
+                                uptime history
+                                <span class="sr-only">for {{ c.name }}, opens in a new tab</span>
+                            </a>
+                            {% endif %}
                         </p>
                         <span class="shrink-0 whitespace-nowrap text-sm font-medium {{ c.status_class }}">{{ c.status_label }}</span>
                     </div>

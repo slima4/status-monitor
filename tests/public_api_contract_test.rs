@@ -70,6 +70,7 @@ impl PublicSource for FakePublicSource {
             description: Some("Primary REST endpoint".into()),
             current_status: PublicComponentStatus::Operational,
             history: vec![DayState::Operational; 90],
+            detail_url: None,
         };
         let incident = PublicIncident {
             id: public_incident_id(),

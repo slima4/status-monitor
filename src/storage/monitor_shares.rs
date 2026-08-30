@@ -14,7 +14,8 @@ use uuid::Uuid;
 
 use crate::auth::token_hash::generate_raw_token;
 use crate::domain::{
-    CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, OrgId, ResolvedShare, UserId,
+    CreatedShare, MonitorShare, MonitorShareId, NewMonitorShare, OrgId, ResolvedShare,
+    SharePageUse, UserId,
 };
 use crate::error::{AppError, Result};
 use crate::security::Cipher;
@@ -38,16 +39,18 @@ pub enum CreateShareOutcome {
 #[async_trait]
 pub trait MonitorShareStore: Send + Sync {
     /// Mint a share for a monitor, enforcing the per-monitor link cap and the
-    /// per-org shared-monitor cap (both from the org's plan). See
-    /// [`CreateShareOutcome`].
+    /// per-org shared-monitor cap (both from the org's plan). `None` for either
+    /// cap exempts it — the status-page detail link mints that way, since the
+    /// page already publishes the monitor and its own component cap applies.
+    /// See [`CreateShareOutcome`].
     async fn create(
         &self,
         org: OrgId,
         target_id: Uuid,
         new: NewMonitorShare,
         created_by: Option<UserId>,
-        max_links_per_monitor: i64,
-        max_shared_monitors: i64,
+        max_links_per_monitor: Option<i64>,
+        max_shared_monitors: Option<i64>,
     ) -> Result<CreateShareOutcome>;
     /// Non-revoked shares for one monitor, newest first.
     async fn list_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Vec<MonitorShare>>;
@@ -115,8 +118,16 @@ impl ShareRow {
             expires_at: self.expires_at,
             view_count: self.view_count,
             last_viewed_at: self.last_viewed_at,
+            used_by_pages: Vec::new(),
         }
     }
+}
+
+#[derive(sqlx::FromRow)]
+struct PageUseRow {
+    share_id: Uuid,
+    name: String,
+    slug: String,
 }
 
 const SHARE_COLUMNS: &str =
@@ -130,8 +141,8 @@ impl MonitorShareStore for PgMonitorShareStore {
         target_id: Uuid,
         new: NewMonitorShare,
         created_by: Option<UserId>,
-        max_links_per_monitor: i64,
-        max_shared_monitors: i64,
+        max_links_per_monitor: Option<i64>,
+        max_shared_monitors: Option<i64>,
     ) -> Result<CreateShareOutcome> {
         let capability_token::Minted {
             raw,
@@ -147,12 +158,18 @@ impl MonitorShareStore for PgMonitorShareStore {
         // One snapshot under the lock: org-membership of the target, this
         // monitor's active-link count, and the org's distinct shared-monitor
         // count (the second cap only bites when this monitor has no links yet).
+        // Page-minted shares are excluded from both counts: the operator did not
+        // spend quota on them, so they must not block the links they do mint.
         let (target_ok, links_here, shared_monitors): (bool, i64, i64) = sqlx::query_as(
             "SELECT EXISTS (SELECT 1 FROM targets WHERE id = $2 AND org_id = $1), \
-             (SELECT count(*) FROM monitor_shares \
-              WHERE org_id = $1 AND target_id = $2 AND revoked_at IS NULL), \
-             (SELECT count(DISTINCT target_id) FROM monitor_shares \
-              WHERE org_id = $1 AND revoked_at IS NULL)",
+             (SELECT count(*) FROM monitor_shares ms \
+              WHERE ms.org_id = $1 AND ms.target_id = $2 AND ms.revoked_at IS NULL \
+                AND NOT EXISTS (SELECT 1 FROM status_page_components spc \
+                                WHERE spc.share_id = ms.id)), \
+             (SELECT count(DISTINCT ms.target_id) FROM monitor_shares ms \
+              WHERE ms.org_id = $1 AND ms.revoked_at IS NULL \
+                AND NOT EXISTS (SELECT 1 FROM status_page_components spc \
+                                WHERE spc.share_id = ms.id))",
         )
         .bind(org.0)
         .bind(target_id)
@@ -163,11 +180,11 @@ impl MonitorShareStore for PgMonitorShareStore {
             tx.rollback().await.ok();
             return Ok(CreateShareOutcome::TargetNotFound);
         }
-        if links_here >= max_links_per_monitor {
+        if max_links_per_monitor.is_some_and(|cap| links_here >= cap) {
             tx.rollback().await.ok();
             return Ok(CreateShareOutcome::PerMonitorLimit);
         }
-        if links_here == 0 && shared_monitors >= max_shared_monitors {
+        if links_here == 0 && max_shared_monitors.is_some_and(|cap| shared_monitors >= cap) {
             tx.rollback().await.ok();
             return Ok(CreateShareOutcome::OrgMonitorLimit);
         }
@@ -214,12 +231,33 @@ impl MonitorShareStore for PgMonitorShareStore {
         .fetch_all(&self.pool)
         .await
         .map_err(db_err)?;
+        let uses: Vec<PageUseRow> = sqlx::query_as(
+            "SELECT spc.share_id, sp.name, sp.slug::text AS slug \
+             FROM status_page_components spc \
+             JOIN status_pages sp ON sp.id = spc.status_page_id \
+             WHERE spc.org_id = $1 AND spc.target_id = $2 AND spc.share_id IS NOT NULL \
+               AND spc.detail_link_enabled \
+             ORDER BY sp.name",
+        )
+        .bind(org.0)
+        .bind(target_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(db_err)?;
         let cipher = self.cipher.as_deref();
         Ok(rows
             .into_iter()
             .map(|r| {
                 let token = capability_token::open(&r.token_enc, cipher);
                 let mut share = r.into_share();
+                share.used_by_pages = uses
+                    .iter()
+                    .filter(|u| u.share_id == share.id.0)
+                    .map(|u| SharePageUse {
+                        name: u.name.clone(),
+                        slug: u.slug.clone(),
+                    })
+                    .collect();
                 share.token = token;
                 share
             })
@@ -343,15 +381,15 @@ impl MonitorShareStore for InMemoryMonitorShareStore {
         target_id: Uuid,
         new: NewMonitorShare,
         _created_by: Option<UserId>,
-        max_links_per_monitor: i64,
-        max_shared_monitors: i64,
+        max_links_per_monitor: Option<i64>,
+        max_shared_monitors: Option<i64>,
     ) -> Result<CreateShareOutcome> {
         let mut st = self.inner.lock().unwrap();
         let links_here = st
             .iter()
             .filter(|m| !m.revoked && m.share.org_id == org && m.share.target_id == target_id)
             .count() as i64;
-        if links_here >= max_links_per_monitor {
+        if max_links_per_monitor.is_some_and(|cap| links_here >= cap) {
             return Ok(CreateShareOutcome::PerMonitorLimit);
         }
         if links_here == 0 {
@@ -361,7 +399,7 @@ impl MonitorShareStore for InMemoryMonitorShareStore {
                 .map(|m| m.share.target_id)
                 .collect::<std::collections::HashSet<_>>()
                 .len() as i64;
-            if shared_monitors >= max_shared_monitors {
+            if max_shared_monitors.is_some_and(|cap| shared_monitors >= cap) {
                 return Ok(CreateShareOutcome::OrgMonitorLimit);
             }
         }
@@ -376,6 +414,7 @@ impl MonitorShareStore for InMemoryMonitorShareStore {
             expires_at: new.expires_at,
             view_count: 0,
             last_viewed_at: None,
+            used_by_pages: Vec::new(),
         };
         st.push(MemShare {
             share: share.clone(),

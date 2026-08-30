@@ -13,6 +13,7 @@
 //! page's curation map, falling back to the monitor's own name.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use anyhow::Context;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
@@ -27,6 +28,8 @@ use crate::domain::{
     PublicIncidentUpdate, PublicMaintenance, PublicStatusPage, StatusPageId,
 };
 use crate::error::Result;
+use crate::security::Cipher;
+use crate::storage::capability_token;
 
 use super::auto_incident_title;
 use super::cache::HistoryIncidentMarker;
@@ -44,6 +47,9 @@ pub struct AggregatorConfig {
     pub recent_incidents_days: u32,
     pub max_recent_incidents: u32,
     pub upcoming_maintenance_horizon: ChronoDuration,
+    /// Operator origin serving `/m/{token}` — a subdomain page is on another
+    /// host, so the link must be absolute. Empty = same-host relative.
+    pub app_base_url: String,
 }
 
 impl Default for AggregatorConfig {
@@ -54,6 +60,7 @@ impl Default for AggregatorConfig {
             recent_incidents_days: 30,
             max_recent_incidents: 50,
             upcoming_maintenance_horizon: ChronoDuration::days(7),
+            app_base_url: String::new(),
         }
     }
 }
@@ -70,6 +77,7 @@ struct PageComponent {
     description: Option<String>,
     group: Option<String>,
     sort_order: i32,
+    detail_url: Option<String>,
 }
 
 /// Page-scoped aggregator. Carries no ids of its own — every method takes the
@@ -79,11 +87,23 @@ pub struct OrgAggregator {
     pg: PgPool,
     ch: ClickhouseClient,
     cfg: AggregatorConfig,
+    /// `None` = no KEK, which is how the tokens were stored too.
+    cipher: Option<Arc<Cipher>>,
 }
 
 impl OrgAggregator {
-    pub fn new(pg: PgPool, ch: ClickhouseClient, cfg: AggregatorConfig) -> Self {
-        Self { pg, ch, cfg }
+    pub fn new(
+        pg: PgPool,
+        ch: ClickhouseClient,
+        cfg: AggregatorConfig,
+        cipher: Option<Arc<Cipher>>,
+    ) -> Self {
+        Self {
+            pg,
+            ch,
+            cfg,
+            cipher,
+        }
     }
 
     /// One atomic snapshot per call: page + 90-day popover markers + the
@@ -166,6 +186,7 @@ impl OrgAggregator {
                     description: c.description.clone(),
                     current_status: current,
                     history,
+                    detail_url: c.detail_url.clone(),
                 };
                 (c.group.clone(), c.sort_order, pc)
             })
@@ -278,9 +299,14 @@ impl OrgAggregator {
         let rows: Vec<PageComponentRow> = sqlx::query_as::<_, PageComponentRow>(
             r#"SELECT spc.target_id, t.name AS monitor_name,
                       spc.public_name, spc.public_description,
-                      spc.public_group, spc.sort_order
+                      spc.public_group, spc.sort_order,
+                      CASE WHEN spc.detail_link_enabled THEN ms.token_enc END AS share_token_enc
                FROM status_page_components spc
                JOIN targets t ON t.id = spc.target_id AND t.org_id = spc.org_id
+               LEFT JOIN monitor_shares ms
+                      ON ms.id = spc.share_id
+                     AND ms.revoked_at IS NULL
+                     AND (ms.expires_at IS NULL OR ms.expires_at > now())
                WHERE spc.status_page_id = $1 AND spc.org_id = $2
                ORDER BY spc.public_group NULLS LAST, spc.sort_order, t.name"#,
         )
@@ -297,6 +323,13 @@ impl OrgAggregator {
                 description: r.public_description,
                 group: r.public_group,
                 sort_order: r.sort_order,
+                detail_url: r
+                    .share_token_enc
+                    .as_deref()
+                    .and_then(|sealed| capability_token::open(sealed, self.cipher.as_deref()))
+                    .map(|token| {
+                        format!("{}/m/{token}", self.cfg.app_base_url.trim_end_matches('/'))
+                    }),
             })
             .collect())
     }
@@ -669,6 +702,7 @@ struct PageComponentRow {
     public_description: Option<String>,
     public_group: Option<String>,
     sort_order: i32,
+    share_token_enc: Option<String>,
 }
 
 #[derive(FromRow)]

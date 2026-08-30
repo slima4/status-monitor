@@ -111,7 +111,18 @@
     }
 
     function rowHtml(s) {
-        const label = s.label ? esc(s.label) : '<span class="text-muted">(no label)</span>';
+        const pages = Array.isArray(s.used_by_pages) ? s.used_by_pages : [];
+        // Page-minted links carry no label; name them by their page.
+        const label = s.label
+            ? esc(s.label)
+            : pages.length
+              ? esc(pages.map((p) => p.name).join(", "))
+              : '<span class="text-muted">(no label)</span>';
+        const usedBy = pages.length
+            ? `<div class="text-xs text-muted">detail link on ${pages
+                  .map((p) => `<span class="font-mono">${esc(p.slug)}</span>`)
+                  .join(", ")} — revoking removes it there</div>`
+            : "";
         const views = Number(s.view_count || 0);
         const viewsLabel = views === 1 ? "1 view" : `${views} views`;
         const lastSeen = s.last_viewed_at ? `last opened ${esc(fmt(s.last_viewed_at))}` : "never opened";
@@ -128,6 +139,7 @@
               <div class="truncate">${label}</div>
               <div class="text-xs text-muted">created ${esc(fmt(s.created_at))} · expires ${esc(fmt(s.expires_at))}</div>
               <div class="text-xs text-muted">${esc(viewsLabel)} · ${esc(lastSeen)}</div>
+              ${usedBy}
             </div>
             <button type="button" data-share-revoke data-share-id="${esc(s.id)}"
                     class="shrink-0 btn-ghost btn-ghost--danger px-2.5 py-1 text-xs focus-visible:ring-red-500">revoke</button>

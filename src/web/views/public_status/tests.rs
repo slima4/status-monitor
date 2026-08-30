@@ -44,6 +44,7 @@ fn sample_page() -> PublicStatusPage {
                 description: Some("Customer-facing edge".into()),
                 current_status: PublicComponentStatus::Operational,
                 history: vec![DayState::Operational; HISTORY_LEN],
+                detail_url: None,
             }],
         }],
         active_incidents: vec![],

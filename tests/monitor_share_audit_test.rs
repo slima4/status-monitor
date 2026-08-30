@@ -66,8 +66,8 @@ async fn mint_and_revoke_share_write_audit_rows() {
                 expires_at: None,
             },
             Some(user),
-            i64::MAX,
-            i64::MAX,
+            Some(i64::MAX),
+            Some(i64::MAX),
         )
         .await
         .unwrap()

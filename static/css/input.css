@@ -2786,6 +2786,22 @@
     .public-cmp--mnt  { color: var(--theme-text-muted); }
     .public-cmp--none { color: var(--sm-state-none-soft-fg); }
 
+    /* Colour set here, not via `hover:text-*`: the semantic text classes live
+       in @layer components and generate no hover variant. */
+    .public-cmp-link {
+        @apply inline-flex shrink-0 items-center gap-1 whitespace-nowrap text-xs;
+        color: var(--theme-text-quiet);
+        text-decoration: none;
+    }
+    .public-cmp-link:hover,
+    .public-cmp-link:focus-visible {
+        color: var(--theme-text);
+        text-decoration: underline;
+        text-decoration-style: dotted;
+        text-underline-offset: 2px;
+    }
+    .public-cmp-link__icon { @apply shrink-0; }
+
     /* Incident severity + phase chips (used by public/_incident_chips.html).
        Sharp corners + hairline edge to match the CLI register. */
     .public-chip {

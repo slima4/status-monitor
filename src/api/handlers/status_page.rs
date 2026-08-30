@@ -20,13 +20,13 @@ use crate::api::ApiError;
 use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::{
-    AssetSlot, NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle,
-    StatusPage, StatusPageComponent, StatusPageComponentUpdate, StatusPageId, StatusPageUpdate,
-    validate_slug,
+    AssetSlot, NewMonitorShare, NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding,
+    PublicStyle, StatusPage, StatusPageComponent, StatusPageComponentUpdate, StatusPageId,
+    StatusPageUpdate, UserId, validate_slug,
 };
 use crate::error::{AppError, Result};
 use crate::public_status::LogoMime;
-use crate::storage::AddComponentOutcome;
+use crate::storage::{AddComponentOutcome, CreateShareOutcome};
 use crate::web::views::public_status::{
     LOGO_ROUTE, public_base, public_logo_url, public_status_url,
 };
@@ -319,6 +319,8 @@ pub async fn add_component(
     new.public_name = clean_curation(new.public_name, "public_name", 80)?;
     new.public_description = clean_curation(new.public_description, "public_description", 200)?;
     new.public_group = clean_curation(new.public_group, "public_group", 50)?;
+    let wants_detail_link = new.detail_link_enabled;
+    let target_id = new.target_id;
     let plan = state.quotas.limit_for_org(org).await?;
     let max = i64::from(plan.max_public_components);
     match state
@@ -327,6 +329,9 @@ pub async fn add_component(
         .await?
     {
         AddComponentOutcome::Added => {
+            if wants_detail_link {
+                ensure_detail_share(&state, org, StatusPageId(id), target_id, user).await?;
+            }
             state.public_source.invalidate(StatusPageId(id)).await;
             Ok(StatusCode::NO_CONTENT)
         }
@@ -357,6 +362,7 @@ pub async fn add_component(
 pub async fn update_component(
     State(state): State<AppState>,
     OwnerAuthorized(org, _): OwnerAuthorized<StatusPageWrite>,
+    CurrentUser(user): CurrentUser,
     Path((id, target_id)): Path<(Uuid, Uuid)>,
     Json(mut upd): Json<StatusPageComponentUpdate>,
 ) -> Result<StatusCode> {
@@ -364,6 +370,7 @@ pub async fn update_component(
     upd.public_description =
         clean_curation_patch(upd.public_description, "public_description", 200)?;
     upd.public_group = clean_curation_patch(upd.public_group, "public_group", 50)?;
+    let wants_detail_link = upd.detail_link_enabled == Some(true);
     if !state
         .status_page_store
         .update_component(org, StatusPageId(id), target_id, upd)
@@ -371,8 +378,70 @@ pub async fn update_component(
     {
         return Err(component_not_found());
     }
+    if wants_detail_link {
+        ensure_detail_share(&state, org, StatusPageId(id), target_id, user).await?;
+    }
     state.public_source.invalidate(StatusPageId(id)).await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Mints only when the component has no live share, so an untick then re-tick
+/// returns the same URL. Plan share caps do not apply: the page already
+/// publishes this monitor.
+async fn ensure_detail_share(
+    state: &AppState,
+    org: OrgId,
+    page: StatusPageId,
+    target_id: Uuid,
+    user: UserId,
+) -> Result<()> {
+    let existing = state
+        .status_page_store
+        .list_components(org, page)
+        .await?
+        .into_iter()
+        .find(|c| c.target_id == target_id)
+        .and_then(|c| c.share_id);
+    if let Some(share) = existing {
+        let now = chrono::Utc::now();
+        let live = state
+            .monitor_share_store
+            .list_for_target(org, target_id)
+            .await?
+            .iter()
+            .any(|s| s.id == share && s.expires_at.is_none_or(|e| e > now));
+        if live {
+            return Ok(());
+        }
+    }
+    let outcome = state
+        .monitor_share_store
+        .create(
+            org,
+            target_id,
+            NewMonitorShare::default(),
+            Some(user),
+            None,
+            None,
+        )
+        .await?;
+    let CreateShareOutcome::Created(created) = outcome else {
+        return Err(component_not_found());
+    };
+    if !state
+        .status_page_store
+        .attach_share(org, page, target_id, existing, created.share.id)
+        .await?
+    {
+        // Lost the swap or the component vanished; either way another mint owns
+        // the slot now, so don't strand this one as a live public URL.
+        state
+            .monitor_share_store
+            .revoke(org, target_id, created.share.id, Some(user))
+            .await?;
+        return Err(component_not_found());
+    }
+    Ok(())
 }
 
 #[utoipa::path(
@@ -387,12 +456,28 @@ pub async fn remove_component(
     CurrentUser(user): CurrentUser,
     Path((id, target_id)): Path<(Uuid, Uuid)>,
 ) -> Result<StatusCode> {
+    // Read the backing share before the row goes: removal drops `share_id`, and
+    // an unrevoked token would keep serving the monitor with nothing left to
+    // attribute it to.
+    let share = state
+        .status_page_store
+        .list_components(org, StatusPageId(id))
+        .await?
+        .into_iter()
+        .find(|c| c.target_id == target_id)
+        .and_then(|c| c.share_id);
     if !state
         .status_page_store
         .remove_component(org, StatusPageId(id), target_id, Some(user))
         .await?
     {
         return Err(component_not_found());
+    }
+    if let Some(share) = share {
+        state
+            .monitor_share_store
+            .revoke(org, target_id, share, Some(user))
+            .await?;
     }
     state.public_source.invalidate(StatusPageId(id)).await;
     Ok(StatusCode::NO_CONTENT)

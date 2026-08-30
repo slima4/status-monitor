@@ -25,6 +25,13 @@ impl std::fmt::Display for MonitorShareId {
     }
 }
 
+/// Resolved on read, never copied into the label — a rename strands a copy.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SharePageUse {
+    pub name: String,
+    pub slug: String,
+}
+
 /// One share link as the operator sees it. The raw token is never here — it is
 /// returned exactly once, by [`CreatedShare`].
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -50,6 +57,8 @@ pub struct MonitorShare {
     /// When the link was last opened, or `None` if never.
     #[schema(nullable = true)]
     pub last_viewed_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub used_by_pages: Vec<SharePageUse>,
 }
 
 /// Result of [`create`](crate::storage::MonitorShareStore::create): the stored

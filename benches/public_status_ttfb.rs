@@ -212,6 +212,7 @@ async fn build_fixture() -> Option<Fixture> {
                         public_description: None,
                         public_group: None,
                         sort_order: j as i32,
+                        detail_link_enabled: false,
                     },
                     i64::MAX,
                     None,
@@ -227,6 +228,7 @@ async fn build_fixture() -> Option<Fixture> {
             pool.clone(),
             ch.clone(),
             AggregatorConfig::default(),
+            None,
         ));
         user_ids.push(user);
         org_ids.push(org.id);

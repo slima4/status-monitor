@@ -10,6 +10,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 
 use super::WriteSource;
+use super::monitor_share::MonitorShareId;
 use super::org::{OrgId, PublicOrgBranding};
 
 /// Strongly-typed status-page id, mirroring [`OrgId`].
@@ -84,6 +85,12 @@ pub struct StatusPageComponent {
     #[schema(nullable = true)]
     pub public_group: Option<String>,
     pub sort_order: i32,
+    pub detail_link_enabled: bool,
+    /// Kept across an untick so re-enabling returns the same URL.
+    #[serde(skip)]
+    pub share_id: Option<MonitorShareId>,
+    /// Revoke is soft, so the flag alone would outlive the working link.
+    pub share_live: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -100,6 +107,8 @@ pub struct NewStatusPageComponent {
     pub public_group: Option<String>,
     #[serde(default)]
     pub sort_order: i32,
+    #[serde(default)]
+    pub detail_link_enabled: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -114,6 +123,7 @@ pub struct StatusPageComponentUpdate {
     #[schema(nullable = true, value_type = Option<String>)]
     pub public_group: Option<Option<String>>,
     pub sort_order: Option<i32>,
+    pub detail_link_enabled: Option<bool>,
 }
 
 /// Lifts `Option<T>` into `Some(Option<T>)`: a missing field stays `None`

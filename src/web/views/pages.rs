@@ -131,6 +131,7 @@ pub struct ComponentRow {
     pub on_page: bool,
     pub public_name: String,
     pub public_group: String,
+    pub detail_link: bool,
 }
 
 fn kind_label(kind: &str) -> &'static str {
@@ -266,6 +267,8 @@ pub async fn page_editor(
                 on_page: true,
                 public_name: c.public_name.clone().unwrap_or_default(),
                 public_group: c.public_group.clone().unwrap_or_default(),
+                // A revoked share leaves the flag set; show what the page renders.
+                detail_link: c.detail_link_enabled && c.share_live,
             }
         })
         .collect();
@@ -284,6 +287,7 @@ pub async fn page_editor(
             on_page: false,
             public_name: String::new(),
             public_group: String::new(),
+            detail_link: false,
         }
     }));
 
@@ -474,6 +478,7 @@ mod tests {
                 on_page: true,
                 public_name: "API".into(),
                 public_group: String::new(),
+                detail_link: false,
             }],
             subscribers: Vec::new(),
         }

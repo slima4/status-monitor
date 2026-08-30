@@ -30,6 +30,7 @@ use uptimepage::public_status::{IncidentListQuery, PublicSource, source::FeedLin
 
 const OPERATOR_TITLE: &str = "API down in EU-WEST — investigating router";
 const PUBLIC_COMPONENT_NAME: &str = "Public API";
+const DETAIL_URL: &str = "https://app.example.com/m/tok3n";
 
 fn fixed_incident_id() -> Uuid {
     Uuid::parse_str("00000000-0000-0000-0000-000000000aa1").unwrap()
@@ -51,6 +52,7 @@ impl PublicSource for PublishedSource {
             description: Some("primary edge".into()),
             current_status: PublicComponentStatus::MajorOutage,
             history: vec![DayState::Operational; 90],
+            detail_url: None,
         };
         let incident = PublicIncident {
             id: fixed_incident_id(),
@@ -121,6 +123,54 @@ impl PublicSource for PublishedSource {
     }
 }
 
+/// [`PublishedSource`] with the component opted into a detail link.
+struct LinkedSource;
+
+#[async_trait]
+impl PublicSource for LinkedSource {
+    async fn page(&self, page: PageRef) -> Result<Arc<PublicStatusPage>, PublicAppError> {
+        let mut built = (*PublishedSource.page(page).await?).clone();
+        for group in &mut built.groups {
+            for c in &mut group.components {
+                c.detail_url = Some(DETAIL_URL.into());
+            }
+        }
+        Ok(Arc::new(built))
+    }
+    async fn component_history(
+        &self,
+        _page: PageRef,
+        _id: Uuid,
+        _days: u32,
+    ) -> Result<ComponentHistoryResponse, PublicAppError> {
+        unimplemented!("not exercised by HTML page tests")
+    }
+    async fn list_incidents(
+        &self,
+        _page: PageRef,
+        _q: IncidentListQuery,
+    ) -> Result<CursorPage<PublicIncident>, PublicAppError> {
+        unimplemented!("not exercised by HTML page tests")
+    }
+    async fn incident_by_id(
+        &self,
+        _page: PageRef,
+        _id: Uuid,
+    ) -> Result<PublicIncident, PublicAppError> {
+        unimplemented!("not exercised by HTML page tests")
+    }
+    async fn maintenance(&self, _page: PageRef) -> Result<PublicMaintenanceList, PublicAppError> {
+        unimplemented!("not exercised by HTML page tests")
+    }
+    async fn incidents_rss(
+        &self,
+        _page: PageRef,
+        _links: FeedLinks<'_>,
+    ) -> Result<String, PublicAppError> {
+        unimplemented!("not exercised by HTML page tests")
+    }
+}
+
 /// Source whose components have `DayState::NoData` for every history cell —
 /// models "ClickHouse reachable but returns no data". Page-level
 /// status still resolves to operational because no component reports an
@@ -136,6 +186,7 @@ impl PublicSource for EmptyDataSource {
             description: None,
             current_status: PublicComponentStatus::Operational,
             history: vec![DayState::NoData; 90],
+            detail_url: None,
         };
         Ok(Arc::new(PublicStatusPage {
             overall: OverallStatus {
@@ -207,6 +258,7 @@ impl PublicSource for MaintenanceDominatesSource {
             description: None,
             current_status: PublicComponentStatus::Maintenance,
             history,
+            detail_url: None,
         };
         let now = Utc::now();
         let maintenance = uptimepage::domain::PublicMaintenance {
@@ -300,6 +352,46 @@ async fn status_page_returns_200_text_html() {
     let html = body_text(resp).await;
     assert!(html.starts_with("<!doctype html>"));
     assert!(html.contains(PUBLIC_COMPONENT_NAME));
+}
+
+/// Opted-in component gets a labelled history link; the name never becomes one.
+#[tokio::test]
+async fn status_page_links_component_name_only_when_opted_in() {
+    let app = build_test_app_with_web_and_public_source(|_| {}, Arc::new(PublishedSource));
+    let html = body_text(
+        app.oneshot(Request::get("/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(
+        !html.contains("public-cmp-link"),
+        "component with no detail_url must not render a link:\n{html}"
+    );
+
+    let app = build_test_app_with_web_and_public_source(|_| {}, Arc::new(LinkedSource));
+    let html = body_text(
+        app.oneshot(Request::get("/status").body(Body::empty()).unwrap())
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert!(
+        html.contains(&format!(r#"href="{DETAIL_URL}""#))
+            && html.contains(r#"rel="noopener""#)
+            && html.contains("uptime history"),
+        "linked component missing its labelled link:\n{html}"
+    );
+    // The name must never be the link text: it often *is* a domain, and would
+    // read as a link to that site.
+    assert!(
+        !html.contains(&format!(r#">{PUBLIC_COMPONENT_NAME}</a>"#)),
+        "component name must not be the anchor text:\n{html}"
+    );
+    assert!(
+        html.contains(PUBLIC_COMPONENT_NAME),
+        "linked component lost its name:\n{html}"
+    );
 }
 
 #[tokio::test]
