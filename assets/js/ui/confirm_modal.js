@@ -1,11 +1,10 @@
 // Shared user-dialog helpers. One <dialog> is lazy-mounted to body and
-// reused for every modal interaction across the app; a separate toast
-// rail handles non-blocking error/info notices.
+// reused for every modal interaction across the app. Non-blocking notices
+// live in notify.js (`smToast`).
 //
 // Direct calls:
 //   await smConfirm({title, body, confirmLabel, danger}) -> boolean
 //   await smPrompt({title, body, placeholder, value, splitOnComma}) -> string | string[] | null
-//   smToast({message, kind})           // kind: "error" (default) | "info" | "ok"
 //
 // Declarative wiring (works for hx-delete, vanilla onclick, fetch buttons):
 //   <button hx-delete="/..." data-confirm-modal
@@ -185,40 +184,6 @@
             promptActiveEl.focus();
             if (!multiline) promptActiveEl.select();
         });
-    };
-
-    // smToast: bottom-right rail, click or 4s auto-dismiss.
-    let toastRail = null;
-    function mountToastRail() {
-        if (toastRail) return;
-        toastRail = document.createElement("div");
-        toastRail.id = "sm-toast-rail";
-        toastRail.className = "pointer-events-none fixed bottom-4 right-4 z-50 flex flex-col gap-2";
-        document.body.appendChild(toastRail);
-    }
-    window.smToast = function (opts) {
-        mountToastRail();
-        opts = opts || {};
-        const msg  = opts.message || "";
-        const kind = opts.kind    || "error";
-        const klass = {
-            error: "alert-card alert-card--error",
-            info:  "alert-card alert-card--muted",
-            ok:    "alert-card alert-card--ok",
-            warn:  "alert-card alert-card--warn",
-        }[kind] || "alert-card alert-card--error";
-        const t = document.createElement("div");
-        t.className = "pointer-events-auto cursor-pointer " + klass;
-        t.style.minWidth = "16rem";
-        t.style.maxWidth = "22rem";
-        t.textContent = msg;
-        t.addEventListener("click", () => t.remove());
-        toastRail.appendChild(t);
-        setTimeout(() => {
-            t.style.transition = "opacity 200ms";
-            t.style.opacity = "0";
-            setTimeout(() => t.remove(), 250);
-        }, 4000);
     };
 
     // Capture-phase click interceptor: runs before htmx (bubble-phase) and

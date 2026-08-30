@@ -35,9 +35,6 @@
     <p class="text-sm text-muted">Your name for it. What visitors read is set below.</p>
   </header>
 
-  <div id="editor-errors" role="alert" aria-live="polite" class="hidden alert-card alert-card--error"></div>
-  <div id="editor-ok" aria-live="polite" class="hidden alert-card alert-card--ok"></div>
-
   <div class="space-y-6">
 
   <fieldset>
@@ -298,19 +295,13 @@
       const root = document.querySelector('[data-page-id]');
       const id = root.dataset.pageId;
       const suffix = root.dataset.suffix || null;
-      const errBox = document.getElementById('editor-errors');
-      const okBox = document.getElementById('editor-ok');
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      function err(msg) { okBox.classList.add('hidden'); errBox.textContent = msg; errBox.classList.remove('hidden'); errBox.scrollIntoView({ block: 'center', behavior: reduceMotion ? 'auto' : 'smooth' }); }
-      let okTimer = null;
-      function hideOk() { clearTimeout(okTimer); okTimer = null; okBox.classList.add('hidden'); }
-      function ok(msg) {
-        errBox.classList.add('hidden');
-        okBox.textContent = msg;
-        okBox.classList.remove('hidden');
-        clearTimeout(okTimer);
-        okTimer = setTimeout(hideOk, 4000);
+      // Row edits stay on the rail: a centre notice would cover the rows being
+      // toggled. Page-level saves take the centre, where the eye already is.
+      function err(msg, placement) {
+        window.smToastClear?.();
+        window.smToast?.({ message: String(msg), kind: 'error', placement });
       }
+      function ok(msg, placement) { window.smToast?.({ message: msg, kind: 'ok', placement }); }
 
       // Warn before leaving with unsaved edits (component rows save on
       // change, and the logo uploads on its own, so neither sets this).
@@ -341,7 +332,6 @@
       const markDirty = (e) => {
         if (e && e.target && e.target.closest && e.target.closest('#logo-zone')) return;
         dirty = true;
-        hideOk();
       };
       form.addEventListener('input', markDirty);
       form.addEventListener('change', markDirty);
@@ -406,10 +396,11 @@
         const btn = form.querySelector('button[type=submit]');
         if (btn.disabled) return;
         const slug = slugEl.value.trim().toLowerCase();
-        if (!slug) { err('url slug is required.'); slugEl.focus(); return; }
+        if (!slug) { err('url slug is required.', 'center'); slugEl.focus(); return; }
         slugEl.value = slug;
         const label = btn.textContent;
         btn.disabled = true; btn.textContent = 'saving…';
+        let saved = false;
         try {
           const style = form.querySelector('input[name=public_style]:checked');
           const visibility = form.querySelector('input[name=enabled]:checked');
@@ -434,7 +425,7 @@
             const url = 'https://' + slug + suffix;
             link.href = url; link.textContent = url + ' ↗';
           }
-          ok('saved');
+          saved = true;
         } catch (m) {
           const aboutSlug = /slug|address/i.test(String(m));
           if (aboutSlug) {
@@ -442,9 +433,12 @@
             slugStatus.className = 'font-mono text-xs text-[color:var(--theme-state-bad-fg)]';
             slugEl.focus();
           }
-          err(m);
+          err(m, 'center');
         }
         finally { btn.disabled = false; btn.textContent = label; }
+        // Outside the try, or a throw out of the notifier reports a failed
+        // save for a PATCH that landed.
+        if (saved) ok('saved', 'center');
       });
 
       const logoInput = document.getElementById('logo-file');
@@ -470,7 +464,7 @@
       uploadBtn.addEventListener('click', async () => {
         if (uploadBtn.disabled) return;
         const f = document.getElementById('logo-file').files[0];
-        if (!f) { err('pick a file first.'); return; }
+        if (!f) { err('pick a file first.', 'center'); return; }
         if (!(await confirmReload('Upload logo now?', 'The page reloads to show it.'))) return;
         const fd = new FormData(); fd.append('file', f);
         const label = uploadBtn.textContent;
@@ -480,7 +474,7 @@
           if (!res.ok) { const d = await res.json().catch(() => null); throw (d && d.error && d.error.message) || ('HTTP ' + res.status); }
           dirty = false;
           location.reload();
-        } catch (m) { err(m); uploadBtn.disabled = false; uploadBtn.textContent = label; }
+        } catch (m) { err(m, 'center'); uploadBtn.disabled = false; uploadBtn.textContent = label; }
       });
       const rm = document.getElementById('logo-remove');
       if (rm) rm.addEventListener('click', async () => {
@@ -493,7 +487,7 @@
         });
         if (!okToRemove) return;
         try { await api('DELETE', '/api/v1/status-pages/' + id + '/logo'); dirty = false; location.reload(); }
-        catch (m) { err(m); }
+        catch (m) { err(m, 'center'); }
       });
 
       // Keep the embed snippets in sync with the table: toggling a monitor on

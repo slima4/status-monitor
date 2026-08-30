@@ -27,12 +27,13 @@
         return undefined;
     }
 
-    var timeFmt, dateFmt, dateYearFmt, dayTimeFmt, exactFmt, fullFmt;
+    var timeFmt, timeSecFmt, dateFmt, dateYearFmt, dayTimeFmt, exactFmt, fullFmt;
     try {
         // hourCycle is one of the few component options allowed alongside
         // timeStyle; undefined leaves the locale default untouched.
         var hc = hourCyclePref();
         timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", hourCycle: hc });
+        timeSecFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit", second: "2-digit", hourCycle: hc });
         dateFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
         dateYearFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" });
         dayTimeFmt = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hourCycle: hc });
@@ -46,6 +47,8 @@
     // server-rendered fallback.
     window.smLocalFmt = fullFmt ? {
         time: function (d) { return timeFmt.format(d); },
+        // Seconds, for stamps that have to separate two actions a moment apart.
+        timeSec: function (d) { return timeSecFmt.format(d); },
         dayTime: function (d) { return dayTimeFmt.format(d); },
     } : null;
 

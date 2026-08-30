@@ -174,9 +174,9 @@
                 const b = await r.json();
                 if (b && b.error && b.error.message) msg = b.error.message;
             } catch { /* empty */ }
-            window.smToast({ message: msg });
+            window.smToast?.({ message: msg });
         } catch (err) {
-            window.smToast({ message: `network: ${String(err.message || err)}` });
+            window.smToast?.({ message: `network: ${String(err.message || err)}` });
         }
         return false;
     }

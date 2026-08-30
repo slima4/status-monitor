@@ -2701,6 +2701,156 @@
         color: var(--theme-text-muted);
     }
 
+    /* Bottom-right notice rail. Rides the top layer like the centre layer, so
+       it carries the same UA popover-box reset; `top`/`left` are released
+       because the UA `inset: 0` would fight the bottom-right anchor. */
+    .sm-toast-rail {
+        position: fixed;
+        top: auto;
+        left: auto;
+        right: 1rem;
+        bottom: 1rem;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        pointer-events: none;
+        width: auto;
+        height: auto;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        overflow: visible;
+    }
+    /* `display: flex` above outranks the UA `[popover]:not(:popover-open)`
+       rule, so an empty rail hides by the same flag the centre layer uses. */
+    .sm-toast-rail:not([data-open]) { display: none; }
+    /* Toast width lives with the rail, not in the script that builds one. */
+    .sm-toast-rail > * {
+        pointer-events: auto;
+        cursor: pointer;
+        min-width: 16rem;
+        max-width: 22rem;
+        opacity: 1;
+        translate: 0 0;
+        transition:
+            opacity 140ms ease-out,
+            translate 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @starting-style {
+        .sm-toast-rail > * { opacity: 0; translate: 0 0.5rem; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .sm-toast-rail > * { transition: opacity 140ms ease-out; translate: none; }
+    }
+
+    /* Screen-centre action confirmation. Operator forms are long enough that
+       their own banners sit off-screen by the time a control is reached, so
+       the acknowledgement has to land where the eye already is. An oversized
+       state glyph slides in cropped by the left edge and the message rides
+       over it. Holds, fades — never blocks the pointer. */
+    .sm-flash-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        display: grid;
+        place-items: center;
+        pointer-events: none;
+        /* Reset the UA popover box (fit-content size, auto margins, its own
+           border and background) — the layer is a transparent full-screen
+           grid, and the notice inside it carries every visible edge. */
+        width: auto;
+        height: auto;
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        overflow: visible;
+    }
+    /* `display: grid` above outranks the UA `[popover]:not(:popover-open)`
+       rule, so the layer has to be hidden explicitly — and by a flag JS sets,
+       which also covers browsers with no popover support. */
+    .sm-flash-layer:not([data-open]) { display: none; }
+    .sm-flash {
+        --flash-accent: var(--theme-state-ok-fg-onsoft);
+        --flash-mark-opacity: 0.12;
+        --flash-mark-size: clamp(7rem, 26vw, 11rem);
+        --flash-mark-left: 1.2rem;
+        position: relative;
+        /* Crops the glyph against the card edge — the mark reads as bigger
+           than the notice holding it. */
+        overflow: hidden;
+        min-width: min(30rem, calc(100vw - 2rem));
+        max-width: min(38rem, calc(100vw - 2rem));
+        padding: 1.5rem 1.75rem;
+        background: var(--theme-surface-elev);
+        border: 1px solid var(--theme-line);
+        border-radius: var(--radius-sm);
+        box-shadow: 0 6px 24px color-mix(in oklch, var(--theme-shadow-color) 18%, transparent);
+        opacity: 1;
+        transform: translateY(0);
+        transition:
+            opacity 140ms ease-out,
+            transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .sm-flash__glyph {
+        position: absolute;
+        left: calc(var(--flash-mark-left) * -1);
+        top: 50%;
+        translate: 0 -50%;
+        font-size: var(--flash-mark-size);
+        line-height: 0.8;
+        color: var(--flash-accent);
+        opacity: var(--flash-mark-opacity);
+        pointer-events: none;
+        animation: sm-flash-mark 700ms cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+    @keyframes sm-flash-mark {
+        from { opacity: 0;                          transform: translateX(-2rem); }
+        to   { opacity: var(--flash-mark-opacity);  transform: translateX(0); }
+    }
+    /* Right-aligned against the mark, so the two never fight for the same
+       optical centre. */
+    .sm-flash__body {
+        position: relative;
+        display: grid;
+        gap: 0.15rem;
+        justify-items: end;
+        text-align: right;
+        /* Tracks the mark rather than guessing at one clamp step: 0.6em is the
+           mono advance, less the crop, plus a gutter. */
+        padding-left: calc(var(--flash-mark-size) * 0.6 - var(--flash-mark-left) + 0.75rem);
+    }
+    .sm-flash__msg {
+        font-family: var(--font-mono);
+        font-size: 1.5rem;
+        line-height: 1.2;
+        letter-spacing: -0.02em;
+        color: var(--theme-text);
+        text-wrap: pretty;
+    }
+    .sm-flash__meta {
+        font-family: var(--font-mono);
+        font-size: 0.78rem;
+        line-height: 1.4;
+        color: var(--theme-text-quiet);
+        font-variant-numeric: tabular-nums;
+    }
+    .sm-flash--error { --flash-accent: var(--theme-state-bad-fg-onsoft); }
+    .sm-flash--warn  { --flash-accent: var(--theme-state-warn-fg-onsoft); }
+    .sm-flash--info  { --flash-accent: var(--theme-text-muted); }
+    @starting-style {
+        .sm-flash { opacity: 0; transform: translateY(8px); }
+    }
+    /* Exit stays quieter than the entrance: it recedes, it does not grow. */
+    .sm-flash--out { opacity: 0; transform: translateY(4px); }
+    @media (prefers-reduced-motion: reduce) {
+        .sm-flash { transition: opacity 140ms ease-out; transform: none; }
+        .sm-flash--out { transform: none; }
+        .sm-flash__glyph { animation: none; }
+    }
+
     /* Live-results zebra rows (parity from the loop, not :nth-child, so the
        interleaved detail sub-row doesn't throw the alternation off). Both
        shades sit above the header wash so the head stays distinct. */
