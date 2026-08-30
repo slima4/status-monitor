@@ -4602,7 +4602,14 @@
     .monitors-row[data-status="degraded"] > * { background: var(--sm-monitors-row-warn-bg); }
     .monitors-row[data-status="down"]     > * { background: var(--sm-monitors-row-bad-bg);  }
     .monitors-row[data-status="error"]    > * { background: var(--sm-monitors-row-bad-bg);  }
-    .monitors-row[data-paused="true"]     > * { opacity: var(--sm-monitors-row-paused-opacity); }
+    /* Dim the cells' contents, never the cells: an opacity box would wash out
+       the row's own hairline and status tint, and drag the actions popover
+       translucent with it. */
+    .monitors-row[data-paused="true"] > *:not(:last-child) > *,
+    .monitors-row[data-paused="true"] .monitors-menu__btn { opacity: var(--sm-monitors-row-paused-opacity); }
+    .monitors-row[data-paused="true"] .monitors-menu__btn:hover,
+    .monitors-row[data-paused="true"] .monitors-menu__btn:focus-visible,
+    .monitors-row[data-paused="true"] .monitors-menu[data-open="true"] .monitors-menu__btn { opacity: 1; }
     .monitors-row[data-selected="true"]   > * {
         background: var(--sm-monitors-row-selected-bg);
     }
