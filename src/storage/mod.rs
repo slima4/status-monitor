@@ -66,6 +66,7 @@ pub use incidents::{
     InMemoryIncidentNarrationStore, IncidentBrief, IncidentBriefFilter, IncidentNarrationStore,
     PgIncidentNarrationStore,
 };
+pub use maintenance::suppressing_window_sql;
 pub use maintenance::{
     InMemoryMaintenanceStore, MaintenanceListQuery, MaintenanceStore, PgMaintenanceStore,
 };

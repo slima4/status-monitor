@@ -490,6 +490,8 @@ async fn main() -> Result<()> {
     let org_directory: Arc<dyn uptimepage::storage::orgs::OrgDirectory> = Arc::new(
         uptimepage::storage::orgs::PgOrgDirectory::new(pg_pool_for_stores.clone()),
     );
+    let maintenance_store: Arc<dyn MaintenanceStore> =
+        Arc::new(PgMaintenanceStore::new(pg_pool_for_stores.clone()));
     let escalation_engine_handle: JoinHandle<()> = {
         let engine = uptimepage::escalation::EscalationEngine::new(
             incident_signal_rx,
@@ -502,6 +504,7 @@ async fn main() -> Result<()> {
                 contacts: contact_store.clone(),
                 targets: target_store.clone(),
                 channels: notification_channel_store.clone(),
+                maintenance: maintenance_store.clone(),
                 orgs: org_directory.clone(),
                 http: outbound_http.clone(),
                 cfg: cfg.escalation.clone(),
@@ -574,8 +577,6 @@ async fn main() -> Result<()> {
         ))
     };
 
-    let maintenance_store: Arc<dyn MaintenanceStore> =
-        Arc::new(PgMaintenanceStore::new(pg_pool_for_stores.clone()));
     let status_page_store: Arc<dyn uptimepage::storage::StatusPageStore> = Arc::new(
         uptimepage::storage::PgStatusPageStore::new(pg_pool_for_stores.clone()),
     );

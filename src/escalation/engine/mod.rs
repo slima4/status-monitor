@@ -82,6 +82,7 @@ pub struct EngineDeps {
     pub contacts: Arc<dyn ContactStore>,
     pub targets: Arc<dyn TargetStore>,
     pub channels: Arc<dyn NotificationChannelStore>,
+    pub maintenance: Arc<dyn crate::storage::MaintenanceStore>,
     pub orgs: Arc<dyn OrgDirectory>,
     pub http: OutboundHttpClient,
     pub cfg: EscalationConfig,
@@ -106,6 +107,7 @@ struct Worker {
     contacts: Arc<dyn ContactStore>,
     targets: Arc<dyn TargetStore>,
     channels: Arc<dyn NotificationChannelStore>,
+    maintenance: Arc<dyn crate::storage::MaintenanceStore>,
     orgs: Arc<dyn OrgDirectory>,
     http: OutboundHttpClient,
     cfg: EscalationConfig,
@@ -136,6 +138,7 @@ impl EscalationEngine {
             contacts,
             targets,
             channels,
+            maintenance,
             orgs,
             http,
             cfg,
@@ -154,6 +157,7 @@ impl EscalationEngine {
                 contacts,
                 targets,
                 channels,
+                maintenance,
                 orgs,
                 http,
                 cfg,
@@ -245,6 +249,11 @@ impl EscalationEngine {
     #[cfg(test)]
     async fn release_held(&self) {
         self.w.release_held().await
+    }
+
+    #[cfg(test)]
+    async fn release_maintenance(&self) {
+        self.w.release_maintenance().await
     }
     /// The paging half of a release, so a test can drive the window between
     /// the scan and the page that the scan's own state filter hides.

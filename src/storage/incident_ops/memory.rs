@@ -805,6 +805,49 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         Ok(())
     }
 
+    /// Whether a window still covers the target is a join this double has no
+    /// tables for; the engine's own guard re-checks it before paging.
+    async fn due_for_maintenance_release(&self, limit: usize) -> Result<Vec<DueIncident>> {
+        let g = self.inner.lock();
+        let held_at = |id: Uuid| {
+            g.notifications
+                .iter()
+                .filter(|(_, n)| {
+                    n.incident_id == id && n.channel_id.is_none() && n.transport == "maintenance"
+                })
+                .map(|(_, n)| n.created_at)
+                .max()
+        };
+        let mut due: Vec<_> = g
+            .incidents
+            .iter()
+            .filter(|i| {
+                if i.state != IncidentState::Triggered || i.target_id.is_none() {
+                    return false;
+                }
+                let Some(at) = held_at(i.id) else {
+                    return false;
+                };
+                !g.notifications
+                    .iter()
+                    .any(|(_, n)| n.incident_id == i.id && n.created_at > at)
+            })
+            .collect();
+        due.sort_by_key(|i| held_at(i.id));
+        Ok(due
+            .into_iter()
+            .take(limit)
+            .map(|i| DueIncident {
+                id: i.id,
+                org: OrgId(Uuid::nil()),
+                target_id: i.target_id,
+                escalation_policy_id: i.escalation_policy_id,
+                escalation_level: i.escalation_level,
+                escalation_round: i.escalation_round,
+            })
+            .collect())
+    }
+
     async fn due_for_flap_release(
         &self,
         now: DateTime<Utc>,

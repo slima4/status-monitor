@@ -14,6 +14,8 @@ pub struct MaintenanceWindow {
     pub starts_at: DateTime<Utc>,
     pub ends_at: DateTime<Utc>,
     pub component_ids: Vec<Uuid>,
+    /// Whether the window silences paging for its components while it runs.
+    pub suppress_alerts: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     /// Where this window was last changed from (UI, API, or Terraform).
@@ -33,6 +35,14 @@ pub struct NewMaintenanceWindow {
     /// IDs of targets affected by this maintenance.
     #[serde(default)]
     pub component_ids: Vec<Uuid>,
+    /// Whether the window silences paging for its components while it runs.
+    /// Defaults to true.
+    #[serde(default = "default_true")]
+    pub suppress_alerts: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
@@ -42,6 +52,7 @@ pub struct MaintenanceWindowUpdate {
     pub starts_at: Option<DateTime<Utc>>,
     pub ends_at: Option<DateTime<Utc>>,
     pub component_ids: Option<Vec<Uuid>>,
+    pub suppress_alerts: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, ToSchema)]

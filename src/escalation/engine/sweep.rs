@@ -115,6 +115,10 @@ impl FailingChannelMail {
     }
 }
 
+/// How long a quiet monitor's escalation timer parks before the sweep looks
+/// at it again.
+const SUPPRESSED_ESCALATION_RETRY_SECS: i64 = 60;
+
 impl Worker {
     /// Walk the next rung of every due incident's policy, bounded-concurrent so
     /// one slow channel never serialises the tick, and budget-capped so the
@@ -212,6 +216,9 @@ impl Worker {
         if !target.enabled || target.renotify_interval_secs == 0 {
             return Ok(());
         }
+        if self.alerts_suppressed(d.org, target_id).await {
+            return Ok(());
+        }
         let channels = resolvable_channels(&self.ops.notifications_for(d.org, d.id).await?);
         if channels.is_empty() {
             return Ok(());
@@ -269,7 +276,21 @@ impl Worker {
                 let Some(target) = self.targets.get(d.org, target_id).await? else {
                     return Ok(());
                 };
-                if !target.enabled {
+                // Push the timer out rather than clearing it: nothing re-arms a
+                // cleared one but a fresh open, so the rest of the ladder would
+                // never page once the monitor came back.
+                if !target.enabled || self.alerts_suppressed(d.org, target.id).await {
+                    let next_at =
+                        Utc::now() + chrono::Duration::seconds(SUPPRESSED_ESCALATION_RETRY_SECS);
+                    self.ops
+                        .record_escalation(
+                            d.org,
+                            d.id,
+                            d.escalation_level,
+                            d.escalation_round,
+                            Some(next_at),
+                        )
+                        .await?;
                     return Ok(());
                 }
                 let notice = self.notice(&incident, &target, NotificationReason::Escalated, None);

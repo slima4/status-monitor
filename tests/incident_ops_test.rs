@@ -948,6 +948,51 @@ async fn renotify_backoff_widens_with_each_reminder_pg() {
         "a reopened incident pages at the base interval again"
     );
 
+    // A window that silences paging takes the incident out of the scan entirely,
+    // so a long window costs no per-tick work.
+    let mw: Uuid = sqlx::query_scalar(
+        "INSERT INTO maintenance_windows (org_id, title, starts_at, ends_at, suppress_alerts) \
+         VALUES ($1, 'w', now() - interval '5 minutes', now() + interval '1 hour', true) \
+         RETURNING id",
+    )
+    .bind(org.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let target_id: Uuid = sqlx::query_scalar("SELECT target_id FROM incidents WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id) \
+         VALUES ($1, $2, $3)",
+    )
+    .bind(org.0)
+    .bind(mw)
+    .bind(target_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        !is_due(&store, id).await,
+        "a silenced window holds the reminder"
+    );
+    sqlx::query("UPDATE maintenance_windows SET suppress_alerts = false WHERE id = $1")
+        .bind(mw)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        is_due(&store, id).await,
+        "an announcement-only window leaves reminders alone"
+    );
+    sqlx::query("DELETE FROM maintenance_windows WHERE id = $1")
+        .bind(mw)
+        .execute(&pool)
+        .await
+        .unwrap();
+
     // The day cap raises a short interval; it must never lower a long one.
     sqlx::query("UPDATE targets SET renotify_interval_secs = 604800 WHERE id = (SELECT target_id FROM incidents WHERE id = $1)")
         .bind(id)
@@ -958,6 +1003,122 @@ async fn renotify_backoff_widens_with_each_reminder_pg() {
     assert!(
         !is_due(&store, id).await,
         "a weekly reminder interval is not pulled forward to daily"
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn a_maintenance_hold_releases_only_once_the_window_lets_go_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, _user, id) = seed(&pool, "incmaint").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+    let target_id: Uuid = sqlx::query_scalar("SELECT target_id FROM incidents WHERE id = $1")
+        .bind(id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    store
+        .record_notification(NewIncidentNotification {
+            org,
+            incident_id: id,
+            escalation_level: None,
+            target_user_id: None,
+            channel_id: None,
+            transport: "maintenance".into(),
+            reason: NotificationReason::Opened,
+            status: NotificationStatus::Suppressed,
+            attempt: 0,
+            error: None,
+            sent_at: None,
+        })
+        .await
+        .expect("hold marker");
+
+    async fn is_due(store: &PgIncidentOpsStore, id: Uuid) -> bool {
+        store
+            .due_for_maintenance_release(1000)
+            .await
+            .unwrap()
+            .iter()
+            .any(|d| d.id == id)
+    }
+
+    assert!(
+        is_due(&store, id).await,
+        "a hold with no window over it is ready to release"
+    );
+
+    // An active silencing window keeps it held.
+    let mw: Uuid = sqlx::query_scalar(
+        "INSERT INTO maintenance_windows (org_id, title, starts_at, ends_at, suppress_alerts) \
+         VALUES ($1, 'w', now() - interval '5 minutes', now() + interval '1 hour', true) \
+         RETURNING id",
+    )
+    .bind(org.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO maintenance_window_components (org_id, maintenance_id, target_id) \
+         VALUES ($1, $2, $3)",
+    )
+    .bind(org.0)
+    .bind(mw)
+    .bind(target_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(!is_due(&store, id).await, "the window still covers it");
+
+    // A window that only announces never held it in the first place.
+    sqlx::query("UPDATE maintenance_windows SET suppress_alerts = false WHERE id = $1")
+        .bind(mw)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        is_due(&store, id).await,
+        "an announcement-only window releases"
+    );
+
+    sqlx::query("UPDATE maintenance_windows SET suppress_alerts = true, ends_at = now() - interval '1 minute' WHERE id = $1")
+        .bind(mw)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(is_due(&store, id).await, "a finished window releases");
+
+    // Once a real page lands the marker is spent.
+    let channel: Uuid = sqlx::query_scalar(
+        "INSERT INTO notification_channels (org_id, name, kind, config) \
+         VALUES ($1, 'ops', 'webhook', '{}'::jsonb) RETURNING id",
+    )
+    .bind(org.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    store
+        .record_notification(NewIncidentNotification {
+            org,
+            incident_id: id,
+            escalation_level: Some(0),
+            target_user_id: None,
+            channel_id: Some(channel),
+            transport: "webhook".into(),
+            reason: NotificationReason::Opened,
+            status: NotificationStatus::Sent,
+            attempt: 1,
+            error: None,
+            sent_at: Some(chrono::Utc::now()),
+        })
+        .await
+        .expect("release page");
+    assert!(
+        !is_due(&store, id).await,
+        "a released hold does not page twice"
     );
 }
 

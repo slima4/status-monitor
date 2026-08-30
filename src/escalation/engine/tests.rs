@@ -173,6 +173,7 @@ fn engine_cfg(
             contacts: Arc::new(InMemoryContactStore::new()),
             targets,
             channels,
+            maintenance: Arc::new(crate::storage::InMemoryMaintenanceStore::new()),
             orgs: Arc::new(crate::storage::orgs::InMemoryOrgDirectory::new()),
             http: crate::http_outbound::build_outbound_client(
                 crate::security::SsrfGuard::relaxed_for_tests(),
@@ -222,6 +223,7 @@ fn engine_mailing_owned(
             contacts: Arc::new(InMemoryContactStore::new()),
             targets,
             channels,
+            maintenance: Arc::new(crate::storage::InMemoryMaintenanceStore::new()),
             orgs,
             http: crate::http_outbound::build_outbound_client(
                 crate::security::SsrfGuard::relaxed_for_tests(),
@@ -239,6 +241,55 @@ fn engine_mailing_owned(
         },
     );
     (engine, sender)
+}
+
+/// [`engine`] with a maintenance store the test controls.
+fn engine_maint(
+    ops: Arc<dyn IncidentOpsStore>,
+    targets: Arc<dyn TargetStore>,
+    channels: Arc<dyn NotificationChannelStore>,
+    maintenance: Arc<dyn crate::storage::MaintenanceStore>,
+) -> EscalationEngine {
+    engine_maint_policies(
+        ops,
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        targets,
+        channels,
+        maintenance,
+    )
+}
+
+/// [`engine_maint`] with an escalation policy store the test controls.
+fn engine_maint_policies(
+    ops: Arc<dyn IncidentOpsStore>,
+    policies: Arc<dyn EscalationPolicyStore>,
+    targets: Arc<dyn TargetStore>,
+    channels: Arc<dyn NotificationChannelStore>,
+    maintenance: Arc<dyn crate::storage::MaintenanceStore>,
+) -> EscalationEngine {
+    let (_tx, rx) = mpsc::channel(4);
+    EscalationEngine::new(
+        rx,
+        EngineDeps {
+            ops,
+            policies,
+            on_call: Arc::new(InMemoryOnCallStore::new()),
+            contacts: Arc::new(InMemoryContactStore::new()),
+            targets,
+            channels,
+            maintenance,
+            orgs: Arc::new(crate::storage::orgs::InMemoryOrgDirectory::new()),
+            http: crate::http_outbound::build_outbound_client(
+                crate::security::SsrfGuard::relaxed_for_tests(),
+            ),
+            cfg: EscalationConfig::default(),
+            base_url: String::new(),
+            alert_channel_stop_secret: String::new(),
+            central_bot: None,
+            central_whatsapp: None,
+            email: None,
+        },
+    )
 }
 
 fn engine_with(
@@ -259,6 +310,7 @@ fn engine_with(
             contacts,
             targets,
             channels,
+            maintenance: Arc::new(crate::storage::InMemoryMaintenanceStore::new()),
             orgs: Arc::new(crate::storage::orgs::InMemoryOrgDirectory::new()),
             http: crate::http_outbound::build_outbound_client(
                 crate::security::SsrfGuard::relaxed_for_tests(),
@@ -788,6 +840,270 @@ async fn a_reminder_that_reaches_nobody_does_not_widen_the_backoff() {
 
     assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
     assert_eq!(ops.renotify_count(id), 0);
+}
+
+async fn window_over(
+    target_id: uuid::Uuid,
+    suppress_alerts: bool,
+) -> Arc<crate::storage::InMemoryMaintenanceStore> {
+    use crate::domain::{NewMaintenanceWindow, WriteSource};
+    use crate::storage::MaintenanceStore;
+    let store = Arc::new(crate::storage::InMemoryMaintenanceStore::new());
+    store
+        .create(
+            org(),
+            NewMaintenanceWindow {
+                title: "Upgrade".into(),
+                description: None,
+                starts_at: chrono::Utc::now() - chrono::Duration::minutes(5),
+                ends_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                component_ids: vec![target_id],
+                suppress_alerts,
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .unwrap();
+    store
+}
+
+#[tokio::test]
+async fn a_monitor_in_maintenance_opens_its_incident_but_pages_nobody() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+
+    let eng = engine_maint(ops.clone(), targets, channels, window_over(tid, true).await);
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+
+    let rows = ops.notifications_for(org(), id).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert!(
+        rows[0].channel_id.is_none() && rows[0].transport == "maintenance",
+        "a hold records a marker, never a delivery: {rows:?}"
+    );
+    // The incident is still on the books, and says why it went unanswered.
+    assert!(ops.get(org(), id).await.unwrap().is_some());
+    let events = ops.timeline(org(), id).await.unwrap();
+    assert!(
+        events.iter().any(|e| e
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("maintenance window"))),
+        "{events:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_held_alert_pages_once_the_window_is_over() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+
+    let eng = engine_maint(
+        ops.clone(),
+        targets.clone(),
+        channels.clone(),
+        window_over(tid, true).await,
+    );
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+
+    // Window gone: the release pages the channel the hold never reached.
+    let eng = engine_maint(
+        ops.clone(),
+        targets,
+        channels,
+        Arc::new(crate::storage::InMemoryMaintenanceStore::new()),
+    );
+    eng.release_maintenance().await;
+
+    let rows = ops.notifications_for(org(), id).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert!(
+        rows.iter().any(|n| n.channel_id == Some(cid)),
+        "the release reaches a real channel: {rows:?}"
+    );
+
+    // The marker is spent: a second sweep must not page the same hold again.
+    eng.release_maintenance().await;
+    assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn maintenance_parks_the_escalation_timer_without_losing_the_ladder() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let c1 = failing_channel(&channels).await;
+    let c2 = failing_channel(&channels).await;
+    let target = bare_target();
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let policies = Arc::new(InMemoryEscalationPolicyStore::new());
+    let p = policies
+        .create(
+            org(),
+            NewEscalationPolicy {
+                name: "p".into(),
+                description: None,
+                repeat_count: 0,
+                steps: vec![channel_step(1, 0, c1), channel_step(2, 0, c2)],
+            },
+            10,
+        )
+        .await
+        .unwrap();
+    policies
+        .set_target_policy(org(), tid, Some(p.id))
+        .await
+        .unwrap();
+
+    let quiet = Arc::new(crate::storage::InMemoryMaintenanceStore::new());
+    let eng = engine_maint_policies(
+        ops.clone(),
+        policies.clone(),
+        targets.clone(),
+        channels.clone(),
+        quiet,
+    );
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    assert!(
+        ops.get(org(), id)
+            .await
+            .unwrap()
+            .unwrap()
+            .next_escalation_at
+            .is_some()
+    );
+
+    let eng = engine_maint_policies(
+        ops.clone(),
+        policies,
+        targets,
+        channels,
+        window_over(tid, true).await,
+    );
+    let before = ops.notifications_for(org(), id).await.unwrap().len();
+    eng.escalate_due().await;
+
+    let inc = ops.get(org(), id).await.unwrap().unwrap();
+    assert_eq!(
+        ops.notifications_for(org(), id).await.unwrap().len(),
+        before
+    );
+    assert!(
+        inc.next_escalation_at
+            .is_some_and(|at| at > chrono::Utc::now()),
+        "clearing the timer would strand the rest of the ladder: only a fresh \
+         open re-arms one"
+    );
+    assert_eq!(inc.escalation_level, 1, "the rung it reached is kept");
+}
+
+#[tokio::test]
+async fn a_window_never_silences_an_incident_someone_declared_by_hand() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    ops.edit(id, |i| i.origin = crate::domain::IncidentOrigin::Manual);
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+
+    let eng = engine_maint(ops.clone(), targets, channels, window_over(tid, true).await);
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+
+    let rows = ops.notifications_for(org(), id).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(
+        rows[0].channel_id,
+        Some(cid),
+        "the operator declared this during the window on purpose: {rows:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_public_only_window_leaves_alerting_alone() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+
+    let eng = engine_maint(
+        ops.clone(),
+        targets,
+        channels,
+        window_over(tid, false).await,
+    );
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+
+    assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn maintenance_holds_a_reminder_without_discarding_the_backoff() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let due = DueIncident {
+        id,
+        org: org(),
+        target_id: Some(tid),
+        escalation_policy_id: None,
+        escalation_level: 0,
+        escalation_round: 0,
+    };
+
+    let quiet = Arc::new(crate::storage::InMemoryMaintenanceStore::new());
+    let eng = engine_maint(ops.clone(), targets.clone(), channels.clone(), quiet);
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    eng.renotify_one(&due).await.unwrap();
+    eng.renotify_one(&due).await.unwrap();
+    assert_eq!(ops.renotify_count(id), 2);
+
+    let eng = engine_maint(ops.clone(), targets, channels, window_over(tid, true).await);
+    eng.renotify_one(&due).await.unwrap();
+
+    assert_eq!(
+        ops.notifications_for(org(), id).await.unwrap().len(),
+        3,
+        "the window holds the reminder"
+    );
+    assert_eq!(
+        ops.renotify_count(id),
+        2,
+        "and leaves the backoff alone: this incident was already paged, so a \
+         window is not a reason to restart its ladder"
+    );
 }
 
 #[tokio::test]

@@ -1361,7 +1361,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         // retries are the retry sweep's job. The
         // `(org_id, incident_id, created_at)` index serves the max as an
         // index-only scan.
-        let rows: Vec<Row> = sqlx::query_as(
+        let sql = format!(
             "SELECT i.id, i.org_id, i.target_id, i.escalation_policy_id, \
                     i.escalation_level, i.escalation_round \
              FROM incidents i \
@@ -1369,6 +1369,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
              WHERE i.state = 'triggered' AND i.ended_at IS NULL \
                  AND i.next_escalation_at IS NULL \
                  AND t.renotify_interval_secs > 0 \
+                 AND NOT {window} \
                  AND ( \
                      SELECT max(n.created_at) FROM incident_notifications n \
                      WHERE n.incident_id = i.id AND n.org_id = i.org_id \
@@ -1384,12 +1385,14 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                        AND n.channel_id IS NOT NULL \
                  ) ASC \
              LIMIT $2",
-        )
-        .bind(now)
-        .bind(cap)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("due_for_renotify: {e}"))?;
+            window = crate::storage::suppressing_window_sql("t.id", "t.org_id"),
+        );
+        let rows: Vec<Row> = sqlx::query_as(&sql)
+            .bind(now)
+            .bind(cap)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("due_for_renotify: {e}"))?;
         Ok(rows
             .into_iter()
             .map(|r| DueIncident {
@@ -1414,6 +1417,65 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         .await
         .map_err(|e| anyhow::anyhow!("bump_renotify_count: {e}"))?;
         Ok(())
+    }
+
+    async fn due_for_maintenance_release(&self, limit: usize) -> Result<Vec<DueIncident>> {
+        let cap = (limit as i64).clamp(1, 1000);
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: Uuid,
+            org_id: Uuid,
+            target_id: Option<Uuid>,
+            escalation_policy_id: Option<Uuid>,
+            escalation_level: i32,
+            escalation_round: i32,
+        }
+        // Same "nothing newer than the hold" shape as the flap release: it is
+        // what makes this fire once even when the release reaches no channel.
+        // The marker EXISTS runs first so a fleet holding nothing pays neither
+        // the LATERAL nor the window join.
+        let sql = format!(
+            "SELECT i.id, i.org_id, i.target_id, i.escalation_policy_id, i.escalation_level, \
+                    i.escalation_round \
+             FROM incidents i \
+             JOIN LATERAL ( \
+                 SELECT max(created_at) AS held_at FROM incident_notifications h \
+                 WHERE h.incident_id = i.id AND h.org_id = i.org_id \
+                   AND h.channel_id IS NULL AND h.transport = 'maintenance' \
+             ) held ON TRUE \
+             WHERE EXISTS ( \
+                   SELECT 1 FROM incident_notifications m \
+                   WHERE m.incident_id = i.id AND m.org_id = i.org_id \
+                     AND m.channel_id IS NULL AND m.transport = 'maintenance' \
+               ) \
+               AND i.state = 'triggered' AND i.ended_at IS NULL \
+               AND i.target_id IS NOT NULL \
+               AND held.held_at IS NOT NULL \
+               AND NOT EXISTS ( \
+                   SELECT 1 FROM incident_notifications n \
+                   WHERE n.incident_id = i.id AND n.org_id = i.org_id \
+                     AND n.created_at > held.held_at \
+               ) \
+               AND NOT {window} \
+             ORDER BY held.held_at ASC LIMIT $1",
+            window = crate::storage::suppressing_window_sql("i.target_id", "i.org_id"),
+        );
+        let rows: Vec<Row> = sqlx::query_as(&sql)
+            .bind(cap)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("due_for_maintenance_release: {e}"))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| DueIncident {
+                id: r.id,
+                org: OrgId(r.org_id),
+                target_id: r.target_id,
+                escalation_policy_id: r.escalation_policy_id,
+                escalation_level: r.escalation_level,
+                escalation_round: r.escalation_round,
+            })
+            .collect())
     }
 
     async fn due_for_flap_release(

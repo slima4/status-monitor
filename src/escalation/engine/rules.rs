@@ -118,17 +118,18 @@ pub(super) struct Paged {
     pub(super) delivered: u32,
 }
 
-/// The damper's own bookkeeping rows. Neither is a delivery.
+/// Bookkeeping rows the engine writes to itself. None is a delivery.
 pub fn is_damper_marker(transport: &str) -> bool {
     matches!(
         transport,
-        DAMPED_TRANSPORT | RELEASED_TRANSPORT | UNREACHABLE_TRANSPORT
+        DAMPED_TRANSPORT | RELEASED_TRANSPORT | UNREACHABLE_TRANSPORT | MAINTENANCE_TRANSPORT
     )
 }
 
 pub const DAMPED_TRANSPORT: &str = "damped";
 pub const RELEASED_TRANSPORT: &str = "released";
 pub const UNREACHABLE_TRANSPORT: &str = "unreachable";
+pub const MAINTENANCE_TRANSPORT: &str = "maintenance";
 
 /// Whether the damper runs on this path. A release already waited out the
 /// hold, so re-damping it would silence the outage the hold exists to surface.

@@ -225,6 +225,7 @@ async fn two_tenants_never_see_each_others_data() {
                 starts_at: now,
                 ends_at: now + chrono::Duration::hours(1),
                 component_ids: vec![],
+                suppress_alerts: true,
             },
             WriteSource::Ui,
         )
@@ -239,6 +240,7 @@ async fn two_tenants_never_see_each_others_data() {
                 starts_at: now,
                 ends_at: now + chrono::Duration::hours(1),
                 component_ids: vec![],
+                suppress_alerts: true,
             },
             WriteSource::Ui,
         )
@@ -260,6 +262,57 @@ async fn two_tenants_never_see_each_others_data() {
             .unwrap()
             .is_none(),
         "tenant b maintenance get of a's id must be None"
+    );
+
+    // A window that silences paging does so only for its own org's monitor,
+    // and only while `suppress_alerts` is on.
+    let covering = maintenance_store
+        .create(
+            a.org,
+            NewMaintenanceWindow {
+                title: "a-covering".into(),
+                description: None,
+                starts_at: now - chrono::Duration::minutes(5),
+                ends_at: now + chrono::Duration::hours(1),
+                component_ids: vec![target_a.id],
+                suppress_alerts: true,
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .expect("a covering mw");
+    assert!(
+        maintenance_store
+            .alerts_suppressed(a.org, target_a.id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        !maintenance_store
+            .alerts_suppressed(b.org, target_a.id)
+            .await
+            .unwrap(),
+        "another tenant's window must never silence this org's paging"
+    );
+
+    maintenance_store
+        .update(
+            a.org,
+            covering.id,
+            uptimepage::domain::MaintenanceWindowUpdate {
+                suppress_alerts: Some(false),
+                ..Default::default()
+            },
+            WriteSource::Ui,
+        )
+        .await
+        .expect("turn suppression off");
+    assert!(
+        !maintenance_store
+            .alerts_suppressed(a.org, target_a.id)
+            .await
+            .unwrap(),
+        "a public-only window leaves paging alone"
     );
 
     // ── Status pages + curated components ─────────────────────────────────

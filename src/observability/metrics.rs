@@ -65,6 +65,10 @@ fn register_descriptions() {
         "Incident alerts held because the monitor is flapping"
     );
     describe_counter!(
+        "uptimepage_alerts_held_maintenance_total",
+        "Incident alerts held because the monitor is in a maintenance window that silences paging. Each held alert pages when the window ends if its incident is still open"
+    );
+    describe_counter!(
         "uptimepage_checks_errors_total",
         "Total check errors, labelled by kind"
     );
@@ -376,6 +380,7 @@ pub mod names {
     pub const NOTIFICATIONS_TOTAL: &str = "uptimepage_notifications_total";
     pub const NOTIFICATIONS_FAILURES: &str = "uptimepage_notifications_failures_total";
     pub const ALERTS_DROPPED: &str = "uptimepage_alerts_dropped_total";
+    pub const ALERTS_HELD_MAINTENANCE: &str = "uptimepage_alerts_held_maintenance_total";
     pub const HOST_THROTTLE_WAITS: &str = "uptimepage_host_throttle_waits_total";
     pub const HOST_THROTTLE_DROPS: &str = "uptimepage_host_throttle_drops_total";
     pub const RDAP_SINGLEFLIGHT: &str = "uptimepage_rdap_singleflight_total";

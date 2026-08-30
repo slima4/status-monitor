@@ -54,6 +54,10 @@ pub trait MaintenanceStore: Send + Sync {
     /// validate `component_ids` on create/update without requiring callers to
     /// plumb in a `TargetStore`.
     async fn existing_target_ids(&self, org: OrgId, ids: &[Uuid]) -> Result<Vec<Uuid>>;
+    /// Whether a window that silences paging currently covers this target.
+    /// A window with `suppress_alerts` off never matches, so it stays a purely
+    /// public announcement.
+    async fn alerts_suppressed(&self, org: OrgId, target_id: Uuid) -> Result<bool>;
 }
 
 // ── Postgres impl ────────────────────────────────────────────────────────
@@ -75,6 +79,7 @@ struct MaintenanceRow {
     description: Option<String>,
     starts_at: DateTime<Utc>,
     ends_at: DateTime<Utc>,
+    suppress_alerts: bool,
     write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
@@ -88,6 +93,7 @@ impl MaintenanceRow {
             description: self.description,
             starts_at: self.starts_at,
             ends_at: self.ends_at,
+            suppress_alerts: self.suppress_alerts,
             component_ids,
             write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
@@ -124,15 +130,16 @@ impl MaintenanceStore for PgMaintenanceStore {
             .map_err(|e| anyhow::anyhow!("begin: {e}"))?;
         let row: MaintenanceRow = sqlx::query_as(
             r#"INSERT INTO maintenance_windows
-                   (org_id, title, description, starts_at, ends_at, write_source)
-               VALUES ($1, $2, $3, $4, $5, $6)
-               RETURNING id, title, description, starts_at, ends_at, write_source, created_at, updated_at"#,
+                   (org_id, title, description, starts_at, ends_at, suppress_alerts, write_source)
+               VALUES ($1, $2, $3, $4, $5, $6, $7)
+               RETURNING id, title, description, starts_at, ends_at, suppress_alerts, write_source, created_at, updated_at"#,
         )
         .bind(org.0)
         .bind(&new.title)
         .bind(&new.description)
         .bind(new.starts_at)
         .bind(new.ends_at)
+        .bind(new.suppress_alerts)
         .bind(source.as_str())
         .fetch_one(&mut *tx)
         .await
@@ -183,7 +190,7 @@ impl MaintenanceStore for PgMaintenanceStore {
 
     async fn get(&self, org: OrgId, id: Uuid) -> Result<Option<MaintenanceWindow>> {
         let row: Option<MaintenanceRow> = sqlx::query_as(
-            r#"SELECT id, title, description, starts_at, ends_at, write_source, created_at, updated_at
+            r#"SELECT id, title, description, starts_at, ends_at, suppress_alerts, write_source, created_at, updated_at
                FROM maintenance_windows WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -222,10 +229,11 @@ impl MaintenanceStore for PgMaintenanceStore {
                    description  = COALESCE($3, description),
                    starts_at    = COALESCE($4, starts_at),
                    ends_at      = COALESCE($5, ends_at),
+                   suppress_alerts = COALESCE($8, suppress_alerts),
                    write_source = $7,
                    updated_at   = now()
                WHERE id = $1 AND org_id = $6
-               RETURNING id, title, description, starts_at, ends_at, write_source, created_at, updated_at"#,
+               RETURNING id, title, description, starts_at, ends_at, suppress_alerts, write_source, created_at, updated_at"#,
         )
         .bind(id)
         .bind(update.title.as_ref())
@@ -234,6 +242,7 @@ impl MaintenanceStore for PgMaintenanceStore {
         .bind(update.ends_at)
         .bind(org.0)
         .bind(source.as_str())
+        .bind(update.suppress_alerts)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| anyhow::anyhow!("update maintenance: {e}"))?;
@@ -300,11 +309,37 @@ impl MaintenanceStore for PgMaintenanceStore {
                 .map_err(|e| anyhow::anyhow!("existing_target_ids: {e}"))?;
         Ok(rows.into_iter().map(|r| r.0).collect())
     }
+
+    async fn alerts_suppressed(&self, org: OrgId, target_id: Uuid) -> Result<bool> {
+        let sql = format!("SELECT {}", suppressing_window_sql("$1", "$2"));
+        let (suppressed,): (bool,) = sqlx::query_as(&sql)
+            .bind(target_id)
+            .bind(org.0)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("alerts_suppressed: {e}"))?;
+        Ok(suppressed)
+    }
+}
+
+/// `EXISTS` clause for "a window is silencing this target right now", against
+/// whichever target/org columns the caller's query already has in scope. The
+/// half-open range matches [`MaintenanceFilter::Active`].
+pub fn suppressing_window_sql(target_col: &str, org_col: &str) -> String {
+    format!(
+        "EXISTS ( \
+             SELECT 1 FROM maintenance_window_components mwc \
+             JOIN maintenance_windows mw ON mw.id = mwc.maintenance_id \
+             WHERE mwc.target_id = {target_col} AND mwc.org_id = {org_col} \
+               AND mw.suppress_alerts \
+               AND now() >= mw.starts_at AND now() < mw.ends_at \
+         )"
+    )
 }
 
 fn list_sql(filter: MaintenanceFilter) -> String {
     format!(
-        r#"SELECT id, title, description, starts_at, ends_at, write_source, created_at, updated_at
+        r#"SELECT id, title, description, starts_at, ends_at, suppress_alerts, write_source, created_at, updated_at
            FROM maintenance_windows
            WHERE org_id = $4 AND ({clause})
            ORDER BY starts_at DESC
@@ -380,6 +415,7 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
             description: new.description,
             starts_at: new.starts_at,
             ends_at: new.ends_at,
+            suppress_alerts: new.suppress_alerts,
             component_ids: new.component_ids,
             write_source: source,
             created_at: now,
@@ -440,6 +476,9 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
         if let Some(e) = update.ends_at {
             w.ends_at = e;
         }
+        if let Some(s) = update.suppress_alerts {
+            w.suppress_alerts = s;
+        }
         if let Some(c) = update.component_ids {
             w.component_ids = c;
         }
@@ -462,6 +501,16 @@ impl MaintenanceStore for InMemoryMaintenanceStore {
             .filter(|id| g.known_targets.contains(id))
             .copied()
             .collect())
+    }
+
+    async fn alerts_suppressed(&self, _org: OrgId, target_id: Uuid) -> Result<bool> {
+        let now = Utc::now();
+        Ok(self.inner.lock().windows.iter().any(|w| {
+            w.suppress_alerts
+                && w.component_ids.contains(&target_id)
+                && w.starts_at <= now
+                && w.ends_at > now
+        }))
     }
 }
 
@@ -486,6 +535,7 @@ mod tests {
             starts_at: Utc::now() + ChronoDuration::hours(1),
             ends_at: Utc::now() + ChronoDuration::hours(2),
             component_ids: vec![],
+            suppress_alerts: true,
         }
     }
 
@@ -558,6 +608,56 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(patched.component_ids, vec![new_id]);
+    }
+
+    #[tokio::test]
+    async fn update_toggles_alert_suppression() {
+        let store = InMemoryMaintenanceStore::new();
+        let mw = store
+            .create(org(), upcoming(), WriteSource::Ui)
+            .await
+            .unwrap();
+        assert!(mw.suppress_alerts);
+        let patched = store
+            .update(
+                org(),
+                mw.id,
+                MaintenanceWindowUpdate {
+                    suppress_alerts: Some(false),
+                    ..Default::default()
+                },
+                WriteSource::Ui,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!patched.suppress_alerts);
+    }
+
+    #[tokio::test]
+    async fn only_a_running_window_suppresses() {
+        let target = Uuid::now_v7();
+        let store = InMemoryMaintenanceStore::new();
+        let window = |from_hours: i64, to_hours: i64| NewMaintenanceWindow {
+            title: "w".into(),
+            description: None,
+            starts_at: Utc::now() + ChronoDuration::hours(from_hours),
+            ends_at: Utc::now() + ChronoDuration::hours(to_hours),
+            component_ids: vec![target],
+            suppress_alerts: true,
+        };
+        for (from, to, expected) in [(-2, -1, false), (1, 2, false), (-1, 1, true)] {
+            let s = InMemoryMaintenanceStore::new();
+            s.create(org(), window(from, to), WriteSource::Ui)
+                .await
+                .unwrap();
+            assert_eq!(
+                s.alerts_suppressed(org(), target).await.unwrap(),
+                expected,
+                "window {from}h..{to}h"
+            );
+        }
+        assert!(!store.alerts_suppressed(org(), target).await.unwrap());
     }
 
     #[tokio::test]

@@ -164,9 +164,23 @@ curl -X POST https://app.uptimepage.dev/api/v1/maintenance \
     "description": "Read-only for ~30 minutes.",
     "starts_at": "2026-05-14T22:00:00Z",
     "ends_at":   "2026-05-14T23:00:00Z",
-    "component_ids": ["01a7b1ce-0000-7000-8000-000000000001"]
+    "component_ids": ["01a7b1ce-0000-7000-8000-000000000001"],
+    "suppress_alerts": true
   }'
 ```
+
+`suppress_alerts` defaults to `true`: while the window runs, its components
+page nobody. Incidents still open and uptime still records, so the history
+stays honest — only the paging is held, and the incident timeline says so.
+Held is not dropped: if the window ends and the incident is still open, the
+alert that was held goes out then. An incident you declare by hand still pages
+during a window. Windows created before this field existed
+keep alerting on, since that is what they were scheduled to do.
+
+Set it to `false` for a window that is an announcement rather than planned
+downtime — a rolling upgrade where brief blips are expected but you still
+want waking if the service is genuinely down. The status page shows the
+window either way.
 
 List, edit, delete:
 
@@ -189,6 +203,7 @@ Validation rules:
 | `ends_at` | strictly after `starts_at` | `INVALID_TIME_RANGE` |
 | `ends_at - starts_at` | ≤ 30 days | `INVALID_DURATION` |
 | `component_ids` | every id must reference an existing target | `INVALID_COMPONENT_ID` |
+| `suppress_alerts` | boolean, defaults to `true` | — |
 | PATCH on a window whose `ends_at` is already past | rejected | `422 MAINTENANCE_COMPLETED` |
 
 For audit, prefer PATCHing a cancelled window's title (e.g. `"[cancelled]

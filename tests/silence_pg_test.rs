@@ -135,6 +135,16 @@ async fn unmonitored_reflects_agent_liveness_pg() {
         "a target in an active maintenance window is not flagged silent"
     );
 
+    sqlx::query("UPDATE maintenance_windows SET suppress_alerts = false WHERE id = $1")
+        .bind(mw_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        has(&store.unmonitored(STALE_AFTER).await.unwrap(), maint),
+        "an announcement-only window leaves no-data alerting live"
+    );
+
     drop(pool);
     common::drop_test_db(&name).await;
 }

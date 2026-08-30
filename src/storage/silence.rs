@@ -32,8 +32,8 @@ pub struct OpenSilence {
 #[async_trait]
 pub trait SilenceStore: Send + Sync {
     /// Enabled, assigned targets whose every region lacks a fresh, enabled agent
-    /// (`last_seen_at` within `stale_after_secs`) and that are not in an active
-    /// maintenance window. The unmonitored set.
+    /// (`last_seen_at` within `stale_after_secs`) and that no active
+    /// alert-silencing maintenance window covers. The unmonitored set.
     async fn unmonitored(&self, stale_after_secs: u64) -> Result<Vec<(OrgId, Uuid)>>;
     /// Open silences (`resolved_at IS NULL`), with whether each was notified.
     async fn list_open(&self) -> Result<Vec<OpenSilence>>;
@@ -71,7 +71,7 @@ impl PgSilenceStore {
 #[async_trait]
 impl SilenceStore for PgSilenceStore {
     async fn unmonitored(&self, stale_after_secs: u64) -> Result<Vec<(OrgId, Uuid)>> {
-        let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(
+        let sql = format!(
             r#"SELECT t.org_id, t.id
                FROM targets t
                JOIN organizations o ON o.id = t.org_id
@@ -86,16 +86,14 @@ impl SilenceStore for PgSilenceStore {
                                     AND a.last_seen_at > now() - ($1::bigint * interval '1 second')
                      WHERE tr.target_id = t.id
                  )
-                 AND NOT EXISTS (
-                     SELECT 1 FROM maintenance_window_components mwc
-                     JOIN maintenance_windows mw ON mw.id = mwc.maintenance_id
-                     WHERE mwc.target_id = t.id AND now() BETWEEN mw.starts_at AND mw.ends_at
-                 )"#,
-        )
-        .bind(stale_after_secs as i64)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| anyhow::anyhow!("silence unmonitored: {e}"))?;
+                 AND NOT {window}"#,
+            window = crate::storage::suppressing_window_sql("t.id", "t.org_id"),
+        );
+        let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(&sql)
+            .bind(stale_after_secs as i64)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| anyhow::anyhow!("silence unmonitored: {e}"))?;
         Ok(rows.into_iter().map(|(o, t)| (OrgId(o), t)).collect())
     }
 

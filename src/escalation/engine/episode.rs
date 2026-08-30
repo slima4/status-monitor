@@ -12,8 +12,8 @@ use crate::notifier::pushover::PushoverReceipts;
 use crate::storage::{Actor, DueIncident, EmergencyAck};
 
 use super::rules::{
-    DAMPED_TRANSPORT, Damper, FlapState, RELEASED_TRANSPORT, UNREACHABLE_TRANSPORT,
-    channel_targets, flap_state, open_episode_active, resolvable_channels,
+    DAMPED_TRANSPORT, Damper, FlapState, MAINTENANCE_TRANSPORT, RELEASED_TRANSPORT,
+    UNREACHABLE_TRANSPORT, channel_targets, flap_state, open_episode_active, resolvable_channels,
 };
 use super::{SWEEP_CONCURRENCY, Worker};
 
@@ -23,6 +23,7 @@ impl Worker {
     pub(super) async fn sweep(&self) {
         self.reconcile().await;
         self.release_held().await;
+        self.release_maintenance().await;
         self.escalate_due().await;
         self.renotify_due().await;
         self.retry_pending().await;
@@ -115,6 +116,39 @@ impl Worker {
         }
     }
 
+    /// Page alerts a maintenance window held, once it lets go. Unleased, with
+    /// the same multi-replica caveat as [`release_held`](Self::release_held).
+    pub(super) async fn release_maintenance(&self) {
+        let limit = self.cfg.max_pages_per_tick.max(1) as usize;
+        let due = match self.ops.due_for_maintenance_release(limit).await {
+            Ok(d) => d,
+            Err(err) => {
+                tracing::warn!(error = %err, "maintenance release scan failed");
+                return;
+            }
+        };
+        if !due.is_empty() {
+            tracing::info!(
+                count = due.len(),
+                "paging alerts held by a maintenance window that has ended"
+            );
+        }
+        let budget = self.sweep_budget();
+        let start = Instant::now();
+        let mut it = due.into_iter();
+        let mut futs = FuturesUnordered::new();
+        for d in it.by_ref().take(SWEEP_CONCURRENCY) {
+            futs.push(self.release_one_logged(d));
+        }
+        while futs.next().await.is_some() {
+            if start.elapsed() < budget
+                && let Some(d) = it.next()
+            {
+                futs.push(self.release_one_logged(d));
+            }
+        }
+    }
+
     async fn release_one_logged(&self, d: DueIncident) {
         if let Err(err) = self.release_one(&d).await {
             tracing::warn!(incident_id = %d.id, error = %err, "held alert release failed");
@@ -173,7 +207,9 @@ impl Worker {
             .ok()
             .and_then(|rows| {
                 rows.iter()
-                    .filter(|n| n.transport == DAMPED_TRANSPORT)
+                    .filter(|n| {
+                        n.transport == DAMPED_TRANSPORT || n.transport == MAINTENANCE_TRANSPORT
+                    })
                     .max_by_key(|n| n.created_at)
                     .map(|n| n.reason)
             })
@@ -263,8 +299,13 @@ impl Worker {
         let mut note = None;
         // A hand-declared incident is the operator's own signal: the count
         // already excludes them, and holding one would silence a real outage
-        // someone declared deliberately.
-        if damper == Damper::Apply && incident.origin != crate::domain::IncidentOrigin::Manual {
+        // someone declared deliberately. A maintenance window is the same
+        // bargain, so it exempts them too.
+        let operator_declared = incident.origin == crate::domain::IncidentOrigin::Manual;
+        if !operator_declared && self.alerts_suppressed(org, target.id).await {
+            return self.hold_for_maintenance(org, incident.id, reason).await;
+        }
+        if damper == Damper::Apply && !operator_declared {
             match self.flap_state(org, target).await? {
                 FlapState::Steady => {}
                 FlapState::Crossing => {
@@ -528,6 +569,55 @@ impl Worker {
                 tracing::warn!(error = %err, "clearing emergency receipt failed");
             }
         }
+    }
+
+    /// A lookup failure reads as no maintenance, so an error never silences a page.
+    pub(super) async fn alerts_suppressed(&self, org: OrgId, target_id: Uuid) -> bool {
+        matches!(
+            self.maintenance.alerts_suppressed(org, target_id).await,
+            Ok(true)
+        )
+    }
+
+    /// The marker row is what the release scan keys off, so a hold is never a
+    /// drop, and it stops the reconcile scan re-running the episode every tick.
+    async fn hold_for_maintenance(
+        &self,
+        org: OrgId,
+        incident_id: Uuid,
+        reason: NotificationReason,
+    ) -> Result<()> {
+        self.ops
+            .record_notification(crate::domain::NewIncidentNotification {
+                org,
+                incident_id,
+                escalation_level: None,
+                target_user_id: None,
+                channel_id: None,
+                transport: MAINTENANCE_TRANSPORT.to_string(),
+                reason,
+                status: crate::domain::NotificationStatus::Suppressed,
+                attempt: 0,
+                error: None,
+                sent_at: None,
+            })
+            .await?;
+        self.ops
+            .append_event(
+                org,
+                incident_id,
+                IncidentEventKind::Note,
+                Actor::System,
+                Some(
+                    "alert held: the monitor is in a maintenance window. It pages \
+                     when the window ends if this incident is still open"
+                        .to_string(),
+                ),
+            )
+            .await?;
+        metrics::counter!(crate::observability::metrics::names::ALERTS_HELD_MAINTENANCE)
+            .increment(1);
+        Ok(())
     }
 
     /// A failed lookup reads as still-watched, so an error never cancels.

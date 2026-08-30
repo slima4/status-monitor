@@ -372,6 +372,11 @@ pub trait IncidentOpsStore: Send + Sync {
 
     /// Widens the incident's next reminder gap. Reset by `reopen`.
     async fn bump_renotify_count(&self, org: OrgId, id: Uuid) -> Result<()>;
+
+    /// Open incidents holding a maintenance marker whose window has since
+    /// ended (or stopped suppressing) and that no page has reached. Oldest
+    /// hold first.
+    async fn due_for_maintenance_release(&self, limit: usize) -> Result<Vec<DueIncident>>;
     /// The flap damper's input. Counts opens, not current state — repeated
     /// fail/recover cycles are exactly what it has to see. Excludes manually
     /// declared incidents.
