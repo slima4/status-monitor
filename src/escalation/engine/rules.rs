@@ -237,7 +237,25 @@ pub(super) fn reason_is_stale(reason: NotificationReason, state: IncidentState) 
         NotificationReason::Opened
         | NotificationReason::Reopened
         | NotificationReason::Escalated => state == IncidentState::Resolved,
+        // A reminder only says "still unacknowledged", which an ack ends.
+        NotificationReason::Reminder => state != IncidentState::Triggered,
         NotificationReason::Resolved => state != IncidentState::Resolved,
         NotificationReason::NoData | NotificationReason::DataResumed => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_queued_reminder_is_dropped_once_someone_acknowledges() {
+        use IncidentState::{Acknowledged, Resolved, Triggered};
+        assert!(!reason_is_stale(NotificationReason::Reminder, Triggered));
+        assert!(reason_is_stale(NotificationReason::Reminder, Acknowledged));
+        assert!(reason_is_stale(NotificationReason::Reminder, Resolved));
+        // An opening page still lands on an acknowledged incident: the
+        // responder took it, they did not learn about it twice.
+        assert!(!reason_is_stale(NotificationReason::Opened, Acknowledged));
     }
 }

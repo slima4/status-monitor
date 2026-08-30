@@ -278,7 +278,8 @@ pub struct MonitorDetail {
     pub alert_confirmations: u32,
     /// Whether recovery is announced to the monitor's channels.
     pub notify_recovery: bool,
-    /// Seconds between reminders while an outage stays unacknowledged. 0 means
+    /// Seconds before the first reminder while an outage stays unacknowledged;
+    /// each further reminder waits twice as long, up to a day. 0 means
     /// reminders are off.
     pub renotify_interval_secs: u32,
     /// The detection quorum, in the same shape the write tools take. `null` for
@@ -577,7 +578,8 @@ pub struct CreateMonitorArgs {
     pub alert_confirmations: Option<u32>,
     /// Whether recovery is announced. Defaults to true.
     pub notify_recovery: Option<bool>,
-    /// Seconds between reminders while an outage stays unacknowledged. 0 turns
+    /// Seconds before the first reminder while an outage stays unacknowledged;
+    /// each further reminder waits twice as long, up to a day. 0 turns
     /// reminders off; otherwise at least 60. Defaults to 3600.
     pub renotify_interval_secs: Option<u32>,
     /// Detection quorum across probe regions.
@@ -1033,7 +1035,8 @@ pub struct UpdateMonitorArgs {
     pub alert_confirmations: Option<u32>,
     /// Whether recovery is announced to the monitor's channels.
     pub notify_recovery: Option<bool>,
-    /// Seconds between reminders while an outage stays unacknowledged. 0 turns
+    /// Seconds before the first reminder while an outage stays unacknowledged;
+    /// each further reminder waits twice as long, up to a day. 0 turns
     /// reminders off; otherwise at least 60.
     pub renotify_interval_secs: Option<u32>,
     /// Replaces the whole tag list. Read the monitor first: a tag left out of

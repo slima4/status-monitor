@@ -215,6 +215,7 @@ mod tests {
         for reason in [
             NotificationReason::Resolved,
             NotificationReason::DataResumed,
+            NotificationReason::Reminder,
         ] {
             assert!(
                 !json(reason, Some("<!here>")).contains("<!here>"),

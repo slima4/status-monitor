@@ -64,7 +64,7 @@ Policies are owner-managed at `/settings/escalation`: build the ladder, set per-
 
 > **One notification source.** Every down/up notification flows through the incident engine — there is no separate per-monitor alert dispatch, so a monitor can never double-page. The `escalation.enabled` switch gates only the policy machinery (ladder walk, policy UI); with it off, monitors still page their bound channels in simple mode.
 
-While an incident stays **unacknowledged**, the engine re-sends a reminder on the monitor's `renotify_interval_secs` cadence (default hourly, `0` disables); acknowledging or resolving stops both the reminders and any escalation walk. Failed deliveries retry on exponential backoff and are dead-lettered after the attempt cap. Every attempt is auditable: the incident detail page has a **Delivery** section, and `GET /api/v1/incidents/{id}/notifications` returns the same log.
+While an incident stays **unacknowledged**, the engine re-sends a reminder on the monitor's `renotify_interval_secs` cadence (default hourly, `0` disables), doubling the gap after each one up to a day; acknowledging or resolving stops both the reminders and any escalation walk. A reminder carries the `reminder` reason rather than a second `opened`, so it reads as a reminder in the delivery log and does not re-ping a Slack channel. Failed deliveries retry on exponential backoff and are dead-lettered after the attempt cap. Every attempt is auditable: the incident detail page has a **Delivery** section, and `GET /api/v1/incidents/{id}/notifications` returns the same log.
 
 ## On-call schedules
 

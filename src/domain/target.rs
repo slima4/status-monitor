@@ -63,7 +63,8 @@ pub struct Target {
     /// Whether a recovery is announced to the monitor's channels.
     #[serde(default = "default_true")]
     pub notify_recovery: bool,
-    /// Seconds between reminders while an outage stays unacknowledged. 0 = off.
+    /// Seconds before the first reminder while an outage stays unacknowledged;
+    /// each further reminder waits twice as long, up to a day. 0 = off.
     #[serde(default = "default_renotify_interval_secs")]
     pub renotify_interval_secs: u32,
     /// How multi-region health folds into incidents for this monitor.
@@ -104,7 +105,8 @@ pub struct NewTarget {
     pub alert_confirmations: u32,
     #[serde(default = "default_true")]
     pub notify_recovery: bool,
-    /// Seconds between reminders while an outage stays unacknowledged. 0 = off.
+    /// Seconds before the first reminder while an outage stays unacknowledged;
+    /// each further reminder waits twice as long, up to a day. 0 = off.
     #[serde(default = "default_renotify_interval_secs")]
     pub renotify_interval_secs: u32,
     /// Detection policy. Omit to take the derived default — quorum-majority when

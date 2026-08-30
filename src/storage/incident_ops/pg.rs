@@ -712,7 +712,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             "UPDATE incidents \
              SET state = 'triggered', ended_at = NULL, duration_secs = NULL, resolved_by = NULL, \
                  acknowledged_at = NULL, acknowledged_by = NULL, \
-                 escalation_level = 0, escalation_round = 0, \
+                 escalation_level = 0, escalation_round = 0, renotify_count = 0, \
                  updated_at = now() \
              WHERE id = $1 AND org_id = $2 AND ($3::uuid IS NULL OR true) RETURNING {OPS_COLS}"
         );
@@ -1355,8 +1355,10 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         // last success: gating on `sent_at` would leave a failing channel's
         // incident perpetually overdue and re-page it every tick. NULL (no page
         // yet) fails the `<=`, leaving an unpaged incident to reconcile/retry.
-        // Each reminder writes a fresh row, advancing the gate one interval out;
-        // within-interval delivery retries are the retry sweep's job. The
+        // Each reminder doubles the next gap, capped at a day but never shorter
+        // than the interval the monitor asked for. Each one writes a fresh row,
+        // advancing the gate past the widened gap; within-interval delivery
+        // retries are the retry sweep's job. The
         // `(org_id, incident_id, created_at)` index serves the max as an
         // index-only scan.
         let rows: Vec<Row> = sqlx::query_as(
@@ -1371,7 +1373,11 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                      SELECT max(n.created_at) FROM incident_notifications n \
                      WHERE n.incident_id = i.id AND n.org_id = i.org_id \
                        AND n.channel_id IS NOT NULL \
-                 ) <= $1 - make_interval(secs => t.renotify_interval_secs::double precision) \
+                 ) <= $1 - make_interval(secs => GREATEST( \
+                     t.renotify_interval_secs::double precision, \
+                     LEAST(t.renotify_interval_secs::double precision \
+                               * pow(2, LEAST(i.renotify_count, 20)), \
+                           86400))) \
              ORDER BY ( \
                  SELECT max(n.created_at) FROM incident_notifications n \
                  WHERE n.incident_id = i.id AND n.org_id = i.org_id \
@@ -1395,6 +1401,19 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                 escalation_round: r.escalation_round,
             })
             .collect())
+    }
+
+    async fn bump_renotify_count(&self, org: OrgId, id: Uuid) -> Result<()> {
+        sqlx::query(
+            "UPDATE incidents SET renotify_count = renotify_count + 1, updated_at = now() \
+             WHERE id = $1 AND org_id = $2 AND state = 'triggered'",
+        )
+        .bind(id)
+        .bind(org.0)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("bump_renotify_count: {e}"))?;
+        Ok(())
     }
 
     async fn due_for_flap_release(

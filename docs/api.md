@@ -394,11 +394,11 @@ target (incidents still open and show on status pages).
 - `channel_id` — id of a notification channel owned by the **same org**. A binding to an unknown or another tenant's channel is rejected.
 - `alert_confirmations` — consecutive failing checks before an incident opens (and the same number of passing checks before it closes, which damps flapping). Default `2`, must be `>= 1`.
 - `notify_recovery` — when `true` (default), the recovery is announced to the monitor's channels. When `false`, recovery is silent.
-- `renotify_interval_secs` — seconds between reminder notifications while an outage stays unacknowledged. `0` disables reminders; otherwise must be `>= 60`. Default `3600`. Acknowledging or resolving the incident stops the reminders.
+- `renotify_interval_secs` — seconds before the first reminder while an outage stays unacknowledged. Each further reminder doubles the gap, capped at a day, so a long outage nobody answers decays to a daily nudge. An interval already longer than a day keeps its own cadence. `0` disables reminders; otherwise must be `>= 60`. Default `3600`. Acknowledging or resolving the incident stops the reminders.
 - `region_policy` — how many probe regions must agree the target is down before an incident opens: `"any"`, `"majority"` (default), `"all"`, or `{ "count": N }`.
 
 Notifications are driven by the incident engine: one notification per
-incident open (then reminders per `renotify_interval_secs`), one on recovery.
+incident open (then backing-off reminders per `renotify_interval_secs`), one on recovery.
 Failed deliveries retry on exponential backoff and dead-letter after the
 attempt cap; per-incident delivery state is visible at
 `GET /api/v1/incidents/{id}/notifications`.
@@ -517,7 +517,7 @@ unsigned.
 | `url` | string \| null | deep link to the incident detail page, when a base URL is configured |
 | `note` | string | present only when there is something to say about the alert stream itself, such as a flapping monitor whose repeat alerts are being held |
 
-`reason` is one of: `opened`, `escalated`, `reopened`, `resolved`, `nodata` (the monitor's probes went silent, no incident, orthogonal to up/down), `dataresumed` (probing recovered after a `nodata` notice).
+`reason` is one of: `opened`, `escalated`, `reopened`, `resolved`, `reminder` (the incident is still open and unacknowledged), `nodata` (the monitor's probes went silent, no incident, orthogonal to up/down), `dataresumed` (probing recovered after a `nodata` notice).
 
 **WhatsApp templates.** Create a one-parameter utility template (body
 `{{1}}`) in the WhatsApp Business Manager and set `template_name` (plus

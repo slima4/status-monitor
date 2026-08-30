@@ -79,7 +79,7 @@ https://shop.example.com/health
 checked every 60s
 trial run: passed, HTTP 200 in 143ms
 alerts after 2 failing checks
-reminds every 3600s while unacknowledged
+first reminder after 3600s, then doubling while unacknowledged
 notification channels: Ops Slack
 ```
 

@@ -56,6 +56,7 @@ impl IncidentAlert {
             NotificationReason::Resolved => "INCIDENT RESOLVED".into(),
             NotificationReason::NoData => "MONITORING INTERRUPTED".into(),
             NotificationReason::DataResumed => "MONITORING RESUMED".into(),
+            NotificationReason::Reminder => format!("{sev} INCIDENT STILL OPEN"),
         }
     }
 
@@ -91,6 +92,7 @@ impl IncidentAlert {
             NotificationReason::Opened
                 | NotificationReason::Escalated
                 | NotificationReason::Reopened
+                | NotificationReason::Reminder
         )
     }
 

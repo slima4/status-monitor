@@ -762,7 +762,7 @@ fn a_creation_prompt_states_every_setting_it_would_apply() {
     new.group_name = None;
     new.alerts = TargetAlerts::default();
     let lines = create_prompt_lines(&new, None, None).join("\n");
-    assert!(lines.contains("reminds every 3600s"));
+    assert!(lines.contains("first reminder after 3600s"));
     assert!(!lines.contains("tags:"));
     // Silence is the one state worth stating outright.
     assert!(lines.contains("alerts nobody unless a channel's tag rule covers its tags"));

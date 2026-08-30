@@ -709,6 +709,88 @@ async fn renotify_re_pages_an_open_unacked_incident_then_stops_once_acked() {
 }
 
 #[tokio::test]
+async fn a_reminder_is_logged_as_a_reminder_not_a_fresh_open() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+
+    let eng = engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        targets,
+        channels,
+    );
+    eng.page(org(), id, NotificationReason::Opened)
+        .await
+        .unwrap();
+    eng.renotify_one(&DueIncident {
+        id,
+        org: org(),
+        target_id: Some(tid),
+        escalation_policy_id: None,
+        escalation_level: 0,
+        escalation_round: 0,
+    })
+    .await
+    .unwrap();
+
+    let rows = ops.notifications_for(org(), id).await.unwrap();
+    let reasons: Vec<_> = rows.iter().map(|r| r.reason).collect();
+    assert_eq!(
+        reasons,
+        vec![NotificationReason::Opened, NotificationReason::Reminder]
+    );
+    assert_eq!(ops.renotify_count(id), 1);
+}
+
+#[tokio::test]
+async fn a_reminder_that_reaches_nobody_does_not_widen_the_backoff() {
+    let channels = Arc::new(InMemoryNotificationChannelStore::new());
+    let cid = failing_channel(&channels).await;
+    let target = target_with_channel(cid);
+    let tid = target.id;
+    let ops = Arc::new(InMemoryIncidentOpsStore::new());
+    let id = seed_incident(&ops, Some(tid));
+    let targets = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
+    let due = DueIncident {
+        id,
+        org: org(),
+        target_id: Some(tid),
+        escalation_policy_id: None,
+        escalation_level: 0,
+        escalation_round: 0,
+    };
+
+    engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        targets.clone(),
+        channels,
+    )
+    .page(org(), id, NotificationReason::Opened)
+    .await
+    .unwrap();
+
+    // The channel is gone by the time the reminder is due, so it pages nothing.
+    engine(
+        ops.clone(),
+        Arc::new(InMemoryEscalationPolicyStore::new()),
+        targets,
+        Arc::new(InMemoryNotificationChannelStore::new()),
+    )
+    .renotify_one(&due)
+    .await
+    .unwrap();
+
+    assert_eq!(ops.notifications_for(org(), id).await.unwrap().len(), 1);
+    assert_eq!(ops.renotify_count(id), 0);
+}
+
+#[tokio::test]
 async fn schedule_target_pages_the_on_call_responders_contact_channel() {
     use crate::domain::{
         NewOnCallLayer, NewOnCallParticipant, NewOnCallSchedule, RotationType, UserId,

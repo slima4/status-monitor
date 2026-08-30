@@ -362,12 +362,16 @@ pub trait IncidentOpsStore: Send + Sync {
         limit: usize,
     ) -> Result<Vec<DueIncident>>;
     /// Cross-org open, unacknowledged incidents whose monitor wants an outage
-    /// reminder (`renotify_interval_secs > 0`) and whose last successful page is
-    /// older than that interval, and which are not mid-escalation
+    /// reminder (`renotify_interval_secs > 0`) and whose last page attempt is
+    /// older than that interval doubled once per reminder already sent, and
+    /// which are not mid-escalation
     /// (`next_escalation_at IS NULL` — an active ladder drives its own cadence).
     /// The engine re-pages the channels already notified this episode. Oldest
     /// last-page first.
     async fn due_for_renotify(&self, now: DateTime<Utc>, limit: usize) -> Result<Vec<DueIncident>>;
+
+    /// Widens the incident's next reminder gap. Reset by `reopen`.
+    async fn bump_renotify_count(&self, org: OrgId, id: Uuid) -> Result<()>;
     /// The flap damper's input. Counts opens, not current state — repeated
     /// fail/recover cycles are exactly what it has to see. Excludes manually
     /// declared incidents.

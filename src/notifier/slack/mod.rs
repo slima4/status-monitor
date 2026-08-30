@@ -76,7 +76,8 @@ impl SlackNotifier {
         match n.reason {
             NotificationReason::Opened
             | NotificationReason::Escalated
-            | NotificationReason::Reopened => format!(
+            | NotificationReason::Reopened
+            | NotificationReason::Reminder => format!(
                 "*{label}* — {sev} incident {state}{err}{regions}{link}",
                 sev = n.severity.as_db_str(),
                 state = n.open_state(),
@@ -170,6 +171,7 @@ mod tests {
             NotificationReason::NoData,
             NotificationReason::Resolved,
             NotificationReason::DataResumed,
+            NotificationReason::Reminder,
         ] {
             let (text, blocks) = SlackNotifier::compose(Some("<!here>"), &notice(reason));
             let card = serde_json::to_string(&blocks).unwrap();

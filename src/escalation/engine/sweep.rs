@@ -156,10 +156,10 @@ impl Worker {
     /// Re-page the channels of open, unacknowledged incidents whose monitor's
     /// reminder interval has elapsed since the last page. Bounded-concurrent +
     /// budget-capped like the escalation sweep. Unlike `escalate_due` this takes
-    /// no claim-and-lease: a reminder is idempotent in intent, so a duplicate
-    /// across two engine instances is a harmless extra page (not a skipped or
-    /// double-advanced rung), and the single-tick single-flight guard already
-    /// prevents an instance from reminding the same incident twice per interval.
+    /// no claim-and-lease: the single-tick single-flight guard already prevents
+    /// an instance from reminding the same incident twice per interval, and a
+    /// duplicate across two engine instances costs one extra page plus a
+    /// double-widened backoff, never a skipped rung.
     pub(super) async fn renotify_due(&self) {
         let limit = self.cfg.max_pages_per_tick.max(1) as usize;
         let due = match self.ops.due_for_renotify(Utc::now(), limit).await {
@@ -194,7 +194,7 @@ impl Worker {
     /// Re-page the channels already notified this episode for a still-open,
     /// unacknowledged incident. Re-reads state under the per-incident lock so an
     /// ack/resolve landing after the scan silences the reminder; the fresh page
-    /// advances the last-paged time, so the next reminder is one interval out.
+    /// advances the last-paged time and widens the gap before the next one.
     pub(super) async fn renotify_one(&self, d: &DueIncident) -> Result<()> {
         let _guard = self.page_lock(d.id).lock().await;
         let Some(incident) = self.ops.get(d.org, d.id).await? else {
@@ -216,18 +216,21 @@ impl Worker {
         if channels.is_empty() {
             return Ok(());
         }
-        let notice = self.notice(&incident, &target, NotificationReason::Opened, None);
+        let notice = self.notice(&incident, &target, NotificationReason::Reminder, None);
         let paged = self
             .page_channels(
                 d.org,
                 d.id,
                 &notice,
-                NotificationReason::Opened,
+                NotificationReason::Reminder,
                 incident.escalation_level,
                 &channel_targets(channels),
             )
             .await?;
-        self.log_paged(d.org, d.id, NotificationReason::Opened, paged.delivered)
+        if paged.recorded > 0 {
+            self.ops.bump_renotify_count(d.org, d.id).await?;
+        }
+        self.log_paged(d.org, d.id, NotificationReason::Reminder, paged.delivered)
             .await
     }
 

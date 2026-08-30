@@ -503,6 +503,8 @@ pub enum NotificationReason {
     NoData,
     /// Monitoring resumed after a `NoData` notice.
     DataResumed,
+    /// Periodic nudge that an already-paged incident is still unacknowledged.
+    Reminder,
 }
 
 impl NotificationReason {
@@ -513,6 +515,7 @@ impl NotificationReason {
         Self::Reopened,
         Self::NoData,
         Self::DataResumed,
+        Self::Reminder,
     ];
     pub fn as_db_str(self) -> &'static str {
         match self {
@@ -522,6 +525,7 @@ impl NotificationReason {
             Self::Reopened => "reopened",
             Self::NoData => "no_data",
             Self::DataResumed => "data_resumed",
+            Self::Reminder => "reminder",
         }
     }
     pub fn from_db_str(s: &str) -> Self {
@@ -531,6 +535,7 @@ impl NotificationReason {
             "reopened" => Self::Reopened,
             "no_data" => Self::NoData,
             "data_resumed" => Self::DataResumed,
+            "reminder" => Self::Reminder,
             _ => Self::Opened,
         }
     }

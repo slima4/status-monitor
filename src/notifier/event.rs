@@ -60,6 +60,7 @@ impl IncidentNotice {
     pub fn open_state(&self) -> &'static str {
         match self.reason {
             NotificationReason::Reopened => "REOPENED",
+            NotificationReason::Reminder => "STILL OPEN",
             _ => "OPEN",
         }
     }
@@ -109,7 +110,8 @@ impl IncidentNotice {
         match self.reason {
             NotificationReason::Opened
             | NotificationReason::Escalated
-            | NotificationReason::Reopened => format!(
+            | NotificationReason::Reopened
+            | NotificationReason::Reminder => format!(
                 "{label} — {sev} incident {state}{err}",
                 label = self.label(),
                 sev = self.severity.as_db_str(),
@@ -146,6 +148,7 @@ impl IncidentNotice {
             NotificationReason::Opened
                 | NotificationReason::Escalated
                 | NotificationReason::Reopened
+                | NotificationReason::Reminder
         ) && let Some(regions) = self.region_summary(|r| r.to_string(), " · ")
         {
             out.push('\n');

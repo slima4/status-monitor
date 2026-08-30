@@ -54,7 +54,7 @@ pub(super) fn create_prompt_lines(
     }
     lines.push(match new.renotify_interval_secs {
         0 => "no reminders while an outage is open".to_string(),
-        secs => format!("reminds every {secs}s while unacknowledged"),
+        secs => format!("first reminder after {secs}s, then doubling while unacknowledged"),
     });
     if let Some(policy) = new.region_policy {
         lines.push(format!(

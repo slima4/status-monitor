@@ -30,6 +30,7 @@ struct MemState {
     incidents: Vec<OpsIncident>,
     events: Vec<IncidentEvent>,
     notifications: Vec<(OrgId, IncidentNotification)>,
+    renotify_counts: std::collections::HashMap<Uuid, u32>,
 }
 
 impl InMemoryIncidentOpsStore {
@@ -48,6 +49,17 @@ impl InMemoryIncidentOpsStore {
         if let Some(i) = self.inner.lock().incidents.iter_mut().find(|i| i.id == id) {
             f(i);
         }
+    }
+
+    /// Test helper: reminders counted against an incident. The backoff itself
+    /// is SQL, so only the counting is observable here.
+    pub fn renotify_count(&self, id: Uuid) -> u32 {
+        self.inner
+            .lock()
+            .renotify_counts
+            .get(&id)
+            .copied()
+            .unwrap_or(0)
     }
 
     /// Test helper: backdate every held row, simulating the flap hold elapsing.
@@ -786,6 +798,11 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         _limit: usize,
     ) -> Result<Vec<DueIncident>> {
         Ok(Vec::new())
+    }
+
+    async fn bump_renotify_count(&self, _org: OrgId, id: Uuid) -> Result<()> {
+        *self.inner.lock().renotify_counts.entry(id).or_default() += 1;
+        Ok(())
     }
 
     async fn due_for_flap_release(

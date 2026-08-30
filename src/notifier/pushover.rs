@@ -312,5 +312,10 @@ mod tests {
         let resolved = msg(&notice(NotificationReason::Resolved, IncidentUrgency::High));
         assert_eq!(resolved["priority"], -1);
         assert!(resolved.get("retry").is_none());
+        // A reminder still rings until acknowledged; the backoff is what thins
+        // them out, not a quieter priority.
+        let reminder = msg(&notice(NotificationReason::Reminder, IncidentUrgency::High));
+        assert_eq!(reminder["priority"], 2);
+        assert_eq!(reminder["retry"], EMERGENCY_RETRY_SECS);
     }
 }

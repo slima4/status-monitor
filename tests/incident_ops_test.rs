@@ -860,6 +860,109 @@ async fn due_for_reconcile_finds_only_unpaged_triggered_pg() {
 
 #[tokio::test]
 #[ignore]
+async fn renotify_backoff_widens_with_each_reminder_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "increno").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    let channel: Uuid = sqlx::query_scalar(
+        "INSERT INTO notification_channels (org_id, name, kind, config) \
+         VALUES ($1, 'ops', 'webhook', '{}'::jsonb) RETURNING id",
+    )
+    .bind(org.0)
+    .fetch_one(&pool)
+    .await
+    .expect("insert channel");
+    store
+        .record_notification(NewIncidentNotification {
+            org,
+            incident_id: id,
+            escalation_level: Some(0),
+            target_user_id: None,
+            channel_id: Some(channel),
+            transport: "webhook".into(),
+            reason: NotificationReason::Opened,
+            status: NotificationStatus::Sent,
+            attempt: 1,
+            error: None,
+            sent_at: Some(chrono::Utc::now()),
+        })
+        .await
+        .expect("record");
+
+    async fn paged_ago(pool: &PgPool, id: Uuid, secs: i64) {
+        sqlx::query(
+            "UPDATE incident_notifications \
+             SET created_at = now() - make_interval(secs => $2) WHERE incident_id = $1",
+        )
+        .bind(id)
+        .bind(secs as f64)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+    // Cross-org scan ordered oldest-page-first, so take the store's whole cap
+    // rather than letting leftover incidents crowd this one out.
+    async fn is_due(store: &PgIncidentOpsStore, id: Uuid) -> bool {
+        store
+            .due_for_renotify(chrono::Utc::now(), 1000)
+            .await
+            .unwrap()
+            .iter()
+            .any(|d| d.id == id)
+    }
+
+    // The monitor keeps the schema default of one hour.
+    paged_ago(&pool, id, 3_700).await;
+    assert!(
+        is_due(&store, id).await,
+        "first reminder is due at the monitor's interval"
+    );
+
+    // Past reminder 5 the doubling hits the day cap and stays there.
+    for reminders in 1..=6u32 {
+        store.bump_renotify_count(org, id).await.unwrap();
+        let gap = (3600 * 2_i64.pow(reminders)).min(86_400);
+        paged_ago(&pool, id, gap - 600).await;
+        assert!(
+            !is_due(&store, id).await,
+            "after {reminders} reminder(s) the gap has widened to {gap}s"
+        );
+        paged_ago(&pool, id, gap + 600).await;
+        assert!(
+            is_due(&store, id).await,
+            "and it comes due once that gap elapses"
+        );
+    }
+
+    store.resolve(org, id, Actor::System, None).await.unwrap();
+    store
+        .reopen(org, id, Actor::User(user), None)
+        .await
+        .unwrap();
+    paged_ago(&pool, id, 3_700).await;
+    assert!(
+        is_due(&store, id).await,
+        "a reopened incident pages at the base interval again"
+    );
+
+    // The day cap raises a short interval; it must never lower a long one.
+    sqlx::query("UPDATE targets SET renotify_interval_secs = 604800 WHERE id = (SELECT target_id FROM incidents WHERE id = $1)")
+        .bind(id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    paged_ago(&pool, id, 90_000).await;
+    assert!(
+        !is_due(&store, id).await,
+        "a weekly reminder interval is not pulled forward to daily"
+    );
+}
+
+#[tokio::test]
+#[ignore]
 async fn assign_rejects_non_member_assignee_pg() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;

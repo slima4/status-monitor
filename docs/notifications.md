@@ -80,14 +80,14 @@ Alongside the bindings sit the controls that decide when they fire:
 |---|---|---|
 | Consecutive failures | 2 | Failing checks before an incident opens. The same count of passing checks closes it, which is what damps flapping. |
 | Region agreement | majority | How many probe regions must agree before it counts as down. See [Probe regions](hosted/regions.md). |
-| Remind while down | every hour | How often to re-notify while an outage stays unacknowledged. Acknowledging or resolving stops the reminders; set it to off for none. |
+| Remind while down | every hour | How long before the first reminder while an outage stays unacknowledged; each further reminder waits twice as long, up to a day. Acknowledging or resolving stops the reminders; set it to off for none. |
 | Announce recovery | on | Whether the "back up" message is sent. |
 
-The reminder interval is the setting most worth tuning. An hour is right for a customer-facing API, and far too often for a nightly batch endpoint you already know is flaky.
+The reminder interval is the setting most worth tuning. An hour is right for a customer-facing API, and far too often for a nightly batch endpoint you already know is flaky. Reminders back off rather than repeating on a fixed cadence, so an incident nobody answers ends up nudging once a day rather than paging forever, and they do not re-ping a Slack channel.
 
 ## What gets delivered
 
-One notification when an incident opens, reminders on your interval while it stays unacknowledged, and one on recovery if announcements are on. Alerts are driven by the incident engine, not by individual check failures, so a monitor failing sixty times in an hour produces one incident and one alert, not sixty.
+One notification when an incident opens, backing-off reminders while it stays unacknowledged, and one on recovery if announcements are on. Alerts are driven by the incident engine, not by individual check failures, so a monitor failing sixty times in an hour produces one incident and one alert, not sixty.
 
 Failed deliveries retry with exponential backoff and are dead-lettered after the attempt cap. Per-incident delivery state is visible through the API if you need to prove whether something was sent.
 

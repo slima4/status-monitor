@@ -110,7 +110,8 @@ impl CardTemplate {
         match reason {
             NotificationReason::Opened
             | NotificationReason::Reopened
-            | NotificationReason::Escalated => Self::Incident,
+            | NotificationReason::Escalated
+            | NotificationReason::Reminder => Self::Incident,
             NotificationReason::Resolved => Self::Resolved,
             NotificationReason::NoData => Self::NoData,
             NotificationReason::DataResumed => Self::DataResumed,

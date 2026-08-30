@@ -115,6 +115,19 @@ impl PagerDutyNotifier {
         }
     }
 
+    /// Every open-side reason shares one `dedup_key`, so PagerDuty folds a
+    /// reminder into the incident it already has instead of paging again.
+    fn closes_the_incident(reason: NotificationReason) -> bool {
+        match reason {
+            NotificationReason::Resolved | NotificationReason::DataResumed => true,
+            NotificationReason::Opened
+            | NotificationReason::Reopened
+            | NotificationReason::Escalated
+            | NotificationReason::Reminder
+            | NotificationReason::NoData => false,
+        }
+    }
+
     async fn send(&self, event: &Event<'_>) -> Result<()> {
         let url: Url = ENQUEUE_URL.parse().expect("static enqueue URL parses");
         post_json(&self.client, &url, event).await
@@ -142,23 +155,16 @@ impl Notifier for PagerDutyNotifier {
             return self.send(&Self::resolve(&self.routing_key, dedup)).await;
         }
         let dedup = notice.incident_id.to_string();
-        match notice.reason {
-            NotificationReason::Opened
-            | NotificationReason::Reopened
-            | NotificationReason::Escalated
-            | NotificationReason::NoData => {
-                self.send(&Self::trigger(
-                    &self.routing_key,
-                    notice,
-                    dedup,
-                    Self::severity(notice),
-                ))
-                .await
-            }
-            NotificationReason::Resolved | NotificationReason::DataResumed => {
-                self.send(&Self::resolve(&self.routing_key, dedup)).await
-            }
+        if Self::closes_the_incident(notice.reason) {
+            return self.send(&Self::resolve(&self.routing_key, dedup)).await;
         }
+        self.send(&Self::trigger(
+            &self.routing_key,
+            notice,
+            dedup,
+            Self::severity(notice),
+        ))
+        .await
     }
 }
 
@@ -231,6 +237,28 @@ mod tests {
                 "dedup_key": "d"
             })
         );
+    }
+
+    #[test]
+    fn only_a_recovery_closes_the_pagerduty_incident() {
+        for reason in [
+            NotificationReason::Resolved,
+            NotificationReason::DataResumed,
+        ] {
+            assert!(PagerDutyNotifier::closes_the_incident(reason), "{reason:?}");
+        }
+        for reason in [
+            NotificationReason::Opened,
+            NotificationReason::Reopened,
+            NotificationReason::Escalated,
+            NotificationReason::Reminder,
+            NotificationReason::NoData,
+        ] {
+            assert!(
+                !PagerDutyNotifier::closes_the_incident(reason),
+                "{reason:?}"
+            );
+        }
     }
 
     #[test]

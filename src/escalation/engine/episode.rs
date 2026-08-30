@@ -229,8 +229,9 @@ impl Worker {
                     .await
             }
             NotificationReason::Resolved => self.notify_resolution(org, &incident, &target).await,
-            // Escalation pages originate from the sweep, never an inbound signal.
-            NotificationReason::Escalated => Ok(()),
+            // Escalation and reminder pages originate from the sweep, never an
+            // inbound signal.
+            NotificationReason::Escalated | NotificationReason::Reminder => Ok(()),
             // Silence has no incident row; the silence sweep delivers it.
             NotificationReason::NoData | NotificationReason::DataResumed => Ok(()),
         }
