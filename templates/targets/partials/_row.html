@@ -1,4 +1,6 @@
-{# 9 cells; align with `.monitors-table grid-template-columns`. #}
+{# 9 cells; align with `.monitors-table grid-template-columns`. Every cell
+   wraps its content in an element — the paused dim reaches grandchildren, so
+   a bare value would stay full-strength while its neighbours fade. #}
 <div class="monitors-row"
      role="row"
      data-row-id="{{ row.id }}"
@@ -39,7 +41,7 @@
     <span class="monitors-avatar" title="{{ owner.label }}" style="background: {{ owner.color }}">{{ owner.initials }}</span>
     {% endif %}
   </span>
-  <span>
+  <span class="monitors-row__actions">
     <div class="monitors-menu" data-menu-root>
       <button type="button"
               class="monitors-menu__btn"

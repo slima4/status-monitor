@@ -2726,7 +2726,6 @@
     /* `display: flex` above outranks the UA `[popover]:not(:popover-open)`
        rule, so an empty rail hides by the same flag the centre layer uses. */
     .sm-toast-rail:not([data-open]) { display: none; }
-    /* Toast width lives with the rail, not in the script that builds one. */
     .sm-toast-rail > * {
         pointer-events: auto;
         cursor: pointer;
@@ -4755,7 +4754,9 @@
     /* Dim the cells' contents, never the cells: an opacity box would wash out
        the row's own hairline and status tint, and drag the actions popover
        translucent with it. */
-    .monitors-row[data-paused="true"] > *:not(:last-child) > *,
+    /* Named, not positional: a tenth column would make the actions cell stop
+       matching `:last-child` and drag the whole row menu back under the dim. */
+    .monitors-row[data-paused="true"] > *:not(.monitors-row__actions) > *,
     .monitors-row[data-paused="true"] .monitors-menu__btn { opacity: var(--sm-monitors-row-paused-opacity); }
     .monitors-row[data-paused="true"] .monitors-menu__btn:hover,
     .monitors-row[data-paused="true"] .monitors-menu__btn:focus-visible,
