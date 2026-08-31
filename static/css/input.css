@@ -2701,9 +2701,8 @@
         color: var(--theme-text-muted);
     }
 
-    /* Bottom-right notice rail. Rides the top layer like the centre layer, so
-       it carries the same UA popover-box reset; `top`/`left` are released
-       because the UA `inset: 0` would fight the bottom-right anchor. */
+    /* Top-layer popover: UA box reset, and `top`/`left` released because the
+       UA `inset: 0` fights the bottom-right anchor. */
     .sm-toast-rail {
         position: fixed;
         top: auto;
@@ -2723,8 +2722,7 @@
         background: transparent;
         overflow: visible;
     }
-    /* `display: flex` above outranks the UA `[popover]:not(:popover-open)`
-       rule, so an empty rail hides by the same flag the centre layer uses. */
+    /* `display: flex` outranks the UA `[popover]:not(:popover-open)` rule. */
     .sm-toast-rail:not([data-open]) { display: none; }
     .sm-toast-rail > * {
         pointer-events: auto;
@@ -2744,11 +2742,8 @@
         .sm-toast-rail > * { transition: opacity 140ms ease-out; translate: none; }
     }
 
-    /* Screen-centre action confirmation. Operator forms are long enough that
-       their own banners sit off-screen by the time a control is reached, so
-       the acknowledgement has to land where the eye already is. An oversized
-       state glyph slides in cropped by the left edge and the message rides
-       over it. Holds, fades — never blocks the pointer. */
+    /* Screen-centre action notice: save controls sit below the fold on long
+       forms, so the acknowledgement lands where the eye already is. */
     .sm-flash-layer {
         position: fixed;
         inset: 0;
@@ -2756,9 +2751,7 @@
         display: grid;
         place-items: center;
         pointer-events: none;
-        /* Reset the UA popover box (fit-content size, auto margins, its own
-           border and background) — the layer is a transparent full-screen
-           grid, and the notice inside it carries every visible edge. */
+        /* UA popover box reset; the notice inside carries every edge. */
         width: auto;
         height: auto;
         margin: 0;
@@ -2767,9 +2760,7 @@
         background: transparent;
         overflow: visible;
     }
-    /* `display: grid` above outranks the UA `[popover]:not(:popover-open)`
-       rule, so the layer has to be hidden explicitly — and by a flag JS sets,
-       which also covers browsers with no popover support. */
+    /* `display: grid` outranks the UA `[popover]:not(:popover-open)` rule. */
     .sm-flash-layer:not([data-open]) { display: none; }
     .sm-flash {
         --flash-accent: var(--theme-state-ok-fg-onsoft);
@@ -2777,8 +2768,7 @@
         --flash-mark-size: clamp(7rem, 26vw, 11rem);
         --flash-mark-left: 1.2rem;
         position: relative;
-        /* Crops the glyph against the card edge — the mark reads as bigger
-           than the notice holding it. */
+        /* Crops the glyph, so the mark reads bigger than the notice. */
         overflow: hidden;
         min-width: min(30rem, calc(100vw - 2rem));
         max-width: min(38rem, calc(100vw - 2rem));
@@ -2809,8 +2799,7 @@
         from { opacity: 0;                          transform: translateX(-2rem); }
         to   { opacity: var(--flash-mark-opacity);  transform: translateX(0); }
     }
-    /* Right-aligned against the mark, so the two never fight for the same
-       optical centre. */
+    /* Right-aligned, so mark and text do not share an optical centre. */
     .sm-flash__body {
         position: relative;
         display: grid;
@@ -4710,7 +4699,7 @@
             3.5rem
             2.75rem;
     }
-    .monitors-row > *:last-child,
+    .monitors-row > .monitors-row__actions,
     .monitors-head > span:last-child {
         padding-right: 1rem;
         justify-content: flex-end;
@@ -4754,8 +4743,8 @@
     /* Dim the cells' contents, never the cells: an opacity box would wash out
        the row's own hairline and status tint, and drag the actions popover
        translucent with it. */
-    /* Named, not positional: a tenth column would make the actions cell stop
-       matching `:last-child` and drag the whole row menu back under the dim. */
+    /* Named, not positional: a tenth column would stop the actions cell
+       matching `:last-child` and drag the row menu back under the dim. */
     .monitors-row[data-paused="true"] > *:not(.monitors-row__actions) > *,
     .monitors-row[data-paused="true"] .monitors-menu__btn { opacity: var(--sm-monitors-row-paused-opacity); }
     .monitors-row[data-paused="true"] .monitors-menu__btn:hover,
