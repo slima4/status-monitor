@@ -433,12 +433,30 @@ docker compose up -d
 
 Changing a network's own settings (subnet, `enable_ipv6`) is the one case
 `up -d <service>` cannot handle: Compose stops that service, then fails to
-remove the network because the other containers still hold endpoints on it,
-and leaves the service stopped. Apply those with a full-stack `docker compose
---profile agent --profile metrics up -d` before any per-service deploy runs —
-every profile in use has to be named, or its containers keep endpoints on the
-old network and the recreate fails the same way. Drop a network you removed
-from the file with `docker network rm <name>`: `up` never prunes it.
+remove the network because other containers still hold endpoints on it, and
+leaves the service stopped. Apply those in a maintenance window, before any
+per-service deploy runs:
+
+```bash
+# 1. Every endpoint on the network must be gone before Compose can recreate it.
+#    Profiles are opt-in, so name each one in use, and detach containers from
+#    other compose projects (Caddy reaches umami by name over this network).
+docker network disconnect uptimepage_default umami
+
+# 2. --force-recreate is required: a container that is merely restarted onto a
+#    recreated network comes back with no published ports and the host's
+#    resolver instead of Docker's, so the edge answers nothing.
+docker compose --profile agent --profile metrics up -d --no-build --force-recreate
+
+# 3. Reattach the foreign container, and drop a network removed from the file —
+#    `up` never prunes it.
+docker network connect uptimepage_default umami
+docker network rm <name>
+```
+
+A container deleted while an endpoint is live leaves that endpoint dangling and
+the recreate keeps failing; clear it with `docker network disconnect -f
+<network> <container-id from the error>`.
 
 For Caddy config changes (Caddyfile only, no env changes), use a hot reload:
 
