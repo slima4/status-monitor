@@ -87,7 +87,19 @@ where
     }
 }
 
+/// The client IP when it is worth showing a reader: behind a declared proxy an
+/// internal result means the chain lost the client, with none declared it is the client.
+pub fn reportable(ip: IpAddr, trusted: &[IpNet]) -> Option<IpAddr> {
+    let ip = ip.to_canonical();
+    if trusted.is_empty() {
+        return (!ip.is_unspecified()).then_some(ip);
+    }
+    (!crate::security::ssrf::is_blocked_ip(ip)).then_some(ip)
+}
+
 fn is_trusted(ip: IpAddr, trusted: &[IpNet]) -> bool {
+    // A dual-stack listener reports v4 peers in `::ffff:` form, which no v4 CIDR contains.
+    let ip = ip.to_canonical();
     trusted.iter().any(|n| n.contains(&ip))
 }
 
@@ -96,6 +108,7 @@ fn client_from_xff(headers: &HeaderMap, trusted: &[IpNet]) -> Option<IpAddr> {
     let hops: Vec<IpAddr> = raw
         .split(',')
         .filter_map(|h| h.trim().parse::<IpAddr>().ok())
+        .map(|ip| ip.to_canonical())
         .collect();
     // Walk right-to-left, skipping trusted proxies. First untrusted is
     // the originating client. If every hop is trusted (full chain of
@@ -177,6 +190,51 @@ mod tests {
         let h = headers_xff("172.17.0.10, 172.17.0.5");
         let trusted = [cidr("172.17.0.0/16")];
         assert_eq!(extract(&h, ip("172.17.0.5"), &trusted), ip("172.17.0.10"));
+    }
+
+    #[test]
+    fn reportable_keeps_public_addresses() {
+        let trusted = [cidr("172.16.0.0/12")];
+        assert_eq!(
+            reportable(ip("115.186.231.19"), &trusted),
+            Some(ip("115.186.231.19"))
+        );
+        assert_eq!(
+            reportable(ip("2a01:4f9::1"), &trusted),
+            Some(ip("2a01:4f9::1"))
+        );
+    }
+
+    #[test]
+    fn reportable_drops_internal_addresses_behind_a_proxy() {
+        let trusted = [cidr("172.16.0.0/12")];
+        assert_eq!(reportable(ip("172.18.0.1"), &trusted), None);
+        assert_eq!(reportable(ip("::ffff:172.18.0.1"), &trusted), None);
+        assert_eq!(reportable(ip("10.0.0.4"), &trusted), None);
+        assert_eq!(reportable(ip("169.254.1.1"), &trusted), None);
+        assert_eq!(reportable(ip("127.0.0.1"), &trusted), None);
+        assert_eq!(reportable(ip("fd4f:420f:fd92::1"), &trusted), None);
+        assert_eq!(reportable(ip("fe80::1"), &trusted), None);
+        assert_eq!(reportable(ip("::"), &trusted), None);
+    }
+
+    #[test]
+    fn reportable_keeps_a_lan_client_when_no_proxy_is_declared() {
+        assert_eq!(
+            reportable(ip("192.168.1.50"), &[]),
+            Some(ip("192.168.1.50"))
+        );
+        assert_eq!(reportable(ip("0.0.0.0"), &[]), None);
+    }
+
+    #[test]
+    fn v4_mapped_peer_is_trusted_against_a_v4_cidr() {
+        let h = headers_xff("1.2.3.4");
+        let trusted = [cidr("172.17.0.0/16")];
+        assert_eq!(
+            extract(&h, ip("::ffff:172.17.0.5"), &trusted),
+            ip("1.2.3.4")
+        );
     }
 
     #[test]

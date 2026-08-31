@@ -89,6 +89,14 @@ pub async fn request(
     let pool = state.require_db()?;
     let salt = state.cfg.auth.fingerprint_salt.as_str();
     let ip_hash = fingerprint::hash_fingerprint(salt, &client_ip.to_string());
+    // Behind a declared proxy an internal address means the chain lost the client.
+    let ip_hint = crate::web::client_ip::reportable(client_ip, &state.cfg.security.trusted_proxies);
+    if ip_hint.is_none() {
+        tracing::warn!(
+            %client_ip,
+            "magic_link: client ip is internal, check security.trusted_proxies and IPv6 ingress"
+        );
+    }
 
     if let Some(email) = email_norm::normalize(&body.email) {
         let cfg = &state.cfg.auth.magic_link;
@@ -143,7 +151,7 @@ pub async fn request(
                 url: verify_url,
                 code: created.code.clone(),
                 expires_in_minutes: cfg.expiry_minutes,
-                ip_hint: Some(client_ip.to_string()),
+                ip_hint: ip_hint.map(|ip| ip.to_string()),
                 opens_accounts: state.cfg.auth.open_signup_enabled(),
             },
         };
