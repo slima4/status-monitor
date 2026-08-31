@@ -1256,7 +1256,9 @@ jobs:
             # The runbook's own rule: never put an unvalidated config on the one
             # service publishing 80/443. Validate in a throwaway container —
             # a crash-looping caddy has no reserve to fall back to.
-            docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            # --env-file: the Caddyfile interpolates {$UPTIMEPAGE_DOMAIN} and
+            # friends, so without the real env it fails to adapt on `email`.
+            docker run --rm --env-file .env -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
               "$caddy_image" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
             docker compose up -d --no-build caddy
             caddy_recreated=1
