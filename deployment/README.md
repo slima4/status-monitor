@@ -28,13 +28,23 @@ PostgreSQL, and ClickHouse.
 
 - A Linux host (any cloud, any VPS, your own metal)
 - Public IP with **ports 80 and 443 open**
-- Docker 24+ and `docker compose` v2
+- Docker 27+ and `docker compose` v2 (27 is where the daemon manages
+  IPv6 firewall rules by default; see the AAAA note below)
 - DNS zone in the **Hetzner Console** (the wildcard cert uses the Hetzner
   Cloud DNS-01 API):
   - `app.{domain}` → A/AAAA to this host (explicit record, beats the
     wildcard for the operator host)
   - `*.{domain}` → A/AAAA to this host (SaaS mode; the apex wildcard
     sends every `{slug}.{domain}` here and the app maps slug → org)
+
+    Publishing AAAA obliges the container network to be dual-stack (the
+    shipped compose is) **and** the daemon to own the v6 firewall rules,
+    which is the default only from Docker 27 — before that, set
+    `{"ip6tables": true}` in `/etc/docker/daemon.json`. Miss either and
+    Docker SNATs every inbound IPv6 connection to the bridge gateway, so all
+    v6 visitors reach the app as one internal address and the per-IP rate
+    limits collapse onto it. Drop the AAAA record if you would rather stay
+    v4-only.
   - A **Hetzner Cloud API token** (Read & Write) from Hetzner Console →
     your Project → Security → API Tokens, set as `HETZNER_DNS_API_TOKEN`
     in `.env`. Tokens are project-scoped, so the DNS zone must be in the
@@ -420,6 +430,15 @@ docker run --rm -v uptimepage_caddy_data:/source:ro \
 docker compose pull
 docker compose up -d
 ```
+
+Changing a network's own settings (subnet, `enable_ipv6`) is the one case
+`up -d <service>` cannot handle: Compose stops that service, then fails to
+remove the network because the other containers still hold endpoints on it,
+and leaves the service stopped. Apply those with a full-stack `docker compose
+--profile agent --profile metrics up -d` before any per-service deploy runs —
+every profile in use has to be named, or its containers keep endpoints on the
+old network and the recreate fails the same way. Drop a network you removed
+from the file with `docker network rm <name>`: `up` never prunes it.
 
 For Caddy config changes (Caddyfile only, no env changes), use a hot reload:
 

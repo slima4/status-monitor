@@ -258,14 +258,6 @@ services:
       UPTIMEPAGE_AGENT__REGION: ${UPTIMEPAGE_SCHEDULER_REGION:-default}
       UPTIMEPAGE_OBSERVABILITY__LOG_FORMAT: json
       RUST_LOG: ${RUST_LOG:-info,uptimepage=info}
-    # The stack network is v4-only, so an IPv6 target fails ENETUNREACH before
-    # a packet leaves the box. `default` keeps priority so it stays the v4
-    # route and the Alloy scrape target; probe6 only adds v6 egress.
-    networks:
-      default:
-        priority: 100
-      probe6:
-        priority: 10
 
   postgres:
     image: postgres:18-alpine
@@ -386,16 +378,13 @@ services:
 
 networks:
   default:
-  probe6:
-    # Outbound IPv6 for the probe, nothing else. v4 stays off so this bridge
-    # cannot become a second v4 egress path or eat another pool subnet.
-    # Randomly generated ULA global id per RFC 4193 3.2.2, so it will not
-    # collide with a VPN or another compose project on the same host.
+    # Without v6 here docker-proxy SNATs every inbound IPv6 client to the bridge
+    # gateway, collapsing the per-IP rate limits onto one address. Also the
+    # probe's v6 egress. ULA global id is random per RFC 4193 3.2.2.
     enable_ipv6: true
-    enable_ipv4: false
     ipam:
       config:
-        - subnet: fd4f:420f:fd91::/64
+        - subnet: fd4f:420f:fd92::/64
 
 volumes:
   caddy_data:
