@@ -67,9 +67,11 @@ The stock `caddy:2-alpine` image lacks two plugins this deployment needs:
 - [`caddy-ratelimit`](https://github.com/mholt/caddy-ratelimit) — per-IP
   throttle on the public status surface.
 
-`deployment/Dockerfile.caddy` bakes both in. `docker compose up -d` builds
-it automatically and tags it `uptimepage-caddy:2` — there is no manual
-one-time step. To rebuild after a Caddy or plugin bump:
+`deployment/Dockerfile.caddy` bakes both in, at pinned versions. `docker
+compose up -d` builds it automatically and tags it `uptimepage-caddy:3` —
+there is no manual one-time step, and the tag is bumped whenever the pins
+move so an upgrade cannot keep running a stale binary against a Caddyfile
+that needs the new one. To rebuild after a Caddy or plugin bump:
 
 ```bash
 docker compose build caddy && docker compose up -d caddy

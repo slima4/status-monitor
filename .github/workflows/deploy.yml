@@ -1236,6 +1236,18 @@ jobs:
             echo "::warning::could not read Caddyfile from caddy container; recreating to be safe"
             ctr_hash=""
           fi
+          # Custom image, so there is nothing to pull: a bumped tag (plugin pin
+          # moved) has no local image, and every compose call here is
+          # --no-build. Build before touching the container — a failed build
+          # after a stop would leave the only service publishing 80/443 down.
+          caddy_image=$(docker compose config --images caddy | head -1)
+          if ! docker image inspect "$caddy_image" >/dev/null 2>&1; then
+            echo "caddy image $caddy_image absent; building"
+            docker compose build caddy
+            docker compose up -d --no-build --force-recreate caddy
+            ctr_hash="$host_hash"
+          fi
+
           if [ -n "$host_hash" ] && [ "$host_hash" != "$ctr_hash" ]; then
             echo "Caddyfile drift (host=${host_hash:0:12} ctr=${ctr_hash:0:12}); recreating caddy"
             docker compose up -d --no-build --force-recreate caddy

@@ -12,10 +12,13 @@
 #
 # docker-compose builds this automatically; no manual one-time step.
 
+# Both plugins are pinned: an unpinned build makes the image's behaviour depend
+# on the day it was built, and the Caddyfile relies on `ipv6_prefix`, which
+# caddy-ratelimit only gained after its sole v0.1.0 tag — hence a commit pin.
 FROM caddy:2-builder AS builder
 RUN xcaddy build \
-    --with github.com/caddy-dns/hetzner/v2 \
-    --with github.com/mholt/caddy-ratelimit
+    --with github.com/caddy-dns/hetzner/v2@v2.0.1 \
+    --with github.com/mholt/caddy-ratelimit@5625512f24f6f59d6f64fb3aafe5eecff0b286db
 
 FROM caddy:2-alpine
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy

@@ -25,7 +25,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.caddy
-    image: uptimepage-caddy:2
+    image: uptimepage-caddy:3
     restart: unless-stopped
     ports:
       - "80:80"
