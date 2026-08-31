@@ -15,7 +15,7 @@ Every request we make was configured by a person. We do not discover sites on ou
 Our probes send a `User-Agent` that names us and links back to this page:
 
 ```
-Mozilla/5.0 (compatible; uptimepage/1.1.0; +https://uptimepage.dev/bot)
+Mozilla/5.0 (compatible; uptimepage/1.3.0; +https://uptimepage.dev/bot)
 ```
 
 The version number changes as we release. The `uptimepage/` token and the link do not.
