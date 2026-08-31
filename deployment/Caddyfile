@@ -71,11 +71,17 @@
 		health_uri /healthz
 		health_interval 5s
 		health_timeout 3s
-		fail_duration 10s
+		# No fail_duration on purpose. Passive health checking counts a
+		# client-side abort as an upstream failure, so one browser hanging up
+		# on a resumed HTTP/3 connection benched the only live color and 503'd
+		# the whole edge for 10s. The active check above already ejects a dead
+		# color, and lb_try_duration covers the deploy-window retry.
 
 		transport http {
 			dial_timeout 5s
-			response_header_timeout 30s
+			# Must exceed ad_hoc_dispatch::RESULT_WAIT (30s), which the
+			# check-now long poll awaits in full.
+			response_header_timeout 60s
 			read_buffer 64KB
 			write_buffer 64KB
 		}
