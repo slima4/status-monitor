@@ -95,6 +95,30 @@ jobs:
         with:
           command: check advisories bans licenses sources
 
+  # The Caddyfile and the plugins it needs live in two files that nothing
+  # otherwise checks against each other; a directive the pinned build lacks is
+  # only discovered when the edge refuses to start in production.
+  caddy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: build the custom image and validate the Caddyfile against it
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -n "$base" ] && [ "$base" != "0000000000000000000000000000000000000000" ] \
+             && git diff --quiet "$base" HEAD -- deployment/; then
+            echo "deployment/ untouched; skipping"
+            exit 0
+          fi
+          docker build -f deployment/Dockerfile.caddy -t caddy-ci:check deployment/
+          docker run --rm -v "$PWD/deployment/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            -e UPTIMEPAGE_DOMAIN=example.com -e UPTIMEPAGE_ACME_EMAIL=ci@example.com \
+            -e HETZNER_DNS_API_TOKEN=ci \
+            caddy-ci:check caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
   test:
     runs-on: ubuntu-latest
     needs: lint

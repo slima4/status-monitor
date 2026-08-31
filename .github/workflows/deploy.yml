@@ -1161,7 +1161,7 @@ jobs:
           # dependencies are sustainably healthy and the new color stayed up
           # once it took load — catches a store that is up-but-boot-looping or
           # a color that OOMs under real traffic, which readyz alone misses.
-          for dep in postgres clickhouse; do
+          for dep in postgres clickhouse caddy; do
             health="unknown"
             for _ in $(seq 1 6); do
               health=$(docker inspect -f '{{ .State.Health.Status }}' \
@@ -1236,19 +1236,33 @@ jobs:
             echo "::warning::could not read Caddyfile from caddy container; recreating to be safe"
             ctr_hash=""
           fi
-          # Custom image, so there is nothing to pull: a bumped tag (plugin pin
-          # moved) has no local image, and every compose call here is
-          # --no-build. Build before touching the container — a failed build
-          # after a stop would leave the only service publishing 80/443 down.
-          caddy_image=$(docker compose config --images caddy | head -1)
-          if ! docker image inspect "$caddy_image" >/dev/null 2>&1; then
-            echo "caddy image $caddy_image absent; building"
-            docker compose build caddy
-            docker compose up -d --no-build --force-recreate caddy
-            ctr_hash="$host_hash"
+          # Every compose call here is --no-build, so a bumped tag (plugin pin
+          # moved) would resolve to no image at all. Compare what the container
+          # actually runs against the tag, not merely whether the tag exists —
+          # a build that landed while the recreate failed must still swap.
+          caddy_image=$(docker compose config --images caddy)
+          case "$caddy_image" in
+            uptimepage-caddy:*) ;;
+            *) echo "::error::unexpected caddy image '$caddy_image'"; exit 1 ;;
+          esac
+          want_id=$(docker image inspect -f '{{ .Id }}' "$caddy_image" 2>/dev/null || echo "")
+          run_id=$(docker inspect -f '{{ .Image }}' "$(docker compose ps -q caddy)" 2>/dev/null || echo "")
+          caddy_recreated=""
+          if [ -z "$want_id" ] || [ "$want_id" != "$run_id" ]; then
+            echo "caddy image $caddy_image not the running one; building"
+            # --pull: the bases are floating tags and the prune step wipes them,
+            # so a cached FROM would silently re-tag the same old binary.
+            docker compose build --pull caddy
+            # The runbook's own rule: never put an unvalidated config on the one
+            # service publishing 80/443. Validate in a throwaway container —
+            # a crash-looping caddy has no reserve to fall back to.
+            docker run --rm -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" \
+              "$caddy_image" caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+            docker compose up -d --no-build caddy
+            caddy_recreated=1
           fi
 
-          if [ -n "$host_hash" ] && [ "$host_hash" != "$ctr_hash" ]; then
+          if [ -z "$caddy_recreated" ] && [ -n "$host_hash" ] && [ "$host_hash" != "$ctr_hash" ]; then
             echo "Caddyfile drift (host=${host_hash:0:12} ctr=${ctr_hash:0:12}); recreating caddy"
             docker compose up -d --no-build --force-recreate caddy
           fi

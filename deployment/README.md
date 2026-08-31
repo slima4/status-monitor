@@ -69,12 +69,15 @@ The stock `caddy:2-alpine` image lacks two plugins this deployment needs:
 
 `deployment/Dockerfile.caddy` bakes both in, at pinned versions. `docker
 compose up -d` builds it automatically and tags it `uptimepage-caddy:3` —
-there is no manual one-time step, and the tag is bumped whenever the pins
-move so an upgrade cannot keep running a stale binary against a Caddyfile
-that needs the new one. To rebuild after a Caddy or plugin bump:
+there is no manual one-time step. Bump that tag whenever the pins move: CI
+validates the Caddyfile against a freshly built image, and the deploy swaps
+the container when the tag no longer matches what it runs, but neither can
+tell that a *reused* tag now means a different binary. To rebuild after a
+Caddy or plugin bump:
 
 ```bash
-docker compose build caddy && docker compose up -d caddy
+# --pull: the bases are floating tags, so a cached FROM re-tags the old binary.
+docker compose build --pull caddy && docker compose up -d caddy
 ```
 
 ### 1. Clone and enter the deployment directory
@@ -445,7 +448,11 @@ per-service deploy runs:
 #    other compose projects (Caddy reaches umami by name over this network).
 docker network disconnect uptimepage_default umami || true
 
-# 2. --force-recreate is required: a container that is merely restarted onto a
+# 2. --no-build below cannot build the custom caddy image, so make sure it
+#    exists first (the tag moves whenever the plugin pins do).
+docker compose build --pull caddy
+
+#    --force-recreate is required: a container that is merely restarted onto a
 #    recreated network comes back with no published ports and the host's
 #    resolver instead of Docker's, so the edge answers nothing.
 docker compose --profile agent --profile metrics up -d --no-build --force-recreate

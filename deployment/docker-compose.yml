@@ -52,6 +52,11 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+      # Without these the first probe waits a full interval, so a recreated
+      # caddy reads `starting` for 30s and the deploy's health gate calls it
+      # unhealthy while it is already serving.
+      start_period: 30s
+      start_interval: 2s
 
   # Two interchangeable app replicas for zero-downtime cutover. Steady state
   # runs exactly one; a deploy boots the idle color, waits for its /readyz,
