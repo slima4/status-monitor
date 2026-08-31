@@ -101,7 +101,7 @@ jobs:
       contents: read
       packages: write # push to GHCR via the job's GITHUB_TOKEN
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The image build exceeds the runner's ~14 GB; drop unused preinstalled toolchains to reclaim space.
       - name: reclaim disk
