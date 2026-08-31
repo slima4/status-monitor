@@ -441,22 +441,32 @@ per-service deploy runs:
 # 1. Every endpoint on the network must be gone before Compose can recreate it.
 #    Profiles are opt-in, so name each one in use, and detach containers from
 #    other compose projects (Caddy reaches umami by name over this network).
-docker network disconnect uptimepage_default umami
+docker network disconnect uptimepage_default umami || true
 
 # 2. --force-recreate is required: a container that is merely restarted onto a
 #    recreated network comes back with no published ports and the host's
 #    resolver instead of Docker's, so the edge answers nothing.
 docker compose --profile agent --profile metrics up -d --no-build --force-recreate
 
-# 3. Reattach the foreign container, and drop a network removed from the file —
-#    `up` never prunes it.
+# 3. Reattach the foreign container — the analytics host 502s until this runs —
+#    and drop a network removed from the file; `up` never prunes it.
 docker network connect uptimepage_default umami
-docker network rm <name>
+docker network rm uptimepage_probe6
+
+# 4. That `up` started BOTH colors. Steady state is one, and the deploy wants
+#    the other stopped as its rollback target.
+docker compose stop uptimepage_green
 ```
 
 A container deleted while an endpoint is live leaves that endpoint dangling and
 the recreate keeps failing; clear it with `docker network disconnect -f
 <network> <container-id from the error>`.
+
+A Caddyfile that uses a plugin directive newer than the image on the box needs
+`docker compose build caddy` first: every deploy path runs `--no-build`, so
+Caddy would otherwise fail to load the config, and it is the only service
+publishing 80/443. Check with `docker exec uptimepage-caddy-1 caddy validate
+--config /etc/caddy/Caddyfile --adapter caddyfile` before reloading.
 
 For Caddy config changes (Caddyfile only, no env changes), use a hot reload:
 

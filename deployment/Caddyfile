@@ -131,6 +131,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone status_path {
 				key {remote_host}
+				ipv6_prefix 64
 				events 60
 				window 1m
 			}
@@ -143,11 +144,14 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	# Caddy owns the per-IP tier (it sees the real peer; the app keys on
 	# org/user, never the TCP peer). The app-side per-org/user limits live
 	# in the plans table. Distinct zone names — zones are process-global.
+	# `ipv6_prefix 64`: a v6 client rotates addresses inside its routed
+	# prefix at will, so a per-address bucket caps nothing.
 	@auth path /auth/* /api/v1/me
 	handle @auth {
 		rate_limit {
 			zone auth_endpoints {
 				key {remote_host}
+				ipv6_prefix 64
 				events 10
 				window 1m
 			}
@@ -164,6 +168,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone org_creation {
 				key {remote_host}
+				ipv6_prefix 64
 				events 3
 				window 24h
 			}
@@ -186,6 +191,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone login_page {
 				key {remote_host}
+				ipv6_prefix 64
 				events 60
 				window 1m
 			}
@@ -208,6 +214,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone share_links {
 				key {remote_host}
+				ipv6_prefix 64
 				events 60
 				window 1m
 			}
@@ -240,6 +247,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone verify_channel {
 				key {remote_host}
+				ipv6_prefix 64
 				events 30
 				window 1m
 			}
@@ -256,6 +264,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone subscribe {
 				key {remote_host}
+				ipv6_prefix 64
 				events 20
 				window 1m
 			}
@@ -271,6 +280,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone invitation_links {
 				key {remote_host}
+				ipv6_prefix 64
 				events 30
 				window 1m
 			}
@@ -288,6 +298,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone on_demand_checks {
 				key {remote_host}
+				ipv6_prefix 64
 				events 60
 				window 1m
 			}
@@ -303,6 +314,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 		rate_limit {
 			zone delegate_connect {
 				key {remote_host}
+				ipv6_prefix 64
 				events 60
 				window 1m
 			}
@@ -449,6 +461,7 @@ app.{$UPTIMEPAGE_DOMAIN} {
 	rate_limit {
 		zone status_pages {
 			key {remote_host}
+			ipv6_prefix 64
 			events 60
 			window 1m
 		}
