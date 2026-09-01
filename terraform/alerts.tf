@@ -1230,16 +1230,15 @@ resource "grafana_rule_group" "availability" {
   }
 }
 
-# Churn alerts. Not health — nothing here means the product is broken. Every
-# rule is a customer leaving while there is still time to ask why, so both fire
-# at warning: a nudge to look, not a page.
+# Churn alerts. Not health — nothing here means the product is broken, so they
+# fire at warning: a nudge to look, not a page.
 resource "grafana_rule_group" "churn" {
   name             = "uptimepage-churn"
   folder_uid       = grafana_folder.obs.uid
   interval_seconds = 300
 
-  # Reversible for the whole grace window, so this is the one churn signal
-  # that arrives while the outcome can still change.
+  # Reversible for the whole grace window, so it arrives while the outcome can
+  # still change.
   rule {
     name           = "UptimepageAccountDeletionRequested"
     condition      = "C"
@@ -1265,47 +1264,6 @@ resource "grafana_rule_group" "churn" {
         refId   = "A"
         instant = true
         expr    = "increase(uptimepage_account_deletions_requested_total[1h]) > 0"
-      })
-    }
-    data {
-      ref_id         = "C"
-      datasource_uid = "__expr__"
-      relative_time_range {
-        from = 0
-        to   = 0
-      }
-      model = local.threshold_c
-    }
-  }
-
-  # A customer clearing the account by hand, which is what they resort to when
-  # they cannot complete a deletion. The org then looks like a live tenant
-  # forever.
-  rule {
-    name           = "UptimepageOrgEmptied"
-    condition      = "C"
-    for            = "0s"
-    no_data_state  = "OK"
-    exec_err_state = "Error"
-    labels = {
-      severity = "warning"
-      service  = "uptimepage"
-    }
-    annotations = {
-      summary     = "uptimepage: an org deleted its last monitor"
-      description = "an organisation went from having monitors to having none in the last hour. Find it in org_audit_log (action = 'target.deleted' / 'target.bulk_deleted')."
-    }
-    data {
-      ref_id         = "A"
-      datasource_uid = data.grafana_data_source.prometheus.uid
-      relative_time_range {
-        from = 3600
-        to   = 0
-      }
-      model = jsonencode({
-        refId   = "A"
-        instant = true
-        expr    = "increase(uptimepage_orgs_emptied_total[1h]) > 0"
       })
     }
     data {

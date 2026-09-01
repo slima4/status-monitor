@@ -5,10 +5,12 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
 
 ## What this manages
 
-- `alerts.tf` — `uptimepage` folder; alert rules across two groups —
-  `uptimepage-pipeline` (data-path health: `UptimepageResultsLost`,
+- `alerts.tf` — `uptimepage` folder; alert rules across three groups —
+  `uptimepage-pipeline` (data-path and host health, mixed severity; the
+  exhaustion pairs warn a step before they page: `UptimepageResultsLost`,
   `UptimepageStorageWriteFailing`, `UptimepagePipelineStalled`,
-  `UptimepageNotificationDeliveryFailing`,
+  `UptimepageNotificationDeliveryFailing`, `UptimepageChannelNotDelivering`,
+  `UptimepageNotificationSendsFailing`,
   `UptimepageCircuitBreakersOpen`, `UptimepageProbeErrorConcentrated`,
   `UptimepageErrorClassSweepTruncated`, `UptimepageResultQueueBacklog`,
   `UptimepageRegistryRefreshStuck`/`Slow`, `UptimepagePgPoolSaturating`,
@@ -16,16 +18,19 @@ State + secrets live in **HCP Terraform Cloud** — never in this repo.
   `UptimepageStorageWriteLatencyHigh`, `UptimepageClickHousePartsHigh`,
   `UptimepageIngestBufferOverflow`, `UptimepageDiskSpaceLow`/`Critical`,
   `UptimepageHostMemoryLow`, `UptimepageHostCpuHigh`,
-  `UptimepageInodesLow`/`Critical`) and `uptimepage-availability`
-  (`UptimepageMetricsPipelineDown`, `UptimepageControlPlaneDown`,
-  `UptimepageRegionalAgentDown`); two
+  `UptimepageInodesLow`/`Critical`), `uptimepage-availability`
+  (is it up at all, all critical: `UptimepageMetricsPipelineDown`,
+  `UptimepageControlPlaneDown`, `UptimepageRegionalAgentDown`) and
+  `uptimepage-churn` (not health — a customer leaving, warning only, a nudge
+  to look rather than a page: `UptimepageAccountDeletionRequested`); two
   contact points (email-only `uptimepage-default` for warnings,
   email+Telegram `uptimepage-critical` for criticals); the root
   notification policy with severity routing (critical pages fast to both
   channels, warning batches slow to email).
 - `dashboard.tf` — every board under `terraform/dashboards/*.json`
-  (`uptimepage-ops`, `uptimepage-business`, `uptimepage-host`), loaded via
-  `fileset` + `for_each` so adding a board is just a new file. The
+  (`uptimepage-ops`, `uptimepage-business`, `uptimepage-host`,
+  `uptimepage-clickhouse`), loaded via `fileset` + `for_each` so adding a
+  board is just a new file. The
   `${DS_PROMETHEUS}` template input is substituted with the real
   Prometheus datasource uid, and the export-only `__inputs`/`__requires`
   keys are stripped, before apply (the provider's POST path does no
