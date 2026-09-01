@@ -28,24 +28,20 @@ use crate::observability::metrics::names;
 /// Redirect-hop ceiling, and the fallback when following is on but `max_redirects` is 0.
 const MAX_REDIRECT_HOPS: u8 = HttpCheck::MAX_REDIRECTS;
 
-/// Cap on the raw HTTP response body the check will collect. Status pages —
-/// the dominant target shape — are usually well under 100 KiB; 1 MiB is the
-/// "huge response, but worth keeping the bytes" knee. Past it the read is
-/// abandoned rather than allowed to allocate freely.
+/// Past this the read is abandoned rather than left to allocate freely.
+/// Status pages, the dominant target shape, sit well under 100 KiB.
 const MAX_RAW_BODY_BYTES: usize = 1 << 20;
 
 /// Names the cap so the fix — assert on something smaller — is readable from
 /// the result row alone.
 const OVER_CAP_ERROR: &str = "body over the 1 MiB read cap";
 
-/// Cap on decompressed body size. Bounds the gzip / brotli expansion ratio
-/// against a hostile target that returns a tiny compressed body that explodes
-/// on decode (a "zip bomb"). 8 MiB tolerates the ~8× expansion that real
-/// HTML/JSON pages hit.
+/// Bounds gzip/brotli expansion against a zip bomb. 8 MiB tolerates the ~8×
+/// that real HTML/JSON pages hit.
 const MAX_DECODED_BODY_BYTES: usize = 8 << 20;
 
-/// The decoded twin of `OVER_CAP_ERROR`. A page that compresses well clears the
-/// raw cap and is only refused here, so the two caps need separate wording.
+/// A page that compresses well clears the raw cap and is only refused here,
+/// so the two caps need separate wording.
 const OVER_DECODED_CAP_ERROR: &str = "body over the 8 MiB decoded cap";
 
 /// Body snippet cap for the verbose test-check response.
@@ -122,10 +118,8 @@ async fn do_http_check(
         (r, None)
     };
 
-    // Each hop reconnects through the same SSRF-guarded connector + DNS
-    // resolver, so a `Location` pointing at an internal address is rejected
-    // at connect time exactly like a directly-configured one — no separate
-    // per-hop revalidation needed.
+    // Each hop reconnects through the same SSRF-guarded connector, so an
+    // internal `Location` is refused at connect time. No per-hop revalidation.
     let mut current = check.url.clone();
     let mut method = check.method;
     let mut send_body = check.body.clone();
@@ -253,9 +247,8 @@ async fn do_http_check(
                 return early("unsupported redirect scheme", Some(status_code));
             }
 
-            // 307/308 preserve the method and body; 301/302/303 degrade to a
-            // bodyless GET (the universal browser behaviour, and the safe
-            // choice for a monitor — never silently replay a POST).
+            // 301/302/303 degrade to a bodyless GET: browser behaviour, and a
+            // monitor must never silently replay a POST.
             if !matches!(status_code, 307 | 308) {
                 method = HttpMethod::Get;
                 send_body = None;
@@ -266,16 +259,13 @@ async fn do_http_check(
                 target_id = %target_id,
                 hop,
                 status = status_code,
-                // Host only — never the full target/redirect URL (may carry
-                // tokens in the path/query).
+                // Host only — a full URL may carry tokens.
                 to_host = next.host_str().unwrap_or("?"),
                 "following redirect"
             );
 
-            // The 3xx body is intentionally not drained before drop: it is
-            // tiny and the next hop almost always targets a different host
-            // (apex→www, http→https), so there is no pooled connection to
-            // reuse — draining would only add latency to this hot path.
+            // Not drained before drop: the next hop is almost always a
+            // different host, so there is no pooled connection to reuse.
             current = next;
             continue;
         }
@@ -297,9 +287,7 @@ async fn do_http_check(
         .await;
     }
 
-    // `for 0..=max_hops` always returns from inside the loop (final response
-    // or the limit-exceeded branch); this is unreachable but keeps the
-    // function total without an `unwrap`/`panic`.
+    // The loop always returns; this keeps the function total without a panic.
     early("too many redirects", None)
 }
 
@@ -327,10 +315,8 @@ fn timed_error(
 }
 
 /// Collect, decode, and score the final (non-redirect) response.
-// Private probe helper: the args are inherent (identity + check + timings
-// + response + connection + clients); grouping them would only move the tuple
-// around. `conn_guard` is held until the body is drained — the response streams
-// from its connection task.
+// `conn_guard` is held until the body is drained: the response streams from
+// its connection task.
 #[allow(clippy::too_many_arguments)]
 async fn finalize(
     target_id: Uuid,
@@ -348,9 +334,8 @@ async fn finalize(
 ) -> (CheckResult, Option<HttpProbe>) {
     clients.ttfb_ms.record(ttfb_ms as f64);
 
-    // Header preview is snapshotted before the response body is consumed:
-    // hyper bodies are streams and the headers handle becomes unavailable
-    // once we move the response into Limited.
+    // Taken before the body: moving the response into Limited drops the
+    // headers handle.
     let headers_preview = capture.then(|| snapshot_headers(response.headers()));
     let response_fingerprint = ResponseFingerprint::from_headers(response.headers());
     let retry_after_raw = response
@@ -402,9 +387,8 @@ async fn finalize(
             .and_then(|h| h.to_str().ok())
             .map(|s| s.to_ascii_lowercase());
         let body_remaining = check.timeout.saturating_sub(start.elapsed());
-        // Bound at the byte-budget *before* allocation: Limited streams frames
-        // and errors mid-read once the cap is exceeded, so an oversized response
-        // never sits fully in memory.
+        // Bounded before allocation, so an oversized response never sits
+        // fully in memory.
         let collected = match tokio::time::timeout(
             body_remaining,
             Limited::new(response.into_body(), MAX_RAW_BODY_BYTES).collect(),
@@ -413,8 +397,8 @@ async fn finalize(
         {
             Err(_) => return err_with_ttfb("body timeout"),
             Ok(Ok(c)) => Some(c),
-            // Only a body assertion needs these bytes. Without one the status
-            // assertion has already decided, so an unbuffered page is no fault.
+            // Without a body assertion the status already decided, so an
+            // unbuffered page is no fault.
             Ok(Err(e)) if e.downcast_ref::<LengthLimitError>().is_some() => {
                 if check.expected_body_contains.is_some() {
                     return err_with_ttfb(OVER_CAP_ERROR);
@@ -430,9 +414,8 @@ async fn finalize(
                 let raw = c.to_bytes();
                 match decode_body(&raw, content_encoding.as_deref()) {
                     Ok(b) => b,
-                    // Same rule as the raw cap: a body nobody asserts on is not
-                    // needed, so refusing to hold it is no fault. A page that
-                    // compresses well can clear the raw cap and still land here.
+                    // Same rule as the raw cap: a body nobody asserts on is
+                    // not needed, so refusing to hold it is no fault.
                     Err(DecodeError::OverCap) => {
                         if check.expected_body_contains.is_some() {
                             return err_with_ttfb(OVER_DECODED_CAP_ERROR);
@@ -509,12 +492,18 @@ async fn finalize(
     )
 }
 
-/// Non-sensitive header signals, held only until the result is classified.
-/// Presence of a provider is never enough on its own: every detector below
-/// pairs it with a vendor challenge signal or a recognizable denial page.
-///
-/// Fields are decisions rather than copied values — this runs on every
-/// response, and the passing majority must not pay an allocation.
+/// What a vendor-namespaced mitigation header declared. `Other` keeps an
+/// unrecognised action out of the detectors while still counting as drift.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VercelMitigation {
+    Challenge,
+    Deny,
+    Other,
+}
+
+/// Non-sensitive signals, held only until the result is classified, and kept
+/// as decisions rather than copied values so the passing majority never
+/// allocates. A provider alone never attributes.
 #[derive(Debug, Default)]
 struct ResponseFingerprint {
     akamai_edge: bool,
@@ -523,7 +512,7 @@ struct ResponseFingerprint {
     cloudflare_challenge: bool,
     azure_reference: bool,
     datadome_signal: bool,
-    vercel_challenge: bool,
+    vercel_mitigation: Option<VercelMitigation>,
     vercel_challenge_token: bool,
     cloudflare_edge: bool,
     cloudflare_ray: bool,
@@ -548,8 +537,15 @@ impl ResponseFingerprint {
             datadome_signal: headers
                 .keys()
                 .any(|name| name.as_str().starts_with("x-datadome")),
-            vercel_challenge: header("x-vercel-mitigated")
-                .is_some_and(|v| v.eq_ignore_ascii_case("challenge")),
+            vercel_mitigation: header("x-vercel-mitigated").map(|action| {
+                if action.eq_ignore_ascii_case("challenge") {
+                    VercelMitigation::Challenge
+                } else if action.eq_ignore_ascii_case("deny") {
+                    VercelMitigation::Deny
+                } else {
+                    VercelMitigation::Other
+                }
+            }),
             vercel_challenge_token: headers.contains_key("x-vercel-challenge-token"),
             cloudflare_edge: server_is("cloudflare"),
             cloudflare_ray: headers.contains_key("cf-ray"),
@@ -631,7 +627,7 @@ fn detect_access_interference(
     // Vercel documents the behaviour but not a stable detector contract, so
     // three signals and medium confidence: a copied header must not name it.
     let vercel_page = body.contains("vercel security checkpoint");
-    if fingerprint.vercel_challenge
+    if fingerprint.vercel_mitigation == Some(VercelMitigation::Challenge)
         && fingerprint.vercel_edge
         && (fingerprint.vercel_challenge_token || vercel_page)
     {
@@ -649,11 +645,22 @@ fn detect_access_interference(
         ));
     }
 
-    // Several appliances ship this same configurable page: enough to call it a
-    // policy block, not enough to name a vendor. The id must be presented, not
-    // merely mentioned — a bare "support id" is ordinary English, and a
-    // customer's own error-help page must not be read as a block. Both
-    // renderings of the page put a colon after the label.
+    // No page to corroborate, so the vendor header stands alone as
+    // `cf-mitigated` does. A fronting proxy rewrites `server`, not the header.
+    if fingerprint.vercel_mitigation == Some(VercelMitigation::Deny) {
+        let mut evidence = vec![DiagnosticEvidence::MitigationHeader];
+        if fingerprint.vercel_edge {
+            evidence.push(DiagnosticEvidence::EdgeServer);
+        }
+        return Some(CheckDiagnostic::access_interference(
+            DiagnosticConfidence::Medium,
+            Some(EdgeProvider::Vercel),
+            evidence,
+        ));
+    }
+
+    // Several appliances ship this page, so no vendor is named. The colon
+    // matters: a bare "support id" is ordinary English on a help page.
     let quotes_support_id = body.contains("support id:") || body.contains("support id is:");
     if body.contains("the requested url was rejected") && quotes_support_id {
         return Some(CheckDiagnostic::access_interference(
@@ -719,7 +726,8 @@ fn parse_cloudflare_error_code(lowercased_body: &str) -> Option<u16> {
     digits.parse().ok()
 }
 
-/// Disjoint by status code, so the order is determinism, not precedence.
+/// Access reads headers and pages, origin reads a status the edge serves
+/// itself, so the order is determinism not precedence.
 fn detect_diagnostic(
     fingerprint: &ResponseFingerprint,
     decoded_body: &[u8],
@@ -751,8 +759,8 @@ fn unmatched_diagnosable_kind(
     if status_ok {
         return None;
     }
-    // A challenge header is detectable without a body.
-    if status_code == 403 {
+    // Detectable without a body, whatever status the vendor paired it with.
+    if status_code == 403 || fingerprint.vercel_mitigation.is_some() {
         return Some(CheckDiagnosticKind::AccessInterference.as_str());
     }
     // A HEAD monitor never carries the page: a permanent miss, not drift.
@@ -762,9 +770,8 @@ fn unmatched_diagnosable_kind(
     None
 }
 
-/// First N unique-by-name response headers, sensitive values redacted.
-/// Multi-value headers (Set-Cookie, Link) collapse to one entry so the cap
-/// isn't burnt on a single repeated name.
+/// First N unique-by-name headers, sensitive values redacted. Multi-value
+/// names collapse to one entry so the cap is not burnt on a repeat.
 fn snapshot_headers(headers: &hyper::HeaderMap) -> Vec<crate::api::types::HeaderPreview> {
     use crate::api::types::HeaderPreview;
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -788,10 +795,8 @@ fn snapshot_headers(headers: &hyper::HeaderMap) -> Vec<crate::api::types::Header
     out
 }
 
-/// First [`PROBE_BODY_SNIPPET_BYTES`] of the decoded body as UTF-8 (lossy
-/// for binary responses, which surface as replacement characters). Snaps
-/// the cut back to a UTF-8 codepoint boundary so multi-byte chars aren't
-/// chopped mid-sequence into a replacement character.
+/// First [`PROBE_BODY_SNIPPET_BYTES`] of the decoded body, lossy UTF-8. The
+/// cut snaps back to a codepoint boundary so a multi-byte char is not chopped.
 fn snapshot_body(decoded: &[u8]) -> String {
     let mut end = decoded.len().min(PROBE_BODY_SNIPPET_BYTES);
     while end > 0 && (decoded[end - 1] & 0b1100_0000) == 0b1000_0000 {
@@ -818,21 +823,19 @@ fn build_request(
 
     let mut builder = Request::builder().method(map_method(method)).uri(target);
 
-    // A configured header replaces the default instead of joining it: two
-    // User-Agent lines are malformed, and overriding ours is the documented
-    // way past an edge that blocks it.
+    // Replaces rather than joins: two User-Agent lines are malformed, and
+    // overriding ours is the documented way past an edge that blocks it.
     for (name, default) in [
         (USER_AGENT, clients.user_agent()),
-        // Sending none reads as a scripted client; `*/*` avoids steering
-        // content negotiation, so a JSON endpoint keeps answering JSON.
+        // Sending none reads as a scripted client; `*/*` steers nothing.
         (ACCEPT, "*/*"),
     ] {
         if !overrides_header(check, name.as_str()) {
             builder = builder.header(name, default);
         }
     }
-    // Not overridable: this advertises what `decode_body` can actually read, so
-    // a configured `zstd` would return bytes no assertion could match.
+    // Not overridable: advertising a codec `decode_body` cannot read would
+    // return bytes no assertion could match.
     builder = builder.header(ACCEPT_ENCODING, "gzip, br");
 
     let bodyless = body.is_none();
@@ -840,10 +843,8 @@ fn build_request(
     if let Some(host) = host_header.filter(|_| !user_set_host) {
         builder = builder.header(HOST, host);
     }
-    // The dedicated auth field is canonical: resolve one Authorization value
-    // (bearer over basic, basic if bearer is unusable) and drop a raw
-    // `Authorization` row so the probe never sends two. None falls through to a
-    // raw header.
+    // The dedicated field wins over a raw `Authorization` row so the probe
+    // never sends two.
     let field_authz = include_auth
         .then(|| {
             check
@@ -862,9 +863,7 @@ fn build_request(
         if field_authz.is_some() && k.eq_ignore_ascii_case("authorization") {
             continue;
         }
-        // On a cross-origin hop, drop the sensitive headers (auth, cookies, API
-        // keys) so a credential — configured or resolved from a secret variable —
-        // can't follow a hostile `Location` to a different origin.
+        // A credential must not follow a hostile `Location` off-origin.
         if !include_auth
             && PROBE_REDACT_HEADERS
                 .iter()
@@ -872,16 +871,12 @@ fn build_request(
         {
             continue;
         }
-        // Fixed by the checker: a caller-set value could advertise a codec we
-        // cannot decode, and the body would then fail every assertion.
+        // A caller-set codec we cannot decode fails every body assertion.
         if k.eq_ignore_ascii_case("accept-encoding") {
             continue;
         }
-        // After a 301/302/303 degrades to a bodyless GET, a caller-set
-        // content-framing header would describe a body that no longer
-        // exists — a malformed request strict origins/WAFs reject (a
-        // spurious Down on exactly the canonical-redirect targets this
-        // feature exists for). Hyper sets its own `content-length: 0`.
+        // Framing a body that no longer exists is malformed, and strict
+        // origins reject it — a spurious Down on canonical redirects.
         if bodyless
             && (k.eq_ignore_ascii_case("content-type")
                 || k.eq_ignore_ascii_case("content-length")
@@ -900,9 +895,8 @@ fn build_request(
     builder.body(Full::new(body_bytes))
 }
 
-/// Whether a configured header really reaches the wire under this name. A
-/// value hyper rejects is no replacement — the loop below drops it, and the
-/// request would carry neither.
+/// A value hyper rejects is no replacement: the loop drops it and the request
+/// would carry neither.
 fn overrides_header(check: &HttpCheck, name: &str) -> bool {
     check
         .headers
@@ -910,11 +904,9 @@ fn overrides_header(check: &HttpCheck, name: &str) -> bool {
         .any(|(k, v)| k.eq_ignore_ascii_case(name) && HeaderValue::try_from(v).is_ok())
 }
 
-/// Request-target and Host for the negotiated protocol. hyper's low-level
-/// http/1 client writes the request URI to the wire verbatim, so an absolute
-/// URI leaves as an absolute-form target (`GET https://host/path`) that strict
-/// origins and WAFs answer with 404. http/1 gets an origin-form target plus an
-/// explicit Host; h2 keeps the authority for its `:authority` pseudo-header.
+/// hyper's low-level http/1 client writes the URI verbatim, so an absolute one
+/// leaves as absolute-form and strict origins answer 404. http/1 gets
+/// origin-form plus an explicit Host; h2 keeps the authority.
 fn request_target(uri: &Uri, alpn_h2: bool) -> Result<(Uri, Option<String>), hyper::http::Error> {
     if alpn_h2 {
         return Ok((uri.clone(), None));
@@ -923,8 +915,7 @@ fn request_target(uri: &Uri, alpn_h2: bool) -> Result<(Uri, Option<String>), hyp
     Ok((Uri::try_from(path)?, host_header_value(uri)))
 }
 
-/// Host header for an origin-form http/1 request: authority host plus a
-/// non-default port. Userinfo never belongs in `Host`, so it is excluded.
+/// Authority host plus a non-default port. Userinfo never belongs in `Host`.
 fn host_header_value(uri: &Uri) -> Option<String> {
     let host = uri.host()?;
     let default_port = if uri.scheme_str() == Some("http") {
@@ -938,9 +929,8 @@ fn host_header_value(uri: &Uri) -> Option<String> {
     })
 }
 
-/// Effective hop budget: `0` disables following entirely; an enabled check
-/// with `max_redirects == 0` falls back to [`MAX_REDIRECT_HOPS`], and any
-/// configured value is clamped to that same ceiling.
+/// `0` disables following; an enabled check with `max_redirects == 0` falls
+/// back to [`MAX_REDIRECT_HOPS`], which also clamps any configured value.
 fn effective_max_redirects(check: &HttpCheck) -> u8 {
     if !check.follow_redirects {
         return 0;
@@ -955,9 +945,8 @@ fn is_redirect(code: u16) -> bool {
     matches!(code, 301 | 302 | 303 | 307 | 308)
 }
 
-/// Why a body could not be decoded. The two are not interchangeable: our own
-/// cap is a decision, malformed bytes are a fault, and only the caller knows
-/// whether the body was needed at all.
+/// Not interchangeable: our cap is a decision, malformed bytes are a fault,
+/// and only the caller knows whether the body was needed.
 #[derive(Debug, PartialEq, Eq)]
 enum DecodeError {
     OverCap,
@@ -966,10 +955,8 @@ enum DecodeError {
 
 fn decode_body(raw: &HBytes, encoding: Option<&str>) -> std::result::Result<Bytes, DecodeError> {
     match encoding {
-        // Typical gzip/brotli ratios on text are 3-5×; pre-size larger to
-        // avoid re-allocation in the decoder loop. Read +1 past the cap so a
-        // body that exactly *fills* the budget is still detected as "over"
-        // and rejected rather than silently truncated to a misleading length.
+        // Read +1 past the cap so a body that exactly fills the budget reads
+        // as over rather than truncating to a misleading length.
         Some("gzip") => decode_capped(GzDecoder::new(raw.as_ref()), raw.len()),
         Some("br") => decode_capped(brotli::Decompressor::new(raw.as_ref(), 4096), raw.len()),
         _ => Ok(raw.clone()),
@@ -1006,10 +993,8 @@ fn map_method(m: HttpMethod) -> Method {
     }
 }
 
-/// Retry-After per RFC 9110: delta-seconds or HTTP-date — both ASCII +
-/// alphanumeric + a handful of punctuation. Anything outside this set is
-/// untrusted upstream input that downstream notifiers (Slack-flavoured
-/// markdown, e.g.) would otherwise render verbatim.
+/// RFC 9110 allows only delta-seconds or an HTTP-date here. Anything else is
+/// untrusted input that a markdown-flavoured notifier would render verbatim.
 fn sanitised_retry_after(raw: &str) -> bool {
     !raw.is_empty()
         && raw.len() <= 64
@@ -1018,10 +1003,8 @@ fn sanitised_retry_after(raw: &str) -> bool {
         })
 }
 
-/// 429 / 503 means "we're throttling you, try later" — distinct from a real
-/// outage. Map it to `Degraded` so the monitor reflects back-pressure without
-/// opening an incident. A user who explicitly accepts 429/503 in
-/// `expected_status` is honored first.
+/// Back-pressure is not an outage, so 429/503 maps to `Degraded` and opens no
+/// incident. An `expected_status` that accepts them is honoured first.
 fn classify_outcome(
     status_code: u16,
     status_ok: bool,
@@ -1064,9 +1047,8 @@ fn classify_hyper_error(err: &hyper::Error) -> &'static str {
     "transport"
 }
 
-// Phrase set is narrow ("timed out" / "deadline") so `connect_timeout=…`
-// in a config-field error string does not flip a connect failure to a
-// timeout. Bare "timeout" substring is deliberately omitted.
+// Narrow on purpose: a bare "timeout" would match `connect_timeout=…` in a
+// config-field error and flip a connect failure to a timeout.
 fn has_timeout_in_chain(err: &(dyn std::error::Error + 'static)) -> bool {
     std::iter::successors(Some(err), |e| e.source()).any(|e| {
         if let Some(io) = e.downcast_ref::<std::io::Error>()
@@ -1414,6 +1396,50 @@ mod tests {
         );
     }
 
+    fn vercel_mitigated(action: &'static str, server: bool) -> ResponseFingerprint {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            "x-vercel-mitigated",
+            hyper::header::HeaderValue::from_static(action),
+        );
+        if server {
+            headers.insert("server", hyper::header::HeaderValue::from_static("Vercel"));
+        }
+        ResponseFingerprint::from_headers(&headers)
+    }
+
+    #[test]
+    fn vercel_deny_is_attributed_from_its_header_alone() {
+        let hit = detect_access_interference(&vercel_mitigated("deny", true), b"")
+            .expect("a deny is attributed without a page");
+        assert_eq!(hit.provider, Some(EdgeProvider::Vercel));
+        assert_eq!(hit.confidence, DiagnosticConfidence::Medium);
+        assert_eq!(
+            hit.evidence,
+            vec![
+                DiagnosticEvidence::MitigationHeader,
+                DiagnosticEvidence::EdgeServer,
+            ]
+        );
+
+        // A proxy in front rewrites `server` but relays the vendor header.
+        let fronted = detect_access_interference(&vercel_mitigated("deny", false), b"")
+            .expect("a fronted deny is still attributed");
+        assert_eq!(fronted.provider, Some(EdgeProvider::Vercel));
+        assert_eq!(fronted.evidence, vec![DiagnosticEvidence::MitigationHeader]);
+    }
+
+    #[test]
+    fn an_unknown_vercel_action_is_unattributed_but_counted_as_drift() {
+        let fingerprint = vercel_mitigated("some-future-action", true);
+        assert!(detect_access_interference(&fingerprint, b"").is_none());
+        assert_eq!(
+            unmatched_diagnosable_kind(&fingerprint, 429, false, false),
+            Some(CheckDiagnosticKind::AccessInterference.as_str()),
+            "a mitigation we cannot name is the drift this counter exists for"
+        );
+    }
+
     #[test]
     fn access_detector_requires_three_vercel_challenge_signals() {
         let fingerprint = |mitigated: bool, server: bool, token: bool| {
@@ -1480,9 +1506,8 @@ mod tests {
         assert!(detect_access_interference(&fingerprint, b"application says forbidden").is_none());
     }
 
-    /// The generic appliance branch has no header to corroborate it and every
-    /// region fetches the same body, so a loose match trips everywhere at once
-    /// and reaches the customer's incident notification as the cause.
+    /// Nothing corroborates this branch, and every region fetches the same
+    /// body, so a loose match reaches the customer's notification as the cause.
     #[test]
     fn access_detector_needs_a_quoted_support_id_not_the_bare_words() {
         let bare = ResponseFingerprint::default();
@@ -1757,9 +1782,8 @@ mod tests {
 
     #[test]
     fn has_timeout_in_chain_does_not_match_config_field_substring() {
-        // `connect_timeout=5s` in an error message would have matched the
-        // earlier permissive `"timeout"` substring; the narrowed phrase set
-        // does not.
+        // `connect_timeout=5s` matched the earlier permissive `"timeout"`
+        // substring; the narrowed phrase set does not.
         let e = ChainErr {
             msg: "connect_timeout=5s exceeded budget",
             src: None,
@@ -1790,9 +1814,8 @@ mod tests {
         assert!(out.starts_with(b"compressible"));
     }
 
-    /// A page that compresses well clears the raw cap and is only refused on
-    /// decode. Telling that decision apart from mangled bytes is what lets the
-    /// caller leave a status-only check alone.
+    /// A well-compressing page clears the raw cap and is refused on decode.
+    /// Only that distinction lets the caller leave a status-only check alone.
     #[test]
     fn a_well_compressing_oversized_body_is_over_cap_not_malformed() {
         use std::io::Write;

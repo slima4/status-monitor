@@ -110,7 +110,7 @@ fn decide_carries_access_diagnosis_into_incident_sample() {
         Action::Open(new) => assert_eq!(
             new.error_sample.as_deref(),
             Some(
-                "unexpected status 403 · access-policy block detected at the Akamai edge · use an authenticated health endpoint or exempt this monitor from browser challenges"
+                "unexpected status 403 · access-policy block detected at the Akamai edge · use an authenticated health endpoint, or allow this monitor through the edge's access rules"
             )
         ),
         other => panic!("expected Open, got {other:?}"),

@@ -195,7 +195,7 @@ impl CheckDiagnostic {
     pub fn guidance(&self) -> &'static str {
         match self.kind {
             CheckDiagnosticKind::AccessInterference => {
-                "use an authenticated health endpoint or exempt this monitor from browser challenges"
+                "use an authenticated health endpoint, or allow this monitor through the edge's access rules"
             }
             CheckDiagnosticKind::OriginUnreachable => {
                 "check the origin is up and reachable from the edge"
@@ -247,7 +247,7 @@ impl CheckDiagnosticKind {
         match self {
             Self::AccessInterference => vec![
                 DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
-                DiagnosticRemediation::BypassBrowserChallengeForMonitor,
+                DiagnosticRemediation::AllowMonitorThroughEdgeRules,
             ],
             Self::OriginUnreachable => vec![DiagnosticRemediation::VerifyOriginReachable],
             Self::OriginTunnelDown => vec![
@@ -337,6 +337,7 @@ pub enum DiagnosticEvidence {
     BlockPage,
     ReferenceId,
     OriginErrorCode,
+    MitigationHeader,
 }
 
 impl DiagnosticEvidence {
@@ -347,6 +348,7 @@ impl DiagnosticEvidence {
             Self::BlockPage => "block_page",
             Self::ReferenceId => "reference_id",
             Self::OriginErrorCode => "origin_error_code",
+            Self::MitigationHeader => "mitigation_header",
         }
     }
 
@@ -357,6 +359,7 @@ impl DiagnosticEvidence {
             "block_page" => Some(Self::BlockPage),
             "reference_id" => Some(Self::ReferenceId),
             "origin_error_code" => Some(Self::OriginErrorCode),
+            "mitigation_header" => Some(Self::MitigationHeader),
             _ => None,
         }
     }
@@ -366,7 +369,7 @@ impl DiagnosticEvidence {
 #[serde(rename_all = "snake_case")]
 pub enum DiagnosticRemediation {
     UseAuthenticatedHealthEndpoint,
-    BypassBrowserChallengeForMonitor,
+    AllowMonitorThroughEdgeRules,
     VerifyOriginReachable,
     VerifyEdgeTunnel,
 }
@@ -375,7 +378,7 @@ impl DiagnosticRemediation {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::UseAuthenticatedHealthEndpoint => "use_authenticated_health_endpoint",
-            Self::BypassBrowserChallengeForMonitor => "bypass_browser_challenge_for_monitor",
+            Self::AllowMonitorThroughEdgeRules => "allow_monitor_through_edge_rules",
             Self::VerifyOriginReachable => "verify_origin_reachable",
             Self::VerifyEdgeTunnel => "verify_edge_tunnel",
         }
@@ -480,7 +483,7 @@ mod tests {
             "confidence": "high",
             "provider": "cloudflare",
             "evidence": ["edge_server"],
-            "remediations": ["bypass_browser_challenge_for_monitor"]
+            "remediations": ["allow_monitor_through_edge_rules"]
         }))
         .expect("payload with mismatched remediations");
 
@@ -585,6 +588,7 @@ mod tests {
             DiagnosticEvidence::BlockPage,
             DiagnosticEvidence::ReferenceId,
             DiagnosticEvidence::OriginErrorCode,
+            DiagnosticEvidence::MitigationHeader,
         ] {
             assert_eq!(DiagnosticEvidence::parse(evidence.as_str()), Some(evidence));
         }

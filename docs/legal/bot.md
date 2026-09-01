@@ -1,6 +1,6 @@
 # Uptimepage Bot
 
-**Last updated:** 2026-08-17
+**Last updated:** 2026-09-01
 
 If you found this page in your server logs, our bot requested a page on your site. This page explains what it is, why it happened, and how to stop it.
 
@@ -61,6 +61,30 @@ Our outbound IP addresses are not guaranteed to be static and can change without
 Allowlist by `User-Agent`. Match requests whose `User-Agent` contains `uptimepage/`, and let them through your WAF, rate limiter, or bot protection.
 
 This is worth doing. If your WAF challenges or blocks our probes, the person monitoring your site sees failures that look like an outage on your side when nothing is actually wrong.
+
+### Vercel
+
+If your Vercel project has bot protection, Attack Challenge Mode, or a matching firewall rule enabled, its firewall treats our probe as an automated client. A blocked probe comes back as `403` with an `x-vercel-mitigated: deny` header, or as a Security Checkpoint page with `x-vercel-mitigated: challenge`. Either way the monitor reads as down while your site is fine in a browser. Vercel's own guidance for this case is to use a **Bypass** rule: a challenge cannot be solved by automated clients at all, because it requires a browser to execute JavaScript.
+
+From your project in the Vercel dashboard:
+
+1. Open **Firewall** in the sidebar
+2. Select **⋯** → **Configure**, then **Add New...** → **Rule**
+3. Name it something like `Allow uptimepage monitoring`
+4. Under **If**, choose the `User-Agent` request header with the **contains** operator and the value `uptimepage/`
+5. Under **Then**, choose **Bypass**
+6. Select **Save Rule**, then **Review Changes** → **Publish**
+
+The rule does not take effect until you publish it.
+
+Two things to know:
+
+- It is a **contains** match, not a prefix match. Our `User-Agent` begins with `Mozilla/5.0 (compatible; …)`, so `uptimepage/` sits in the middle.
+- A custom Bypass rule skips your custom and managed rules, but **not** Vercel's platform-level DDoS mitigations. If the block is coming from those, a custom rule will not clear it and you need Vercel support.
+
+If a **Deny** rule with a persistent action already matched one of our probes, Vercel stores that IP at the platform firewall for the timeout you configured. Adding the bypass rule stops new blocks, but an existing one has to expire.
+
+If you would rather not open a path by header, point the monitor at a health endpoint outside the firewall's scope, or exempt just that path.
 
 ## If You Did Not Authorise This
 

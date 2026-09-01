@@ -227,7 +227,7 @@ async fn http_check_diagnoses_akamai_access_denial_without_changing_verdict() {
         diagnostic.remediations,
         vec![
             DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
-            DiagnosticRemediation::BypassBrowserChallengeForMonitor,
+            DiagnosticRemediation::AllowMonitorThroughEdgeRules,
         ]
     );
 }
@@ -448,6 +448,64 @@ async fn http_check_requires_corroboration_for_vercel_challenge() {
             DiagnosticEvidence::EdgeServer,
             DiagnosticEvidence::BlockPage,
         ]
+    );
+}
+
+/// Seen in production: one region got `challenge`, the other `deny`, and only
+/// the first was explained.
+#[tokio::test]
+async fn http_check_explains_a_vercel_hard_deny() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                StatusCode::FORBIDDEN,
+                [
+                    (header::SERVER, "Vercel"),
+                    (
+                        header::HeaderName::from_static("x-vercel-mitigated"),
+                        "deny",
+                    ),
+                ],
+                "",
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert_eq!(result.response_code, Some(403));
+    assert_eq!(result.error.as_deref(), Some("unexpected status 403"));
+    let diagnostic = result
+        .diagnostic
+        .expect("a deny is attributed from headers alone");
+    assert_eq!(diagnostic.kind, CheckDiagnosticKind::AccessInterference);
+    assert_eq!(diagnostic.provider, Some(EdgeProvider::Vercel));
+    assert_eq!(diagnostic.confidence, DiagnosticConfidence::Medium);
+    assert_eq!(
+        diagnostic.evidence,
+        vec![
+            DiagnosticEvidence::MitigationHeader,
+            DiagnosticEvidence::EdgeServer,
+        ]
+    );
+    assert_eq!(
+        diagnostic.remediations,
+        vec![
+            DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
+            DiagnosticRemediation::AllowMonitorThroughEdgeRules,
+        ],
+        "no browser challenge was issued, so no challenge-only advice"
+    );
+    assert_eq!(
+        diagnostic.summary(),
+        "possible access-policy block at the Vercel edge"
     );
 }
 

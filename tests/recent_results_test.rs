@@ -137,7 +137,7 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
         stored_diagnostic.remediations,
         vec![
             DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
-            DiagnosticRemediation::BypassBrowserChallengeForMonitor,
+            DiagnosticRemediation::AllowMonitorThroughEdgeRules,
         ]
     );
     let stored_origin = t1_rows
