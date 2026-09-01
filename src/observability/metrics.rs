@@ -79,7 +79,7 @@ fn register_descriptions() {
     );
     describe_counter!(
         "uptimepage_http_access_diagnostics_total",
-        "Failed HTTP checks evaluated for edge access interference. Matched rows are labelled by bounded provider/confidence enums; unmatched is emitted only for unexpected 403 responses so signature drift is observable without target labels"
+        "Failed HTTP checks attributed to the edge in front of the origin. Matched rows are labelled by bounded kind/provider/confidence enums; unmatched covers only a failed 403 or a failure carrying Cloudflare error-page headers that no signature matched, so drift is observable without target labels"
     );
     describe_counter!(
         "uptimepage_circuit_breaker_state_changes_total",

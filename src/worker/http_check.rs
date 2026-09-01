@@ -16,8 +16,8 @@ use metrics::counter;
 use uuid::Uuid;
 
 use crate::domain::{
-    CheckDiagnostic, CheckResult, CheckStatus, DiagnosticConfidence, DiagnosticEvidence,
-    EdgeProvider, ExpectedStatus, HttpCheck, HttpMethod,
+    CheckDiagnostic, CheckDiagnosticKind, CheckResult, CheckStatus, DiagnosticConfidence,
+    DiagnosticEvidence, EdgeProvider, ExpectedStatus, HttpCheck, HttpMethod,
 };
 use crate::http_client::HttpClients;
 use crate::http_client::connector::{
@@ -362,7 +362,7 @@ async fn finalize(
     let status_ok = match_status(status_code, &check.expected_status);
     // Taken before the body is consumed, so a decode or timeout failure still
     // reports evidence that already arrived.
-    let header_diagnostic = detect_access_interference(&response_fingerprint, b"");
+    let header_diagnostic = detect_diagnostic(&response_fingerprint, b"", status_code);
 
     let err_with_ttfb = |reason: &'static str| -> (CheckResult, Option<HttpProbe>) {
         let mut r = CheckResult::error_with_elapsed(
@@ -380,7 +380,7 @@ async fn finalize(
         // failure still distinguishes 200-then-truncated from 503-broken-body.
         r.response_code = Some(status_code);
         if let Some(diagnostic) = header_diagnostic.as_ref() {
-            record_matched_access_diagnostic(diagnostic);
+            record_matched_diagnostic(diagnostic);
         }
         r.diagnostic = header_diagnostic.clone();
         let probe = headers_preview.clone().map(|h| HttpProbe {
@@ -461,14 +461,22 @@ async fn finalize(
         classify_outcome(status_code, status_ok, body_ok, retry_after_raw.as_deref());
     // Explains a failed verdict, never creates or clears one.
     let diagnostic = (status != CheckStatus::Up)
-        .then(|| detect_access_interference(&response_fingerprint, &decoded))
+        .then(|| detect_diagnostic(&response_fingerprint, &decoded, status_code))
         .flatten();
     if let Some(diagnostic) = diagnostic.as_ref() {
-        record_matched_access_diagnostic(diagnostic);
-    } else if !over_cap && is_unmatched_unexpected_403(status_code, status_ok) {
+        record_matched_diagnostic(diagnostic);
+    } else if !over_cap
+        && let Some(kind) = unmatched_diagnosable_kind(
+            &response_fingerprint,
+            status_code,
+            status_ok,
+            !decoded.is_empty(),
+        )
+    {
         counter!(
             names::HTTP_ACCESS_DIAGNOSTICS,
             "outcome" => "unmatched",
+            "kind" => kind,
             "provider" => "unknown",
             "confidence" => "unknown",
         )
@@ -517,6 +525,11 @@ struct ResponseFingerprint {
     datadome_signal: bool,
     vercel_challenge: bool,
     vercel_challenge_token: bool,
+    cloudflare_edge: bool,
+    cloudflare_ray: bool,
+    /// On relayed responses, absent on pages Cloudflare writes itself.
+    /// Measured, not documented — hence the body markers below.
+    cloudflare_relayed: bool,
 }
 
 impl ResponseFingerprint {
@@ -538,9 +551,18 @@ impl ResponseFingerprint {
             vercel_challenge: header("x-vercel-mitigated")
                 .is_some_and(|v| v.eq_ignore_ascii_case("challenge")),
             vercel_challenge_token: headers.contains_key("x-vercel-challenge-token"),
+            cloudflare_edge: server_is("cloudflare"),
+            cloudflare_ray: headers.contains_key("cf-ray"),
+            cloudflare_relayed: headers.contains_key("cf-cache-status"),
         }
     }
 }
+
+/// 502 is here because a tunnel with a dead service returns it — and because
+/// it is a common honest origin response, the page decides, never the code.
+const CLOUDFLARE_ORIGIN_ERROR_CODES: &[u16] = &[502, 520, 521, 522, 523, 524, 530];
+
+const CLOUDFLARE_TUNNEL_ERROR: u16 = 1033;
 
 fn detect_access_interference(
     fingerprint: &ResponseFingerprint,
@@ -647,18 +669,97 @@ fn detect_access_interference(
     None
 }
 
-fn record_matched_access_diagnostic(diagnostic: &CheckDiagnostic) {
+/// Edge marker, no relay marker, on a code the edge serves itself.
+fn cloudflare_error_page_headers(fingerprint: &ResponseFingerprint, status_code: u16) -> bool {
+    fingerprint.cloudflare_edge
+        && fingerprint.cloudflare_ray
+        && !fingerprint.cloudflare_relayed
+        && CLOUDFLARE_ORIGIN_ERROR_CODES.contains(&status_code)
+}
+
+/// The code proves nothing: 5xx above 511 is unassigned and other vendors
+/// emit 530. Only Cloudflare's own page separates them.
+fn detect_origin_unreachable(
+    fingerprint: &ResponseFingerprint,
+    decoded_body: &[u8],
+    status_code: u16,
+) -> Option<CheckDiagnostic> {
+    if !cloudflare_error_page_headers(fingerprint, status_code) {
+        return None;
+    }
+
+    let prefix = &decoded_body[..decoded_body.len().min(DIAGNOSTIC_BODY_BYTES)];
+    let body = String::from_utf8_lossy(prefix).to_ascii_lowercase();
+
+    // The header pair does not prove Cloudflare wrote the page: a Worker
+    // carries it too. No page, no diagnostic.
+    if !body.contains("cf-error-details") {
+        return None;
+    }
+    let origin_error = parse_cloudflare_error_code(&body);
+    if origin_error.is_none() && !body.contains(&format!("error code {status_code}")) {
+        return None;
+    }
+
+    Some(CheckDiagnostic::origin_unreachable(
+        vec![
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::ReferenceId,
+            DiagnosticEvidence::OriginErrorCode,
+        ],
+        origin_error == Some(CLOUDFLARE_TUNNEL_ERROR),
+    ))
+}
+
+/// The page carries unrelated four-digit numbers, so read only the one the
+/// `errorCode:` label names.
+fn parse_cloudflare_error_code(lowercased_body: &str) -> Option<u16> {
+    let rest = lowercased_body.split_once("errorcode:")?.1.trim_start();
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// Disjoint by status code, so the order is determinism, not precedence.
+fn detect_diagnostic(
+    fingerprint: &ResponseFingerprint,
+    decoded_body: &[u8],
+    status_code: u16,
+) -> Option<CheckDiagnostic> {
+    detect_access_interference(fingerprint, decoded_body)
+        .or_else(|| detect_origin_unreachable(fingerprint, decoded_body, status_code))
+}
+
+fn record_matched_diagnostic(diagnostic: &CheckDiagnostic) {
     counter!(
         names::HTTP_ACCESS_DIAGNOSTICS,
         "outcome" => "matched",
+        "kind" => diagnostic.kind.as_str(),
         "provider" => diagnostic.provider.map(EdgeProvider::as_str).unwrap_or("unknown"),
         "confidence" => diagnostic.confidence.as_str(),
     )
     .increment(1);
 }
 
-fn is_unmatched_unexpected_403(status_code: u16, status_ok: bool) -> bool {
-    status_code == 403 && !status_ok
+/// Only failures that cleared the detector's own gate and stayed unattributed.
+/// A relayed origin 5xx is correct, not drift, and would swamp the ratio.
+fn unmatched_diagnosable_kind(
+    fingerprint: &ResponseFingerprint,
+    status_code: u16,
+    status_ok: bool,
+    body_available: bool,
+) -> Option<&'static str> {
+    if status_ok {
+        return None;
+    }
+    // A challenge header is detectable without a body.
+    if status_code == 403 {
+        return Some(CheckDiagnosticKind::AccessInterference.as_str());
+    }
+    // A HEAD monitor never carries the page: a permanent miss, not drift.
+    if body_available && cloudflare_error_page_headers(fingerprint, status_code) {
+        return Some(CheckDiagnosticKind::OriginUnreachable.as_str());
+    }
+    None
 }
 
 /// First N unique-by-name response headers, sensitive values redacted.
@@ -985,6 +1086,7 @@ mod tests {
     use url::Url;
 
     use super::*;
+    use crate::domain::DiagnosticRemediation;
 
     fn check(url: &str, follow: bool, max: u8) -> HttpCheck {
         HttpCheck {
@@ -1029,6 +1131,261 @@ mod tests {
         assert!(!sanitised_retry_after("*bold*"));
         assert!(!sanitised_retry_after(""));
         assert!(!sanitised_retry_after(&"a".repeat(65)));
+    }
+
+    /// Verbatim from a live tunnel, so a template change breaks the test.
+    const CF_ORIGIN_DOWN_502: &str =
+        include_str!("../../tests/fixtures/cloudflare/origin_down_502.html");
+    const CF_TUNNEL_DOWN_530: &str =
+        include_str!("../../tests/fixtures/cloudflare/tunnel_down_530.html");
+
+    const CF_UP_200_HEADERS: &str =
+        include_str!("../../tests/fixtures/cloudflare/origin_up_200.headers");
+    const CF_ORIGIN_DOWN_502_HEADERS: &str =
+        include_str!("../../tests/fixtures/cloudflare/origin_down_502.headers");
+    const CF_TUNNEL_DOWN_530_HEADERS: &str =
+        include_str!("../../tests/fixtures/cloudflare/tunnel_down_530.headers");
+
+    fn captured_fingerprint(raw: &str) -> ResponseFingerprint {
+        let mut headers = hyper::HeaderMap::new();
+        for line in raw.lines().skip(1).filter(|line| !line.trim().is_empty()) {
+            let (name, value) = line.split_once(':').expect("header line");
+            headers.insert(
+                hyper::header::HeaderName::from_bytes(name.trim().as_bytes()).expect("name"),
+                hyper::header::HeaderValue::from_str(value.trim()).expect("value"),
+            );
+        }
+        ResponseFingerprint::from_headers(&headers)
+    }
+
+    /// `cf-cache-status` is undocumented, so pin it to what the edge sent
+    /// rather than to a hand-written header set that restates the guess.
+    #[test]
+    fn the_relay_marker_holds_against_captured_responses() {
+        assert!(
+            captured_fingerprint(CF_UP_200_HEADERS).cloudflare_relayed,
+            "a proxied 200 carries cf-cache-status"
+        );
+        for raw in [CF_ORIGIN_DOWN_502_HEADERS, CF_TUNNEL_DOWN_530_HEADERS] {
+            let fingerprint = captured_fingerprint(raw);
+            assert!(fingerprint.cloudflare_edge && fingerprint.cloudflare_ray);
+            assert!(
+                !fingerprint.cloudflare_relayed,
+                "a Cloudflare-authored error page omits cf-cache-status"
+            );
+        }
+    }
+
+    #[test]
+    fn origin_detector_matches_the_captured_responses_end_to_end() {
+        let tunnel = detect_origin_unreachable(
+            &captured_fingerprint(CF_TUNNEL_DOWN_530_HEADERS),
+            CF_TUNNEL_DOWN_530.as_bytes(),
+            530,
+        )
+        .expect("captured tunnel failure");
+        assert_eq!(tunnel.kind, CheckDiagnosticKind::OriginTunnelDown);
+
+        let origin = detect_origin_unreachable(
+            &captured_fingerprint(CF_ORIGIN_DOWN_502_HEADERS),
+            CF_ORIGIN_DOWN_502.as_bytes(),
+            502,
+        )
+        .expect("captured origin failure");
+        assert_eq!(origin.kind, CheckDiagnosticKind::OriginUnreachable);
+
+        // The proxied 200's headers must not attribute even on an error code.
+        assert!(
+            detect_origin_unreachable(
+                &captured_fingerprint(CF_UP_200_HEADERS),
+                CF_TUNNEL_DOWN_530.as_bytes(),
+                530
+            )
+            .is_none()
+        );
+    }
+
+    fn cloudflare_headers(relayed: bool, ray: bool) -> ResponseFingerprint {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            "server",
+            hyper::header::HeaderValue::from_static("cloudflare"),
+        );
+        if ray {
+            headers.insert(
+                "cf-ray",
+                hyper::header::HeaderValue::from_static("a340f0bcd922fd58-LCA"),
+            );
+        }
+        if relayed {
+            headers.insert(
+                "cf-cache-status",
+                hyper::header::HeaderValue::from_static("DYNAMIC"),
+            );
+        }
+        ResponseFingerprint::from_headers(&headers)
+    }
+
+    #[test]
+    fn origin_detector_names_a_downed_tunnel() {
+        let hit = detect_origin_unreachable(
+            &cloudflare_headers(false, true),
+            CF_TUNNEL_DOWN_530.as_bytes(),
+            530,
+        )
+        .expect("captured tunnel error page");
+
+        assert_eq!(hit.kind, CheckDiagnosticKind::OriginTunnelDown);
+        assert_eq!(hit.provider, Some(EdgeProvider::Cloudflare));
+        assert_eq!(hit.confidence, DiagnosticConfidence::High);
+        assert_eq!(
+            hit.evidence,
+            vec![
+                DiagnosticEvidence::EdgeServer,
+                DiagnosticEvidence::ReferenceId,
+                DiagnosticEvidence::OriginErrorCode,
+            ]
+        );
+        assert!(
+            hit.remediations
+                .contains(&DiagnosticRemediation::VerifyEdgeTunnel)
+        );
+    }
+
+    #[test]
+    fn origin_detector_keeps_the_tunnel_arm_off_a_live_tunnel() {
+        // Tunnel up, service dead: naming the tunnel would misdirect.
+        let hit = detect_origin_unreachable(
+            &cloudflare_headers(false, true),
+            CF_ORIGIN_DOWN_502.as_bytes(),
+            502,
+        )
+        .expect("captured 502 error page");
+
+        assert_eq!(hit.kind, CheckDiagnosticKind::OriginUnreachable);
+        assert_eq!(hit.confidence, DiagnosticConfidence::High);
+        assert_eq!(
+            hit.remediations,
+            vec![DiagnosticRemediation::VerifyOriginReachable]
+        );
+    }
+
+    #[test]
+    fn origin_detector_leaves_a_relayed_origin_error_alone() {
+        // Load-bearing negative: blaming the edge for a customer's own 502
+        // is worse than saying nothing.
+        assert!(
+            detect_origin_unreachable(
+                &cloudflare_headers(true, true),
+                b"<html>application error</html>",
+                502
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn origin_detector_requires_both_edge_markers() {
+        assert!(
+            detect_origin_unreachable(
+                &cloudflare_headers(false, false),
+                CF_TUNNEL_DOWN_530.as_bytes(),
+                530
+            )
+            .is_none()
+        );
+
+        // 530 is not Cloudflare-exclusive.
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert("server", hyper::header::HeaderValue::from_static("nginx"));
+        assert!(
+            detect_origin_unreachable(&ResponseFingerprint::from_headers(&headers), b"", 530)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn origin_detector_will_not_attribute_on_headers_alone() {
+        // A Worker carries the same edge markers. No page, no diagnostic.
+        assert!(detect_origin_unreachable(&cloudflare_headers(false, true), b"", 522).is_none());
+        assert!(
+            detect_origin_unreachable(
+                &cloudflare_headers(false, true),
+                b"<html>worker threw</html>",
+                502
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn origin_detector_ignores_codes_outside_the_family() {
+        // 525/526 are origin-side too, but their fix is a certificate change.
+        for code in [525, 526, 200, 404, 503] {
+            assert!(
+                detect_origin_unreachable(
+                    &cloudflare_headers(false, true),
+                    CF_TUNNEL_DOWN_530.as_bytes(),
+                    code
+                )
+                .is_none(),
+                "{code} must not be attributed"
+            );
+        }
+    }
+
+    #[test]
+    fn cloudflare_error_code_reads_the_labelled_one() {
+        assert_eq!(
+            parse_cloudflare_error_code(&CF_TUNNEL_DOWN_530.to_ascii_lowercase()),
+            Some(CLOUDFLARE_TUNNEL_ERROR)
+        );
+        assert_eq!(parse_cloudflare_error_code("no code here"), None);
+        assert_eq!(parse_cloudflare_error_code("errorcode: "), None);
+    }
+
+    #[test]
+    fn unmatched_counter_stays_off_correct_non_attributions() {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert("server", hyper::header::HeaderValue::from_static("nginx"));
+        let plain = ResponseFingerprint::from_headers(&headers);
+        assert_eq!(unmatched_diagnosable_kind(&plain, 502, false, true), None);
+
+        // Relayed: Cloudflare in front, but the origin wrote the response.
+        assert_eq!(
+            unmatched_diagnosable_kind(&cloudflare_headers(true, true), 530, false, true),
+            None
+        );
+
+        // An accepted 5xx is not a failure to attribute.
+        assert_eq!(
+            unmatched_diagnosable_kind(&cloudflare_headers(false, true), 530, true, true),
+            None
+        );
+
+        // A HEAD probe can never carry the page: a permanent miss, not drift.
+        assert_eq!(
+            unmatched_diagnosable_kind(&cloudflare_headers(false, true), 530, false, false),
+            None
+        );
+
+        // Headers say Cloudflare's own page, no signature matched: the drift.
+        assert_eq!(
+            unmatched_diagnosable_kind(&cloudflare_headers(false, true), 530, false, true),
+            Some(CheckDiagnosticKind::OriginUnreachable.as_str())
+        );
+    }
+
+    #[test]
+    fn dispatcher_keeps_access_interference_reachable() {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            "cf-mitigated",
+            hyper::header::HeaderValue::from_static("challenge"),
+        );
+        let hit = detect_diagnostic(&ResponseFingerprint::from_headers(&headers), b"", 403)
+            .expect("challenge header");
+        assert_eq!(hit.kind, CheckDiagnosticKind::AccessInterference);
     }
 
     #[test]
@@ -1214,13 +1571,21 @@ mod tests {
 
     #[test]
     fn unmatched_metric_requires_a_status_mismatched_403() {
-        assert!(is_unmatched_unexpected_403(403, false));
-        assert!(
-            !is_unmatched_unexpected_403(403, true),
+        let plain = ResponseFingerprint::default();
+        let access = Some(CheckDiagnosticKind::AccessInterference.as_str());
+        assert_eq!(unmatched_diagnosable_kind(&plain, 403, false, true), access);
+        assert_eq!(
+            unmatched_diagnosable_kind(&plain, 403, false, false),
+            access,
+            "a challenge header is detectable without a body"
+        );
+        assert_eq!(
+            unmatched_diagnosable_kind(&plain, 403, true, true),
+            None,
             "an accepted 403 with a failed body assertion is not signature drift"
         );
-        assert!(!is_unmatched_unexpected_403(401, false));
-        assert!(!is_unmatched_unexpected_403(500, false));
+        assert_eq!(unmatched_diagnosable_kind(&plain, 401, false, true), None);
+        assert_eq!(unmatched_diagnosable_kind(&plain, 500, false, true), None);
     }
 
     #[test]

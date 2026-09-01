@@ -198,3 +198,45 @@ pub struct DispatchReport {
     #[serde(default)]
     pub flow_steps: Vec<StepTrace>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The body is decoded before the handler runs, so one unreadable field
+    /// would reject every result in the flush.
+    #[test]
+    fn a_batch_survives_a_diagnostic_kind_this_build_cannot_read() {
+        let req: IngestRequest = serde_json::from_value(serde_json::json!({
+            "batch_id": Uuid::nil(),
+            "results": [
+                {
+                    "target_id": Uuid::nil(),
+                    "org_id": Uuid::nil(),
+                    "timestamp": "2026-09-01T02:07:53Z",
+                    "status": "down",
+                    "duration_ms": 12,
+                    "response_code": 530,
+                    "diagnostic": {
+                        "kind": "a_kind_from_a_newer_agent",
+                        "confidence": "high",
+                        "evidence": ["edge_server"]
+                    },
+                    "error": "unexpected status 530"
+                },
+                {
+                    "target_id": Uuid::nil(),
+                    "org_id": Uuid::nil(),
+                    "timestamp": "2026-09-01T02:08:53Z",
+                    "status": "up",
+                    "duration_ms": 40
+                }
+            ]
+        }))
+        .expect("an unknown diagnostic kind must not fail the batch");
+
+        assert_eq!(req.results.len(), 2);
+        assert!(req.results[0].diagnostic.is_none());
+        assert_eq!(req.results[1].status, crate::domain::CheckStatus::Up);
+    }
+}

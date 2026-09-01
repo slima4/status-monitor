@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -27,7 +27,11 @@ pub struct CheckResult {
     pub response_size: Option<u32>,
     /// Explains a failed result. Never moves the verdict: assertions alone
     /// decide Up/Down.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "lenient_diagnostic",
+        skip_serializing_if = "Option::is_none"
+    )]
     #[schema(nullable = true)]
     pub diagnostic: Option<CheckDiagnostic>,
     pub error: Option<String>,
@@ -69,9 +73,28 @@ impl CheckResult {
     }
 }
 
+/// A kind from a newer agent would fail the whole ingest batch. A diagnostic
+/// only explains a verdict, so drop it alone.
+fn lenient_diagnostic<'de, D>(deserializer: D) -> Result<Option<CheckDiagnostic>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let Some(raw) = Option::<serde_json::Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match serde_json::from_value(raw) {
+        Ok(diagnostic) => Ok(Some(diagnostic)),
+        Err(error) => {
+            tracing::warn!(%error, "unreadable check diagnostic dropped from result");
+            Ok(None)
+        }
+    }
+}
+
 /// Bounded diagnosis beside a check result. The HTTP error stays the
 /// authority; this only attributes it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(from = "CheckDiagnosticWire")]
 pub struct CheckDiagnostic {
     pub kind: CheckDiagnosticKind,
     pub confidence: DiagnosticConfidence,
@@ -82,11 +105,43 @@ pub struct CheckDiagnostic {
     pub evidence: Vec<DiagnosticEvidence>,
     /// Stable action codes for API clients. Derived from the kind, never
     /// stored, so an old row cannot outlive the advice it was written with.
-    #[serde(
-        default = "CheckDiagnostic::standard_access_remediations",
-        skip_serializing_if = "Vec::is_empty"
-    )]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub remediations: Vec<DiagnosticRemediation>,
+}
+
+/// Remediations re-derive from `kind` rather than trusting the wire, so a
+/// live result and a stored one cannot disagree.
+#[derive(Deserialize)]
+struct CheckDiagnosticWire {
+    kind: CheckDiagnosticKind,
+    confidence: DiagnosticConfidence,
+    #[serde(default)]
+    provider: Option<EdgeProvider>,
+    #[serde(default, deserialize_with = "known_evidence")]
+    evidence: Vec<DiagnosticEvidence>,
+}
+
+fn known_evidence<'de, D>(deserializer: D) -> Result<Vec<DiagnosticEvidence>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Vec::<String>::deserialize(deserializer)?;
+    Ok(raw
+        .iter()
+        .filter_map(|item| DiagnosticEvidence::parse(item))
+        .collect())
+}
+
+impl From<CheckDiagnosticWire> for CheckDiagnostic {
+    fn from(wire: CheckDiagnosticWire) -> Self {
+        Self {
+            kind: wire.kind,
+            confidence: wire.confidence,
+            provider: wire.provider,
+            evidence: wire.evidence,
+            remediations: wire.kind.remediations(),
+        }
+    }
 }
 
 impl CheckDiagnostic {
@@ -104,6 +159,22 @@ impl CheckDiagnostic {
         }
     }
 
+    /// `tunnel` picks the kind, not a remediation: only the kind is stored.
+    pub fn origin_unreachable(evidence: Vec<DiagnosticEvidence>, tunnel: bool) -> Self {
+        let kind = if tunnel {
+            CheckDiagnosticKind::OriginTunnelDown
+        } else {
+            CheckDiagnosticKind::OriginUnreachable
+        };
+        Self {
+            kind,
+            confidence: DiagnosticConfidence::High,
+            provider: Some(EdgeProvider::Cloudflare),
+            evidence,
+            remediations: kind.remediations(),
+        }
+    }
+
     pub fn summary(&self) -> String {
         let certainty = match (self.kind, self.confidence) {
             (CheckDiagnosticKind::AccessInterference, DiagnosticConfidence::High) => {
@@ -112,9 +183,11 @@ impl CheckDiagnostic {
             (CheckDiagnosticKind::AccessInterference, DiagnosticConfidence::Medium) => {
                 "possible access-policy block"
             }
+            (CheckDiagnosticKind::OriginUnreachable, _) => "origin unreachable",
+            (CheckDiagnosticKind::OriginTunnelDown, _) => "origin tunnel down",
         };
         match self.provider {
-            Some(provider) => format!("{certainty} at {}", provider.label()),
+            Some(provider) => format!("{certainty} {} {}", self.kind.joiner(), provider.label()),
             None => certainty.to_string(),
         }
     }
@@ -124,11 +197,13 @@ impl CheckDiagnostic {
             CheckDiagnosticKind::AccessInterference => {
                 "use an authenticated health endpoint or exempt this monitor from browser challenges"
             }
+            CheckDiagnosticKind::OriginUnreachable => {
+                "check the origin is up and reachable from the edge"
+            }
+            CheckDiagnosticKind::OriginTunnelDown => {
+                "restart the tunnel daemon on the origin, then check the origin is up"
+            }
         }
-    }
-
-    pub fn standard_access_remediations() -> Vec<DiagnosticRemediation> {
-        CheckDiagnosticKind::AccessInterference.remediations()
     }
 }
 
@@ -136,19 +211,35 @@ impl CheckDiagnostic {
 #[serde(rename_all = "snake_case")]
 pub enum CheckDiagnosticKind {
     AccessInterference,
+    OriginUnreachable,
+    /// Own kind, not a flag: advice derives from the kind, and only the kind
+    /// is stored.
+    OriginTunnelDown,
 }
 
 impl CheckDiagnosticKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::AccessInterference => "access_interference",
+            Self::OriginUnreachable => "origin_unreachable",
+            Self::OriginTunnelDown => "origin_tunnel_down",
         }
     }
 
     pub fn parse(raw: &str) -> Option<Self> {
         match raw {
             "access_interference" => Some(Self::AccessInterference),
+            "origin_unreachable" => Some(Self::OriginUnreachable),
+            "origin_tunnel_down" => Some(Self::OriginTunnelDown),
             _ => None,
+        }
+    }
+
+    /// "blocked *at* the edge", but "origin unreachable *behind* it".
+    pub const fn joiner(self) -> &'static str {
+        match self {
+            Self::AccessInterference => "at",
+            Self::OriginUnreachable | Self::OriginTunnelDown => "behind",
         }
     }
 
@@ -157,6 +248,11 @@ impl CheckDiagnosticKind {
             Self::AccessInterference => vec![
                 DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
                 DiagnosticRemediation::BypassBrowserChallengeForMonitor,
+            ],
+            Self::OriginUnreachable => vec![DiagnosticRemediation::VerifyOriginReachable],
+            Self::OriginTunnelDown => vec![
+                DiagnosticRemediation::VerifyEdgeTunnel,
+                DiagnosticRemediation::VerifyOriginReachable,
             ],
         }
     }
@@ -240,6 +336,7 @@ pub enum DiagnosticEvidence {
     EdgeServer,
     BlockPage,
     ReferenceId,
+    OriginErrorCode,
 }
 
 impl DiagnosticEvidence {
@@ -249,6 +346,7 @@ impl DiagnosticEvidence {
             Self::EdgeServer => "edge_server",
             Self::BlockPage => "block_page",
             Self::ReferenceId => "reference_id",
+            Self::OriginErrorCode => "origin_error_code",
         }
     }
 
@@ -258,6 +356,7 @@ impl DiagnosticEvidence {
             "edge_server" => Some(Self::EdgeServer),
             "block_page" => Some(Self::BlockPage),
             "reference_id" => Some(Self::ReferenceId),
+            "origin_error_code" => Some(Self::OriginErrorCode),
             _ => None,
         }
     }
@@ -268,6 +367,8 @@ impl DiagnosticEvidence {
 pub enum DiagnosticRemediation {
     UseAuthenticatedHealthEndpoint,
     BypassBrowserChallengeForMonitor,
+    VerifyOriginReachable,
+    VerifyEdgeTunnel,
 }
 
 impl DiagnosticRemediation {
@@ -275,6 +376,8 @@ impl DiagnosticRemediation {
         match self {
             Self::UseAuthenticatedHealthEndpoint => "use_authenticated_health_endpoint",
             Self::BypassBrowserChallengeForMonitor => "bypass_browser_challenge_for_monitor",
+            Self::VerifyOriginReachable => "verify_origin_reachable",
+            Self::VerifyEdgeTunnel => "verify_edge_tunnel",
         }
     }
 }
@@ -351,19 +454,173 @@ mod tests {
     }
 
     #[test]
-    fn old_diagnostic_payloads_receive_standard_remediations() {
+    fn payloads_without_remediations_fill_them_from_their_own_kind() {
+        for kind in [
+            CheckDiagnosticKind::AccessInterference,
+            CheckDiagnosticKind::OriginUnreachable,
+            CheckDiagnosticKind::OriginTunnelDown,
+        ] {
+            let diagnostic: CheckDiagnostic = serde_json::from_value(serde_json::json!({
+                "kind": kind.as_str(),
+                "confidence": "high",
+                "provider": "cloudflare",
+                "evidence": ["edge_server"]
+            }))
+            .expect("agent payload predating the field");
+
+            assert_eq!(diagnostic.remediations, kind.remediations());
+        }
+    }
+
+    #[test]
+    fn wire_remediations_are_ignored_in_favour_of_the_kind() {
+        // Storage re-derives on read; trusting the wire only lets them differ.
         let diagnostic: CheckDiagnostic = serde_json::from_value(serde_json::json!({
-            "kind": "access_interference",
+            "kind": "origin_tunnel_down",
             "confidence": "high",
-            "provider": "akamai",
-            "evidence": ["edge_server", "block_page"]
+            "provider": "cloudflare",
+            "evidence": ["edge_server"],
+            "remediations": ["bypass_browser_challenge_for_monitor"]
         }))
-        .expect("old agent payload");
+        .expect("payload with mismatched remediations");
 
         assert_eq!(
             diagnostic.remediations,
-            CheckDiagnostic::standard_access_remediations()
+            CheckDiagnosticKind::OriginTunnelDown.remediations()
         );
+    }
+
+    #[test]
+    fn an_unknown_evidence_tag_does_not_cost_the_diagnostic() {
+        let diagnostic: CheckDiagnostic = serde_json::from_value(serde_json::json!({
+            "kind": "origin_tunnel_down",
+            "confidence": "high",
+            "provider": "cloudflare",
+            "evidence": ["edge_server", "a_tag_from_a_newer_agent", "reference_id"]
+        }))
+        .expect("an unknown evidence tag must not fail the diagnostic");
+
+        assert_eq!(diagnostic.kind, CheckDiagnosticKind::OriginTunnelDown);
+        assert_eq!(
+            diagnostic.evidence,
+            vec![
+                DiagnosticEvidence::EdgeServer,
+                DiagnosticEvidence::ReferenceId,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_result_survives_a_diagnostic_kind_this_build_cannot_read() {
+        // One unreadable field must not cost a region the whole flush.
+        let result: CheckResult = serde_json::from_value(serde_json::json!({
+            "target_id": Uuid::nil(),
+            "org_id": Uuid::nil(),
+            "timestamp": "2026-09-01T02:07:53Z",
+            "status": "down",
+            "duration_ms": 12,
+            "dns_ms": null,
+            "connect_ms": null,
+            "tls_ms": null,
+            "ttfb_ms": null,
+            "response_code": 530,
+            "response_size": null,
+            "diagnostic": {
+                "kind": "a_kind_from_a_newer_agent",
+                "confidence": "high",
+                "provider": "cloudflare",
+                "evidence": ["edge_server"]
+            },
+            "error": "unexpected status 530"
+        }))
+        .expect("an unknown diagnostic kind must not fail the result");
+
+        assert!(result.diagnostic.is_none());
+        assert_eq!(result.response_code, Some(530));
+        assert_eq!(result.status, CheckStatus::Down);
+        assert_eq!(result.error.as_deref(), Some("unexpected status 530"));
+    }
+
+    #[test]
+    fn a_readable_diagnostic_still_arrives_intact() {
+        let result: CheckResult = serde_json::from_value(serde_json::json!({
+            "target_id": Uuid::nil(),
+            "org_id": Uuid::nil(),
+            "timestamp": "2026-09-01T02:07:53Z",
+            "status": "down",
+            "duration_ms": 12,
+            "response_code": 530,
+            "diagnostic": {
+                "kind": "origin_tunnel_down",
+                "confidence": "high",
+                "provider": "cloudflare",
+                "evidence": ["edge_server", "reference_id", "origin_error_code"]
+            },
+            "error": "unexpected status 530"
+        }))
+        .expect("a known diagnostic kind");
+
+        let diagnostic = result.diagnostic.expect("diagnostic kept");
+        assert_eq!(diagnostic.kind, CheckDiagnosticKind::OriginTunnelDown);
+        assert_eq!(
+            diagnostic.remediations,
+            CheckDiagnosticKind::OriginTunnelDown.remediations()
+        );
+    }
+
+    #[test]
+    fn diagnostic_storage_names_round_trip() {
+        for kind in [
+            CheckDiagnosticKind::AccessInterference,
+            CheckDiagnosticKind::OriginUnreachable,
+            CheckDiagnosticKind::OriginTunnelDown,
+        ] {
+            assert_eq!(CheckDiagnosticKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(CheckDiagnosticKind::parse("unknown_future_kind"), None);
+
+        for evidence in [
+            DiagnosticEvidence::ChallengeHeader,
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::BlockPage,
+            DiagnosticEvidence::ReferenceId,
+            DiagnosticEvidence::OriginErrorCode,
+        ] {
+            assert_eq!(DiagnosticEvidence::parse(evidence.as_str()), Some(evidence));
+        }
+        assert_eq!(DiagnosticEvidence::parse("unknown_future_evidence"), None);
+    }
+
+    #[test]
+    fn origin_unreachable_reads_as_english_and_gates_the_tunnel_arm() {
+        let tunnel =
+            CheckDiagnostic::origin_unreachable(vec![DiagnosticEvidence::EdgeServer], true);
+        assert_eq!(tunnel.kind, CheckDiagnosticKind::OriginTunnelDown);
+        assert_eq!(
+            tunnel.summary(),
+            "origin tunnel down behind the Cloudflare edge"
+        );
+        assert!(
+            tunnel
+                .remediations
+                .contains(&DiagnosticRemediation::VerifyEdgeTunnel)
+        );
+        // The invariant storage depends on: only the kind decides the advice.
+        assert_eq!(tunnel.remediations, tunnel.kind.remediations());
+
+        // Tunnel up, service dead: naming the tunnel would misdirect.
+        let service =
+            CheckDiagnostic::origin_unreachable(vec![DiagnosticEvidence::EdgeServer], false);
+        assert_eq!(
+            service.summary(),
+            "origin unreachable behind the Cloudflare edge"
+        );
+        assert!(
+            !service
+                .remediations
+                .contains(&DiagnosticRemediation::VerifyEdgeTunnel)
+        );
+        assert_eq!(service.remediations, service.kind.remediations());
     }
 
     #[test]

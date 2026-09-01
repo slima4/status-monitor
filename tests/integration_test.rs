@@ -282,6 +282,96 @@ async fn http_check_uses_cloudflare_documented_challenge_header() {
 }
 
 #[tokio::test]
+async fn http_check_names_a_dead_origin_behind_cloudflare() {
+    let error_page = include_str!("fixtures/cloudflare/tunnel_down_530.html");
+    let app = Router::new().route(
+        "/",
+        get(move || async move {
+            (
+                StatusCode::from_u16(530).unwrap(),
+                [
+                    (header::CONTENT_TYPE, "text/html; charset=UTF-8"),
+                    (header::SERVER, "cloudflare"),
+                    (
+                        header::HeaderName::from_static("cf-ray"),
+                        "a340f0bcd922fd58-LCA",
+                    ),
+                ],
+                error_page,
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    let diagnostic = result.diagnostic.expect("origin-unreachable diagnosis");
+    assert_eq!(diagnostic.kind, CheckDiagnosticKind::OriginTunnelDown);
+    assert_eq!(diagnostic.confidence, DiagnosticConfidence::High);
+    assert_eq!(diagnostic.provider, Some(EdgeProvider::Cloudflare));
+    assert_eq!(
+        diagnostic.evidence,
+        vec![
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::ReferenceId,
+            DiagnosticEvidence::OriginErrorCode,
+        ]
+    );
+    assert_eq!(
+        diagnostic.remediations,
+        vec![
+            DiagnosticRemediation::VerifyEdgeTunnel,
+            DiagnosticRemediation::VerifyOriginReachable,
+        ]
+    );
+    assert_eq!(
+        diagnostic.summary(),
+        "origin tunnel down behind the Cloudflare edge"
+    );
+}
+
+/// A customer's own 502 must reach the operator unattributed.
+#[tokio::test]
+async fn http_check_leaves_a_relayed_origin_error_unattributed() {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            (
+                StatusCode::BAD_GATEWAY,
+                [
+                    (header::CONTENT_TYPE, "text/html; charset=UTF-8"),
+                    (header::SERVER, "cloudflare"),
+                    (
+                        header::HeaderName::from_static("cf-ray"),
+                        "a340f0bcd922fd58-LCA",
+                    ),
+                    (
+                        header::HeaderName::from_static("cf-cache-status"),
+                        "DYNAMIC",
+                    ),
+                ],
+                "<!doctype html><h1>upstream said 502</h1>",
+            )
+        }),
+    );
+    let addr = spawn_router(app).await;
+    let check = default_http_check(
+        Url::parse(&format!("http://{addr}/")).unwrap(),
+        ExpectedStatus::Exact(200),
+    );
+
+    let result = execute_http_check(Uuid::now_v7(), Uuid::nil(), &check, &test_client()).await;
+
+    assert_eq!(result.status, CheckStatus::Down);
+    assert!(result.diagnostic.is_none(), "{:?}", result.diagnostic);
+}
+
+#[tokio::test]
 async fn http_check_uses_aws_waf_documented_challenge_header() {
     let app = Router::new().route(
         "/",

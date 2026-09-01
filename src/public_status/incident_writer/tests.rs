@@ -45,6 +45,21 @@ fn akamai_blocked(target_id: Uuid, when: DateTime<Utc>) -> CheckResult {
     blocked
 }
 
+fn tunnel_down(target_id: Uuid, when: DateTime<Utc>) -> CheckResult {
+    let mut dead = result(target_id, when, CheckStatus::Down);
+    dead.error = Some("unexpected status 530".into());
+    dead.response_code = Some(530);
+    dead.diagnostic = Some(CheckDiagnostic::origin_unreachable(
+        vec![
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::ReferenceId,
+            DiagnosticEvidence::OriginErrorCode,
+        ],
+        true,
+    ));
+    dead
+}
+
 // ── pure decide() ──────────────────────────────────────────────────────
 
 #[test]
@@ -132,6 +147,69 @@ fn decide_requires_cross_region_cause_consensus_and_reports_it() {
                 sample.find("authenticated health endpoint") < sample.find("regions agree"),
                 "the fix outranks the tally when a long error text forces a clip: {sample}"
             );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+#[test]
+fn decide_names_the_failing_side_when_every_region_sees_a_dead_origin() {
+    // The shape that prompted this: every region on 530, cause unnamed.
+    let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+    let target = Uuid::now_v7();
+    let by_region = ["eu-helsinki", "us-east", "apac-sg"].map(|region| {
+        (
+            region.to_string(),
+            vec![tunnel_down(target, base), tunnel_down(target, ts(base, 30))],
+        )
+    });
+
+    match decide_multi(target, &[], &by_region, 2, 2)
+        .into_iter()
+        .next()
+    {
+        Some(Action::Open(new)) => {
+            let sample = new.error_sample.expect("diagnostic sample");
+            assert!(
+                sample.contains("origin tunnel down behind the Cloudflare edge"),
+                "{sample}"
+            );
+            assert!(sample.contains("restart the tunnel daemon"), "{sample}");
+            assert!(sample.contains("3/3 reporting regions agree"), "{sample}");
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
+#[test]
+fn decide_will_not_blame_the_edge_on_one_regions_evidence() {
+    // Below quorum the incident must stay unattributed.
+    let base = Utc.with_ymd_and_hms(2026, 5, 13, 12, 0, 0).unwrap();
+    let target = Uuid::now_v7();
+    let mut ordinary = result(target, base, CheckStatus::Down);
+    ordinary.error = Some("connection refused".into());
+    let by_region = [
+        (
+            "eu-helsinki".to_string(),
+            vec![tunnel_down(target, base), tunnel_down(target, ts(base, 30))],
+        ),
+        (
+            "us-east".to_string(),
+            vec![ordinary.clone(), ordinary.clone()],
+        ),
+        (
+            "apac-sg".to_string(),
+            vec![ordinary.clone(), ordinary.clone()],
+        ),
+    ];
+
+    match decide_multi(target, &[], &by_region, 2, 2)
+        .into_iter()
+        .next()
+    {
+        Some(Action::Open(new)) => {
+            let sample = new.error_sample.unwrap_or_default();
+            assert!(!sample.contains("origin tunnel down"), "{sample}");
         }
         other => panic!("expected Open, got {other:?}"),
     }

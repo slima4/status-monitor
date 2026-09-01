@@ -12,8 +12,8 @@ mod common;
 
 use chrono::{Duration, Utc};
 use uptimepage::domain::{
-    CheckDiagnostic, CheckResult, CheckStatus, DiagnosticConfidence, DiagnosticEvidence,
-    DiagnosticRemediation, EdgeProvider, OrgId,
+    CheckDiagnostic, CheckDiagnosticKind, CheckResult, CheckStatus, DiagnosticConfidence,
+    DiagnosticEvidence, DiagnosticRemediation, EdgeProvider, OrgId,
 };
 use uptimepage::storage::{
     ClampedRange, ClickhouseResultSink, ClickhouseResultsStore, OrgTtlDays, ResultSink,
@@ -81,13 +81,28 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
         ],
     ));
 
-    // t1: 4 eu results + 1 us result. t2: 2 eu results.
+    let origin_at = ago(45);
+    let mut origin_down = result(t1, org, origin_at);
+    origin_down.status = CheckStatus::Down;
+    origin_down.response_code = Some(530);
+    origin_down.error = Some("unexpected status 530".into());
+    origin_down.diagnostic = Some(CheckDiagnostic::origin_unreachable(
+        vec![
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::ReferenceId,
+            DiagnosticEvidence::OriginErrorCode,
+        ],
+        true,
+    ));
+
+    // t1: 5 eu results + 1 us result. t2: 2 eu results.
     sink_eu
         .write_batch(&[
             result(t1, org, ago(90)),
             result(t1, org, ago(60)),
             result(t1, org, ago(30)),
             diagnosed,
+            origin_down,
             result(t2, org, ago(40)),
             result(t2, org, ago(20)),
         ])
@@ -110,7 +125,7 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
         .expect("batched read");
     let t1_rows: Vec<_> = all.iter().filter(|(_, r)| r.target_id == t1).collect();
     let t2_rows: Vec<_> = all.iter().filter(|(_, r)| r.target_id == t2).collect();
-    assert_eq!(t1_rows.len(), 5, "t1: 4 eu + 1 us");
+    assert_eq!(t1_rows.len(), 6, "t1: 5 eu + 1 us");
     assert_eq!(t2_rows.len(), 2, "t2: 2 eu");
     let stored_diagnostic = t1_rows
         .iter()
@@ -124,6 +139,29 @@ async fn batched_read_caps_per_target_region_and_filters_pairs() {
             DiagnosticRemediation::UseAuthenticatedHealthEndpoint,
             DiagnosticRemediation::BypassBrowserChallengeForMonitor,
         ]
+    );
+    let stored_origin = t1_rows
+        .iter()
+        .find(|(_, result)| result.timestamp.timestamp() == origin_at.timestamp())
+        .and_then(|(_, result)| result.diagnostic.as_ref())
+        .expect("origin diagnosis round-trips through ClickHouse");
+    assert_eq!(stored_origin.kind, CheckDiagnosticKind::OriginTunnelDown);
+    assert_eq!(stored_origin.provider, Some(EdgeProvider::Cloudflare));
+    assert_eq!(
+        stored_origin.evidence,
+        vec![
+            DiagnosticEvidence::EdgeServer,
+            DiagnosticEvidence::ReferenceId,
+            DiagnosticEvidence::OriginErrorCode,
+        ]
+    );
+    assert_eq!(
+        stored_origin.remediations,
+        vec![
+            DiagnosticRemediation::VerifyEdgeTunnel,
+            DiagnosticRemediation::VerifyOriginReachable,
+        ],
+        "remediations must survive a round trip that stores only the kind"
     );
     assert!(
         t1_rows.iter().any(|(region, _)| region == "eu")
