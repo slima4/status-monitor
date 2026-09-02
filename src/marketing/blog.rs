@@ -41,6 +41,8 @@ static BLOG_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/src/marketing/conte
 pub struct Post {
     pub slug: String,
     pub title: String,
+    /// Optional document title when it should differ from the visible post title.
+    pub meta_title: Option<String>,
     pub date: String,
     pub updated: Option<String>,
     pub excerpt: String,
@@ -76,6 +78,7 @@ pub struct PostImage {
 #[derive(Debug, Deserialize)]
 struct FrontMatter {
     title: String,
+    meta_title: Option<String>,
     date: String,
     updated: Option<String>,
     slug: Option<String>,
@@ -193,6 +196,7 @@ fn parse_post(raw: &str, stem: &str) -> anyhow::Result<Post> {
     Ok(Post {
         slug: fm.slug.unwrap_or_else(|| stem.to_string()),
         title: fm.title,
+        meta_title: fm.meta_title,
         date: fm.date,
         updated: fm.updated,
         excerpt: fm.excerpt,
@@ -469,6 +473,7 @@ struct BlogPostPage {
     json_ld: JsonLd,
     item_list_ld: Option<JsonLd>,
     faq_ld: Option<JsonLd>,
+    meta_title: String,
     title: String,
     date: String,
     updated: Option<String>,
@@ -604,6 +609,10 @@ fn render_post(cfg: &MarketingCfg, post: &Post) -> CachedRender {
         json_ld,
         item_list_ld,
         faq_ld,
+        meta_title: post
+            .meta_title
+            .clone()
+            .unwrap_or_else(|| post.title.clone()),
         title: post.title.clone(),
         date: post.date.clone(),
         updated: post.updated.clone().filter(|u| u != &post.date),
@@ -1058,17 +1067,27 @@ mod tests {
         let post = parse_post(raw, "hi").expect("parse");
         assert_eq!(post.slug, "hi");
         assert_eq!(post.title, "Hi");
+        assert_eq!(post.meta_title, None);
         assert!(!post.draft);
+    }
+
+    #[test]
+    fn parse_post_accepts_meta_title_override() {
+        let raw = "+++\ntitle = \"Visible title\"\nmeta_title = \"Search title\"\ndate = \"2026-05-20\"\n+++\nbody\n";
+        let post = parse_post(raw, "hi").expect("parse");
+        assert_eq!(post.title, "Visible title");
+        assert_eq!(post.meta_title.as_deref(), Some("Search title"));
     }
 
     #[test]
     fn posts_fit_serp_limits() {
         for p in all() {
+            let search_title = p.meta_title.as_deref().unwrap_or(&p.title);
             assert!(
-                p.title.len() <= 65,
+                search_title.len() <= 65,
                 "{}: title {} chars > 65",
                 p.slug,
-                p.title.len()
+                search_title.len()
             );
             assert!(
                 p.excerpt.len() <= 160,

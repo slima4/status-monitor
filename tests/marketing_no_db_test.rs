@@ -606,6 +606,41 @@ async fn og_image_is_rooted_at_origin_on_subpages() {
 }
 
 #[tokio::test]
+async fn blog_meta_title_only_changes_the_document_title() {
+    let (status, body, _) = get("/blog/is-98-uptime-good").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("<title>Is 98% Uptime Good? When It Works—and When It Fails</title>"),
+        "meta_title must control the document title"
+    );
+    assert!(
+        body.contains(
+            "<h1 class=\"mk-display mk-blog-title\">Is 98% uptime good? It allows 7.3 days of downtime a year</h1>"
+        ),
+        "the visible H1 must keep the post title"
+    );
+    assert!(
+        body.contains(
+            r#"property="og:title" content="Is 98% uptime good? It allows 7.3 days of downtime a year""#
+        ),
+        "OpenGraph must keep the post title"
+    );
+    assert!(
+        body.contains(r#""headline":"Is 98% uptime good? It allows 7.3 days of downtime a year""#),
+        "BlogPosting schema must keep the post title"
+    );
+
+    let (status, body, _) = get("/blog/error-budgets-explained").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains(
+            "<title>Error budgets, explained: SLOs, burn rate, when to stop shipping</title>"
+        ),
+        "posts without meta_title must use the post title"
+    );
+}
+
+#[tokio::test]
 async fn blog_post_og_image_overrides_the_shared_card() {
     let (status, body, _) = get("/blog/is-98-uptime-good").await;
     assert_eq!(status, StatusCode::OK);
