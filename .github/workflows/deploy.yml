@@ -355,12 +355,23 @@ jobs:
             git fetch --quiet origin "$HEAD_SHA"
             git checkout --quiet --force "$HEAD_SHA"
           else
-            # Manual path: operator-chosen tag; take tip of main.
-            git pull --ff-only
+            # Manual path: operator-chosen tag, tree stays at tip of main.
+            # Rollback is code-only (see rollback.yml) and an older tree would
+            # roll the postgres/clickhouse pins under a live volume. Named refs
+            # because the auto path leaves HEAD detached, where a bare `git
+            # pull` refuses to guess a branch; FETCH_HEAD because a hand-set
+            # remote.origin.fetch cannot redirect it.
+            git fetch --quiet origin main
+            # --force lost --ff-only's other job: refusing a non-descendant.
+            git merge-base --is-ancestor HEAD FETCH_HEAD || {
+              echo "::error::main is not a fast-forward of the deployed tree — refusing to move it backward"
+              exit 1
+            }
+            git checkout --quiet --force FETCH_HEAD
           fi
           unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 \
                 GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1
-          echo "tree at $(git rev-parse --short HEAD)"
+          echo "tree at $(git rev-parse HEAD)"
 
           # Ship only prod artifacts to the box. Pre-this, `git pull` landed
           # the entire repo on /opt/uptimepage/, including root
