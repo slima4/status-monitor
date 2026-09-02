@@ -45,6 +45,18 @@
         <span class="mt-1 block text-xs text-muted">
           Links the incident to a monitor's timeline and status pages. Leave unset for something the platform doesn't watch.
         </span>
+        <div class="mt-5">
+          <span class="mb-1.5 block text-xs text-muted">Uptime</span>
+          <div class="sm-rail sm-rail--wide sm-rail--tall" role="radiogroup" aria-label="Count against uptime">
+            <label class="sm-rail__seg">
+              <input type="radio" name="counts_as_downtime" value="0" class="sr-only" checked>leave uptime alone
+            </label>
+            <label class="sm-rail__seg">
+              <input type="radio" name="counts_as_downtime" value="1" class="sr-only">count as downtime
+            </label>
+          </div>
+          <p class="mt-1 text-xs text-muted">No check failed here, so by default this does not move the monitor's uptime. Switch it on when the outage was real and the checks could not see it.</p>
+        </div>
       </div>
     </fieldset>
 

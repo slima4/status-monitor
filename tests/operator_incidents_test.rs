@@ -21,6 +21,7 @@ fn seed_incident() -> Incident {
         status: CheckStatus::Down,
         duration_secs: None,
         check_count: 3,
+        counts_as_downtime: true,
         error_sample: None,
         severity: IncidentSeverity::Major,
         public_title: None,
@@ -274,4 +275,32 @@ async fn a_declared_incident_stays_internal_unless_it_asks_to_be_public() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CREATED);
     assert_eq!(body_json(resp).await["visibility"], "public");
+}
+
+/// A note about an outage the checks never saw must not quietly dent uptime.
+#[tokio::test]
+async fn a_declared_incident_leaves_uptime_alone_unless_it_asks_to_count() {
+    let app = build_test_app_with_owner(|_| {});
+    let resp = app
+        .clone()
+        .oneshot(owner_json(
+            "POST",
+            "/api/v1/incidents",
+            json!({ "title": "customer reports checkout failing" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(body_json(resp).await["counts_as_downtime"], false);
+
+    let resp = app
+        .oneshot(owner_json(
+            "POST",
+            "/api/v1/incidents",
+            json!({ "title": "payments down, site up", "counts_as_downtime": true }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    assert_eq!(body_json(resp).await["counts_as_downtime"], true);
 }

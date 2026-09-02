@@ -14,8 +14,8 @@ use uuid::Uuid;
 use crate::api::error::codes;
 use crate::app::AppState;
 use crate::domain::{
-    CheckResult, CheckStatus, IncidentEvent, IncidentSeverity, IncidentState, IncidentStatusPhase,
-    OpsIncident, OrgId, UserId,
+    CheckResult, CheckStatus, IncidentEvent, IncidentOrigin, IncidentSeverity, IncidentState,
+    IncidentStatusPhase, OpsIncident, OrgId, UserId,
 };
 use crate::error::AppError;
 use crate::storage::orgs::list_members;
@@ -773,6 +773,7 @@ fn event_kind_label(e: &IncidentEvent) -> &'static str {
         Notified => "notified",
         Note => "note",
         SeverityChanged => "severity changed",
+        DowntimeChanged => "downtime accounting changed",
         StateChanged => "state changed",
         Resolved => "resolved",
         Reopened => "reopened",
@@ -1016,7 +1017,7 @@ pub struct EditIncidentPage {
     pub active_tab: &'static str,
     pub id: String,
     pub title: String,
-    /// Read-only: one monitor holds one open incident, so rebinding would
+    /// Read-only: one monitor holds one open declaration, so rebinding would
     /// collide with the open-incident index.
     pub monitor_name: Option<String>,
     pub target_id: Option<String>,
@@ -1025,6 +1026,9 @@ pub struct EditIncidentPage {
     pub visibility: &'static str,
     pub public_title: String,
     pub public_description: String,
+    /// Manual origin and bound to a monitor: anything else has no uptime to move.
+    pub downtime_editable: bool,
+    pub counts_as_downtime: bool,
 }
 
 pub async fn edit_form(
@@ -1061,6 +1065,8 @@ pub async fn edit_form(
             .as_ref()
             .and_then(|n| n.public_description.clone())
             .unwrap_or_default(),
+        downtime_editable: inc.origin == IncidentOrigin::Manual && inc.target_id.is_some(),
+        counts_as_downtime: inc.counts_as_downtime,
     })
 }
 
@@ -1299,6 +1305,7 @@ mod tests {
             origin: crate::domain::IncidentOrigin::Monitor,
             visibility: crate::domain::IncidentVisibility::Internal,
             paging_enabled: true,
+            counts_as_downtime: true,
             started_at: Utc::now(),
             ended_at: None,
             acknowledged_at: None,
@@ -1585,12 +1592,18 @@ mod tests {
             visibility: "public",
             public_title: "Elevated errors".into(),
             public_description: "Some checkouts fail.".into(),
+            downtime_editable: true,
+            counts_as_downtime: false,
         }
         .render()
         .unwrap();
         assert!(html.contains(r#"value="partner API degraded""#), "{html}");
         assert!(
             html.contains(r#"name="severity" value="critical" checked"#),
+            "{html}"
+        );
+        assert!(
+            html.contains(r#"name="counts_as_downtime" value="0" class="sr-only" checked"#),
             "{html}"
         );
         assert!(

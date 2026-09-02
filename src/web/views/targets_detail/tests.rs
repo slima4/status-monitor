@@ -1467,6 +1467,7 @@ fn incident_row_falls_back_to_start_end_when_duration_secs_missing() {
         status: crate::domain::CheckStatus::Down,
         duration_secs: None,
         check_count: 7,
+        counts_as_downtime: true,
         error_sample: None,
         severity: Default::default(),
         public_title: None,
@@ -1525,6 +1526,7 @@ fn ongoing_row() -> IncidentRow {
         check_count: 4,
         error_sample: "connection refused".into(),
         ongoing: true,
+        counts_as_downtime: true,
     }
 }
 
@@ -1539,6 +1541,7 @@ fn resolved_row() -> IncidentRow {
         check_count: 7,
         error_sample: "HTTP 503 Service Unavailable".into(),
         ongoing: false,
+        counts_as_downtime: true,
     }
 }
 
@@ -1568,6 +1571,20 @@ fn incidents_page_renders_table_rows_with_ongoing_emphasis() {
     assert!(html.contains("data-incident-chevron"));
     // Row carries the window data the JS uses to fetch the timeline.
     assert!(html.contains(r#"data-from="2026-05-13T11:50:00Z""#));
+}
+
+/// An unexplained row beside a 100% figure is the confusion, pointed the other way.
+#[test]
+fn an_excluded_incident_says_so_beside_its_duration() {
+    let counted = sample_incidents_page(vec![resolved_row()], 1)
+        .render()
+        .unwrap();
+    assert!(!counted.contains("not counted"), "{counted}");
+
+    let mut row = resolved_row();
+    row.counts_as_downtime = false;
+    let excluded = sample_incidents_page(vec![row], 1).render().unwrap();
+    assert!(excluded.contains("not counted"), "{excluded}");
 }
 
 #[test]

@@ -75,6 +75,7 @@ pub struct IncidentRow {
     pub check_count: u64,
     pub error_sample: String,
     pub ongoing: bool,
+    pub counts_as_downtime: bool,
 }
 
 /// What a heartbeat's own clock says. `Some` for every heartbeat, so the live
@@ -457,6 +458,7 @@ impl From<Incident> for IncidentRow {
                 .map(fmt_error_display)
                 .unwrap_or_default(),
             ongoing,
+            counts_as_downtime: inc.counts_as_downtime,
         }
     }
 }

@@ -313,6 +313,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             origin: IncidentOrigin::Manual,
             visibility: IncidentVisibility::Internal,
             paging_enabled: new.notify,
+            counts_as_downtime: new.counts_as_downtime,
             started_at: now,
             ended_at: None,
             acknowledged_at: None,

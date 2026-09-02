@@ -76,7 +76,12 @@
             {% when None %}<span class="font-medium text-state-bad">—</span>
           {% endmatch %}
         </td>
-        <td class="px-3 py-2 align-top font-mono text-xs">{% match inc.duration_secs %}{% when Some with (s) %}{{ s|humanize_dur }}{% when None %}ongoing{% endmatch %}</td>
+        <td class="px-3 py-2 align-top font-mono text-xs">
+          {% match inc.duration_secs %}{% when Some with (s) %}{{ s|humanize_dur }}{% when None %}ongoing{% endmatch %}
+          {% if !inc.counts_as_downtime %}
+          <span class="block text-quiet" title="Declared by hand with no failing check behind it, so it is left out of the uptime figure">not counted</span>
+          {% endif %}
+        </td>
         <td class="px-3 py-2 align-top text-right font-mono text-xs">{{ inc.check_count }}</td>
         <td class="px-3 py-2 align-top text-muted">
           <span class="line-clamp-2 break-words" title="{{ inc.error_sample }}">{% if !inc.error_sample.is_empty() %}{{ inc.error_sample }}{% else %}—{% endif %}</span>

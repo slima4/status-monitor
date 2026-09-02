@@ -526,7 +526,9 @@ impl OrgAggregator {
                WHERE i.org_id = $2
                  AND (i.ended_at IS NULL OR i.ended_at >= $1)
                  AND i.target_id = ANY($3)
-                 AND (i.origin = 'monitor' OR i.visibility = 'public')"#,
+                 AND (i.origin = 'monitor' OR i.visibility = 'public')
+                 -- A published declaration kept out of uptime is a notice, not an outage.
+                 AND i.counts_as_downtime"#,
         )
         .bind(since)
         .bind(org.0)

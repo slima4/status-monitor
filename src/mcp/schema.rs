@@ -387,6 +387,8 @@ pub struct IncidentWindow {
     pub opened_at: String,
     /// RFC 3339 incident end, or `null` while ongoing.
     pub resolved_at: Option<String>,
+    /// `false` when this window is listed but explains none of the `uptime` gap.
+    pub counts_as_downtime: bool,
 }
 
 /// One region's share of a monitor's window, straight from its own checks.

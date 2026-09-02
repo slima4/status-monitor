@@ -37,8 +37,9 @@ impl PgIncidentOpsStore {
 /// Columns selected for an [`OpsIncident`]. Kept in one place so every
 /// `RETURNING` / `SELECT` stays in lockstep with [`OpsIncidentRow`].
 const OPS_COLS: &str = "id, target_id, title, state, severity, urgency, origin, visibility, \
-     paging_enabled, started_at, ended_at, acknowledged_at, acknowledged_by, assigned_to, \
-     resolved_by, escalation_policy_id, escalation_level, escalation_round, next_escalation_at, \
+     paging_enabled, counts_as_downtime, started_at, ended_at, acknowledged_at, \
+     acknowledged_by, assigned_to, resolved_by, escalation_policy_id, escalation_level, \
+     escalation_round, next_escalation_at, \
      check_count, error_sample, regions_down, regions_up, created_at, updated_at";
 
 /// A `%…%` `LIKE` pattern with the operator's wildcards neutralised, so a
@@ -71,6 +72,7 @@ struct OpsIncidentRow {
     origin: String,
     visibility: String,
     paging_enabled: bool,
+    counts_as_downtime: bool,
     started_at: DateTime<Utc>,
     ended_at: Option<DateTime<Utc>>,
     acknowledged_at: Option<DateTime<Utc>>,
@@ -100,6 +102,7 @@ fn row_to_ops(r: OpsIncidentRow) -> OpsIncident {
         origin: IncidentOrigin::from_db_str(&r.origin),
         visibility: IncidentVisibility::from_db_str(&r.visibility),
         paging_enabled: r.paging_enabled,
+        counts_as_downtime: r.counts_as_downtime,
         started_at: r.started_at,
         ended_at: r.ended_at,
         acknowledged_at: r.acknowledged_at,
@@ -295,11 +298,13 @@ impl PgIncidentOpsStore {
             .await
         {
             Ok(row) => row,
-            // Reopen clears ended_at; if another incident is already open for the
-            // target, the unique open-incident index rejects it — surface 409.
+            // Reopen clears ended_at; if one of the same origin is already open
+            // for the target, its unique index rejects it — surface 409.
             Err(e)
-                if e.as_database_error().and_then(|d| d.constraint())
-                    == Some("idx_incidents_org_open") =>
+                if matches!(
+                    e.as_database_error().and_then(|d| d.constraint()),
+                    Some("idx_incidents_org_open_monitor" | "idx_incidents_org_open_manual")
+                ) =>
             {
                 return Err(crate::error::AppError::conflict(
                     crate::api::error::codes::INCIDENT_ALREADY_OPEN,
@@ -566,14 +571,15 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         // status_at_start is a non-null column shared with monitor-opened
         // incidents; a declared incident has no check status, so it records the
         // declared problem as 'down'.
-        // A target-bound declare conflicts with the unique open-incident index
-        // when one is already open; DO NOTHING yields no row → 409, not a 500.
+        // A target-bound declare conflicts only with another open declaration;
+        // DO NOTHING yields no row → 409, not a 500.
         let sql = format!(
             "INSERT INTO incidents \
                 (org_id, target_id, started_at, status_at_start, origin, state, \
-                 severity, urgency, title, visibility, paging_enabled) \
-             VALUES ($1, $2, now(), 'down', 'manual', 'triggered', $3, $4, $5, 'internal', $6) \
-             ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL DO NOTHING \
+                 severity, urgency, title, visibility, paging_enabled, counts_as_downtime) \
+             VALUES ($1, $2, now(), 'down', 'manual', 'triggered', $3, $4, $5, 'internal', $6, $7) \
+             ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL AND origin = 'manual' \
+             DO NOTHING \
              RETURNING {OPS_COLS}"
         );
         let row: Option<OpsIncidentRow> = sqlx::query_as(&sql)
@@ -583,6 +589,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             .bind(new.urgency.as_db_str())
             .bind(new.title)
             .bind(new.notify)
+            .bind(new.counts_as_downtime)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| anyhow::anyhow!("declare incident: {e}"))?;

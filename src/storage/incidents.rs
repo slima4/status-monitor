@@ -139,6 +139,7 @@ struct IncidentRow {
     status_at_start: String,
     check_count: i32,
     error_sample: Option<String>,
+    counts_as_downtime: bool,
     public_title: Option<String>,
     public_description: Option<String>,
     duration_secs: Option<i32>,
@@ -158,7 +159,8 @@ struct UpdateRow {
 async fn load_with_updates(pool: &PgPool, id: Uuid, org_id: Uuid) -> Result<Option<Incident>> {
     let Some(row): Option<IncidentRow> = sqlx::query_as(
         r#"SELECT id, target_id, started_at, ended_at, severity, status_at_start,
-                  check_count, error_sample, public_title, public_description,
+                  check_count, error_sample, counts_as_downtime,
+                  public_title, public_description,
                   duration_secs, created_at, updated_at, regions_down, regions_up
            FROM incidents WHERE id = $1 AND org_id = $2"#,
     )
@@ -194,6 +196,7 @@ fn row_to_incident(row: IncidentRow, updates: Vec<UpdateRow>) -> Incident {
         duration_secs: row.duration_secs.map(|d| d.max(0) as u64),
         check_count: row.check_count.max(0) as u64,
         error_sample: row.error_sample,
+        counts_as_downtime: row.counts_as_downtime,
         severity: IncidentSeverity::from_db_str(&row.severity),
         public_title: row.public_title,
         public_description: row.public_description,
@@ -242,10 +245,15 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
                    severity           = COALESCE($6, severity),
                    title              = CASE WHEN $8::bool THEN $9 ELSE title END,
                    urgency            = COALESCE($10, urgency),
+                   -- Guards the handler's 422: check rows evidence a monitor incident.
+                   counts_as_downtime = CASE
+                       WHEN $11::bool AND origin = 'manual' THEN $12
+                       ELSE counts_as_downtime END,
                    updated_at         = now()
                WHERE id = $1 AND org_id = $7
                RETURNING id, target_id, started_at, ended_at, severity, status_at_start,
-                         check_count, error_sample, public_title, public_description,
+                         check_count, error_sample, counts_as_downtime,
+                         public_title, public_description,
                          duration_secs, created_at, updated_at, regions_down, regions_up"#,
         )
         .bind(id)
@@ -258,6 +266,8 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         .bind(update.title.is_some())
         .bind(update.title.clone().flatten())
         .bind(urgency)
+        .bind(update.counts_as_downtime.is_some())
+        .bind(update.counts_as_downtime.unwrap_or_default())
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| anyhow::anyhow!("patch_narration: {e}"))?;
@@ -432,7 +442,8 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
         let skip = offset as i64;
         let rows: Vec<IncidentRow> = sqlx::query_as(
             r#"SELECT id, target_id, started_at, ended_at, severity, status_at_start,
-                      check_count, error_sample, public_title, public_description,
+                      check_count, error_sample, counts_as_downtime,
+                      public_title, public_description,
                       duration_secs, created_at, updated_at, regions_down, regions_up
                FROM incidents
                WHERE org_id = $1 AND target_id = $2
@@ -472,6 +483,7 @@ impl IncidentNarrationStore for PgIncidentNarrationStore {
                FROM incidents
                WHERE org_id = $3 AND target_id IS NOT NULL AND started_at < $2
                  AND (ended_at IS NULL OR ended_at >= $1)
+                 AND counts_as_downtime
                GROUP BY target_id"#,
         )
         .bind(range.from)
@@ -581,6 +593,9 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
         }
         if let Some(s) = update.severity {
             inc.severity = s;
+        }
+        if let Some(c) = update.counts_as_downtime {
+            inc.counts_as_downtime = c;
         }
         inc.updated_at = Some(Utc::now());
         Ok(Some(inc.clone()))
@@ -698,6 +713,9 @@ impl IncidentNarrationStore for InMemoryIncidentNarrationStore {
             let Some(target_id) = i.target_id else {
                 continue;
             };
+            if !i.counts_as_downtime {
+                continue;
+            }
             if i.started_at < range.to && i.ended_at.is_none_or(|e| e >= range.from) {
                 let end = i.ended_at.unwrap_or(range.to).min(range.to);
                 let start = i.started_at.max(range.from);
@@ -723,6 +741,7 @@ mod tests {
             duration_secs: None,
             check_count: 3,
             error_sample: Some("timeout".into()),
+            counts_as_downtime: true,
             severity: IncidentSeverity::Major,
             public_title: None,
             public_description: None,

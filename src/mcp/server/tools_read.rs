@@ -489,6 +489,7 @@ impl McpServer {
             .map(|inc| IncidentWindow {
                 opened_at: inc.started_at.to_rfc3339(),
                 resolved_at: inc.ended_at.map(|e| e.to_rfc3339()),
+                counts_as_downtime: inc.counts_as_downtime,
             })
             .collect();
 

@@ -1387,6 +1387,7 @@ fn incident_detail_maps_state_severity_and_updates() {
         status: CheckStatus::Down,
         duration_secs: None,
         check_count: 3,
+        counts_as_downtime: true,
         error_sample: Some("boom".into()),
         severity: IncidentSeverity::Major,
         public_title: None,

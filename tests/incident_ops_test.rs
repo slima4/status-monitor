@@ -150,6 +150,7 @@ async fn an_incident_can_be_amended_after_it_is_declared_pg() {
             urgency: Some(uptimepage::domain::IncidentUrgency::Low),
             public_title: Some(Some("Elevated errors".into())),
             public_description: Some(Some("Some checkouts fail.".into())),
+            counts_as_downtime: Some(true),
         },
     )
     .await
@@ -1263,6 +1264,98 @@ async fn reopen_conflicts_when_target_has_a_newer_open_incident_pg() {
         }
         other => panic!("expected Conflict, got {other:?}"),
     }
+}
+
+/// The two kinds of incident hold separate slots: an operator can record what
+/// they are chasing without muting the monitor underneath it.
+#[tokio::test]
+#[ignore]
+async fn a_declaration_and_a_monitor_incident_can_be_open_at_once_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, monitor_incident) = seed(&pool, "incboth").await;
+    let target_id: Uuid = sqlx::query_scalar("SELECT target_id FROM incidents WHERE id = $1")
+        .bind(monitor_incident)
+        .fetch_one(&pool)
+        .await
+        .expect("target of the seeded monitor incident");
+
+    let store = PgIncidentOpsStore::new(pool.clone());
+    let declared = store
+        .declare(
+            org,
+            NewManualIncident {
+                target_id: Some(target_id),
+                ..Default::default()
+            },
+            Actor::User(user),
+        )
+        .await
+        .expect("declaring alongside an open monitor incident");
+    assert!(!declared.counts_as_downtime);
+
+    let open: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM incidents WHERE target_id = $1 AND ended_at IS NULL",
+    )
+    .bind(target_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(open, 2);
+}
+
+/// The one field in the amend surface that moves a published number is the one
+/// that most needs to say who moved it.
+#[tokio::test]
+#[ignore]
+async fn changing_downtime_accounting_lands_on_the_timeline_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, _) = seed(&pool, "incdown").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+    let narration = uptimepage::storage::PgIncidentNarrationStore::new(pool.clone());
+    let declared = store
+        .declare(org, NewManualIncident::default(), Actor::User(user))
+        .await
+        .expect("declare");
+
+    let patched = uptimepage::storage::IncidentNarrationStore::patch_narration(
+        &narration,
+        org,
+        declared.id,
+        uptimepage::domain::IncidentNarrationUpdate {
+            counts_as_downtime: Some(true),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("patch")
+    .expect("incident exists");
+    assert!(patched.counts_as_downtime);
+
+    store
+        .append_event(
+            org,
+            declared.id,
+            IncidentEventKind::DowntimeChanged,
+            Actor::User(user),
+            Some("now counts toward uptime".into()),
+        )
+        .await
+        .expect("append event");
+    let kinds: Vec<IncidentEventKind> = store
+        .timeline(org, declared.id)
+        .await
+        .expect("timeline")
+        .into_iter()
+        .map(|e| e.kind)
+        .collect();
+    assert!(
+        kinds.contains(&IncidentEventKind::DowntimeChanged),
+        "{kinds:?}"
+    );
 }
 
 // Emergency-receipt lifecycle on the in-memory store (no DB): a sent page with

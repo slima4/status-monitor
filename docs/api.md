@@ -79,7 +79,7 @@ These mutate the public surface; they live under the same auth boundary as
 | `GET` | `/api/v1/maintenance/{id}` | get one window |
 | `PATCH` | `/api/v1/maintenance/{id}` | edit title / description / time range / components / alert suppression (rejected after `ends_at`) |
 | `DELETE` | `/api/v1/maintenance/{id}` | cancel a window |
-| `PATCH` | `/api/v1/incidents/{id}` | update narration: `public_title`, `public_description`, `severity` (JSON `null` clears, omit to leave alone) |
+| `PATCH` | `/api/v1/incidents/{id}` | update narration: `public_title`, `public_description`, `severity` (JSON `null` clears, omit to leave alone), plus `counts_as_downtime` on a declared incident (`422` on a monitor-opened one) |
 | `POST` | `/api/v1/incidents/{id}/updates` | append a status update — `phase` ∈ `investigating`/`identified`/`monitoring`/`resolved`/`postmortem`, `message` ≤ 2 000 chars |
 
 ### Operator endpoints (status pages)

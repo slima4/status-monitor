@@ -846,6 +846,136 @@ async fn internal_auto_incident_paints_strip_manual_stays_hidden() {
     }
 }
 
+/// Publishing says something happened; counting says the service was down.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL + CLICKHOUSE_URL"]
+async fn a_published_declaration_paints_only_when_it_counts() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let Some(ch) = common::ch_client_from_env().await else {
+        return;
+    };
+    purge_prefix(&pool, "agg-decl-").await;
+
+    let org_id = seed_org(&pool, "agg-decl").await;
+    let store = Arc::new(PostgresTargetStore::from_pool(pool.clone(), None));
+    let mk_target = |role: &str| public_target(&format!("agg-decl-{role}-{}", Uuid::now_v7()));
+    let notice_target = store
+        .create(
+            org_id,
+            mk_target("notice"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create notice target");
+    let outage_target = store
+        .create(
+            org_id,
+            mk_target("outage"),
+            WriteSource::Ui,
+            i64::MAX,
+            i64::MAX,
+        )
+        .await
+        .expect("create outage target");
+    let notice_id = notice_target.id;
+    let outage_id = outage_target.id;
+    let pool_for_cleanup = pool.clone();
+
+    let body = async move {
+        let now = Utc::now();
+        let mk = |tid: Uuid, counts: bool| {
+            sqlx::query(
+                "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, origin,                                         visibility, severity, counts_as_downtime)                  VALUES ($1, $2, $3, 'down', 'manual', 'public', 'critical', $4)",
+            )
+            .bind(org_id.0)
+            .bind(tid)
+            .bind(now - chrono::Duration::minutes(5))
+            .bind(counts)
+        };
+        mk(notice_id, false)
+            .execute(&pool)
+            .await
+            .expect("insert published declaration that does not count");
+        mk(outage_id, true)
+            .execute(&pool)
+            .await
+            .expect("insert published declaration that counts");
+
+        let page_id = seed_page_with_target(&pool, org_id, notice_id).await;
+        PgStatusPageStore::new(pool.clone())
+            .add_component(
+                org_id,
+                page_id,
+                NewStatusPageComponent {
+                    target_id: outage_id,
+                    public_name: None,
+                    public_description: None,
+                    public_group: None,
+                    sort_order: 1,
+                    detail_link_enabled: false,
+                },
+                i64::MAX,
+                None,
+            )
+            .await
+            .expect("add outage component");
+
+        let agg = OrgAggregator::new(pool, ch, AggregatorConfig::default(), None);
+        let (page, _markers, _names) = agg.build(page_id, org_id).await.expect("aggregator build");
+
+        let component = |id: Uuid| {
+            page.groups
+                .iter()
+                .flat_map(|g| &g.components)
+                .find(|c| c.id == id)
+                .expect("component present")
+        };
+        let notice = component(notice_id);
+        let outage = component(outage_id);
+
+        assert!(
+            matches!(
+                notice.current_status,
+                PublicComponentStatus::Operational | PublicComponentStatus::NoData
+            ),
+            "a notice does not flip the dot"
+        );
+        assert!(
+            matches!(
+                notice.history.last().copied(),
+                Some(DayState::Operational | DayState::NoData)
+            ),
+            "a notice paints no day"
+        );
+        assert_eq!(
+            outage.current_status,
+            PublicComponentStatus::MajorOutage,
+            "counting means the service was down"
+        );
+        assert_eq!(
+            outage.history.last().copied(),
+            Some(DayState::MajorOutage),
+            "counting paints the day"
+        );
+        assert_eq!(
+            page.active_incidents.len(),
+            2,
+            "both are published, so both are still told to customers"
+        );
+    };
+
+    let result = AssertUnwindSafe(body).catch_unwind().await;
+    delete_target(&pool_for_cleanup, notice_id).await;
+    delete_target(&pool_for_cleanup, outage_id).await;
+    if let Err(p) = result {
+        std::panic::resume_unwind(p);
+    }
+}
+
 /// End-to-end: a PUBLISHED postmortem surfaces on the public incident detail via
 /// `OrgPublicSource::incident_by_id`; a DRAFT one (published_at NULL) does not.
 /// Guards the publish → public-page wiring.

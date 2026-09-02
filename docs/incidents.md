@@ -16,15 +16,27 @@ Acknowledging an incident stops escalation and records who took it — it posts 
 
 ## How an incident opens
 
-A background writer scans every enabled monitor (not only status-page components). When a monitor sustains a bad state — `down`, `error`, or `degraded` — it opens one incident; a sustained recovery to `up` resolves it automatically (with no human resolver recorded). One open incident per monitor at a time; duplicate failures fold into it.
+A background writer scans every enabled monitor (not only status-page components). When a monitor sustains a bad state — `down`, `error`, or `degraded` — it opens one incident; a sustained recovery to `up` resolves it automatically (with no human resolver recorded). One open monitor incident at a time; duplicate failures fold into it. A declared incident sits in its own slot, so one left open does not stop the writer opening, paging and counting a real outage under it.
 
 "Sustains" is two gates, not one. A region counts as failing only after `alert_confirmations` failures in a row from that region alone (default 2), and then the monitor's region policy decides how many failing regions have to agree before the incident opens. The default is majority, meaning more than half of the regions currently reporting results for that monitor; a region that stops reporting drops out of the vote instead of counting as down. Under that default, a monitor probed from several regions does not open an incident because one location had a bad minute. See [Multi-region probes](multi-region.md) for the policy list, or [Probe regions](hosted/regions.md) on the hosted service.
 
 Visibility is derived at open time: if the monitor is a component of an enabled status page the incident opens `public`, otherwise `internal`. A monitor on no page still gets a fully tracked internal incident.
 
-You can also declare an incident by hand from the console (`/incidents/declare`) — for a problem a monitor can't see, like a customer report or a partner outage. A manual incident may stand alone or link to a monitor.
+You can also declare an incident by hand from the console (`/incidents/declare`) — for a problem a monitor can't see, like a customer report or a partner outage. A manual incident may stand alone or link to a monitor. A monitor holds at most one open declaration, independently of whatever the writer is doing, so a declaration you forget to close never silences detection on that monitor.
 
 Declaring is quiet by default: the incident opens `internal` and pages nobody, so you can open one while you are still working out what broke. The form offers both louder options explicitly — publish it to the status pages carrying the linked monitor, and alert the org's channels now. Over the API those are the `visibility` and `notify` fields on `POST /api/v1/incidents`, both off unless set. Alert mail for a declared incident says it was declared by hand, so nobody reads it as a monitor detection.
+
+A declared incident does not dent the monitor's uptime unless you say it should. Uptime is measured from checks, and a declaration has no failing check behind it, so counting one by default would move a number nothing in the check history can explain. The declare form asks the question directly, and the incident stays listed either way with the monitor's incident list marking an excluded one `not counted`. Switch it on for a real outage the checks could not see, like payments failing while the site answers fine. Over the API this is `counts_as_downtime` on `POST /api/v1/incidents`, off unless set, and it can be flipped later with `PATCH /api/v1/incidents/{id}`. It also decides what the public page paints: see [Public status page](public-status.md). An incident a monitor opened always counts: its failed checks are the evidence, and the API refuses to move that with a `422`.
+
+### A declaration and a detection on the same monitor
+
+The two are independent objects and hold separate slots, so a monitor can carry one of each at once. Walking the usual sequence:
+
+1. **You declare.** One `manual` incident opens, quiet unless you asked it to page, excluded from uptime unless you asked it to count. The writer ignores it from here on.
+2. **The monitor then goes down for real.** The writer sees no monitor incident open for it, so it opens its own, pages on-call, and derives visibility as usual. Both incidents are now open. Only the writer's one moves uptime; yours still reads `not counted`.
+3. **The monitor recovers.** The writer resolves the incident it opened, stamped at the recovery, and uptime is dented by exactly that window.
+
+Your declaration is left alone in step 3. The writer never resolves what a person opened, so a declaration stays open until someone closes it, and while it is open the org keeps reporting an active incident. Resolve declarations when you are done with them.
 
 Each incident carries a **severity** (`minor` / `major` / `critical`) and an **urgency** (`high` pages on-call, `low` notifies only; urgency decides how hard it pages once alerting is on). A declared incident takes the severity you choose; an auto-opened one currently defaults to `major` until an operator changes it.
 

@@ -35,6 +35,7 @@ impl IncidentStore for PgIncidentStore {
         let row: Option<OpenIncidentRow> = sqlx::query_as::<_, OpenIncidentRow>(
             r#"SELECT id, target_id, started_at, region FROM incidents
                WHERE target_id = $1 AND org_id = $2 AND ended_at IS NULL
+                 AND origin = 'monitor'
                ORDER BY started_at DESC LIMIT 1"#,
         )
         .bind(target_id)
@@ -76,7 +77,7 @@ impl IncidentStore for PgIncidentStore {
                FROM incidents i
                JOIN unnest($1::uuid[], $2::uuid[]) AS pairs(org_id, target_id)
                  ON i.org_id = pairs.org_id AND i.target_id = pairs.target_id
-               WHERE i.ended_at IS NULL"#,
+               WHERE i.ended_at IS NULL AND i.origin = 'monitor'"#,
         )
         .bind(&orgs)
         .bind(&targets)
@@ -102,18 +103,21 @@ impl IncidentStore for PgIncidentStore {
         let status_at_start = status_to_db(new.status_at_start)
             .ok_or_else(|| anyhow::anyhow!("cannot open incident from status=up"))?;
         // ON CONFLICT on the partial unique index is the race-safe single-open
-        // guarantee: a concurrent writer yields no row → None → no page.
+        // guarantee: a concurrent writer yields no row → None → no page. Scoped
+        // to monitor origin so an operator's open declaration cannot shadow a
+        // real detection.
         // Visibility is derived here, not by the caller: an incident is public
         // only while its monitor is a component of an enabled status page.
         let row: Option<(Uuid,)> = sqlx::query_as(
-            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, region, regions_down, regions_up, visibility)
-               SELECT $6, $1, $2, $3, $4, $5, $7, $8, $9,
+            r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, region, regions_down, regions_up, origin, visibility)
+               SELECT $6, $1, $2, $3, $4, $5, $7, $8, $9, 'monitor',
                       CASE WHEN EXISTS (
                           SELECT 1 FROM status_page_components spc
                           JOIN status_pages sp ON sp.id = spc.status_page_id
                           WHERE spc.target_id = $1 AND spc.org_id = $6 AND sp.enabled = true
                       ) THEN 'public' ELSE 'internal' END
-               ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL DO NOTHING
+               ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL AND origin = 'monitor'
+               DO NOTHING
                RETURNING id"#,
         )
         .bind(new.target_id)

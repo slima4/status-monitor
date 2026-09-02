@@ -19,8 +19,9 @@ use crate::api::handlers::validation::{self, validate_message};
 use crate::app::AppState;
 use crate::domain::{
     Incident, IncidentEvent, IncidentEventKind, IncidentMetrics, IncidentNarrationUpdate,
-    IncidentPostmortem, IncidentState, IncidentVisibility, NewIncidentUpdate, NewManualIncident,
-    NotificationReason, OpsIncident, PostmortemUpsert, PublicIncidentUpdate, UserId,
+    IncidentOrigin, IncidentPostmortem, IncidentState, IncidentVisibility, NewIncidentUpdate,
+    NewManualIncident, NotificationReason, OpsIncident, PostmortemUpsert, PublicIncidentUpdate,
+    UserId,
 };
 use crate::error::{AppError, Result};
 use crate::storage::{Actor, IncidentOpsFilter, LifecycleOutcome};
@@ -34,19 +35,23 @@ use crate::web::{Authorized, CurrentUser, IncidentsRead, IncidentsWrite};
     description = "Sending JSON `null` for `title`, `public_title` or `public_description` clears \
                    the stored value; omitting the field leaves it unchanged. The public page falls \
                    back to auto-generated content when the public title is null. A severity change \
-                   is recorded on the incident's internal timeline.",
+                   is recorded on the incident's internal timeline. `counts_as_downtime` decides \
+                   whether the incident's duration reaches the monitor's uptime figure, and is \
+                   editable only on a declared incident.",
     params(("id" = Uuid, Path)),
     request_body(content = IncidentNarrationUpdate, example = json!({
         "title": "Checkout failing for EU customers",
         "public_title": "Latency spike on EU API",
         "public_description": "Investigation in progress.",
         "severity": "major",
-        "urgency": "low"
+        "urgency": "low",
+        "counts_as_downtime": true
     })),
     responses(
         (status = 200, body = Incident),
         (status = 400, body = ApiError),
         (status = 404, body = ApiError),
+        (status = 422, body = ApiError),
     ),
 )]
 pub async fn update_incident_narration(
@@ -63,42 +68,84 @@ pub async fn update_incident_narration(
         "public_description",
     )?;
     // Read before the write so the timeline can say what it changed from.
-    let was = match update.severity {
-        Some(_) => state.incident_ops_store.get(org, id).await?,
-        None => None,
+    let was = if update.severity.is_some() || update.counts_as_downtime.is_some() {
+        state.incident_ops_store.get(org, id).await?
+    } else {
+        None
     };
+    if update.counts_as_downtime.is_some()
+        && let Some(before) = was.as_ref()
+        && before.origin != IncidentOrigin::Manual
+    {
+        return Err(AppError::unprocessable(
+            codes::INCIDENT_DOWNTIME_NOT_EDITABLE,
+            "only a declared incident can be excluded from uptime; this one was opened by \
+             its monitor and the check history behind it stands",
+        ));
+    }
     let patched = state
         .incident_narration_store
         .patch_narration(org, id, update)
         .await?
         .ok_or_else(|| AppError::not_found(codes::INCIDENT_NOT_FOUND, "incident not found"))?;
-    if let Some(before) = was
+    // Already committed: failing here would report a save that happened as a
+    // failure, and the retry would find nothing to log.
+    if let Some(before) = was.as_ref()
         && before.severity != patched.severity
     {
-        // The severity is already committed: failing here would report a save
-        // that happened as a failure, and the retry would find nothing to log.
-        if let Err(err) = state
-            .incident_ops_store
-            .append_event(
-                org,
-                id,
-                IncidentEventKind::SeverityChanged,
-                Actor::User(user),
-                Some(format!(
-                    "severity {} to {}",
-                    before.severity.as_db_str(),
-                    patched.severity.as_db_str()
-                )),
-            )
-            .await
-        {
-            tracing::warn!(
-                %org, incident_id = %id, error = %err,
-                "severity changed but its timeline entry was lost"
-            );
-        }
+        log_amendment(
+            &state,
+            org,
+            id,
+            user,
+            IncidentEventKind::SeverityChanged,
+            format!(
+                "severity {} to {}",
+                before.severity.as_db_str(),
+                patched.severity.as_db_str()
+            ),
+        )
+        .await;
+    }
+    if let Some(before) = was.as_ref()
+        && before.counts_as_downtime != patched.counts_as_downtime
+    {
+        log_amendment(
+            &state,
+            org,
+            id,
+            user,
+            IncidentEventKind::DowntimeChanged,
+            match patched.counts_as_downtime {
+                true => "now counts toward uptime".to_string(),
+                false => "no longer counts toward uptime".to_string(),
+            },
+        )
+        .await;
     }
     Ok(Json(patched))
+}
+
+/// Amendments that move a published number need provenance, but the row is
+/// already written, so a lost timeline entry must not fail the request.
+async fn log_amendment(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    id: Uuid,
+    user: UserId,
+    kind: IncidentEventKind,
+    message: String,
+) {
+    if let Err(err) = state
+        .incident_ops_store
+        .append_event(org, id, kind, Actor::User(user), Some(message))
+        .await
+    {
+        tracing::warn!(
+            %org, incident_id = %id, kind = kind.as_db_str(), error = %err,
+            "incident amended but its timeline entry was lost"
+        );
+    }
 }
 
 #[utoipa::path(

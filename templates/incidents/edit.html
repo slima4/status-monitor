@@ -40,10 +40,24 @@
         {% match monitor_name %}{% when Some with (n) %}
         <a href="/targets/{{ target_id.as_deref().unwrap_or("") }}"
            class="dashboard-chip hover:underline">monitor: {{ n }}</a>
-        <p class="mt-2 font-mono text-xs text-quiet"># fixed after declaring — one monitor holds one open incident</p>
+        <p class="mt-2 font-mono text-xs text-quiet"># fixed after declaring — one monitor holds one open declaration</p>
         {% when None %}
         <p class="font-mono text-xs text-quiet"># standalone — this incident hangs off no monitor</p>
         {% endmatch %}
+        {% if downtime_editable %}
+        <div class="mt-5">
+          <span class="mb-1.5 block text-xs text-muted">Uptime</span>
+          <div class="sm-rail sm-rail--wide sm-rail--tall" role="radiogroup" aria-label="Count against uptime">
+            <label class="sm-rail__seg">
+              <input type="radio" name="counts_as_downtime" value="0" class="sr-only"{% if !counts_as_downtime %} checked{% endif %}>leave uptime alone
+            </label>
+            <label class="sm-rail__seg">
+              <input type="radio" name="counts_as_downtime" value="1" class="sr-only"{% if counts_as_downtime %} checked{% endif %}>count as downtime
+            </label>
+          </div>
+          <p class="mt-1 text-xs text-muted">You declared this one, so you decide whether it dents the monitor's uptime. An incident a monitor opened is fixed at counting: its failed checks are the record.</p>
+        </div>
+        {% endif %}
       </div>
     </fieldset>
 

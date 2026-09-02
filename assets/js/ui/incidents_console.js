@@ -189,6 +189,9 @@
       urgency: (fd.get("urgency") || "high").toString(),
       public_title: text("public_title"),
       public_description: text("public_description"),
+      ...(fd.has("counts_as_downtime")
+        ? { counts_as_downtime: (fd.get("counts_as_downtime") || "0").toString() === "1" }
+        : {}),
     });
     if (!res.ok) return showError(errMsg(res));
     if (window.smToast) window.smToast({ message: "Saved", kind: "ok" });
@@ -204,6 +207,7 @@
       urgency: (fd.get("urgency") || "high").toString(),
       visibility: (fd.get("visibility") || "internal").toString(),
       notify: (fd.get("notify") || "0").toString() === "1",
+      counts_as_downtime: (fd.get("counts_as_downtime") || "0").toString() === "1",
     };
     if (tid) body.target_id = tid;
     const res = await post("/api/v1/incidents", body);

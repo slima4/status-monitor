@@ -48,6 +48,7 @@ fn seed_triggered(store: &InMemoryIncidentOpsStore) -> Uuid {
         origin: IncidentOrigin::Monitor,
         visibility: IncidentVisibility::Internal,
         paging_enabled: true,
+        counts_as_downtime: true,
         started_at: now,
         ended_at: None,
         acknowledged_at: None,

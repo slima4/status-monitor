@@ -124,3 +124,55 @@ async fn close_reports_only_the_call_that_flipped_the_row_pg() {
         "the incident is resolved"
     );
 }
+
+/// A declaration left open for weeks used to hold the monitor's only open slot,
+/// so a real outage under it opened nothing, paged nobody, and was swallowed by
+/// a window the operator had excluded from uptime.
+#[tokio::test]
+#[ignore]
+async fn an_open_declaration_does_not_block_a_real_incident_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, target_id) = seed(&pool, "iwdecl").await;
+    sqlx::query(
+        "INSERT INTO incidents (org_id, target_id, started_at, status_at_start, \
+                                check_count, state, visibility, origin, counts_as_downtime) \
+         VALUES ($1, $2, now() - interval '14 day', 'down', 0, 'triggered', \
+                 'internal', 'manual', false)",
+    )
+    .bind(org.0)
+    .bind(target_id)
+    .execute(&pool)
+    .await
+    .expect("declare");
+
+    let store = PgIncidentStore::new(pool.clone());
+    assert!(
+        store
+            .open_for_target(org, target_id)
+            .await
+            .expect("open_for_target")
+            .is_none(),
+        "the writer must not adopt a declaration as its own open incident"
+    );
+
+    let opened = store
+        .insert_open(org, new_open(target_id))
+        .await
+        .expect("insert_open");
+    assert!(
+        opened.is_some(),
+        "a real outage still opens its own incident"
+    );
+    assert_eq!(open_incident_count(&pool, org, target_id).await, 2);
+
+    let second = store
+        .insert_open(org, new_open(target_id))
+        .await
+        .expect("insert_open");
+    assert!(
+        second.is_none(),
+        "one open monitor incident per target still holds"
+    );
+}

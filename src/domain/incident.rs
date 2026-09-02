@@ -31,6 +31,9 @@ pub struct Incident {
     #[serde(default)]
     #[schema(default = "major")]
     pub severity: IncidentSeverity,
+    #[serde(default = "default_true")]
+    #[schema(default = true)]
+    pub counts_as_downtime: bool,
     #[serde(default)]
     #[schema(nullable = true)]
     pub public_title: Option<String>,
@@ -91,6 +94,7 @@ pub fn confirmed_downtime_secs(
 ) -> i64 {
     incidents
         .iter()
+        .filter(|i| i.counts_as_downtime)
         .map(|i| {
             let end = i.ended_at.unwrap_or(now).min(to);
             let start = i.started_at.max(from);
@@ -135,6 +139,9 @@ pub struct IncidentNarrationUpdate {
     pub severity: Option<IncidentSeverity>,
     #[serde(default)]
     pub urgency: Option<IncidentUrgency>,
+    /// Declared incidents only; rejected on a monitor-opened one.
+    #[serde(default)]
+    pub counts_as_downtime: Option<bool>,
 }
 
 /// Lifts the inner `Option<T>` into a `Some(Option<T>)` so missing fields stay
@@ -221,6 +228,7 @@ fn new_incident(
         check_count: 1,
         error_sample: error,
         severity: IncidentSeverity::default(),
+        counts_as_downtime: true,
         public_title: None,
         public_description: None,
         created_at: None,
@@ -391,6 +399,7 @@ pub enum IncidentEventKind {
     Notified,
     Note,
     SeverityChanged,
+    DowntimeChanged,
     StateChanged,
     Resolved,
     Reopened,
@@ -410,6 +419,7 @@ impl IncidentEventKind {
         Self::Notified,
         Self::Note,
         Self::SeverityChanged,
+        Self::DowntimeChanged,
         Self::StateChanged,
         Self::Resolved,
         Self::Reopened,
@@ -428,6 +438,7 @@ impl IncidentEventKind {
             Self::Notified => "notified",
             Self::Note => "note",
             Self::SeverityChanged => "severity_changed",
+            Self::DowntimeChanged => "downtime_changed",
             Self::StateChanged => "state_changed",
             Self::Resolved => "resolved",
             Self::Reopened => "reopened",
@@ -448,6 +459,7 @@ impl IncidentEventKind {
             "escalated" => Self::Escalated,
             "notified" => Self::Notified,
             "severity_changed" => Self::SeverityChanged,
+            "downtime_changed" => Self::DowntimeChanged,
             "state_changed" => Self::StateChanged,
             "resolved" => Self::Resolved,
             "reopened" => Self::Reopened,
@@ -560,6 +572,8 @@ pub struct OpsIncident {
     /// triggered that reached no channel.
     #[serde(default = "default_true")]
     pub paging_enabled: bool,
+    #[serde(default = "default_true")]
+    pub counts_as_downtime: bool,
     pub started_at: DateTime<Utc>,
     #[schema(nullable = true)]
     pub ended_at: Option<DateTime<Utc>>,
@@ -614,6 +628,9 @@ pub struct NewManualIncident {
     /// the product misfiring.
     #[serde(default)]
     pub notify: bool,
+    /// Off by default: a declaration has no failing check behind it.
+    #[serde(default)]
+    pub counts_as_downtime: bool,
 }
 
 /// One internal timeline entry.
@@ -945,12 +962,38 @@ mod tests {
         assert!((uptime_pct_from_downtime(400, 1000) - 60.0).abs() < 1e-9);
     }
 
+    /// An excluded row is listed but must not reach the sum.
+    #[test]
+    fn an_excluded_incident_contributes_no_downtime() {
+        let (from, to, now) = (ts(1000), ts(2000), ts(2000));
+        let mut counted = new_incident(Uuid::nil(), ts(1200), CheckStatus::Down, None);
+        counted.ended_at = Some(ts(1300));
+        let mut excluded = new_incident(Uuid::nil(), ts(1400), CheckStatus::Down, None);
+        excluded.ended_at = Some(ts(1900));
+        excluded.counts_as_downtime = false;
+        let incidents = vec![counted, excluded];
+        assert_eq!(confirmed_downtime_secs(&incidents, from, to, now), 100);
+    }
+
     /// A client that omits these cannot page an org by accident.
     #[test]
     fn a_declare_body_that_says_nothing_pages_nobody_and_stays_internal() {
         let new: NewManualIncident = serde_json::from_str(r#"{"title":"db failover"}"#).unwrap();
         assert!(!new.notify);
         assert_eq!(new.visibility, IncidentVisibility::Internal);
+        assert!(!new.counts_as_downtime);
+    }
+
+    /// Rows predating the column are measured downtime, so the default is on.
+    #[test]
+    fn an_incident_json_without_the_flag_still_counts() {
+        let inc: Incident = serde_json::from_str(
+            r#"{"id":"00000000-0000-0000-0000-000000000000","target_id":null,
+                "started_at":"2026-09-01T13:24:22Z","ended_at":null,"status":"down",
+                "duration_secs":null,"check_count":2,"error_sample":null}"#,
+        )
+        .unwrap();
+        assert!(inc.counts_as_downtime);
     }
 
     #[test]
