@@ -108,7 +108,7 @@ jobs:
     # triggered us actually succeeded (the ci-green gate is the next step).
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     permissions:
-      contents: read
+      contents: read # authenticated git fetch on the box (see deploy step)
       actions: read # read ci.yml run conclusion for the gate
       packages: read # authenticated GHCR pull (higher rate limit than anonymous)
     environment: production # attach required-reviewer / protection rules via the GitHub env
@@ -259,6 +259,7 @@ jobs:
               "${DEPLOY_USER}@${DEPLOY_HOST}" \
               "NEW_IMAGE='${NEW_IMAGE}' HEAD_SHA='${HEAD_SHA}' \
                GHCR_USER='${GHCR_USER}' GHCR_TOKEN='${GHCR_TOKEN}' \
+               IMAGE_NAME='${IMAGE_NAME}' \
                GRAFANA_CLOUD_PROM_URL='${GRAFANA_CLOUD_PROM_URL}' \
                GRAFANA_CLOUD_PROM_USER='${GRAFANA_CLOUD_PROM_USER}' \
                GRAFANA_CLOUD_API_TOKEN='${GRAFANA_CLOUD_API_TOKEN}' \
@@ -321,6 +322,32 @@ jobs:
           umask 077
 
           cd /opt/uptimepage
+          # GitHub 401s anonymous git-over-HTTPS from this box: its May 2025
+          # unauthenticated-traffic limits took clone/fetch in scope. Send the
+          # credential up front, scoped to github.com — a credential helper
+          # would stay dormant, git consults one only after a 401.
+          if [ -z "${IMAGE_NAME:-}" ] || [ -z "${GHCR_TOKEN:-}" ]; then
+            echo "::error::IMAGE_NAME/GHCR_TOKEN did not reach the box — check the ssh env prefix"
+            exit 1
+          fi
+          git_basic=$(printf 'x-access-token:%s' "$GHCR_TOKEN" | base64 -w0)
+          # Actions masks the raw secret, not this encoding of it.
+          echo "::add-mask::$git_basic"
+          # A box still carrying a pre-transfer origin fails here, and nothing
+          # on it self-heals.
+          origin_url="https://github.com/${IMAGE_NAME}.git"
+          if git remote get-url origin >/dev/null 2>&1; then
+            git remote set-url origin "$origin_url"
+          else
+            git remote add origin "$origin_url"
+          fi
+          # Slot 0 is the documented reset: extraheader accumulates across every
+          # config scope, and github.com rejects two Authorization headers.
+          export GIT_CONFIG_COUNT=2
+          export GIT_CONFIG_KEY_0='http.https://github.com/.extraheader'
+          export GIT_CONFIG_VALUE_0=''
+          export GIT_CONFIG_KEY_1='http.https://github.com/.extraheader'
+          export GIT_CONFIG_VALUE_1="AUTHORIZATION: basic ${git_basic}"
           if [ -n "$HEAD_SHA" ]; then
             # Auto path: pin the working tree to the exact built commit so the
             # on-disk compose/.env/migrations match the image. A later push
@@ -331,6 +358,9 @@ jobs:
             # Manual path: operator-chosen tag; take tip of main.
             git pull --ff-only
           fi
+          unset GIT_CONFIG_COUNT GIT_CONFIG_KEY_0 GIT_CONFIG_VALUE_0 \
+                GIT_CONFIG_KEY_1 GIT_CONFIG_VALUE_1
+          echo "tree at $(git rev-parse --short HEAD)"
 
           # Ship only prod artifacts to the box. Pre-this, `git pull` landed
           # the entire repo on /opt/uptimepage/, including root
