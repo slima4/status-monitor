@@ -1194,6 +1194,15 @@ impl TargetStore for PostgresTargetStore {
         Ok(rows.into_iter().map(|(r,)| r).collect())
     }
 
+    async fn default_selected_regions(&self) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> =
+            sqlx::query_as("SELECT id FROM regions WHERE enabled AND default_selected ORDER BY id")
+                .fetch_all(&self.pool)
+                .await
+                .context("postgres default_selected_regions")?;
+        Ok(rows.into_iter().map(|(r,)| r).collect())
+    }
+
     async fn available_regions_detailed(&self) -> Result<Vec<RegionOption>> {
         let rows: Vec<(
             String,

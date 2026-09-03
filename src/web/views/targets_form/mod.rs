@@ -111,13 +111,17 @@ pub async fn new_form(
     // A new monitor is prefilled with 60s; raise it if the plan floor is
     // higher so the default the user sees would actually be accepted.
     form.interval_s = form.interval_s.max(form.min_interval_s);
-    // Prefill the default coverage (all regions capped at the plan, checked).
+    // Prefill the same coverage a create would seed, so the boxes match what
+    // saving without touching them would do.
     let max_regions = plan.max_regions;
     if available.len() > 1 && max_regions > 1 {
         let default_region = state.cfg.scheduler.effective_default_region().to_string();
-        let ids: Vec<String> = available.iter().map(|r| r.id.clone()).collect();
-        let default_set =
-            crate::api::handlers::targets::default_region_set(ids, max_regions, &default_region);
+        let preferred = state.target_store.default_selected_regions().await?;
+        let default_set = crate::api::handlers::targets::default_region_set(
+            preferred,
+            max_regions,
+            &default_region,
+        );
         let chosen: std::collections::HashSet<String> = default_set.into_iter().collect();
         let cap = available.len().min(max_regions.max(1) as usize);
         let flow_capable = crate::api::handlers::targets::flow_capable_set(&state).await?;

@@ -126,6 +126,7 @@ pub struct RegionView {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub enabled: bool,
+    pub default_selected: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -161,6 +162,8 @@ pub struct UpdateRegion {
     pub longitude: Option<f64>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    #[serde(default)]
+    pub default_selected: Option<bool>,
 }
 
 pub async fn list_regions(
@@ -180,6 +183,7 @@ pub async fn list_regions(
                 latitude: r.latitude,
                 longitude: r.longitude,
                 enabled: r.enabled,
+                default_selected: r.default_selected,
                 created_at: r.created_at,
             })
             .collect(),
@@ -231,6 +235,7 @@ pub async fn update_region(
         && req.latitude.is_none()
         && req.longitude.is_none()
         && req.enabled.is_none()
+        && req.default_selected.is_none()
     {
         return Err(AppError::bad_request(
             codes::EMPTY_PATCH,
@@ -265,6 +270,9 @@ pub async fn update_region(
     }
     if let Some(enabled) = req.enabled {
         found |= r.set_region_enabled(&id, enabled).await?;
+    }
+    if let Some(on) = req.default_selected {
+        found |= r.set_region_default_selected(&id, on).await?;
     }
     if found {
         Ok(StatusCode::NO_CONTENT)

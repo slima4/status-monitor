@@ -10,7 +10,7 @@ This is opt-in. A default deployment is a single region — the control plane ch
 - **Agent** — a process started with `[agent] enabled = true`. It runs no database, web UI, or alerting. It pulls its region's decrypted monitor config from the control plane over authenticated HTTPS, runs the checks locally, and POSTs results back to the central ingest API. Agents never touch ClickHouse or fire alerts.
 - **Region is the partition key.** One agent per region needs no coordination — there is no leader election. (Running more than one agent in the same region, or more than one control plane, is out of scope for this version.)
 
-New targets are assigned to `scheduler.default_region` (empty falls back to `scheduler.region`). At boot the control plane reconciles the configured region rows and backfills any unassigned target to the default region, so enabling regions never leaves a target unchecked.
+New targets are assigned to every region flagged `default_selected` (all of them until an operator opts one out), capped at the plan's `max_regions`. An opted-out region stays fully pickable on the monitor form, it just starts unchecked. That is how to offer a vantage point with a known-bad network path without putting it on every new monitor. If nothing is flagged, targets fall back to `scheduler.default_region` (empty falls back to `scheduler.region`). At boot the control plane reconciles the configured region rows and backfills any unassigned target to the default region, so enabling regions never leaves a target unchecked.
 
 ## Running an agent
 
@@ -58,7 +58,7 @@ Authorization: Bearer <that-secret>
 |--------|------|---------|
 | `GET` | `/operator/regions` | list regions |
 | `POST` | `/operator/regions` | create a region (`id` is a `[a-z0-9-]` slug, `name`, optional geo fields: `city`, `country_code`, `continent`, `latitude`/`longitude`) |
-| `PATCH` | `/operator/regions/{id}` | rename / relocate, or enable / disable a region (`enabled`) |
+| `PATCH` | `/operator/regions/{id}` | rename / relocate, enable / disable a region (`enabled`), or opt it in / out of new monitors' defaults (`default_selected`) |
 | `DELETE` | `/operator/regions/{id}` | delete a region — `409` while it still holds agents or assigned targets |
 | `GET` | `/operator/agents` | list agents |
 | `POST` | `/operator/agents` | mint an agent — the response carries its `sm_agent_…` token **once** |

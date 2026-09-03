@@ -918,7 +918,8 @@ pub async fn bulk_create(
     let item_policies: Vec<Option<RegionIncidentPolicy>> =
         items.iter().map(|i| i.region_policy).collect();
     let default_region = state.cfg.scheduler.effective_default_region().to_string();
-    let regions = default_region_set(available, plan.max_regions, &default_region);
+    let preferred = state.target_store.default_selected_regions().await?;
+    let regions = default_region_set(preferred, plan.max_regions, &default_region);
     for new in &items {
         ensure_flow_regions_covered(&state, &new.check, &regions).await?;
     }
@@ -1253,9 +1254,16 @@ pub(crate) async fn create_target(
     plan: &crate::domain::quota::Plan,
 ) -> Result<Target> {
     let default_region = state.cfg.scheduler.effective_default_region().to_string();
-    let available = state.target_store.available_regions().await?;
-    let available = flow_restrict_regions(state, &new.check, available).await?;
-    let regions = default_region_set(available, plan.max_regions, &default_region);
+    let preferred = state.target_store.default_selected_regions().await?;
+    let mut preferred = flow_restrict_regions(state, &new.check, preferred).await?;
+    // A flow only runs where an engine exists, so the default-selected
+    // preference cannot be what leaves one with nowhere to run: fall back to
+    // the full catalog when no default region can carry it.
+    if preferred.is_empty() && matches!(&new.check, CheckSpec::Flow(_)) {
+        let available = state.target_store.available_regions().await?;
+        preferred = flow_restrict_regions(state, &new.check, available).await?;
+    }
+    let regions = default_region_set(preferred, plan.max_regions, &default_region);
     ensure_flow_regions_covered(state, &new.check, &regions).await?;
     let t = state
         .target_store

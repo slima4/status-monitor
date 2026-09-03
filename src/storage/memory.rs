@@ -1093,6 +1093,10 @@ impl TargetStore for InMemoryTargetStore {
         Ok(Vec::new())
     }
 
+    async fn default_selected_regions(&self) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+
     async fn regions_for_target(
         &self,
         _org: OrgId,

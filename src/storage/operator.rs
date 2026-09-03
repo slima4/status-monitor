@@ -20,6 +20,7 @@ pub struct RegionRow {
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
     pub enabled: bool,
+    pub default_selected: bool,
     pub created_at: DateTime<Utc>,
 }
 
@@ -61,7 +62,7 @@ impl OperatorRepo {
     pub async fn list_regions(&self) -> Result<Vec<RegionRow>> {
         let rows = sqlx::query_as::<_, RegionRow>(
             "SELECT id, name, city, country_code, continent, latitude, longitude, \
-             enabled, created_at FROM regions ORDER BY id",
+             enabled, default_selected, created_at FROM regions ORDER BY id",
         )
         .fetch_all(&self.pool)
         .await
@@ -141,6 +142,19 @@ impl OperatorRepo {
             .execute(&self.pool)
             .await
             .context("operator: set region enabled")?;
+        Ok(res.rows_affected() > 0)
+    }
+
+    /// Opt a region in or out of the set a new monitor starts assigned to.
+    /// Independent of `enabled`: an opted-out region still probes the monitors
+    /// already assigned to it, it just stops being a default.
+    pub async fn set_region_default_selected(&self, id: &str, on: bool) -> Result<bool> {
+        let res = sqlx::query("UPDATE regions SET default_selected = $2 WHERE id = $1")
+            .bind(id)
+            .bind(on)
+            .execute(&self.pool)
+            .await
+            .context("operator: set region default_selected")?;
         Ok(res.rows_affected() > 0)
     }
 

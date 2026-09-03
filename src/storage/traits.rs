@@ -238,6 +238,10 @@ pub trait TargetStore: Send + Sync {
     /// Same catalog with display fields for the assignment picker, so the UI
     /// can show a human name + location instead of the bare id.
     async fn available_regions_detailed(&self) -> Result<Vec<RegionOption>>;
+    /// Enabled regions a new monitor starts assigned to, sorted. A subset of
+    /// [`Self::available_regions`]: the rest stay pickable, just unchecked, so a
+    /// region with a known-bad network path is opt-in rather than default.
+    async fn default_selected_regions(&self) -> Result<Vec<String>>;
     /// Regions one target is assigned to, sorted. `None` if the target is not in
     /// the org (so a guessed id from another tenant reads as not-found).
     async fn regions_for_target(&self, org: OrgId, target_id: Uuid) -> Result<Option<Vec<String>>>;
