@@ -348,7 +348,7 @@ pub const DOCS: &[DocPage] = &[
         blurb: "Where the hosted service checks from, how to pick regions for a monitor, and what our probes cannot reach.",
         section: Section::Hosted,
         scope: Scope::Hosted,
-        lastmod: "2026-08-17",
+        lastmod: "2026-09-03",
         source: include_str!("../../docs/hosted/regions.md"),
         dir: "hosted",
     },

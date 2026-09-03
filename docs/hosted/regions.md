@@ -6,9 +6,13 @@ This page covers the hosted service at `uptimepage.dev`. If you run your own ins
 
 | Region | Location |
 |---|---|
-| `us-east` | Secaucus, United States |
+| `us-west` | San Jose, United States |
+| `us-east` | Secaucus, United States (New York metro) |
+| `eu-frankfurt` | Frankfurt, Germany |
 | `eu-helsinki` | Helsinki, Finland |
 | `apac-sg` | Singapore |
+
+A new monitor starts in a default set of regions rather than all of them. Today the defaults are New York, Frankfurt and Helsinki; San Jose and Singapore are opt-in, one checkbox away on the monitor form. On Standard, which caps a monitor at three regions, adding one means unticking another.
 
 More regions are rolling out. Existing monitors pick them up as soon as you assign them, with no migration and no change to your history.
 

@@ -87,7 +87,7 @@ static OPEN_SOURCE_MONITOR_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "multi-region probes",
             cells: &[
-                ("yes, agents you run", "yes"),
+                ("5 hosted regions", "yes"),
                 ("via Globalping add-on", "part"),
                 ("28 regions on hosted", "part"),
                 ("federate it yourself", "part"),
@@ -161,7 +161,7 @@ static SELF_HOSTED_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "multi-region probes",
             cells: &[
-                ("yes", "yes"),
+                ("5 hosted regions", "yes"),
                 ("bolt-on", "part"),
                 ("no", "no"),
                 ("no", "no"),
@@ -374,7 +374,7 @@ static MONITORING_MATRIX: Matrix = Matrix {
         MatrixRow {
             label: "multi-region probes",
             cells: &[
-                ("yes", "yes"),
+                ("5 hosted regions", "yes"),
                 ("add-on", "part"),
                 ("28 regions", "yes"),
                 ("yes", ""),
@@ -505,7 +505,7 @@ static UPTIME_KUMA_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "multi-region probes",
-            cells: &[("yes", "yes"), ("add-on", "part")],
+            cells: &[("5 hosted regions", "yes"), ("add-on", "part")],
         },
         MatrixRow {
             label: "alert channels",
@@ -585,7 +585,7 @@ static ONEUPTIME_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "multi-region probes",
-            cells: &[("yes", "yes"), ("yes", "")],
+            cells: &[("5 hosted regions", "yes"), ("yes", "")],
         },
         MatrixRow {
             label: "config-as-code",
@@ -656,7 +656,7 @@ static UPTIMEROBOT_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "multi-region probes",
-            cells: &[("yes", "yes"), ("1 free · 4 paid", "part")],
+            cells: &[("5 hosted regions", "yes"), ("1 free · 4 paid", "part")],
         },
         MatrixRow {
             label: "alert channels",
@@ -741,7 +741,7 @@ static BETTER_STACK_MATRIX: Matrix = Matrix {
         },
         MatrixRow {
             label: "multi-region probes",
-            cells: &[("yes", "yes"), ("4 regions", "yes")],
+            cells: &[("5 hosted regions", "yes"), ("4 regions", "yes")],
         },
         MatrixRow {
             label: "config-as-code",
@@ -957,7 +957,7 @@ static OPENSTATUS_KUMA_MATRIX: Matrix = Matrix {
             cells: &[
                 ("28 hosted regions", "yes"),
                 ("via Globalping add-on", "part"),
-                ("multi-region, run your own", "yes"),
+                ("5 hosted regions", "yes"),
             ],
         },
         MatrixRow {
@@ -1056,7 +1056,7 @@ static KUMA_ZABBIX_MATRIX: Matrix = Matrix {
             cells: &[
                 ("via Globalping add-on", "part"),
                 ("proxies you host", "part"),
-                ("multi-region, run your own", "yes"),
+                ("5 hosted regions", "yes"),
             ],
         },
         MatrixRow {
@@ -1263,7 +1263,7 @@ static KUMA_UPPTIME_MATRIX: Matrix = Matrix {
             cells: &[
                 ("via Globalping add-on", "part"),
                 ("GitHub runners, or Globalping", "part"),
-                ("multi-region, or run your own", "yes"),
+                ("5 hosted regions", "yes"),
             ],
         },
         MatrixRow {
@@ -1401,7 +1401,7 @@ static KUMA_ONEUPTIME_MATRIX: Matrix = Matrix {
             cells: &[
                 ("via Globalping add-on", "part"),
                 ("yes", "yes"),
-                ("yes, or run your own", "yes"),
+                ("5 hosted regions", "yes"),
             ],
         },
         MatrixRow {
@@ -1565,7 +1565,7 @@ static PINGDOM_STATUSCAKE_MATRIX: Matrix = Matrix {
             cells: &[
                 ("~100 locations", ""),
                 ("30+ countries", ""),
-                ("EU · US · Asia-Pacific + run your own", ""),
+                ("EU · US · Asia-Pacific", ""),
             ],
         },
         MatrixRow {
@@ -1892,7 +1892,7 @@ static OPENSTATUS_GATUS_MATRIX: Matrix = Matrix {
             cells: &[
                 ("28 hosted regions + private locations", "yes"),
                 ("experimental federation only", "no"),
-                ("multi-region, run your own", "yes"),
+                ("5 hosted regions", "yes"),
             ],
         },
         MatrixRow {
@@ -2030,7 +2030,7 @@ static BLACKBOX_KUMA_MATRIX: Matrix = Matrix {
             cells: &[
                 ("deploy N exporters yourself", "no"),
                 ("via Globalping add-on", "part"),
-                ("multi-region, run your own", "yes"),
+                ("5 hosted regions", "yes"),
             ],
         },
         MatrixRow {
