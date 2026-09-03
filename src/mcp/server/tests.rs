@@ -1425,17 +1425,36 @@ fn metrics(samples: u64, last_status: &str, last_minute_ts: Option<i64>) -> Dash
 
 #[test]
 fn current_state_is_no_data_without_samples() {
-    assert_eq!(current_state(None), "no_data");
-    assert_eq!(current_state(Some(&metrics(0, "up", None))), "no_data");
+    assert_eq!(current_state(None, None), "no_data");
+    assert_eq!(
+        current_state(Some(&metrics(0, "up", None)), None),
+        "no_data"
+    );
 }
 
 #[test]
 fn current_state_maps_last_status_with_samples() {
     for s in ["up", "down", "degraded", "error"] {
-        assert_eq!(current_state(Some(&metrics(3, s, None))), s);
+        assert_eq!(current_state(Some(&metrics(3, s, None)), None), s);
     }
     // An unexpected enum string degrades to no_data rather than leaking it.
-    assert_eq!(current_state(Some(&metrics(3, "weird", None))), "no_data");
+    assert_eq!(
+        current_state(Some(&metrics(3, "weird", None)), None),
+        "no_data"
+    );
+}
+
+#[test]
+fn current_state_prefers_the_folded_status_over_the_last_row() {
+    use crate::domain::CheckStatus;
+    assert_eq!(
+        current_state(Some(&metrics(3, "down", None)), Some(CheckStatus::Degraded)),
+        "degraded"
+    );
+    assert_eq!(
+        current_state(Some(&metrics(0, "down", None)), Some(CheckStatus::Degraded)),
+        "no_data"
+    );
 }
 
 #[test]

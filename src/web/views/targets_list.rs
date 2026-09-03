@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 use crate::api::types::DashboardMetrics;
 use crate::app::AppState;
-use crate::domain::{OrgId, Target};
+use crate::domain::{CheckStatus, OrgId, Target};
 use crate::storage::TimeRange;
 use crate::storage::orgs::list_members;
 use crate::storage::traits::{TargetFilter, TargetSort};
@@ -299,21 +299,25 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
         targets.truncate(limit);
     }
 
-    let metrics_by_target: HashMap<Uuid, DashboardMetrics> = if targets.is_empty() {
-        HashMap::new()
+    let (metrics_by_target, folded_status): (
+        HashMap<Uuid, DashboardMetrics>,
+        HashMap<Uuid, CheckStatus>,
+    ) = if targets.is_empty() {
+        (HashMap::new(), HashMap::new())
     } else {
         let now = Utc::now();
         let range = TimeRange {
             from: now - ChronoDuration::days(UPTIME_WINDOW_DAYS),
             to: now,
         };
-        state
-            .results_store
-            .dashboard_rollup(org, range, None)
-            .await?
-            .into_iter()
-            .map(|m| (m.target_id, m))
-            .collect()
+        let (rollup, folded) = tokio::join!(
+            state.results_store.dashboard_rollup(org, range, None),
+            state.folded_status(org, range, crate::app::folded_status_policies(&targets)),
+        );
+        (
+            rollup?.into_iter().map(|m| (m.target_id, m)).collect(),
+            folded,
+        )
     };
 
     let members = match state.db.as_ref() {
@@ -356,7 +360,14 @@ async fn build_page(state: &AppState, org: OrgId, params: &ListParams) -> WebRes
     let mut paused_total = 0usize;
     for t in targets {
         let metrics = metrics_by_target.get(&t.id);
-        let row = build_row(&t, metrics, &owner_lookup, now, &flapping);
+        let row = build_row(
+            &t,
+            metrics,
+            folded_status.get(&t.id).copied(),
+            &owner_lookup,
+            now,
+            &flapping,
+        );
         if !row.enabled {
             paused_total += 1;
         }
@@ -507,13 +518,18 @@ fn db_kind_to_chip(kind: &str) -> Option<&'static str> {
 fn build_row(
     t: &Target,
     metrics: Option<&DashboardMetrics>,
+    folded: Option<CheckStatus>,
     owner_lookup: &HashMap<Uuid, MemberLite>,
     now: chrono::DateTime<Utc>,
     flapping: &std::collections::HashSet<Uuid>,
 ) -> MonitorRow {
     let (kind, address) = describe_check(&t.check);
     let class = match metrics {
-        Some(m) if m.samples > 0 => status_class_for(m.last_status.as_str()),
+        // `last_status` alone is whichever region reported last.
+        Some(m) if m.samples > 0 => match folded {
+            Some(s) => status_class_for(s.as_str()),
+            None => status_class_for(m.last_status.as_str()),
+        },
         _ => "",
     };
     let last_status = class;
@@ -613,13 +629,7 @@ fn avg_uptime_label(rows: &[MonitorRow]) -> String {
 }
 
 fn worst_of(acc: &'static str, next: &'static str) -> &'static str {
-    let rank = |s: &str| match s {
-        "error" => 4,
-        "down" => 3,
-        "degraded" => 2,
-        "up" => 1,
-        _ => 0,
-    };
+    let rank = |s: &str| CheckStatus::from_label(s).map_or(0, |c| c.severity_rank() + 1);
     if rank(next) > rank(acc) { next } else { acc }
 }
 

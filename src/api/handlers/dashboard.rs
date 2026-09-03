@@ -1,15 +1,22 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::State;
 use chrono::{Duration, Utc};
+use uuid::Uuid;
 
 use crate::api::ApiError;
-use crate::api::types::{DashboardSummary, Last24hSummary, SystemSummary};
+use crate::api::types::{
+    DashboardMetrics, DashboardSummary, Last24hSummary, StatusBreakdown, SystemSummary,
+};
 use crate::app::AppState;
+use crate::domain::{CheckStatus, OrgId, Target};
 use crate::error::Result;
-use crate::storage::TimeRange;
+use crate::storage::{TargetFilter, TimeRange};
 use crate::web::CurrentOrg;
+
+const MAX_ORG_MONITORS: usize = 10_000;
 
 #[utoipa::path(
     get,
@@ -41,13 +48,20 @@ pub async fn dashboard_summary(
         to: now,
     };
 
-    let (targets, current_status, (checks_total, checks_up, _avg_ms, incidents)) = tokio::try_join!(
+    let (targets, monitors, rollup, (checks_total, checks_up, _avg_ms, incidents)) = tokio::try_join!(
         state.target_store.summary(org_id),
-        state
-            .results_store
-            .current_status_breakdown(org_id, range, None),
+        state.target_store.list(
+            org_id,
+            TargetFilter {
+                // Default limit is a page of 100; the breakdown counts the org.
+                limit: Some(MAX_ORG_MONITORS),
+                ..TargetFilter::default()
+            },
+        ),
+        state.results_store.dashboard_rollup(org_id, range, None),
         state.results_store.last_n_summary(org_id, range, None),
     )?;
+    let current_status = status_breakdown(&state, org_id, range, &monitors, rollup).await;
 
     let uptime_pct = if checks_total > 0 {
         (checks_up as f64 / checks_total as f64) * 100.0
@@ -80,4 +94,36 @@ pub async fn dashboard_summary(
         .dashboard_cache
         .insert(org_id, Arc::new(summary.clone()));
     Ok(Json(summary))
+}
+
+/// Counts by folded status, not by whichever region reported last.
+async fn status_breakdown(
+    state: &AppState,
+    org: OrgId,
+    range: TimeRange,
+    monitors: &[Target],
+    rollup: Vec<DashboardMetrics>,
+) -> StatusBreakdown {
+    let metrics: HashMap<Uuid, DashboardMetrics> =
+        rollup.into_iter().map(|m| (m.target_id, m)).collect();
+    let folded = state
+        .folded_status(org, range, crate::app::folded_status_policies(monitors))
+        .await;
+    let mut out = StatusBreakdown::default();
+    for t in monitors {
+        let status = metrics.get(&t.id).filter(|m| m.samples > 0).and_then(|m| {
+            folded
+                .get(&t.id)
+                .copied()
+                .or_else(|| CheckStatus::from_label(&m.last_status))
+        });
+        match status {
+            Some(CheckStatus::Up) => out.up += 1,
+            Some(CheckStatus::Down) => out.down += 1,
+            Some(CheckStatus::Degraded) => out.degraded += 1,
+            Some(CheckStatus::Error) => out.error += 1,
+            None => out.unknown += 1,
+        }
+    }
+    out
 }

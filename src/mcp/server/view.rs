@@ -9,7 +9,7 @@ use crate::domain::IncidentVisibility;
 use crate::domain::TargetAlerts;
 use crate::domain::incident::Incident;
 use crate::domain::notification_channel::NotificationChannel;
-use crate::domain::result::CheckResult;
+use crate::domain::result::{CheckResult, CheckStatus};
 use crate::domain::target::RegionIncidentPolicy;
 use crate::domain::{CheckSpec, ExpectedStatus, FlowStep};
 use crate::storage::incidents::IncidentBrief;
@@ -365,11 +365,17 @@ pub(super) fn incident_detail(i: &Incident, monitor_name: Option<String>) -> Inc
     }
 }
 
-/// Current state string from the per-monitor rollup: the last observed status
-/// when there are samples, else `no_data`.
-pub(super) fn current_state(metrics: Option<&DashboardMetrics>) -> &'static str {
+/// Prefers the folded status: raw `last_status` is whichever region reported
+/// most recently, so alone it calls a monitor down over one failing region.
+pub(super) fn current_state(
+    metrics: Option<&DashboardMetrics>,
+    folded: Option<CheckStatus>,
+) -> &'static str {
     match metrics {
-        Some(m) if m.samples > 0 => status_str(&m.last_status),
+        Some(m) if m.samples > 0 => match folded {
+            Some(f) => f.as_str(),
+            None => status_str(&m.last_status),
+        },
         _ => "no_data",
     }
 }

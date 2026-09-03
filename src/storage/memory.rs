@@ -5,8 +5,7 @@ use uuid::Uuid;
 
 use crate::api::types::{
     AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket,
-    PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount,
-    TargetsSummary,
+    PriorPeriodSummary, RegionLatencySeries, RegionRollup, TagCount, TargetsSummary,
 };
 use crate::domain::target::MAX_TAGS_PER_TARGET;
 use crate::domain::{
@@ -14,8 +13,8 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    ClampedRange, RegionFlaps, RegionOption, ResultSink, ResultsStore, TagAddOutcome, TargetFilter,
-    TargetStore, TimeRange, UptimeStats, rollup_bucket_secs,
+    ClampedRange, RegionFlaps, RegionLatestStatus, RegionOption, ResultSink, ResultsStore,
+    TagAddOutcome, TargetFilter, TargetStore, TimeRange, UptimeStats, rollup_bucket_secs,
 };
 
 #[derive(Default)]
@@ -177,40 +176,6 @@ impl ResultsStore for InMemorySink {
         Ok(UptimeStats::from_results(&filtered))
     }
 
-    async fn current_status_breakdown(
-        &self,
-        _org: OrgId,
-        range: TimeRange,
-        _region: Option<&str>,
-    ) -> Result<StatusBreakdown> {
-        let guard = self.results.lock();
-        let mut latest: std::collections::HashMap<Uuid, &CheckResult> =
-            std::collections::HashMap::new();
-        for r in guard.iter() {
-            if r.timestamp < range.from || r.timestamp >= range.to {
-                continue;
-            }
-            latest
-                .entry(r.target_id)
-                .and_modify(|cur| {
-                    if r.timestamp > cur.timestamp {
-                        *cur = r;
-                    }
-                })
-                .or_insert(r);
-        }
-        let mut out = StatusBreakdown::default();
-        for r in latest.values() {
-            match r.status {
-                CheckStatus::Up => out.up += 1,
-                CheckStatus::Down => out.down += 1,
-                CheckStatus::Degraded => out.degraded += 1,
-                CheckStatus::Error => out.error += 1,
-            }
-        }
-        Ok(out)
-    }
-
     async fn dashboard_rollup(
         &self,
         _org: OrgId,
@@ -261,6 +226,38 @@ impl ResultsStore for InMemorySink {
             });
         }
         Ok(out)
+    }
+
+    async fn latest_status_by_region(
+        &self,
+        _org: OrgId,
+        range: TimeRange,
+    ) -> Result<Vec<RegionLatestStatus>> {
+        // No region dimension in memory; tag every target one synthetic region.
+        let guard = self.results.lock();
+        let mut latest: std::collections::BTreeMap<Uuid, &CheckResult> =
+            std::collections::BTreeMap::new();
+        for r in guard.iter() {
+            if r.timestamp < range.from || r.timestamp >= range.to {
+                continue;
+            }
+            latest
+                .entry(r.target_id)
+                .and_modify(|cur| {
+                    if r.timestamp >= cur.timestamp {
+                        *cur = r;
+                    }
+                })
+                .or_insert(r);
+        }
+        Ok(latest
+            .into_iter()
+            .map(|(target_id, r)| RegionLatestStatus {
+                target_id,
+                region: "default".to_string(),
+                status: r.status,
+            })
+            .collect())
     }
 
     async fn dashboard_sparkline(

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::api::error::codes;
 use crate::app::AppState;
-use crate::domain::CheckSpec;
+use crate::domain::{CheckSpec, CheckStatus};
 use crate::error::AppError;
 use crate::storage::{HeartbeatMonitor, TimeRange};
 use crate::web::error::WebResult;
@@ -335,7 +335,13 @@ pub async fn index(
     let liveness = heartbeat
         .as_ref()
         .map(|h| HeartbeatLiveness::derive(h, Utc::now(), target.enabled));
-    let last_status = badge_status(live.last_status, liveness.as_ref());
+    // A region-filtered page shows that region's own results, so the badge
+    // above them must not fold across the regions it is hiding.
+    let folded = selected_region
+        .is_none()
+        .then(|| fold_breakdown(&region_breakdown, target.region_policy))
+        .flatten();
+    let last_status = badge_status(folded.unwrap_or(live.last_status), liveness.as_ref());
 
     Ok(DetailPage {
         active_tab: "targets",
@@ -709,6 +715,21 @@ pub(crate) async fn read_liveness(
         late: window.is_some_and(|(due, down)| now > due && now <= down),
         overdue: window.is_some_and(|(_, down)| now > down),
     })
+}
+
+/// Folds the per-region table below the badge, so the headline cannot
+/// contradict the breakdown it sits above. `None` leaves the raw last status.
+fn fold_breakdown(
+    breakdown: &[RegionBreakdownRow],
+    policy: crate::domain::RegionIncidentPolicy,
+) -> Option<&'static str> {
+    if breakdown.is_empty() {
+        return None;
+    }
+    let reported = breakdown
+        .iter()
+        .filter_map(|r| CheckStatus::from_label(&r.last_status));
+    policy.fold_regions(reported).map(CheckStatus::as_str)
 }
 
 /// Every other kind gets its stored status back untouched.

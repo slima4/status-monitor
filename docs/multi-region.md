@@ -79,7 +79,7 @@ Once results carry a region, the operator surfaces let you slice by it:
 - **Monitor detail** — a region selector scopes the KPI cards, latency and breakdown charts, and recent results. In the all-regions view the latency chart overlays one p95 line per region, and a **by region** table summarises uptime, p50, p95, and last status per region. Pick a region to drill into a single line.
 - **REST API** — `/api/v1/targets/{id}/results`, `/latency`, and `/uptime` accept an optional `region=` query parameter; `/api/v1/targets/{id}/latency/by-region` returns one series per region. `GET /api/v1/regions` lists the enabled region catalog and `GET`/`PUT /api/v1/targets/{id}/regions` read and set a monitor's assignment — all under `targets:read`/`targets:write`. See [REST API](api.md#latency-series).
 
-What deliberately **blends** across regions: the public status page's component status (the public "is it up" answer is region-agnostic by design), the monitors list, and incident timelines. Those aggregate every region so a viewer sees one verdict.
+What deliberately **blends** across regions: the public status page's component status (the public "is it up" answer is region-agnostic by design), the monitors list, and incident timelines. Those combine every region under the monitor's region policy so a viewer sees one verdict, described under [Incident detection across regions](#incident-detection-across-regions).
 
 ## Incident detection across regions
 
@@ -93,6 +93,10 @@ How the per-region verdicts combine is a **per-monitor policy**, set on the moni
 - **count: N** — open once at least *N* regions are down.
 
 A monitor probed from a single region behaves the same under every policy.
+
+The same policy decides the status you see, not only whether an incident opens. A monitor whose failing regions have not reached its quorum shows **degraded**, not down: something is wrong somewhere, but not enough regions agree to call it an outage. Reach quorum and it shows the worst failing status. This is why the monitors list, the dashboard and the MCP tools can read degraded while the incidents tab stays empty, and it is the intended pairing rather than a disagreement. Filter the console to a single region and you get that region's raw verdict instead, since a region view is asking what that probe saw.
+
+Displayed status folds each region's most recent result from the last 24 hours, so it can turn degraded a check or two before an incident opens: the incident writer additionally waits for `alert_confirmations` failures in a row from a region, and the folded status does not. A region that stops probing a monitor drops out of the fold within that day. Monitor detail is the exception: its badge folds the by-region table under it, over the range that page is showing, so the two always agree with each other.
 
 The policy counts regions that delivered results inside the evaluation window, not regions merely assigned. Agents push their results to the control plane, so an agent that goes quiet takes its region out of the vote: no results means no down vote and no recovery evidence. A silent region can neither open nor close an incident, and the threshold recomputes over the regions still reporting.
 

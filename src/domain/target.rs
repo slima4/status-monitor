@@ -8,6 +8,7 @@ use uuid::Uuid;
 use super::WriteSource;
 use super::alert::TargetAlerts;
 use super::check::CheckSpec;
+use super::result::CheckStatus;
 
 /// Tag bounds, applied by every write path.
 pub const MAX_TAGS_PER_TARGET: usize = 50;
@@ -41,6 +42,36 @@ impl RegionIncidentPolicy {
             Self::Count(c) => *c as usize,
         };
         n.clamp(1, region_count.max(1))
+    }
+
+    /// Below quorum yields `Degraded`: the incident writer refused to open an
+    /// outage here. Reads a latest status, not a run, so no `alert_confirmations`.
+    pub fn fold_regions(
+        &self,
+        latest_per_region: impl IntoIterator<Item = CheckStatus>,
+    ) -> Option<CheckStatus> {
+        let mut reported = 0usize;
+        let mut bad = 0usize;
+        let mut worst = CheckStatus::Up;
+        for s in latest_per_region {
+            reported += 1;
+            if s.is_bad() {
+                bad += 1;
+                if s.severity_rank() > worst.severity_rank() {
+                    worst = s;
+                }
+            }
+        }
+        if reported == 0 {
+            return None;
+        }
+        if bad == 0 {
+            return Some(CheckStatus::Up);
+        }
+        if bad < self.required(reported) {
+            return Some(CheckStatus::Degraded);
+        }
+        Some(worst)
     }
 }
 
@@ -199,5 +230,84 @@ mod duration_secs_opt {
     pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Duration>, D::Error> {
         let secs = Option::<u64>::deserialize(d)?;
         Ok(secs.map(Duration::from_secs))
+    }
+}
+
+#[cfg(test)]
+mod region_fold_tests {
+    use super::*;
+
+    const P: RegionIncidentPolicy = RegionIncidentPolicy::Majority;
+
+    fn fold(policy: RegionIncidentPolicy, s: &[CheckStatus]) -> Option<CheckStatus> {
+        policy.fold_regions(s.iter().copied())
+    }
+
+    #[test]
+    fn nothing_reported_has_no_status() {
+        assert_eq!(fold(P, &[]), None);
+    }
+
+    #[test]
+    fn all_up_is_up() {
+        use CheckStatus::*;
+        assert_eq!(fold(P, &[Up, Up, Up]), Some(Up));
+    }
+
+    #[test]
+    fn one_failing_region_of_three_is_degraded_not_down() {
+        use CheckStatus::*;
+        assert_eq!(fold(P, &[Up, Up, Down]), Some(Degraded));
+        assert_eq!(fold(P, &[Up, Up, Error]), Some(Degraded));
+    }
+
+    #[test]
+    fn quorum_reached_reports_the_worst_failure() {
+        use CheckStatus::*;
+        assert_eq!(fold(P, &[Up, Error, Down]), Some(Down));
+        assert_eq!(fold(P, &[Degraded, Down, Up]), Some(Down));
+        assert_eq!(fold(P, &[Degraded, Error, Up]), Some(Error));
+    }
+
+    #[test]
+    fn single_region_keeps_its_own_verdict() {
+        use CheckStatus::*;
+        assert_eq!(fold(P, &[Down]), Some(Down));
+        assert_eq!(fold(P, &[Error]), Some(Error));
+        assert_eq!(fold(P, &[Up]), Some(Up));
+    }
+
+    #[test]
+    fn any_policy_reports_a_lone_failure() {
+        use CheckStatus::*;
+        assert_eq!(fold(RegionIncidentPolicy::Any, &[Up, Up, Down]), Some(Down));
+    }
+
+    #[test]
+    fn all_policy_softens_until_every_region_agrees() {
+        use CheckStatus::*;
+        let all = RegionIncidentPolicy::All;
+        assert_eq!(fold(all, &[Down, Down, Up]), Some(Degraded));
+        assert_eq!(fold(all, &[Down, Down, Down]), Some(Down));
+    }
+
+    #[test]
+    fn count_policy_uses_its_own_threshold() {
+        use CheckStatus::*;
+        let two = RegionIncidentPolicy::Count(2);
+        assert_eq!(fold(two, &[Down, Up, Up]), Some(Degraded));
+        assert_eq!(fold(two, &[Down, Down, Up]), Some(Down));
+    }
+
+    #[test]
+    fn degraded_regions_count_toward_quorum() {
+        use CheckStatus::*;
+        assert_eq!(fold(P, &[Degraded, Degraded, Up]), Some(Degraded));
+    }
+
+    #[test]
+    fn quorum_denominator_is_what_reported() {
+        use CheckStatus::*;
+        assert_eq!(fold(P, &[Up, Down]), Some(Degraded));
     }
 }

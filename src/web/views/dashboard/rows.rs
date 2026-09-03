@@ -9,7 +9,7 @@ use serde::Deserialize;
 use uuid::Uuid;
 
 use crate::api::types::DashboardMetrics;
-use crate::domain::{IncidentSeverity, uptime_pct_from_downtime};
+use crate::domain::{CheckStatus, IncidentSeverity, uptime_pct_from_downtime};
 use crate::storage::IncidentBrief;
 use crate::web::filters;
 use crate::web::views::region_display::LabeledRegion;
@@ -234,6 +234,7 @@ impl DashboardRow {
         address: String,
         enabled: bool,
         metrics: Option<&DashboardMetrics>,
+        folded: Option<CheckStatus>,
         spark: Vec<Option<f32>>,
         confirmed_downtime_secs: Option<i64>,
         window_secs: i64,
@@ -251,7 +252,10 @@ impl DashboardRow {
                         format!("{} ms", m.p95_ms),
                         format!("{err_pct:.1}"),
                         format!("{uptime_pct:.2}"),
-                        status_label(&m.last_status),
+                        match folded {
+                            Some(f) => status_label(f.as_str()),
+                            None => status_label(&m.last_status),
+                        },
                         m.samples,
                     )
                 }

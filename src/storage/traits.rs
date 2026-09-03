@@ -1,11 +1,12 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
 use uuid::Uuid;
 
 use crate::api::types::{
     AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, LatencyBucket,
-    PriorPeriodSummary, RegionLatencySeries, RegionRollup, StatusBreakdown, TagCount,
-    TargetsSummary,
+    PriorPeriodSummary, RegionLatencySeries, RegionRollup, TagCount, TargetsSummary,
 };
 use crate::domain::agent_wire::FlowRunRecord;
 use crate::domain::{
@@ -381,6 +382,23 @@ pub struct RegionFlaps {
     pub transitions: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct RegionLatestStatus {
+    pub target_id: Uuid,
+    pub region: String,
+    pub status: CheckStatus,
+}
+
+impl RegionLatestStatus {
+    pub fn group(rows: Vec<Self>) -> HashMap<Uuid, Vec<CheckStatus>> {
+        let mut out: HashMap<Uuid, Vec<CheckStatus>> = HashMap::new();
+        for r in rows {
+            out.entry(r.target_id).or_default().push(r.status);
+        }
+        out
+    }
+}
+
 /// Operator-facing results repository. Org-scoped on every method for the
 /// same reason as [`TargetStore`]: the `org` is resolved from the request and
 /// the implementation never returns another tenant's check history. A bare
@@ -504,15 +522,6 @@ pub trait ResultsStore: Send + Sync {
         range: ClampedRange,
         region: Option<&str>,
     ) -> Result<UptimeStats>;
-    /// Per-status breakdown using each target's most recent observation in
-    /// `range`. Targets with no observations in the range are omitted from
-    /// the counts.
-    async fn current_status_breakdown(
-        &self,
-        org: OrgId,
-        range: TimeRange,
-        region: Option<&str>,
-    ) -> Result<StatusBreakdown>;
     /// Aggregate uptime, response, and incident count across all targets
     /// in `range`. Returns `(checks_total, checks_up, avg_ms,
     /// incident_count)`. `avg_ms` is the true sample-weighted mean —
@@ -535,6 +544,14 @@ pub trait ResultsStore: Send + Sync {
         range: TimeRange,
         region: Option<&str>,
     ) -> Result<Vec<DashboardMetrics>>;
+    /// Each region's latest verdict, to fold against the monitor's policy. A
+    /// region with no samples in `range` is absent, and so out of the quorum
+    /// denominator.
+    async fn latest_status_by_region(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<Vec<RegionLatestStatus>>;
     /// Minute-bucketed average duration for the last 60 minutes, every
     /// monitor in the org. Drives the per-row sparkline. Implementations
     /// MUST read from the `check_results_1m` rollup (already aggregated

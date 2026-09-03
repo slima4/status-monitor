@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,16 +13,17 @@ use crate::auth::api_tokens::{
 };
 use crate::auth::session::{LastUsedDebounce, build_debounce_cache};
 use crate::config::AppConfig;
-use crate::domain::OrgId;
+use crate::domain::{CheckStatus, OrgId, RegionIncidentPolicy};
 use crate::email::EmailSender;
 use crate::http_client::HttpClients;
 use crate::http_outbound::OutboundHttpClient;
 use crate::public_status::PublicSource;
 use crate::quotas::{QuotaService, RateLimitService};
 use crate::security::AbuseGuard;
+use crate::storage::traits::RegionLatestStatus;
 use crate::storage::{
     IncidentNarrationStore, MaintenanceStore, NotificationChannelStore, ResultSink, ResultsStore,
-    TargetStore,
+    TargetStore, TimeRange,
 };
 use crate::worker::WorkerPool;
 
@@ -427,7 +429,65 @@ pub fn assert_cookie_scope_safe(cfg: &AppConfig) {
     }
 }
 
+/// How far back the region fold reads. Long enough for every check interval to
+/// have reported, short enough that a region dropped from a monitor stops
+/// voting quickly.
+const FOLD_LOOKBACK_HOURS: i64 = 24;
+
+/// Fold inputs for [`AppState::folded_status`]. Heartbeats are inbound-only, so
+/// a quorum over probe regions describes nothing.
+pub fn folded_status_policies(
+    targets: &[crate::domain::Target],
+) -> impl Iterator<Item = (uuid::Uuid, RegionIncidentPolicy)> + '_ {
+    targets
+        .iter()
+        .filter(|t| !t.check.is_passive())
+        .map(|t| (t.id, t.region_policy))
+}
+
 impl AppState {
+    /// Quorum-folded current status per monitor. Best-effort: a missing entry
+    /// leaves the caller on the raw `last_status` rather than failing the read.
+    pub async fn folded_status(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+        policies: impl IntoIterator<Item = (uuid::Uuid, RegionIncidentPolicy)>,
+    ) -> HashMap<uuid::Uuid, CheckStatus> {
+        // Current status needs the tail of the caller's window, not all of it: a
+        // region dropped from a monitor mid-window must stop voting rather than
+        // freeze its last verdict into a 90-day argMax.
+        let recent = TimeRange {
+            from: range
+                .from
+                .max(range.to - chrono::Duration::hours(FOLD_LOOKBACK_HOURS)),
+            to: range.to,
+        };
+        // Only regions that reported inside the window are in the denominator,
+        // which is the rule the incident writer votes by. A region that stops
+        // delivering drops out on its own; agent liveness is not consulted,
+        // since the control plane's own region has no `agents` row to be live in.
+        let rows = match self
+            .results_store
+            .latest_status_by_region(org, recent)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(err) => {
+                tracing::warn!(error = %err, "region statuses unavailable, showing last result");
+                return HashMap::new();
+            }
+        };
+        let grouped = RegionLatestStatus::group(rows);
+        policies
+            .into_iter()
+            .filter_map(|(id, policy)| {
+                let statuses = grouped.get(&id)?;
+                Some((id, policy.fold_regions(statuses.iter().copied())?))
+            })
+            .collect()
+    }
+
     /// Borrow the Postgres pool, or return an internal error. Centralises
     /// the "tenancy enabled but db is None" cloak so every handler doesn't
     /// rewrite the same anyhow string.

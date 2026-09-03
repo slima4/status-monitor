@@ -23,6 +23,7 @@ pub struct StatusBreakdown {
     pub down: u64,
     pub degraded: u64,
     pub error: u64,
+    /// No readable result in the window; the buckets sum to the monitor count.
     pub unknown: u64,
 }
 

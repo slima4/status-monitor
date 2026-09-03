@@ -88,7 +88,7 @@ pub fn decide_multi(
                 let status_at_start = bad
                     .iter()
                     .flat_map(|v| v.bad.iter().map(|r| r.status))
-                    .max_by_key(|s| severity_rank(*s))
+                    .max_by_key(|s| s.severity_rank())
                     .unwrap_or(CheckStatus::Down);
                 vec![Action::Open(NewOpenIncident {
                     target_id,
@@ -200,33 +200,10 @@ fn incident_error_sample(
         .find_map(|verdict| verdict.bad.iter().find_map(|result| result.error.clone()))
 }
 
-/// Anything that is not a clean `Up` is unhealthy: `Down`/`Error` are outages
-/// and `Degraded` is a service not meeting its check (slow, partial, rate
-/// limited). All three open an incident and none counts as recovery — an
-/// incident clears only on a sustained run of genuine `Up`. Exhaustive on
-/// purpose: a new `CheckStatus` variant must classify here, never default to
-/// healthy and silently auto-close incidents.
-fn is_bad(status: CheckStatus) -> bool {
-    match status {
-        CheckStatus::Down | CheckStatus::Error | CheckStatus::Degraded => true,
-        CheckStatus::Up => false,
-    }
-}
-
-/// Ordering for "worst status at open": hard failures outrank degraded.
-fn severity_rank(status: CheckStatus) -> u8 {
-    match status {
-        CheckStatus::Up => 0,
-        CheckStatus::Degraded => 1,
-        CheckStatus::Error => 2,
-        CheckStatus::Down => 3,
-    }
-}
-
 fn trailing_bad_run(results: &[CheckResult]) -> &[CheckResult] {
     let split = results
         .iter()
-        .rposition(|r| !is_bad(r.status))
+        .rposition(|r| !r.status.is_bad())
         .map(|i| i + 1)
         .unwrap_or(0);
     &results[split..]
@@ -235,7 +212,7 @@ fn trailing_bad_run(results: &[CheckResult]) -> &[CheckResult] {
 fn trailing_good_run(results: &[CheckResult]) -> &[CheckResult] {
     let split = results
         .iter()
-        .rposition(|r| is_bad(r.status))
+        .rposition(|r| r.status.is_bad())
         .map(|i| i + 1)
         .unwrap_or(0);
     &results[split..]

@@ -10,7 +10,6 @@ use uuid::Uuid;
 use crate::api::types::{
     AvailabilityBucket, DashboardMetrics, DashboardSparkBucket, FleetRibbonBucket, FlowStepBucket,
     FlowStepTrend, LatencyBucket, PriorPeriodSummary, RegionLatencySeries, RegionRollup,
-    StatusBreakdown,
 };
 use crate::domain::agent_wire::{ConsoleLine, FlowEvidence, StepOutcome, StepTrace};
 use crate::domain::{
@@ -19,8 +18,8 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::storage::traits::{
-    ClampedRange, FlowRunView, RegionFlaps, ResultsStore, TimeRange, UptimeStats,
-    rollup_bucket_secs,
+    ClampedRange, FlowRunView, RegionFlaps, RegionLatestStatus, ResultsStore, TimeRange,
+    UptimeStats, rollup_bucket_secs,
 };
 
 use super::{
@@ -694,49 +693,6 @@ impl ResultsStore for ClickhouseResultsStore {
         Ok(rows.into_iter().map(MultiResultRow::split).collect())
     }
 
-    async fn current_status_breakdown(
-        &self,
-        org: OrgId,
-        range: TimeRange,
-        region: Option<&str>,
-    ) -> Result<StatusBreakdown> {
-        #[derive(Row, Deserialize)]
-        struct Latest {
-            status: i8,
-        }
-        let region_pred = region.map(|_| "AND region = ?").unwrap_or("");
-        let mut q = self
-            .client
-            .query(&format!(
-                "SELECT argMax(status, timestamp) AS status \
-                 FROM {TABLE} \
-                 WHERE org_id = ? {region_pred} \
-                 AND timestamp >= fromUnixTimestamp(?) \
-                 AND timestamp < fromUnixTimestamp(?) \
-                 GROUP BY target_id"
-            ))
-            .bind(org.0);
-        if let Some(r) = region {
-            q = q.bind(r);
-        }
-        let rows: Vec<Latest> = q
-            .bind(range.from.timestamp())
-            .bind(range.to.timestamp())
-            .fetch_all::<Latest>()
-            .await
-            .context("clickhouse current_status_breakdown")?;
-        let mut out = StatusBreakdown::default();
-        for r in rows {
-            match CheckStatus::from_enum8(r.status) {
-                CheckStatus::Up => out.up += 1,
-                CheckStatus::Down => out.down += 1,
-                CheckStatus::Degraded => out.degraded += 1,
-                CheckStatus::Error => out.error += 1,
-            }
-        }
-        Ok(out)
-    }
-
     async fn last_n_summary(
         &self,
         org: OrgId,
@@ -931,6 +887,46 @@ impl ResultsStore for ClickhouseResultsStore {
                     last_status: CheckStatus::from_enum8(r.last_status).as_str().to_string(),
                     last_minute_ts: (r.last_minute_ts > 0).then_some(r.last_minute_ts as i64),
                 }
+            })
+            .collect())
+    }
+
+    async fn latest_status_by_region(
+        &self,
+        org: OrgId,
+        range: TimeRange,
+    ) -> Result<Vec<RegionLatestStatus>> {
+        // Unfiltered by region on purpose: the fold needs every region that
+        // reported, and a single-region view reads raw status anyway.
+        #[derive(Row, Deserialize)]
+        struct StatusRow {
+            #[serde(with = "clickhouse::serde::uuid")]
+            target_id: Uuid,
+            region: String,
+            status: i8,
+        }
+        let (table, tcol) = rollup_source(range.from);
+        let query = format!(
+            "SELECT \
+               target_id, \
+               region, \
+               argMaxMerge(last_status_state) AS status \
+             FROM {table} \
+             WHERE org_id = ? \
+               AND {tcol} >= fromUnixTimestamp(?) AND {tcol} < fromUnixTimestamp(?) \
+             GROUP BY target_id, region"
+        );
+        let rows: Vec<StatusRow> =
+            bind_minute_window(self.client.query(&query).bind(org.0), range.from, range.to)
+                .fetch_all::<StatusRow>()
+                .await
+                .context("clickhouse latest_status_by_region")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| RegionLatestStatus {
+                target_id: r.target_id,
+                region: r.region,
+                status: CheckStatus::from_enum8(r.status),
             })
             .collect())
     }

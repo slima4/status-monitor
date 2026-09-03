@@ -23,6 +23,12 @@ The result channel between worker pool and batcher is back-pressured.
 
 Look at `uptimepage_checks_errors_total{kind}` filtered by host to find the failure mode, then wait `circuit_breaker.open_duration_secs` for the breaker to enter half-open and probe.
 
+## A monitor shows `degraded` but every check looks fine
+
+Some of its probe regions are failing and the count has not reached the monitor's region policy, so the status is held at degraded instead of down. Open the monitor and read the per-region table: the failing regions are named there. Nothing is paging, because an incident needs the same quorum.
+
+If one region fails while the others stay clean for many monitors at once, suspect that probe's network path rather than your origins. Filter the console to that region to see its raw verdicts.
+
 ## Targets reporting `degraded` with `throttled: host concurrency cap`
 
 One tenant has more concurrent monitors at the same `(host, port)` than `checker.per_host_max_inflight` allows (default 2). Over-cap checks are recorded `degraded` instead of running. No alert fires — the upstream is fine. Either spread the targets across more hosts, raise the cap, or rely on jitter to thin the burst. Watch `uptimepage_host_throttle_drops_total` to size the cap against real traffic.

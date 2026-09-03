@@ -123,6 +123,10 @@ impl McpServer {
         let org_row = org_row.map_err(to_err)?;
 
         let metrics = index_by_target(rollup);
+        let folded = self
+            .state
+            .folded_status(org, range, crate::app::folded_status_policies(&targets))
+            .await;
         let org_slug = org_row.map(|o| o.slug).unwrap_or_else(|| org.0.to_string());
 
         let mut totals = HealthTotals {
@@ -139,7 +143,7 @@ impl McpServer {
                 continue;
             }
             let m = metrics.get(&t.id);
-            let state = current_state(m);
+            let state = current_state(m, folded.get(&t.id).copied());
             match state {
                 "up" => totals.up += 1,
                 "down" => totals.down += 1,
@@ -238,6 +242,10 @@ impl McpServer {
         .map_err(|e| McpToolError::internal(format!("list monitors query: {e}")))?;
 
         let metrics = index_by_target(rollup);
+        let folded = self
+            .state
+            .folded_status(org, range, crate::app::folded_status_policies(&targets))
+            .await;
 
         // Build, filter (type + state) in memory, then sort for stable paging.
         let mut items: Vec<MonitorListItem> = targets
@@ -249,7 +257,7 @@ impl McpServer {
                     id: t.id.to_string(),
                     name: sanitize_data(&t.name),
                     r#type: t.check.kind().to_string(),
-                    state: current_state(m).to_string(),
+                    state: current_state(m, folded.get(&t.id).copied()).to_string(),
                     group_name: t.group_name.as_deref().map(sanitize_data),
                     interval_secs: t.interval.as_secs(),
                     enabled: t.enabled,
@@ -330,6 +338,18 @@ impl McpServer {
             ));
         }
 
+        // Folded like `list_monitors`, so the drill-down cannot contradict it.
+        let folded = self
+            .state
+            .folded_status(
+                org,
+                r24.inner(),
+                crate::app::folded_status_policies(std::slice::from_ref(&target)),
+            )
+            .await
+            .get(&id)
+            .copied();
+
         let last = latest.first();
         let (_, address) = describe_check(&target.check);
         Ok(Json(MonitorDetail {
@@ -361,10 +381,12 @@ impl McpServer {
             managed_externally: target.write_source == WriteSource::Terraform,
             group_name: target.group_name.as_deref().map(sanitize_data),
             tags: target.tags.iter().map(|t| sanitize_data(t)).collect(),
-            state: last
-                .map(|r| r.status.as_str())
-                .unwrap_or("no_data")
-                .to_string(),
+            state: match (last, folded) {
+                (Some(_), Some(f)) => f.as_str(),
+                (Some(r), None) => r.status.as_str(),
+                (None, _) => "no_data",
+            }
+            .to_string(),
             last_checked_at: last.map(|r| r.timestamp.to_rfc3339()),
             last_error: last.and_then(|r| r.error.as_deref()).map(present_error),
             last_diagnostic: last.and_then(super::view::check_diagnostic),
@@ -738,12 +760,19 @@ impl McpServer {
             from: now - Duration::try_hours(HEALTH_WINDOW_HOURS).unwrap_or_default(),
             to: now,
         };
-        let (components, rollup) = tokio::try_join!(
+        // Components name a monitor by id, so the target list rides along
+        // purely for `region_policy`.
+        let (components, rollup, targets) = tokio::try_join!(
             self.state.status_page_store.list_components(org, page.id),
             self.state.results_store.dashboard_rollup(org, range, None),
+            self.state.target_store.list(org, all_monitors_filter(None)),
         )
         .map_err(|e| McpToolError::internal(format!("status page components: {e}")))?;
         let metrics = index_by_target(rollup);
+        let folded = self
+            .state
+            .folded_status(org, range, crate::app::folded_status_policies(&targets))
+            .await;
 
         let components = components
             .into_iter()
@@ -751,7 +780,8 @@ impl McpServer {
                 public_name: sanitize_data(&c.public_name.unwrap_or(c.monitor_name)),
                 group: c.public_group.as_deref().map(sanitize_data),
                 linked_monitor: c.target_id.to_string(),
-                state: current_state(metrics.get(&c.target_id)).to_string(),
+                state: current_state(metrics.get(&c.target_id), folded.get(&c.target_id).copied())
+                    .to_string(),
             })
             .collect();
 

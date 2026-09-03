@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::api::types::{DashboardMetrics, PriorPeriodSummary};
 use crate::app::AppState;
-use crate::domain::{OrgId, uptime_pct_from_downtime};
+use crate::domain::{CheckStatus, OrgId, uptime_pct_from_downtime};
 use crate::storage::{IncidentBriefFilter, TargetFilter, TimeRange};
 use crate::web::error::WebResult;
 use crate::web::views::describe_check;
@@ -122,6 +122,19 @@ pub(super) async fn build_snapshot(
         .collect();
     let metrics_by_target: HashMap<Uuid, DashboardMetrics> =
         rollup.into_iter().map(|m| (m.target_id, m)).collect();
+    // Same split as `confirmed`: a single-region view wants that region's raw
+    // verdict, so there is nothing to fold.
+    let folded_status: HashMap<Uuid, CheckStatus> = if confirmed {
+        state
+            .folded_status(
+                org,
+                time_range,
+                crate::app::folded_status_policies(&targets),
+            )
+            .await
+    } else {
+        HashMap::new()
+    };
     let spark_by_target = group_sparks(&spark_rows, spark_from);
     // Cosmetic overlay — a silence-query hiccup must not fail the dashboard.
     let silenced: std::collections::HashSet<Uuid> = state
@@ -144,6 +157,7 @@ pub(super) async fn build_snapshot(
                 .cloned()
                 .unwrap_or_else(|| vec![None; SPARK_BUCKETS]);
             let dt = confirmed.then(|| downtime_by_target.get(&t.id).copied().unwrap_or(0));
+            let folded = folded_status.get(&t.id).copied();
             let mut row = DashboardRow::build(
                 t.id,
                 t.name,
@@ -151,6 +165,7 @@ pub(super) async fn build_snapshot(
                 address,
                 t.enabled,
                 metrics,
+                folded,
                 spark,
                 dt,
                 window_secs,

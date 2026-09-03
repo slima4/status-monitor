@@ -281,7 +281,7 @@ A missing/invalid token returns `401` with `WWW-Authenticate: Bearer …`; a wro
 Once connected, drive it in natural language — the client picks the tool:
 
 - "What's broken in my org right now?" → `get_org_health`
-- "Show me every DNS monitor that's degraded." → `list_monitors(type=dns, state=degraded)`
+- "Show me every DNS monitor that's degraded." → `list_monitors(type=dns, state=degraded)` (`state` is folded across probe regions under the monitor's region policy, so `degraded` covers both a degraded check result and a failure in too few regions to count as down)
 - "How has the checkout API done over the last 7 days?" → `get_monitor_history(window=7d)`
 - "Is it down everywhere or only from Singapore?" → `get_monitor_history(window=24h)`, then `region=apac-sg`
 - "Why does this check treat a 301 as a failure?" → `get_monitor` (reads `follow_redirects` + `expected_status`)

@@ -432,6 +432,35 @@ impl CheckStatus {
             _ => Self::Error,
         }
     }
+
+    /// `None` for the view-layer pseudo-statuses ("no_data", "late").
+    pub fn from_label(s: &str) -> Option<Self> {
+        match s {
+            "up" => Some(Self::Up),
+            "down" => Some(Self::Down),
+            "degraded" => Some(Self::Degraded),
+            "error" => Some(Self::Error),
+            _ => None,
+        }
+    }
+
+    /// Exhaustive on purpose: a new variant must classify here, never default
+    /// to healthy and silently auto-close incidents.
+    pub const fn is_bad(self) -> bool {
+        match self {
+            Self::Down | Self::Error | Self::Degraded => true,
+            Self::Up => false,
+        }
+    }
+
+    pub const fn severity_rank(self) -> u8 {
+        match self {
+            Self::Up => 0,
+            Self::Degraded => 1,
+            Self::Error => 2,
+            Self::Down => 3,
+        }
+    }
 }
 
 #[cfg(test)]

@@ -770,6 +770,8 @@ Returns every tag currently in use across the caller's targets (enabled or disab
 }
 ```
 
+`current_status` counts each monitor once, so its five buckets sum to `targets.total`. A monitor with no readable result in the last 24 hours counts as `unknown`. The state is folded across probe regions under the monitor's region policy, matching the console and the MCP tools: failing regions below the monitor's quorum count as `degraded`, not `down`. See [Multi-region probes](multi-region.md#incident-detection-across-regions).
+
 ## On-demand operations
 
 - **`POST /api/v1/targets/test`** — runs one check against a raw `CheckSpec`, no persistence. Same SSRF / URL-scheme / port validation as `POST /targets`. Returns `TestResponse { result, matched_expectations, warnings }`.

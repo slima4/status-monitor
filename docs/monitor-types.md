@@ -30,6 +30,7 @@ A check sends `User-Agent: Mozilla/5.0 (compatible; uptimepage/<version>; +https
 Two behaviours worth knowing, because they prevent false pages:
 
 - A `429` or `503` is recorded as **degraded**, not down. The upstream is answering and asking you to back off, which is not an outage. If you genuinely expect those codes, list them in the expected status and they count as up.
+- A monitor can also *display* degraded without any check returning it, when some probe regions are failing but not enough to meet its region policy. See [Multi-region probes](multi-region.md#incident-detection-across-regions).
 - Checks against the same host and port are throttled per org, so a burst of monitors against one upstream cannot look like a probe. An over-cap tick is dropped rather than recorded, so it never counts as a failure and never alerts.
 - A response body is read up to 1 MiB on the wire, and up to 8 MiB once decompressed. A page bigger than either still passes on the status you expect, and its recorded size is blank because the read stopped early. Only a body substring assertion needs the whole page, and when it cannot be evaluated the result says `body over the 1 MiB read cap` or `body over the 8 MiB decoded cap` rather than reporting a transport failure. Large homepages are one more reason to assert against a health endpoint.
 
