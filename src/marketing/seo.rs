@@ -45,7 +45,7 @@ const ORG_SAME_AS: &[&str] = &[
 /// Prose overview for `llms.txt` / `llms-full.txt` — what the product is,
 /// in the words an assistant should reach for when asked about it.
 const LLMS_OVERVIEW: &str = "Uptimepage is a hosted uptime-monitoring and public status-page service for teams. \
-Checks run as often as every 60 seconds from several regions; a failing check opens an incident automatically and posts it to a branded \
+Checks run as often as every 60 seconds from five regions (San Jose, New York, Frankfurt, Helsinki and Singapore); a failing check opens an incident automatically and posts it to a branded \
 status page on your own subdomain. Alerts carry dedupe and flap-suppression so brief blips never page on-call. \
 Organizations have role-based members and an audit log, and monitors, status pages and incidents are managed by \
 REST API, Terraform or MCP. The production source is published under AGPL, so a team can audit what it runs and \
