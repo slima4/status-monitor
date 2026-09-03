@@ -29,12 +29,22 @@ pub(super) fn field_label(field: &str) -> &str {
 /// is approved unread, so nothing the caller chose is omitted here.
 pub(super) fn create_prompt_lines(
     new: &NewTarget,
-    probe: Option<&ProbeOutcome>,
+    regions: &[String],
+    probe: Option<(&str, &ProbeOutcome)>,
     channel_summary: Option<&str>,
 ) -> Vec<String> {
     let mut lines = vec![format!("checked every {}s", new.interval.as_secs())];
+    // Part of what the check watches, so it is approved rather than discovered.
+    if !new.check.is_passive() {
+        lines.push(format!("probed from: {}", regions.join(", ")));
+    }
     lines.push(match probe {
-        Some(p) => format!("trial run: {}", sanitize_prompt(&probe_line(p))),
+        // Named: the trial answers from one region, the monitor may hold several.
+        Some((region, p)) => format!(
+            "trial run from {}: {}",
+            sanitize_prompt(region),
+            sanitize_prompt(&probe_line(p))
+        ),
         None => "nothing to probe: it reports nothing and alerts nobody until the job's \
                  first ping"
             .to_string(),
@@ -57,10 +67,17 @@ pub(super) fn create_prompt_lines(
         secs => format!("first reminder after {secs}s, then doubling while unacknowledged"),
     });
     if let Some(policy) = new.region_policy {
-        lines.push(format!(
-            "opens an incident on {}",
-            region_policy_str(policy)
-        ));
+        // A quorum wider than the assignment is clamped, so the label alone would
+        // promise a patience the monitor will not have.
+        lines.push(match new.check.is_passive() {
+            true => format!("opens an incident on {}", region_policy_str(policy)),
+            false => format!(
+                "opens an incident on {} ({} of {} assigned regions)",
+                region_policy_str(policy),
+                policy.required(regions.len()),
+                regions.len()
+            ),
+        });
     }
     lines.push(match channel_summary {
         Some(s) => format!("notification channels: {}", sanitize_prompt(s)),

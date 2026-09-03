@@ -161,6 +161,53 @@ async fn bulk_create_rejects_empty() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+/// The bulk INSERT omits the column, so a dropped follow-up write leaves the
+/// monitor on the default quorum without saying so.
+#[tokio::test]
+async fn bulk_create_keeps_each_items_region_policy() {
+    let app = app();
+    let item = json!({
+        "name": "bulk-policy",
+        "check": {
+            "type": "http",
+            "url": "https://example.com/",
+            "method": "GET",
+            "timeout": 5000,
+            "follow_redirects": false,
+            "max_redirects": 0,
+            "expected_status": { "kind": "exact", "value": 200 },
+            "headers": {},
+            "verify_tls": true
+        },
+        "interval": 60,
+        "region_policy": "any"
+    });
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/targets/bulk")
+                .header("content-type", "application/json")
+                .body(Body::from(json!([item]).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let created = body_json(resp).await;
+    let id = created[0]["id"].as_str().unwrap().to_string();
+
+    let resp = app
+        .oneshot(
+            Request::get(format!("/api/v1/targets/{id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_json(resp).await["region_policy"], "any");
+}
+
 fn ssrf_payload(url: &str) -> Value {
     json!({
         "name": "ssrf-attempt",

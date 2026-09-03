@@ -429,6 +429,52 @@ pub(crate) fn default_region_set(
     }
 }
 
+/// A set that cleans down to nothing is refused, not defaulted: quietly probing
+/// somewhere else is the wrong answer to a typo.
+pub(crate) fn normalize_region_ids(requested: &[String]) -> Result<Vec<String>> {
+    let mut regions: Vec<String> = requested
+        .iter()
+        .map(|r| r.trim().to_string())
+        .filter(|r| !r.is_empty())
+        .collect();
+    regions.sort();
+    regions.dedup();
+    if regions.is_empty() {
+        return Err(AppError::unprocessable(
+            codes::REGION_INVALID,
+            "at least one region is required",
+        ));
+    }
+    Ok(regions)
+}
+
+/// Shared so naming regions at create time and setting them afterwards cannot
+/// drift into two ideas of a valid set.
+pub(crate) async fn vet_requested_regions(
+    state: &AppState,
+    org: OrgId,
+    requested: &[String],
+) -> Result<Vec<String>> {
+    let regions = normalize_region_ids(requested)?;
+    state
+        .quotas
+        .check_region_assignment(org, None, regions.len() as i64)
+        .await?;
+    let available: std::collections::HashSet<String> = state
+        .target_store
+        .available_regions()
+        .await?
+        .into_iter()
+        .collect();
+    if let Some(bad) = regions.iter().find(|r| !available.contains(*r)) {
+        return Err(AppError::unprocessable(
+            codes::REGION_INVALID,
+            format!("unknown or disabled region: {bad}"),
+        ));
+    }
+    Ok(regions)
+}
+
 /// Reject a binding to a channel the caller's org doesn't own (the store is
 /// org-scoped, so a foreign or deleted id resolves to `None`). Closes the
 /// IDOR where a target could otherwise reference another tenant's channel.

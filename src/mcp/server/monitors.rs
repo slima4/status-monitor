@@ -235,6 +235,18 @@ impl McpServer {
             .await
             .map_err(config_error)?;
 
+        // With the other argument checks: a set the fleet cannot serve is a
+        // mistake worth answering before a probe is spent on it.
+        let regions = rest::resolve_create_regions(
+            &self.state,
+            auth.org,
+            &new.check,
+            &plan,
+            args.regions.clone(),
+        )
+        .await
+        .map_err(config_error)?;
+
         // Ahead of the probe, not after it: a client that can never confirm must
         // not be able to spend probes at addresses it chooses. Behind argument
         // validation, which has no outward effect and is worth answering.
@@ -251,7 +263,7 @@ impl McpServer {
         let probe = if new.check.is_passive() {
             None
         } else {
-            Some(self.trial_run(auth.org, &new.check).await?)
+            Some(self.trial_run(auth.org, &new.check, &regions).await?)
         };
 
         require_confirmation(
@@ -260,21 +272,39 @@ impl McpServer {
                 "Create monitor \"{}\"?\n\n{}\n{}",
                 sanitize_prompt(&new.name),
                 sanitize_prompt(&address),
-                create_prompt_lines(&new, probe.as_ref(), channel_summary.as_deref()).join("\n"),
+                create_prompt_lines(
+                    &new,
+                    &regions,
+                    probe.as_ref().map(|(r, p)| (r.as_str(), p)),
+                    channel_summary.as_deref(),
+                )
+                .join("\n"),
             ),
         )
         .await?;
 
-        let created = rest::create_target(&self.state, auth.org, new, WriteSource::Api, &plan)
-            .await
-            .map_err(config_error)?;
+        let created = rest::create_target(
+            &self.state,
+            auth.org,
+            new,
+            WriteSource::Api,
+            &plan,
+            regions.clone(),
+        )
+        .await
+        .map_err(config_error)?;
 
         Ok(Json(MonitorCreated {
             id: created.id.to_string(),
             name: sanitize_data(&created.name),
             address: sanitize_data(&address),
             interval_secs: created.interval.as_secs(),
-            probe,
+            // A heartbeat is pinged, not probed, so it names no regions at all.
+            regions: match created.check.is_passive() {
+                true => Vec::new(),
+                false => regions,
+            },
+            probe: probe.map(|(_, p)| p),
             alerts: match &channel_summary {
                 Some(s) => s.clone(),
                 // Unread inventory would call a tag-covered monitor unmonitored.
@@ -308,17 +338,24 @@ impl McpServer {
     }
 
     /// Run the check once, unsaved, so the confirmation can show what it does.
+    /// A trial answered by a region the monitor was never assigned describes a
+    /// different network path than the one being approved.
     async fn trial_run(
         &self,
         org: crate::domain::OrgId,
         check: &CheckSpec,
-    ) -> Result<ProbeOutcome, McpToolError> {
-        let region = self
-            .state
-            .cfg
-            .scheduler
-            .effective_default_region()
-            .to_string();
+        regions: &[String],
+    ) -> Result<(String, ProbeOutcome), McpToolError> {
+        let default = self.state.cfg.scheduler.effective_default_region();
+        let live = |r: &&String| self.state.ad_hoc.region_live(r);
+        // A region with no agent 503s the dispatch and takes the create with it,
+        // so liveness outranks the preference for home.
+        let region = regions
+            .iter()
+            .find(|r| r.as_str() == default && live(r))
+            .or_else(|| regions.iter().find(live))
+            .or_else(|| regions.first())
+            .map_or_else(|| default.to_string(), String::clone);
         let delivered = crate::api::handlers::targets::run_ad_hoc(
             &self.state,
             org,
@@ -330,13 +367,16 @@ impl McpServer {
         .await
         .map_err(probe_dispatch_error)?;
         let r = delivered.result;
-        Ok(ProbeOutcome {
-            state: r.status.as_str().to_string(),
-            duration_ms: r.duration_ms,
-            http_status: r.response_code,
-            error: r.error.as_deref().map(present_error),
-            diagnostic: check_diagnostic(&r),
-        })
+        Ok((
+            region,
+            ProbeOutcome {
+                state: r.status.as_str().to_string(),
+                duration_ms: r.duration_ms,
+                http_status: r.response_code,
+                error: r.error.as_deref().map(present_error),
+                diagnostic: check_diagnostic(&r),
+            },
+        ))
     }
 
     /// `update_monitor` body (no audit — the wrapper's `finish` records it).

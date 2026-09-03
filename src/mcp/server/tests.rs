@@ -737,15 +737,17 @@ fn a_creation_prompt_states_every_setting_it_would_apply() {
         channel_id: Uuid::nil(),
     }]);
     let summary = "ops-slack, pager (disabled, delivers nothing)";
-    let lines = create_prompt_lines(&new, None, Some(summary)).join("\n");
+    let regions = vec!["eu-helsinki".to_string(), "us-east".to_string()];
+    let lines = create_prompt_lines(&new, &regions, None, Some(summary)).join("\n");
     for expected in [
         "checked every 300s",
+        "probed from: eu-helsinki, us-east",
         "tags: prod",
         "group: API",
         "alerts after 5 failing checks",
         "recovery is not announced",
         "no reminders",
-        "2 regions down",
+        "2 regions down (2 of 2 assigned regions)",
         "notification channels: ops-slack, pager (disabled, delivers nothing)",
     ] {
         assert!(
@@ -761,7 +763,7 @@ fn a_creation_prompt_states_every_setting_it_would_apply() {
     new.tags.clear();
     new.group_name = None;
     new.alerts = TargetAlerts::default();
-    let lines = create_prompt_lines(&new, None, None).join("\n");
+    let lines = create_prompt_lines(&new, &regions, None, None).join("\n");
     assert!(lines.contains("first reminder after 3600s"));
     assert!(!lines.contains("tags:"));
     // Silence is the one state worth stating outright.

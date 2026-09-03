@@ -586,6 +586,11 @@ pub struct CreateMonitorArgs {
     pub renotify_interval_secs: Option<u32>,
     /// Detection quorum across probe regions.
     pub region_policy: Option<RegionPolicyArg>,
+    /// Probe regions to run the check from, as ids from `list_regions`. Omit to
+    /// take the operator's default set, which is not necessarily every region:
+    /// a vantage point can be offered without being on by default. Rejected for
+    /// a heartbeat, which is pinged rather than probed, and capped by the plan.
+    pub regions: Option<Vec<String>>,
     /// Channel ids from `list_notification_channels` to alert. Omit to create a
     /// monitor that alerts nobody. The channels themselves are set up in the
     /// app, since they hold the tokens and addresses.
@@ -615,6 +620,9 @@ pub struct MonitorCreated {
     /// What the check watches, as stored.
     pub address: String,
     pub interval_secs: u64,
+    /// Probe regions the monitor was assigned, which is the operator's default
+    /// set when `regions` was omitted. Empty for a heartbeat.
+    pub regions: Vec<String>,
     /// The trial run's outcome, which the operator saw before approving. Absent
     /// for a heartbeat, which has nothing to probe.
     pub probe: Option<ProbeOutcome>,

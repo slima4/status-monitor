@@ -499,6 +499,18 @@ async fn a_monitor_is_not_created_when_the_check_is_refused_or_cannot_be_tried()
             "a second count too wide for the column",
             json!({ "name": "wide", "check": { "type": "http", "url": "https://example.com/" }, "interval_secs": 4_294_967_356u64 }),
         ),
+        (
+            "a region the fleet does not serve",
+            json!({ "name": "nowhere", "check": { "type": "http", "url": "https://example.com/" }, "regions": ["atlantis"] }),
+        ),
+        (
+            "an empty region set",
+            json!({ "name": "empty regions", "check": { "type": "http", "url": "https://example.com/" }, "regions": [] }),
+        ),
+        (
+            "regions on a monitor that is pinged rather than probed",
+            json!({ "name": "nightly", "check": { "type": "heartbeat", "period_secs": 86_400, "grace_secs": 3_600 }, "regions": ["eu-helsinki"] }),
+        ),
     ] {
         let refused = mcp.call("create_monitor", args).await;
         assert_eq!(

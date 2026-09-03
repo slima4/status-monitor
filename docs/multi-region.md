@@ -90,7 +90,7 @@ How the per-region verdicts combine is a **per-monitor policy**, set on the moni
 - **any** — open as soon as a single region is sustained-unhealthy.
 - **majority** — open once more than half the reporting regions agree it's down (the standard defence against a single-location false positive).
 - **all** — open only when every region is down.
-- **count: N** — open once at least *N* regions are down.
+- **count: N** — open once at least *N* regions are down. A count wider than the regions the monitor is assigned is clamped to the regions that report, so it can never be impossible to reach.
 
 A monitor probed from a single region behaves the same under every policy.
 

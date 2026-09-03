@@ -413,7 +413,10 @@ attempt cap; per-incident delivery state is visible at
 - `renotify_interval_secs must be 0 (off) or at least 60`
 
 A `region_policy` of `{ "count": N }` where `N` is `0` or exceeds the
-available regions is `422 INVALID_REGION_POLICY`.
+available regions is `422 INVALID_REGION_POLICY`. A count within the catalog but
+wider than the regions one monitor is assigned is accepted and clamped to the
+regions that report, since regions are assigned on their own sub-resource and a
+monitor is often narrowed after it is created.
 
 ### Validation errors
 

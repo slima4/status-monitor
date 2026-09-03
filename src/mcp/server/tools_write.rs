@@ -72,7 +72,7 @@ impl McpServer {
     /// Create a monitor. The check runs once first and its result is shown in
     /// the confirmation, so a misconfigured check is visible before it exists.
     #[tool(
-        description = "Create a monitor for an http, tcp, ping, dns, tls_cert, domain_expiry or heartbeat check. The check is run once before anything is saved and the result is shown to the user along with every setting it would apply; nothing is created unless they approve. Pass channel_ids from list_notification_channels to have it alert those channels (this needs the channels:read scope); without them the monitor alerts nobody. Request headers, request bodies and credentials cannot be set here, a URL carrying a username or password is refused, and browser flows cannot be created here — add those in the app. Not read-only.",
+        description = "Create a monitor for an http, tcp, ping, dns, tls_cert, domain_expiry or heartbeat check. The check is run once before anything is saved and the result is shown to the user along with every setting it would apply; nothing is created unless they approve. Pass channel_ids from list_notification_channels to have it alert those channels (this needs the channels:read scope); without them the monitor alerts nobody. Pass regions from list_regions to choose where it probes from; omitted, it takes the operator's default set, which need not be every region the fleet has. Request headers, request bodies and credentials cannot be set here, a URL carrying a username or password is refused, and browser flows cannot be created here — add those in the app. Not read-only.",
         title = "Create monitor",
         annotations(
             read_only_hint = false,
@@ -94,10 +94,12 @@ impl McpServer {
                 "name": created.name,
                 "address": created.address,
                 "interval_secs": created.interval_secs,
+                // A caller's choice now, and this row is its only record.
+                "regions": created.regions,
                 // Who this pages is the part an incident review asks about.
                 "alerts": created.alerts,
             }),
-            Err(_) => json!({ "name": args.name }),
+            Err(_) => json!({ "name": args.name, "regions": args.regions }),
         };
         self.finish(pool, &auth, "create_monitor", args_json, result)
             .await

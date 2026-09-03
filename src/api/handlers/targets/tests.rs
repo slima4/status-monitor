@@ -682,6 +682,31 @@ fn host_canonicalization_is_pinned_to_a_fixed_corpus() {
 }
 
 #[test]
+fn a_named_region_set_is_cleaned_and_an_empty_one_refused() {
+    use super::validate::normalize_region_ids;
+
+    assert_eq!(
+        normalize_region_ids(&[
+            "  us-east ".to_string(),
+            "eu-helsinki".to_string(),
+            "us-east".to_string(),
+        ])
+        .unwrap(),
+        vec!["eu-helsinki".to_string(), "us-east".to_string()]
+    );
+    for empty in [vec![], vec!["".to_string()], vec!["   ".to_string()]] {
+        assert!(
+            matches!(
+                normalize_region_ids(&empty),
+                Err(crate::error::AppError::Unprocessable { code, .. })
+                    if code == codes::REGION_INVALID
+            ),
+            "{empty:?}"
+        );
+    }
+}
+
+#[test]
 fn a_new_monitor_seeds_only_the_regions_flagged_as_defaults() {
     let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
 

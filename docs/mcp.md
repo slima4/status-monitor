@@ -48,7 +48,7 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 
 | Tool | Scope | Effect |
 |---|---|---|
-| `create_monitor` | `targets:write` + `targets:execute` (+ `channels:read` to bind channels) | Create an `http`, `tcp`, `ping`, `dns`, `tls_cert`, `domain_expiry` or `heartbeat` monitor. See [How creation is guarded](#how-creation-is-guarded). |
+| `create_monitor` | `targets:write` + `targets:execute` (+ `channels:read` to bind channels) | Create an `http`, `tcp`, `ping`, `dns`, `tls_cert`, `domain_expiry` or `heartbeat` monitor, optionally naming the `regions` it probes from. See [How creation is guarded](#how-creation-is-guarded). |
 | `run_check_now` | `targets:execute` | Probe a monitor immediately and record the result. A `down` result may fire the org's normal alerts. A heartbeat monitor has nothing to probe and is refused as `invalid_argument`, not as something to retry. |
 | `update_monitor` | `targets:write` (+ `channels:read` to rebind channels) | Change how loudly a monitor is watched: `interval_secs`, `alert_confirmations`, `notify_recovery`, `renotify_interval_secs`, `tags`, `group_name`, `region_policy`, `channel_ids`. Nothing else — see [What it will not change](#what-update-monitor-will-not-change). `tags` replaces the whole list and takes at most 50, each at most 50 characters, with no blank and no invisible characters. The confirmation names the monitor and states old → new for every field, and a request whose values already match writes nothing and never prompts. If the monitor moves between the prompt and the approval, the write is refused as `conflict` instead of landing on top of the newer value. Idempotent. |
 | `pause_monitor` | `targets:write` | Stop a monitor's checks until resumed. Idempotent. |
@@ -65,11 +65,11 @@ Incidents start internal, so the customer-facing sequence is `publish_incident` 
 
 `create_monitor` is the one tool that brings something into existence, so it carries three constraints the others don't need.
 
-**The check runs before anything is saved.** The trial result — passed, HTTP status, duration, or the error text — is part of the confirmation the operator reads, so a check that asserts the wrong thing is visible while it can still be declined rather than after it starts paging. That is also why the tool needs `targets:execute` alongside `targets:write`: it dispatches a real probe at a caller-supplied address, and that probe is metered against the same `test_now` budget as `POST /targets/test`. If no agent is serving the region, creation is refused as `probe_unavailable` rather than persisted untried, since a monitor nothing can check is not worth having.
+**The check runs before anything is saved.** The trial result — the region it ran from, passed or not, HTTP status, duration, or the error text — is part of the confirmation the operator reads, so a check that asserts the wrong thing is visible while it can still be declined rather than after it starts paging. That is also why the tool needs `targets:execute` alongside `targets:write`: it dispatches a real probe at a caller-supplied address, and that probe is metered against the same `test_now` budget as `POST /targets/test`. If no agent is serving the region, creation is refused as `probe_unavailable` rather than persisted untried, since a monitor nothing can check is not worth having.
 
 Two consequences worth stating plainly. The probe necessarily happens **before** the human answers, so declining the prompt still means one request was made to that address — the confirmation decides whether the monitor is created, not whether the check was tried. And a client that never negotiated elicitation is refused *before* the probe, so it cannot use this tool to reach an address it chooses without ever being able to create anything.
 
-**The confirmation lists every setting**, not just the address: interval, tags, group, how many failing checks it alerts after, whether recovery is announced, the reminder cadence, and the multi-region quorum. A field the prompt omitted would be approved unread.
+**The confirmation lists every setting**, not just the address: interval, probe regions, tags, group, how many failing checks it alerts after, whether recovery is announced, the reminder cadence, and the multi-region quorum, resolved against the regions the monitor is being given rather than left as a label a narrower assignment would clamp. A field the prompt omitted would be approved unread.
 
 **Credentials cannot be set here.** No request headers, no request body, no basic auth, no bearer token. A custom `Authorization` or `X-Api-Key` header is a literal secret, and a tool that accepted one would carry it through a chat log. Browser flows are excluded for the same reason: their fill values are withheld from every other MCP tool. Add both in the app, on a monitor that already exists.
 
@@ -79,7 +79,9 @@ The confirmation names the channels rather than listing ids, and says outright w
 
 The interval defaults to where the app's own picker opens a monitor of that kind, held up to the plan's floor — not to the hard minimum, which is legal but would probe a certificate twelve times more often than any other front door does. For a heartbeat it is capped at `period + grace`, since a tick coarser than the window could never judge it.
 
-A monitor created here gets the same region set, heartbeat ping row and immediate first check that `POST /targets` gives it, because both doors go through one creation path. Without that a heartbeat would have no ping URL to call, and a multi-region plan would quietly get single-region monitors.
+**Regions are chosen, not assumed.** `regions` takes ids from `list_regions` and pins where the check runs from; omit it and the monitor takes the operator's default set, which is not necessarily every region — a vantage point can be published without being ticked by default, so a monitor that needs it has to name it. The set is vetted before the trial probe, so an unknown or disabled id, or one the plan's region cap will not pay for, is refused without spending a probe. A heartbeat is pinged rather than probed and rejects the argument outright. The result reports the regions the monitor was actually assigned, so the default set never has to be guessed at.
+
+Beyond that, a monitor created here gets the same heartbeat ping row and immediate first check that `POST /targets` gives it, because both doors go through one creation path. Without that a heartbeat would have no ping URL to call, and a multi-region plan would quietly get single-region monitors.
 
 ### What `update_monitor` will not change
 
