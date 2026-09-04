@@ -279,6 +279,8 @@ impl QuotaService {
                 }
                 // Billed add-ons stack on the resolved plan/override base.
                 plan = apply_addons(&plan, &org_addons(&db2, org).await?);
+                // Creation assigns a region regardless, so zero is unhonourable.
+                plan.max_regions = plan.max_regions.max(1);
                 Ok::<Arc<Plan>, sqlx::Error>(Arc::new(plan))
             })
             .await

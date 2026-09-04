@@ -956,6 +956,32 @@ async fn plan_override_replaces_named_caps() {
     );
 }
 
+// ── a region cap of zero floors to one, since zero cannot be honoured ─
+#[tokio::test]
+async fn a_zero_region_override_floors_to_one() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (_pid, org) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    seed_override(&pool, org, r#"{"max_regions": 0}"#, false).await;
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    assert_eq!(
+        svc.limit_for_org(org).await.unwrap().max_regions,
+        1,
+        "creation assigns a region regardless, so the cap must admit one"
+    );
+    assert!(
+        svc.check_region_assignment(org, None, 1).await.is_ok(),
+        "the one region a monitor is given anyway must not be refused"
+    );
+    assert!(
+        svc.check_region_assignment(org, None, 2).await.is_err(),
+        "the floor lifts the cap to one, it does not remove it"
+    );
+}
+
 // ── billed add-ons stack additively on the base cap ─────────────────
 #[tokio::test]
 async fn addon_adds_to_base_cap() {
