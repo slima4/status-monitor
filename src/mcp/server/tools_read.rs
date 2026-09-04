@@ -33,8 +33,8 @@ use crate::mcp::schema::{
     IncidentDetail, IncidentIdArg, IncidentList, IncidentMetricsResult, IncidentWindow,
     LatencyPoint, ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs, MetricCount,
     MonitorDetail, MonitorHistory, MonitorList, MonitorListItem, NoisyMonitor, OrgHealth, OrgUsage,
-    Quota, RegionItem, RegionList, StatusPageComponent as McpComponent, StatusPageDetail,
-    StatusPageList, StatusPageSummary, TagItem, TagList, WorstMonitor,
+    Quota, RegionList, StatusPageComponent as McpComponent, StatusPageDetail, StatusPageList,
+    StatusPageSummary, TagItem, TagList, WorstMonitor,
 };
 
 use super::McpServer;
@@ -45,7 +45,8 @@ use super::args::{
 use super::text::{present_error, sanitize_data};
 use super::view::{
     check_config, check_timing, current_state, flow_run_item, incident_detail, incident_summary,
-    ms_to_rfc3339, region_health, region_policy_view, step_trend_item, ts_to_rfc3339,
+    ms_to_rfc3339, region_cap, region_health, region_items, region_policy_view, step_trend_item,
+    ts_to_rfc3339,
 };
 
 /// Health/list window. Matches the operator dashboard's default so the MCP
@@ -528,7 +529,7 @@ impl McpServer {
     /// The probe-region catalog, so the model can name a region and pass a
     /// valid one to `get_monitor_history`.
     #[tool(
-        description = "The fleet's probe regions: id, display name, city, country, continent. Use it to name where a check runs from and to pass a valid `region` to get_monitor_history. Read-only.",
+        description = "The fleet's probe regions: id, display name, city, country, continent, and whether each is on by default for a new monitor. Reports `max_regions` only when the plan reaches fewer regions than the catalog lists, so a set too large to be accepted is visible before it is sent. Use it to pass a valid `region` to get_monitor_history, and to read where a check would run from. This is a catalog, not a menu to fill: leave `create_monitor.regions` unset unless the user named the places they want covered. Read-only.",
         title = "List probe regions",
         annotations(read_only_hint = true)
     )]
@@ -543,17 +544,28 @@ impl McpServer {
             .regions_detailed()
             .await
             .map_err(|e| McpToolError::internal(format!("list regions: {e}")))?;
+        let plan = self
+            .state
+            .quotas
+            .limit_for_org(auth.org)
+            .await
+            .map_err(|e| McpToolError::internal(format!("plan: {e}")))?;
+        let preferred = self
+            .state
+            .target_store
+            .default_selected_regions()
+            .await
+            .map_err(|e| McpToolError::internal(format!("default regions: {e}")))?;
+        // Must resolve exactly as an omitted `create_monitor.regions` does.
+        let applied_default = crate::api::handlers::targets::default_region_set(
+            preferred,
+            plan.max_regions,
+            self.state.cfg.scheduler.effective_default_region(),
+        );
+        let items = region_items(regions, &applied_default);
         Ok(Json(RegionList {
-            items: regions
-                .into_iter()
-                .map(|r| RegionItem {
-                    id: r.id,
-                    name: sanitize_data(&r.name),
-                    city: sanitize_data(&r.city),
-                    country_code: r.country_code,
-                    continent: r.continent,
-                })
-                .collect(),
+            max_regions: region_cap(plan.max_regions, items.len()),
+            items,
         }))
     }
 

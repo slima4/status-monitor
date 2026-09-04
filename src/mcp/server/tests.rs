@@ -9,8 +9,8 @@ use super::text::{clean_public_text, create_prompt_lines, sanitize_data, sanitiz
 use super::tools_read::IncidentPage;
 use super::view::{
     channel_names, check_config, check_timing, current_state, expected_status_str, flow_run_item,
-    incident_detail, incident_summary, ms_to_rfc3339, probe_line, region_health,
-    region_policy_view, step_trend_item, ts_to_rfc3339, undeliverable_reason,
+    incident_detail, incident_summary, ms_to_rfc3339, probe_line, region_cap, region_health,
+    region_items, region_policy_view, step_trend_item, ts_to_rfc3339, undeliverable_reason,
 };
 use super::*;
 
@@ -1370,6 +1370,81 @@ fn region_health_rates_a_regions_own_checks() {
     });
     assert_eq!(health.uptime_pct, None);
     assert_eq!(health.last_status, "no_data");
+}
+
+fn region_option(id: &str) -> crate::storage::RegionOption {
+    crate::storage::RegionOption {
+        id: id.into(),
+        name: id.into(),
+        city: String::new(),
+        country_code: None,
+        continent: None,
+        latitude: None,
+        longitude: None,
+    }
+}
+
+#[test]
+fn the_region_catalog_flags_the_default_set_the_plan_actually_pays_for() {
+    use crate::api::handlers::targets::default_region_set;
+
+    let catalog = || {
+        vec![
+            region_option("apac-sg"),
+            region_option("eu-frankfurt"),
+            region_option("eu-helsinki"),
+            region_option("us-east"),
+        ]
+    };
+    let preferred = vec![
+        "apac-sg".to_string(),
+        "eu-frankfurt".to_string(),
+        "eu-helsinki".to_string(),
+    ];
+
+    let applied = default_region_set(preferred.clone(), 3, "eu-helsinki");
+    let flagged: Vec<String> = region_items(catalog(), &applied)
+        .into_iter()
+        .filter(|r| r.default_selected)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(flagged, ["apac-sg", "eu-frankfurt", "eu-helsinki"]);
+
+    let applied = default_region_set(preferred, 2, "eu-helsinki");
+    let flagged: Vec<String> = region_items(catalog(), &applied)
+        .into_iter()
+        .filter(|r| r.default_selected)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(flagged, ["apac-sg", "eu-helsinki"]);
+
+    let applied = default_region_set(Vec::new(), 3, "eu-helsinki");
+    let flagged: Vec<String> = region_items(catalog(), &applied)
+        .into_iter()
+        .filter(|r| r.default_selected)
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(flagged, ["eu-helsinki"]);
+}
+
+#[test]
+fn the_region_cap_is_reported_only_where_it_bites() {
+    assert_eq!(
+        region_cap(3, 5),
+        Some(3),
+        "a plan short of the catalog says so"
+    );
+    assert_eq!(
+        region_cap(i32::MAX, 5),
+        None,
+        "a cap the catalog can never reach is not a ceiling worth naming"
+    );
+    assert_eq!(
+        region_cap(5, 5),
+        None,
+        "reaching every region is not licence to name every region"
+    );
+    assert_eq!(region_cap(1, 5), Some(1), "a single-region plan says one");
 }
 
 #[test]

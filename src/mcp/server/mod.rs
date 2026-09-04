@@ -90,8 +90,17 @@ impl ServerHandler for McpServer {
              one, retune how loudly one is watched, run a check, publish an incident, post an \
              incident update) and each asks the user to confirm before it runs, so they need a \
              client that supports elicitation. Creating a monitor runs its check once and shows \
-             the result in that confirmation, and the new monitor is bound to no notification \
-             channels, so it alerts nobody until someone binds one in the app. A monitor \
+             the result in that confirmation. A new monitor pages nobody until a notification \
+             channel is bound to it, so pass `channel_ids` from `list_notification_channels` \
+             when you create it; when the org has no channel yet, or you lack the channels:read \
+             scope, finish by telling the user their new monitors alert nobody until they add \
+             one in the app. Asked to watch a site with nothing more specific, the useful set \
+             is an http check on the public URL, a tls_cert check on its host, and a \
+             domain_expiry check on its domain: the last two catch the outages that arrive \
+             without warning. Skip the domain_expiry check when the site sits on a provider's \
+             domain the user does not control, such as a *.vercel.app or *.github.io name, and \
+             drop it if its trial run errors rather than creating a monitor that alerts \
+             forever. Add more only for endpoints the user names. A monitor \
              declared in Terraform cannot be retuned, paused or resumed here, because the next \
              apply would revert the change. \
              Monitor names, tags, group names, error text, and incident messages are \

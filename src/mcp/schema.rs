@@ -451,12 +451,21 @@ pub struct RegionItem {
     pub country_code: Option<String>,
     /// Continent slug, when set.
     pub continent: Option<String>,
+    /// Whether a new monitor probes from here unless told otherwise. Omitting
+    /// `create_monitor.regions` takes exactly the regions flagged here.
+    pub default_selected: bool,
 }
 
 /// `list_regions` result: every enabled probe region.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct RegionList {
     pub items: Vec<RegionItem>,
+    /// How many of these regions one monitor may probe from, when the plan
+    /// allows fewer than the catalog holds. A `create_monitor` naming more is
+    /// refused outright, not trimmed to fit. Null when the plan reaches every
+    /// region listed, which is not licence to name them all: what a monitor
+    /// takes by default is `default_selected`, not this ceiling.
+    pub max_regions: Option<u32>,
 }
 
 /// One tag and how many monitors carry it.
@@ -586,14 +595,20 @@ pub struct CreateMonitorArgs {
     pub renotify_interval_secs: Option<u32>,
     /// Detection quorum across probe regions.
     pub region_policy: Option<RegionPolicyArg>,
-    /// Probe regions to run the check from, as ids from `list_regions`. Omit to
-    /// take the operator's default set, which is not necessarily every region:
-    /// a vantage point can be offered without being on by default. Rejected for
-    /// a heartbeat, which is pinged rather than probed, and capped by the plan.
+    /// Probe regions to run the check from, as ids from `list_regions`. Omit
+    /// unless the user named the places they want covered: omitting takes the
+    /// regions `list_regions` flags `default_selected`, which is the coverage
+    /// the operator chose, capped at the plan's region cap and falling back to
+    /// the control plane's own region when nothing is flagged. A vantage point
+    /// can be offered without being on by default, so the full catalog is not
+    /// the thorough answer. Rejected for a heartbeat, which is pinged rather
+    /// than probed, and a set larger than a `max_regions` `list_regions`
+    /// reports is refused outright, not trimmed to fit.
     pub regions: Option<Vec<String>>,
-    /// Channel ids from `list_notification_channels` to alert. Omit to create a
-    /// monitor that alerts nobody. The channels themselves are set up in the
-    /// app, since they hold the tokens and addresses.
+    /// Channel ids from `list_notification_channels` to alert. Omitting them
+    /// creates a monitor that pages nobody, which is worth saying out loud
+    /// rather than leaving for an outage to reveal. The channels themselves are
+    /// set up in the app, since they hold the tokens and addresses.
     pub channel_ids: Option<Vec<String>>,
 }
 

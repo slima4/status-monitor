@@ -18,8 +18,8 @@ use crate::mcp::schema::{
     CheckConfig, CheckDiagnosticView, CheckTiming, DnsCheckConfig, DomainExpiryCheckConfig,
     FlowCheckConfig, FlowRunEvidence, FlowRunItem, FlowStepConfig, FlowStepRun, FlowStepTrendItem,
     HeartbeatCheckConfig, HttpCheckConfig, IncidentDetail, IncidentSummary, IncidentUpdateItem,
-    IncidentVisibilityResult, PingCheckConfig, ProbeOutcome, RegionHealth, RegionPolicyArg,
-    RegionPolicyMode, TcpCheckConfig, TlsCertCheckConfig,
+    IncidentVisibilityResult, PingCheckConfig, ProbeOutcome, RegionHealth, RegionItem,
+    RegionPolicyArg, RegionPolicyMode, TcpCheckConfig, TlsCertCheckConfig,
 };
 
 pub(super) fn check_diagnostic(result: &CheckResult) -> Option<CheckDiagnosticView> {
@@ -161,6 +161,31 @@ pub(super) fn probe_line(p: &ProbeOutcome) -> String {
         Some(diagnostic) => format!("{result}; {}", diagnostic.summary),
         None => result,
     }
+}
+
+/// Flags against the resolved set, not the raw column: a plan cap trims it.
+pub(super) fn region_items(
+    catalog: Vec<crate::storage::RegionOption>,
+    applied_default: &[String],
+) -> Vec<RegionItem> {
+    catalog
+        .into_iter()
+        .map(|r| RegionItem {
+            default_selected: applied_default.contains(&r.id),
+            id: r.id,
+            name: sanitize_data(&r.name),
+            city: sanitize_data(&r.city),
+            country_code: r.country_code,
+            continent: r.continent,
+        })
+        .collect()
+}
+
+/// Reported only where it bites: a ceiling equal to the catalog invites naming
+/// every row.
+pub(super) fn region_cap(max_regions: i32, catalog_len: usize) -> Option<u32> {
+    let cap = max_regions.max(0) as usize;
+    (cap < catalog_len).then_some(cap as u32)
 }
 
 pub(super) fn region_health(r: crate::api::types::RegionRollup) -> RegionHealth {
