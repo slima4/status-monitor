@@ -1,11 +1,13 @@
 pub mod abuse;
 pub mod abuse_reload;
+pub mod cert_probe;
 pub mod crypto;
 pub mod email_policy;
 pub mod outbound_connector;
 pub mod ssrf;
 
 pub use abuse::{AbuseGuard, AbuseHit, AbuseKind};
+pub use cert_probe::{CertFacts, CertProbeError};
 pub use crypto::{
     Cipher, CryptoError, ENC_KEY, envelope_str, is_envelope, open_str, seal_str, wrap_envelope,
 };

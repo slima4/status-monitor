@@ -12,6 +12,11 @@
 //! filter + `mount_static` helper). On extraction the assets module
 //! moves with the marketing site or is duplicated into the extracted
 //! service; either way the rebind is one path.
+//! The SSL checker adds two more, both leaves that travel the same way:
+//! `crate::security::{SsrfGuard, cert_probe}` and
+//! `crate::web::client_ip::extract`. Each is a pure function over its
+//! arguments — no pool, no state, no resolver — which is the property
+//! that keeps them copyable rather than couplings.
 //! The Markdown renderer is **vendored locally** (`blog::render`) —
 //! deliberately not the trusted-unsanitised legal renderer; blog
 //! content is third-party PR input and has a different trust model.

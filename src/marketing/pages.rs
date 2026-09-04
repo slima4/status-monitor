@@ -608,6 +608,7 @@ mod tests {
             canonical_origin: canonical_origin.into(),
             blog_enabled: true,
             mcp_url: None,
+            trusted_proxies: Vec::new(),
         }
     }
 

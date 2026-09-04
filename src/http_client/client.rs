@@ -22,6 +22,7 @@ use crate::http_client::connector::ConnectParams;
 use crate::http_client::dns::HickoryDnsResolver;
 use crate::observability::metrics::names;
 use crate::security::SsrfGuard;
+use crate::security::cert_probe::NoVerify;
 
 /// Shared, cheaply-clonable handles for the check path. Holds no connection
 /// pool: every HTTP check connects fresh (a monitor probes each target once per
@@ -259,57 +260,6 @@ fn diagnose_lone_leaf(leaf: &CertificateDer<'_>) -> Option<ChainFault> {
 pub(crate) fn install_default_crypto_provider() {
     if CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
-    }
-}
-
-/// Accepts every chain. Used by the `verify_tls = false` HTTP client path and
-/// by the TLS-cert-expiry check (which must read expired/self-signed leaves to
-/// report `Down: expired` rather than a generic handshake failure).
-#[derive(Debug)]
-pub(crate) struct NoVerify;
-
-impl ServerCertVerifier for NoVerify {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &CertificateDer<'_>,
-        _intermediates: &[CertificateDer<'_>],
-        _server_name: &ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: UnixTime,
-    ) -> std::result::Result<ServerCertVerified, rustls::Error> {
-        Ok(ServerCertVerified::assertion())
-    }
-
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &CertificateDer<'_>,
-        _dss: &DigitallySignedStruct,
-    ) -> std::result::Result<HandshakeSignatureValid, rustls::Error> {
-        Ok(HandshakeSignatureValid::assertion())
-    }
-
-    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
-        vec![
-            SignatureScheme::RSA_PKCS1_SHA256,
-            SignatureScheme::RSA_PKCS1_SHA384,
-            SignatureScheme::RSA_PKCS1_SHA512,
-            SignatureScheme::ECDSA_NISTP256_SHA256,
-            SignatureScheme::ECDSA_NISTP384_SHA384,
-            SignatureScheme::RSA_PSS_SHA256,
-            SignatureScheme::RSA_PSS_SHA384,
-            SignatureScheme::RSA_PSS_SHA512,
-            SignatureScheme::ED25519,
-        ]
     }
 }
 

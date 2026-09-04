@@ -1,19 +1,14 @@
-use std::sync::Arc;
 use std::time::Instant;
 
-use chrono::{TimeZone, Utc};
-use rustls::ClientConfig;
-use rustls::pki_types::{CertificateDer, ServerName};
+use chrono::Utc;
 use serde::Serialize;
 use tokio::time::timeout;
-use tokio_rustls::TlsConnector;
 use uuid::Uuid;
-use x509_parser::prelude::*;
 
 use crate::domain::{CheckResult, CheckStatus, TlsCertCheck};
 use crate::http_client::HttpClients;
-use crate::http_client::client::NoVerify;
 use crate::http_client::connector::tls_reason;
+use crate::security::cert_probe::{self, CertFacts, CertProbeError};
 use crate::worker::connect_via_guard;
 
 pub async fn execute_tls_cert_check(
@@ -84,55 +79,37 @@ struct CertVerdict {
 
 async fn run_check(check: &TlsCertCheck, clients: &HttpClients) -> anyhow::Result<ProbeOutcome> {
     let stream = connect_via_guard(&check.host, check.port, clients).await?;
+    let peer = stream.peer_addr()?.ip();
     let server_name = check.server_name.as_deref().unwrap_or(&check.host);
-    let dns_name = ServerName::try_from(server_name.to_owned())
-        .map_err(|e| anyhow::anyhow!("invalid server_name '{server_name}': {e}"))?;
 
-    let tls_config = ClientConfig::builder()
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(NoVerify))
-        .with_no_client_auth();
-    let connector = TlsConnector::from(Arc::new(tls_config));
+    let facts = cert_probe::read_cert(stream, server_name, peer)
+        .await
+        .map_err(|e| probe_error(&check.host, e))?;
+    let handshake_ms = facts.handshake_ms;
 
-    let handshake_start = Instant::now();
-    // Same reason the connect above is normalised: a reset mid-handshake would
-    // otherwise reach the customer as a raw errno.
-    let tls = connector.connect(dns_name, stream).await.map_err(|e| {
-        tracing::debug!(host = %check.host, error = %e, "tls handshake failed");
-        let reason = tls_reason(&e);
-        anyhow::Error::new(e).context(reason)
-    })?;
-    let handshake_ms = handshake_start.elapsed().as_millis() as u32;
-
-    let (_io, session) = tls.get_ref();
-    let chain = session
-        .peer_certificates()
-        .ok_or_else(|| anyhow::anyhow!("server returned no certificate chain"))?;
-    let leaf = chain
-        .first()
-        .ok_or_else(|| anyhow::anyhow!("empty certificate chain"))?;
-    let verdict = classify_leaf(leaf, check)?;
     Ok(ProbeOutcome {
-        verdict,
+        verdict: grade(&facts, check),
         handshake_ms,
     })
 }
 
-fn classify_leaf(leaf: &CertificateDer<'_>, check: &TlsCertCheck) -> anyhow::Result<CertVerdict> {
-    let (_, parsed) = X509Certificate::from_der(leaf.as_ref())
-        .map_err(|e| anyhow::anyhow!("parsing leaf certificate: {e}"))?;
+/// The raw `io::Error` Display carries a platform-specific errno, which no
+/// error class can name and the customer should never read. `tls_reason`
+/// replaces it with a class while the errno survives as the source.
+fn probe_error(host: &str, err: CertProbeError) -> anyhow::Error {
+    match err {
+        CertProbeError::Handshake(io) => {
+            tracing::debug!(host, error = %io, "tls handshake failed");
+            let reason = tls_reason(&io);
+            anyhow::Error::new(io).context(reason)
+        }
+        other => anyhow::Error::new(other),
+    }
+}
 
-    let not_after_ts = parsed.validity().not_after.timestamp();
-    let not_after = Utc
-        .timestamp_opt(not_after_ts, 0)
-        .single()
-        .ok_or_else(|| anyhow::anyhow!("notAfter out of range: {not_after_ts}"))?;
-    let days_remaining = (not_after - Utc::now()).num_days();
-
-    let subject_cn = first_cn(parsed.subject()).unwrap_or_else(|| "<no CN>".into());
-    let issuer_cn = first_cn(parsed.issuer()).unwrap_or_else(|| "<no CN>".into());
-
-    let status = crate::worker::classify_days(days_remaining, check.warn_days, check.critical_days);
+fn grade(facts: &CertFacts, check: &TlsCertCheck) -> CertVerdict {
+    let status =
+        crate::worker::classify_days(facts.days_remaining, check.warn_days, check.critical_days);
 
     #[derive(Serialize)]
     struct Details<'a> {
@@ -142,21 +119,15 @@ fn classify_leaf(leaf: &CertificateDer<'_>, check: &TlsCertCheck) -> anyhow::Res
         issuer_common_name: &'a str,
     }
     let details_json = serde_json::to_string(&Details {
-        days_remaining,
-        not_after: not_after.to_rfc3339(),
-        subject_common_name: &subject_cn,
-        issuer_common_name: &issuer_cn,
+        days_remaining: facts.days_remaining,
+        not_after: facts.not_after.to_rfc3339(),
+        subject_common_name: facts.subject_common_name.as_deref().unwrap_or("<no CN>"),
+        issuer_common_name: facts.issuer_common_name.as_deref().unwrap_or("<no CN>"),
     })
     .expect("infallible serialize for fixed struct");
 
-    Ok(CertVerdict {
+    CertVerdict {
         status,
         details_json,
-    })
-}
-
-fn first_cn(name: &X509Name<'_>) -> Option<String> {
-    name.iter_common_name()
-        .next()
-        .and_then(|cn| cn.as_str().ok().map(str::to_owned))
+    }
 }

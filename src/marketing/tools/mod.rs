@@ -3,6 +3,8 @@
 //! the visitor into the product. Same cached-render contract as the rest
 //! of marketing: one render at boot, ETag + Cache-Control on every hit.
 
+pub mod ssl;
+
 use std::sync::Arc;
 use std::sync::OnceLock;
 
@@ -1067,6 +1069,12 @@ pub const TOOLS: &[ToolMeta] = &[
         description: DNS_LOOKUP_DESCRIPTION,
         lastmod: DNS_LOOKUP_LASTMOD,
     },
+    ToolMeta {
+        path: ssl::SSL_CHECKER_PATH,
+        title: ssl::SSL_CHECKER_TITLE,
+        description: ssl::SSL_CHECKER_DESCRIPTION,
+        lastmod: ssl::SSL_CHECKER_LASTMOD,
+    },
 ];
 
 // ── Tools index ───────────────────────────────────────────────────────
@@ -1147,6 +1155,8 @@ pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<Market
         .route(ERROR_BUDGET_PATH, axum::routing::get(error_budget))
         .route(INCIDENT_UPDATE_PATH, axum::routing::get(incident_update))
         .route(DNS_LOOKUP_PATH, axum::routing::get(dns_lookup))
+        .route(ssl::SSL_CHECKER_PATH, axum::routing::get(ssl::page))
+        .route(ssl::SSL_PROBE_PATH, axum::routing::get(ssl::probe))
 }
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
@@ -1156,6 +1166,7 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     ERROR_BUDGET_CACHED.get_or_init(|| render_error_budget(cfg));
     INCIDENT_UPDATE_CACHED.get_or_init(|| render_incident_update(cfg));
     DNS_LOOKUP_CACHED.get_or_init(|| render_dns_lookup(cfg));
+    ssl::warm(cfg);
 }
 
 #[cfg(test)]

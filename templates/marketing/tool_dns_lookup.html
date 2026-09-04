@@ -20,8 +20,8 @@
         </p>
     </section>
 
-    {# No server-side lookup: marketing owns no egress, and the browser is the
-       vantage point that matters anyway. #}
+    {# No server-side lookup: the browser is the vantage point that matters,
+       because a resolver that lies to the visitor is invisible from ours. #}
     <section class="mx-auto max-w-3xl">
         <div class="tool-calc mk-panel rounded-sm">
             <form id="dns-form" class="tool-dns__form">
@@ -146,6 +146,7 @@
         </div>
         <p class="mk-mono mk-quiet text-xs">
             more free tools:
+            <a href="/tools/ssl-certificate-checker" class="mk-footer-link mk-footer-link--inline">SSL certificate checker</a> ·
             <a href="/tools/uptime-sla-calculator" class="mk-footer-link mk-footer-link--inline">uptime SLA calculator</a> ·
             <a href="/tools/error-budget-calculator" class="mk-footer-link mk-footer-link--inline">error budget calculator</a> ·
             <a href="/tools/cron-expression-generator" class="mk-footer-link mk-footer-link--inline">cron expression generator</a> ·

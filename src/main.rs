@@ -852,6 +852,7 @@ async fn main() -> Result<()> {
             blog_enabled: state.cfg.marketing.blog_enabled,
             mcp_url: (state.cfg.mcp.enabled && !state.cfg.mcp.resource_uri.is_empty())
                 .then(|| state.cfg.mcp.resource_uri.clone()),
+            trusted_proxies: state.cfg.security.trusted_proxies.clone(),
         };
         // Pre-warm the in-memory post cache so the first /blog hit
         // doesn't pay the parse cost.

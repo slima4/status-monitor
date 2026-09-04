@@ -59,6 +59,52 @@ fn make_check(addr: SocketAddr, warn: u32, critical: u32) -> TlsCertCheck {
     }
 }
 
+/// The shared probe read by both the monitor and the public SSL tool. Asserted
+/// directly because the monitor only ever surfaces four of its fields, and the
+/// tool renders the rest.
+#[tokio::test]
+async fn cert_probe_reads_the_leaf_a_server_presents() {
+    let addr = spawn_tls_server_with_validity(45).await;
+    let facts = uptimepage::security::cert_probe::connect_and_read(
+        &[addr.ip()],
+        addr.port(),
+        "localhost",
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("probe reads the certificate");
+
+    assert_eq!(facts.san_dns_names, vec!["localhost".to_string()]);
+    assert!(facts.name_matches, "the SAN covers the name we asked for");
+    assert!(facts.self_signed, "the test server signs its own leaf");
+    assert_eq!(facts.chain_len, 1);
+    assert_eq!(facts.subject_common_name.as_deref(), Some("localhost"));
+    assert!(
+        (44..=45).contains(&facts.days_remaining),
+        "expected ~45 days, got {}",
+        facts.days_remaining
+    );
+    assert!(facts.not_before < facts.not_after);
+}
+
+/// A name the certificate does not carry must come back as a mismatch rather
+/// than as a handshake failure: reading the wrong certificate is the answer.
+#[tokio::test]
+async fn cert_probe_reports_a_name_the_certificate_does_not_cover() {
+    let addr = spawn_tls_server_with_validity(30).await;
+    let facts = uptimepage::security::cert_probe::connect_and_read(
+        &[addr.ip()],
+        addr.port(),
+        "not-the-name.example",
+        Duration::from_secs(5),
+    )
+    .await
+    .expect("probe still reads the certificate");
+
+    assert!(!facts.name_matches);
+    assert_eq!(facts.san_dns_names, vec!["localhost".to_string()]);
+}
+
 #[tokio::test]
 async fn tls_cert_check_returns_up_for_valid_cert() {
     let addr = spawn_tls_server_with_validity(60).await;

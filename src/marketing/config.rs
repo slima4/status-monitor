@@ -87,4 +87,8 @@ pub struct MarketingCfg {
     /// This deployment's MCP endpoint. Never falls back to [`MCP_URL`]:
     /// the catalog is a machine contract, that constant is hosted-only copy.
     pub mcp_url: Option<String>,
+    /// Reverse proxies whose `X-Forwarded-For` may be believed. Empty means
+    /// the TCP peer is the client. Only the SSL checker reads it, to key its
+    /// per-IP budget on the visitor rather than on Caddy.
+    pub trusted_proxies: Vec<ipnet::IpNet>,
 }

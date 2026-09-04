@@ -941,6 +941,7 @@ mod tests {
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: true,
             mcp_url: None,
+            trusted_proxies: Vec::new(),
         };
         let mut rendered = 0usize;
         for post in all().iter().filter(|p| !p.draft) {

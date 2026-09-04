@@ -139,6 +139,7 @@ mod tests {
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: false,
             mcp_url: Some("https://mcp.uptimepage.dev/mcp".into()),
+            trusted_proxies: Vec::new(),
         }
     }
 
@@ -182,6 +183,7 @@ mod tests {
     fn mcp_entry_is_omitted_when_unconfigured() {
         let doc: serde_json::Value = serde_json::from_slice(&build_catalog(&MarketingCfg {
             mcp_url: None,
+            trusted_proxies: Vec::new(),
             ..cfg()
         }))
         .unwrap();

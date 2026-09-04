@@ -18,6 +18,7 @@ fn router() -> axum::Router {
         canonical_origin: "https://uptimepage.dev".into(),
         blog_enabled: true,
         mcp_url: Some("https://mcp.uptimepage.dev/mcp".into()),
+        trusted_proxies: Vec::new(),
     })
 }
 
@@ -683,6 +684,39 @@ async fn sitemap_lists_the_tools() {
         body.contains("https://uptimepage.dev/tools/incident-update-generator"),
         "sitemap must list the incident update tool"
     );
+}
+
+#[tokio::test]
+async fn ssl_checker_renders_without_db() {
+    let (status, body, _) = get("/tools/ssl-certificate-checker").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("ssl_checker"),
+        "page must load its own script"
+    );
+    assert!(
+        body.contains(r#"data-probe="/tools/ssl-certificate-checker/probe""#),
+        "the form must carry the probe endpoint it posts to"
+    );
+}
+
+/// The one marketing route that opens a socket. Each of these must be refused
+/// before any connection is attempted, so the test needs no network.
+#[tokio::test]
+async fn ssl_probe_refuses_anything_but_a_public_hostname() {
+    for query in [
+        "host=127.0.0.1",
+        "host=localhost",
+        "host=acme.com&port=22",
+        "host=",
+    ] {
+        let (status, body, _) = get(&format!("/tools/ssl-certificate-checker/probe?{query}")).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{query} must be refused, got {body}"
+        );
+    }
 }
 
 #[tokio::test]

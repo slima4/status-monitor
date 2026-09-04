@@ -627,8 +627,12 @@ fn build_robots(cfg: &MarketingCfg) -> Bytes {
          User-agent: *\n\
          Content-Signal: {CONTENT_SIGNAL}\n\
          Allow: /\n\
+         Disallow: {probe}\n\
          Sitemap: {origin}/sitemap.xml\n",
-        origin = cfg.canonical_origin
+        origin = cfg.canonical_origin,
+        // Every hit opens a socket to a host a stranger named. Nothing links
+        // to it, so a crawler reaching it is spending our egress on nothing.
+        probe = crate::marketing::tools::ssl::SSL_PROBE_PATH,
     ))
 }
 
@@ -1111,6 +1115,7 @@ mod tests {
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: false,
             mcp_url: None,
+            trusted_proxies: Vec::new(),
         };
         let txt = String::from_utf8(build_llms_full(&cfg).to_vec()).expect("llms-full is UTF-8");
         for l in landings::LANDINGS {
@@ -1135,6 +1140,7 @@ mod tests {
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: false,
             mcp_url: None,
+            trusted_proxies: Vec::new(),
         };
         let xml = build_sitemap(&cfg);
         assert!(
@@ -1162,6 +1168,7 @@ mod tests {
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: false,
             mcp_url: None,
+            trusted_proxies: Vec::new(),
         };
         let xml = build_sitemap(&cfg);
         let newest = crate::marketing::docs::index_lastmod().expect("docs are never empty");
@@ -1187,6 +1194,7 @@ mod tests {
             canonical_origin: "https://uptimepage.dev".into(),
             blog_enabled: true,
             mcp_url: None,
+            trusted_proxies: Vec::new(),
         };
         let xml = build_sitemap(&cfg);
         let illustrated: Vec<_> = list_published()
