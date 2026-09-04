@@ -44,7 +44,7 @@ pub const SSL_CHECKER_PATH: &str = "/tools/ssl-certificate-checker";
 pub const SSL_PROBE_PATH: &str = "/tools/ssl-certificate-checker/probe";
 const SSL_CHECKER_CREATED: &str = "2026-09-04";
 pub const SSL_CHECKER_LASTMOD: &str = "2026-09-04";
-pub const SSL_CHECKER_TITLE: &str = "SSL Certificate Checker: Expiry, Chain and Hostname";
+pub const SSL_CHECKER_TITLE: &str = "SSL Certificate Checker: Expiry and Chain";
 pub const SSL_CHECKER_DESCRIPTION: &str = "Read any public host's TLS certificate: days until expiry, who issued it, which names it covers and whether the chain is complete. Free, no sign-up.";
 
 /// Ports that speak TLS immediately on connect. Without this list the endpoint
