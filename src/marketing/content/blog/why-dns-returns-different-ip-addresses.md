@@ -4,7 +4,7 @@ date = "2026-09-05"
 slug = "why-dns-returns-different-ip-addresses"
 excerpt = "Compare DNS answers from Cloudflare and Google, read TTLs, and query authoritative nameservers to separate normal CDN routing from a broken DNS change."
 tags = ["dns", "debugging", "monitoring", "cdn"]
-draft = true
+draft = false
 +++
 
 > **TL;DR**

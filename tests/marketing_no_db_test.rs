@@ -723,6 +723,54 @@ async fn blog_prose_links_resolve() {
     );
 }
 
+#[tokio::test]
+async fn diagnostic_guides_are_publishable_and_linked_from_related_pages() {
+    let (status, sitemap, _) = get("/sitemap.xml").await;
+    assert_eq!(status, StatusCode::OK);
+    for (slug, sources) in [
+        (
+            "how-to-monitor-ssl-certificate-expiry",
+            [
+                "/tools/ssl-certificate-checker",
+                "/blog/do-i-need-an-uptime-monitor",
+                "/blog/domain-expired-but-site-still-up",
+            ],
+        ),
+        (
+            "how-to-debug-redirect-loops",
+            [
+                "/tools/http-header-checker",
+                "/blog/do-i-need-an-uptime-monitor",
+                "/blog/monitor-the-login-not-the-login-page",
+            ],
+        ),
+        (
+            "why-dns-returns-different-ip-addresses",
+            [
+                "/tools/dns-lookup",
+                "/blog/do-i-need-an-uptime-monitor",
+                "/blog/domain-expired-but-site-still-up",
+            ],
+        ),
+    ] {
+        let post = blog::all().iter().find(|post| post.slug == slug).unwrap();
+        // Debug builds serve drafts too, so a successful GET alone would not
+        // catch a link whose destination disappears in production.
+        assert!(!post.draft, "{slug} must be visible in production builds");
+        let path = format!("/blog/{slug}");
+        assert_eq!(get(&path).await.0, StatusCode::OK);
+        assert!(sitemap.contains(&format!("<loc>https://uptimepage.dev{path}</loc>")));
+        for source in sources {
+            let (status, body, _) = get(source).await;
+            assert_eq!(status, StatusCode::OK);
+            assert!(
+                body.contains(&format!("href=\"{path}\"")),
+                "{source} must link to {path}"
+            );
+        }
+    }
+}
+
 /// Site-relative page links only: assets are served by the static layer this
 /// router does not mount, and anchors resolve against the page itself.
 fn internal_hrefs(html: &str) -> Vec<String> {

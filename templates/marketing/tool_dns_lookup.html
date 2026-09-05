@@ -95,6 +95,12 @@
     <section class="mx-auto max-w-3xl space-y-4">
         <h2 class="mk-h2">Why two resolvers</h2>
         <p class="mk-body">
+            If the results differ, start with
+            <a href="/blog/why-dns-returns-different-ip-addresses" class="mk-link">why DNS returns different IP addresses on different resolvers</a>.
+            It walks through cache lifetimes, CDN routing, and authoritative
+            queries to help you decide whether either answer is wrong.
+        </p>
+        <p class="mk-body">
             One resolver tells you what one machine currently believes. Two tell
             you whether the internet agrees with itself. Right after a change,
             the slower resolver keeps serving the old answer until its TTL runs

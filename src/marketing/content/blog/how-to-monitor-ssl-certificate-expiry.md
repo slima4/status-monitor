@@ -4,7 +4,7 @@ date = "2026-09-05"
 slug = "how-to-monitor-ssl-certificate-expiry"
 excerpt = "Check the certificate your server serves, catch failed renewals before expiry, and set up TLS alerts alongside HTTPS monitoring. Includes OpenSSL checks."
 tags = ["ssl", "tls", "certificates", "monitoring", "reliability"]
-draft = true
+draft = false
 +++
 
 > **TL;DR**
@@ -22,8 +22,6 @@ People still search for "SSL monitoring", though modern HTTPS uses TLS. Here, bo
 Open the [SSL certificate checker](/tools/ssl-certificate-checker), enter your public hostname, and use port 443 for ordinary HTTPS. Check `app.example.com` and `api.example.com` separately if customers depend on both.
 
 Read the expiry date, the names the certificate covers, and the issuer. Keep the resolved IP in mind: a lookup observes the endpoint it reached, which matters when several servers can answer for the same hostname.
-
-<!-- SCREENSHOT-TODO: capture a real SSL checker result at /tools/ssl-certificate-checker, showing expiry, covered names, and the monitor-this-certificate button. Use an owned public demo host. -->
 
 For a terminal check, replace `app.example.com` with your hostname:
 

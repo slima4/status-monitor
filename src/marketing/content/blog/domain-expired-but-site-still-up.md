@@ -78,7 +78,11 @@ So how do you avoid reading about your own outage in a customer's email? Not wit
 - **Domain expiry.** Reads the registration record and warns you weeks before the day it lapses.
 - **TLS certificate expiry.** The same shape, a full outage with the date printed on it in advance. Read the date on your own host with the [SSL certificate checker](/tools/ssl-certificate-checker).
 
+The [SSL monitoring walkthrough](/blog/how-to-monitor-ssl-certificate-expiry) covers the next step: setting warning thresholds and testing the notification.
+
 Then cover the failures a homepage check never sees: a TCP check on your database port, a DNS check that reads the answer from outside your own network, and a heartbeat for the backup job that dies without a sound. The full list is in [do I need an uptime monitor](/blog/do-i-need-an-uptime-monitor).
+
+If a domain or nameserver change leaves you seeing different answers, use the [DNS resolver troubleshooting guide](/blog/why-dns-returns-different-ip-addresses) to compare cached records with the authoritative nameservers.
 
 Six checks you trust beat one that only ever watches the front door.
 

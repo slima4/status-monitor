@@ -99,6 +99,8 @@ Here is what can be broken while your homepage still answers 200 OK.
 
 **The TLS certificate expires.** Not a slow decline. At the exact expiry second, every browser shows a full-page security warning and nobody gets through, including your monitor if it does not verify certificates. The date is public and readable months ahead: the [SSL certificate checker](/tools/ssl-certificate-checker) prints it for any public host.
 
+For warning thresholds and alert testing, follow the [SSL certificate expiry monitoring guide](/blog/how-to-monitor-ssl-certificate-expiry).
+
 > **The cheapest check you will ever add**
 >
 > Certificate expiry is a total outage with a known date on it. A TLS certificate check tells you weeks in advance and takes two minutes to set up. If you add only one thing from this whole page, add this one.
@@ -107,9 +109,13 @@ Here is what can be broken while your homepage still answers 200 OK.
 
 **DNS changes and you do not notice.** Someone edits a record, or a registrar migration drops one. Your site is fine from your laptop because your machine cached the old answer. New visitors get nothing. A DNS check compares the answer against what you expect, and does it from outside your network.
 
+If two lookups disagree, [compare DNS resolver answers](/blog/why-dns-returns-different-ip-addresses) before changing the record again. Different CDN addresses can both be correct.
+
 **A background job dies silently.** The nightly backup, the invoice generator, the queue worker. Nothing throws an error, the process just stopped, and you find out weeks later when you actually need the backup. Probing from outside cannot catch this, because there is nothing to probe. A heartbeat check works the other way round. The job calls a URL every time it finishes, and the monitor alerts you when that call does not arrive on time. There is a longer version of this failure, with sources, in [why a cron job can fail for months without telling you](/blog/cron-jobs-fail-silently).
 
 **The login form breaks.** Every endpoint answers, every status code is 200, and the button does nothing because a JavaScript bundle failed to load. A browser flow check runs the real steps in a real browser, types the password, and tells you the user journey is broken.
+
+If the browser keeps bouncing between pages instead, [trace the redirect loop](/blog/how-to-debug-redirect-loops) to find where the request gets sent back.
 
 **One region cannot reach you.** Your site is up from Europe and dead from Singapore, because of a routing problem or a firewall rule. A single-region check reports 100% uptime while some of your customers see nothing. Check from more than one place.
 

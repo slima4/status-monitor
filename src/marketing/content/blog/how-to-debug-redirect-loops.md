@@ -4,7 +4,7 @@ date = "2026-09-05"
 slug = "how-to-debug-redirect-loops"
 excerpt = "Trace ERR_TOO_MANY_REDIRECTS with curl and response headers. Find conflicting HTTPS, hostname, and login rules, then monitor the path after fixing it."
 tags = ["http", "redirects", "debugging", "monitoring", "cloudflare"]
-draft = true
+draft = false
 +++
 
 > **TL;DR**

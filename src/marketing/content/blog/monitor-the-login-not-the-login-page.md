@@ -1,7 +1,7 @@
 +++
 title = "Your login page returns 200. Nobody can sign in."
 date = "2026-08-01"
-updated = "2026-08-02"
+updated = "2026-09-05"
 slug = "monitor-the-login-not-the-login-page"
 excerpt = "A 200 proves the page was sent. It proves nothing about the form. Four ways a login breaks while every check stays green, and how to tell them apart."
 tags = ["monitoring", "login", "trust", "uptime"]
@@ -58,6 +58,8 @@ None of these are rare. Each one is a normal Tuesday.
 **A JavaScript file stops loading.** You deploy. File names carry a hash. One file never reaches the CDN, or it arrives with the wrong content type. The HTML is fine, so the page returns 200. But that file is what draws the form, so the fields never appear. A header, a footer, and empty space in the middle. This one is cruel, because it often hits only cold caches or one browser. On your laptop it looks fine.
 
 **The session cookie stops being set.** Someone changes a [cookie attribute](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) like `SameSite` or `Domain`, or the app moves to a new subdomain, or a proxy starts stripping a header. The password is accepted, the server is happy, the redirect happens. Then the app sends the user straight back to the login page, because it cannot find the session. From outside it looks like a wrong password. Support gets a queue of people who swear they typed it correctly. They did.
+
+To investigate that return trip, follow [how to debug a redirect loop](/blog/how-to-debug-redirect-loops). Compare the browser's cookies and redirect chain with a stateless request before changing the login rules.
 
 **Bot protection starts blocking real users.** You turn on a rule, or your vendor changes a default. Now some visitors get a challenge page where the form should be. Checking your browser, and then nothing. Cloudflare says [most visitors pass a challenge without interaction](https://developers.cloudflare.com/waf/reference/cloudflare-challenges/), and that is the trap: a challenge is selective, so your check, which asks for one page from one place every few minutes, may never be challenged at all. Your uptime graph stays flat and green. The people locked out are usually on a company VPN or an older browser, which often means your biggest customers.
 
