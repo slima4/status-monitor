@@ -287,9 +287,9 @@
 
     <div id="delete-blocking" class="hidden alert-card alert-card--warn space-y-3">
       <p class="font-medium">
-        You solely own organisations that still have other members. Transfer
-        ownership (promote another member to owner) or delete these
-        organisations first:
+        You solely own organisations that still have other members. Give each
+        one a second owner, or delete it. A second owner leaves the org running
+        for them; deleting takes it away.
       </p>
       <ul id="delete-blocking-list" class="space-y-2"></ul>
     </div>
@@ -328,18 +328,141 @@
     const blocking = document.getElementById('delete-blocking');
     const blockingList = document.getElementById('delete-blocking-list');
 
+    const jsonHeaders = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-Requested-With': 'uptimepage',
+    };
+
+    // The org blocks deletion because this user is its ONLY owner, so every
+    // other member is promotable and none needs filtering by id.
+    async function togglePicker(org, trigger, picker) {
+      if (picker.children.length) {
+        picker.hidden = !picker.hidden;
+        trigger.setAttribute('aria-expanded', String(!picker.hidden));
+        return;
+      }
+
+      trigger.disabled = true;
+      let members;
+      try {
+        const res = await fetch('/api/v1/orgs/' + org.id + '/members', { headers: jsonHeaders });
+        if (!res.ok) throw new Error('members');
+        members = (await res.json()).filter((m) => m.role !== 'owner');
+      } catch {
+        result.className = 'flash-text flash-text--bad';
+        result.textContent = 'Could not load the members of ' + (org.slug || 'that organisation') + '.';
+        trigger.disabled = false;
+        return;
+      }
+      trigger.disabled = false;
+      if (!members.length) {
+        result.className = 'flash-text flash-text--warn';
+        result.textContent = 'No one in ' + (org.slug || 'that organisation') + ' can take it over — delete it instead.';
+        return;
+      }
+
+      const select = document.createElement('select');
+      select.className = 'field font-mono text-xs';
+      select.setAttribute('aria-label', 'New owner');
+      members.forEach((m) => {
+        const opt = document.createElement('option');
+        opt.value = m.user_id;
+        opt.textContent = m.email;
+        select.appendChild(opt);
+      });
+
+      const go = document.createElement('button');
+      go.type = 'button';
+      go.className = 'btn-ghost px-2 py-1 text-xs font-medium';
+      go.textContent = 'make owner';
+      // Same friction the team screen puts on granting owner — this is a
+      // permanent privilege grant that survives cancelling the deletion.
+      go.addEventListener('click', async () => {
+        const email = select.options[select.selectedIndex].textContent;
+        const ok = await window.smConfirm({
+          title: 'Make ' + email + ' an owner?',
+          body: email + ' gains full control of ' + (org.slug || 'this organisation')
+            + ', including deleting it. That is what unblocks your account deletion: the org '
+            + 'stops being solely yours. You stay an owner too, and this is not undone if you '
+            + 'cancel the deletion.',
+          confirmLabel: 'make owner',
+        });
+        if (ok) promote(org, select.value, go);
+      });
+
+      picker.appendChild(select);
+      picker.appendChild(go);
+      picker.hidden = false;
+      trigger.setAttribute('aria-expanded', 'true');
+      select.focus();
+    }
+
+    async function promote(org, userId, btn) {
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/v1/orgs/' + org.id + '/members/' + userId, {
+          method: 'PATCH',
+          headers: jsonHeaders,
+          body: JSON.stringify({ role: 'owner' }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => null);
+          result.className = 'flash-text flash-text--bad';
+          result.textContent = (body && body.error && body.error.message) || 'Could not transfer ownership.';
+          btn.disabled = false;
+          return;
+        }
+      } catch {
+        result.className = 'flash-text flash-text--bad';
+        result.textContent = 'Network error — try again.';
+        btn.disabled = false;
+        return;
+      }
+      // No longer *solely* owned, so the org stops blocking the deletion and
+      // keeps running for everyone still in it.
+      clearBlockingRow(org.id);
+    }
+
+    function clearBlockingRow(orgId) {
+      const li = blockingList.querySelector('[data-org-id="' + orgId + '"]');
+      if (li) li.remove();
+      if (!blockingList.children.length) {
+        blocking.classList.add('hidden');
+        result.className = 'flash-text flash-text--ok';
+        result.textContent = 'All blocking organisations cleared — you can delete your account now.';
+      }
+    }
+
     function renderBlocking(orgs) {
       blockingList.textContent = '';
       orgs.forEach((org) => {
         const li = document.createElement('li');
-        li.className = 'flex items-center justify-between gap-3 rounded px-3 py-2';
+        li.className = 'space-y-2 rounded px-3 py-2';
         li.style.background = 'var(--theme-surface-elev)';
         li.dataset.orgId = org.id;
+
+        const row = document.createElement('div');
+        row.className = 'flex items-center justify-between gap-3';
 
         const name = document.createElement('span');
         name.className = 'font-mono text-xs text-body';
         name.textContent = org.slug || org.id;
-        li.appendChild(name);
+        row.appendChild(name);
+
+        const actions = document.createElement('div');
+        actions.className = 'flex items-center gap-2';
+
+        // A second owner leaves the org standing for the people still in it,
+        // so it is offered first and the destructive option reads as the
+        // fallback rather than the default.
+        const transfer = document.createElement('button');
+        transfer.type = 'button';
+        transfer.className = 'org-transfer btn-ghost px-2 py-1 text-xs font-medium';
+        transfer.textContent = 'add an owner';
+        transfer.setAttribute('aria-expanded', 'false');
+        transfer.setAttribute('aria-controls', 'owner-picker-' + org.id);
+        actions.appendChild(transfer);
 
         const btn = document.createElement('button');
         btn.type = 'button';
@@ -356,7 +479,18 @@
           + 'after which it is erased for good.');
         btn.setAttribute('data-confirm-label', 'delete organisation');
         btn.setAttribute('data-confirm-danger', '');
-        li.appendChild(btn);
+        actions.appendChild(btn);
+
+        row.appendChild(actions);
+        li.appendChild(row);
+
+        const picker = document.createElement('div');
+        picker.className = 'flex items-center gap-2';
+        picker.id = 'owner-picker-' + org.id;
+        picker.hidden = true;
+        li.appendChild(picker);
+
+        transfer.addEventListener('click', () => togglePicker(org, transfer, picker));
 
         blockingList.appendChild(li);
       });
@@ -398,14 +532,15 @@
         return;
       }
 
-      if (elt.classList && elt.classList.contains('org-delete') && ev.detail.successful) {
+      if (elt.classList && elt.classList.contains('org-delete')) {
         const li = elt.closest('li');
-        if (li) li.remove();
-        if (!blockingList.children.length) {
-          blocking.classList.add('hidden');
-          result.className = 'flash-text flash-text--ok';
-          result.textContent = 'All blocking organisations cleared — you can delete your account now.';
+        if (ev.detail.successful) {
+          if (li) clearBlockingRow(li.dataset.orgId);
+          return;
         }
+        const err = (window.smJson(ev.detail.xhr) || {}).error || {};
+        result.className = 'flash-text flash-text--bad';
+        result.textContent = err.message || 'Could not delete that organisation.';
       }
     });
   })();

@@ -339,7 +339,8 @@ pub async fn delete_org(
         orgs_store::DeleteOutcome::Deleted => Ok(StatusCode::NO_CONTENT),
         orgs_store::DeleteOutcome::LastOrg => Err(AppError::unprocessable(
             codes::LAST_ORG,
-            "this is your only organisation — create another one before deleting it",
+            "deleting your only organisation would leave your account with no \
+             organisation to sign in to",
         )),
         orgs_store::DeleteOutcome::NotFound => Err(AppError::not_found(
             codes::ORG_NOT_FOUND,
