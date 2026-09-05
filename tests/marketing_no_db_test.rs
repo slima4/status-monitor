@@ -10,7 +10,7 @@ use tower::util::ServiceExt;
 
 use uptimepage::domain::check::CheckSpec;
 use uptimepage::marketing::config::META_DESCRIPTION;
-use uptimepage::marketing::{self, MarketingCfg, landings};
+use uptimepage::marketing::{self, MarketingCfg, blog, landings, tools};
 
 fn router() -> axum::Router {
     marketing::router(MarketingCfg {
@@ -668,22 +668,61 @@ async fn blog_post_og_image_overrides_the_shared_card() {
     );
 }
 
+/// Hand-typed paths let a tool ship without ever reaching the sitemap. Drive
+/// the assertion off the registry that mounts them.
 #[tokio::test]
 async fn sitemap_lists_the_tools() {
     let (status, body, _) = get("/sitemap.xml").await;
     assert_eq!(status, StatusCode::OK);
+    for tool in tools::TOOLS {
+        assert!(
+            body.contains(&format!("https://uptimepage.dev{}", tool.path)),
+            "sitemap must list {}",
+            tool.path
+        );
+    }
+}
+
+/// Landing resources and doc bodies both have a link guard; blog prose did
+/// not, so a renamed path rotted into a 404 while the suite stayed green.
+#[tokio::test]
+async fn blog_prose_links_resolve() {
+    let mut checked = 0;
+    for post in blog::list_published() {
+        for href in internal_hrefs(&post.body_html) {
+            let (status, _, _) = get(&href).await;
+            assert_eq!(
+                status,
+                StatusCode::OK,
+                "/blog/{} links to {href}, which does not resolve",
+                post.slug
+            );
+            checked += 1;
+        }
+    }
     assert!(
-        body.contains("https://uptimepage.dev/tools/uptime-sla-calculator"),
-        "sitemap must list the SLA tool"
+        checked > 0,
+        "extracted no links, so the guard proved nothing"
     );
-    assert!(
-        body.contains("https://uptimepage.dev/tools/cron-expression-generator"),
-        "sitemap must list the cron tool"
-    );
-    assert!(
-        body.contains("https://uptimepage.dev/tools/incident-update-generator"),
-        "sitemap must list the incident update tool"
-    );
+}
+
+/// Site-relative page links only: assets are served by the static layer this
+/// router does not mount, and anchors resolve against the page itself.
+fn internal_hrefs(html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for tail in html.split("href=\"").skip(1) {
+        let Some(href) = tail.split('"').next() else {
+            continue;
+        };
+        if !href.starts_with('/') || href.starts_with("/static/") {
+            continue;
+        }
+        let path = href.split('#').next().unwrap_or(href);
+        if !path.is_empty() && !out.contains(&path.to_string()) {
+            out.push(path.to_string());
+        }
+    }
+    out
 }
 
 #[tokio::test]

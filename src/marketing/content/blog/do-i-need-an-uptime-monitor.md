@@ -1,7 +1,7 @@
 +++
 title = "Do I need an uptime monitor? Count what downtime costs you"
 date = "2026-07-22"
-updated = "2026-08-26"
+updated = "2026-09-05"
 slug = "do-i-need-an-uptime-monitor"
 excerpt = "An uptime monitor is cheap. One outage you find out about from a customer is not. How to price your own downtime, and what to watch besides the homepage."
 tags = ["uptime", "monitoring", "downtime", "reliability"]
@@ -97,7 +97,7 @@ Here is what can be broken while your homepage still answers 200 OK.
 
 **The database is down or full.** Your marketing page is cached and static, so it loads fine. Login fails. Checkout fails. The homepage check stays green for the whole outage. Watch the database port directly with a TCP check, so you find out when the port stops accepting connections instead of when a user does.
 
-**The TLS certificate expires.** Not a slow decline. At the exact expiry second, every browser shows a full-page security warning and nobody gets through, including your monitor if it does not verify certificates.
+**The TLS certificate expires.** Not a slow decline. At the exact expiry second, every browser shows a full-page security warning and nobody gets through, including your monitor if it does not verify certificates. The date is public and readable months ahead: the [SSL certificate checker](/tools/ssl-certificate-checker) prints it for any public host.
 
 > **The cheapest check you will ever add**
 >

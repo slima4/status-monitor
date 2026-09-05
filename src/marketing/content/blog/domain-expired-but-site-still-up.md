@@ -1,6 +1,7 @@
 +++
 title = "Your domain can expire while your uptime monitor stays green"
 date = "2026-07-24"
+updated = "2026-09-05"
 slug = "domain-expired-but-site-still-up"
 excerpt = "An expired domain does not go dark. It serves a parking page that returns 200 OK, so uptime monitors report it healthy while the site is gone."
 tags = ["domain expiry", "monitoring", "uptime", "dns"]
@@ -75,7 +76,7 @@ That is the trap. One HTTP check on the homepage, the most common setup there is
 So how do you avoid reading about your own outage in a customer's email? Not with one cleverer check. With a few plain ones, each watching a different way to fail. Start with the two that hand you a date instead of a surprise.
 
 - **Domain expiry.** Reads the registration record and warns you weeks before the day it lapses.
-- **TLS certificate expiry.** The same shape, a full outage with the date printed on it in advance.
+- **TLS certificate expiry.** The same shape, a full outage with the date printed on it in advance. Read the date on your own host with the [SSL certificate checker](/tools/ssl-certificate-checker).
 
 Then cover the failures a homepage check never sees: a TCP check on your database port, a DNS check that reads the answer from outside your own network, and a heartbeat for the backup job that dies without a sound. The full list is in [do I need an uptime monitor](/blog/do-i-need-an-uptime-monitor).
 

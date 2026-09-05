@@ -439,7 +439,7 @@ docker compose up -d"#,
     Landing {
         path: "/uptime-monitoring-for-developers",
         created: "2026-07-01",
-        lastmod: "2026-08-11",
+        lastmod: "2026-09-05",
         title: "Uptime Monitoring for Developers, as Code",
         eyebrow: "for developers",
         h1: "Uptime monitoring built for developers",
@@ -543,6 +543,14 @@ docker compose up -d"#,
             ResourceLink {
                 label: "Error budget calculator",
                 href: "/tools/error-budget-calculator",
+            },
+            ResourceLink {
+                label: "SSL certificate checker",
+                href: "/tools/ssl-certificate-checker",
+            },
+            ResourceLink {
+                label: "DNS lookup",
+                href: "/tools/dns-lookup",
             },
             ResourceLink {
                 label: "Open-source monitors you can self-host",

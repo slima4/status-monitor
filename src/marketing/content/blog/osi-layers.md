@@ -1,7 +1,7 @@
 +++
 title = "The mystery of the \"down\" website"
 date = "2026-06-18"
-updated = "2026-07-06"
+updated = "2026-09-05"
 slug = "osi-layers"
 excerpt = "\"The site is down!\" But what does \"down\" really mean? A detective story through the seven network layers, and the one quiet failure no alarm caught."
 tags = ["monitoring", "networking", "osi", "tls", "dns"]
@@ -114,7 +114,8 @@ runs a dedicated probe per layer, per failure mode:
 - **TLS certificate** (layer 6): inspects the cert itself: expiry,
   chain, issuer. The alarm that would have tapped Jamie on the shoulder
   *days* before midnight, while every HTTP check was still cheerfully
-  green.
+  green. You can read those fields for any public host in the
+  [SSL certificate checker](/tools/ssl-certificate-checker).
 - **DNS** (layer 7): queries a record and checks the *answer*, catching
   a name that resolves to the *wrong* place, not just slowly.
 - **Domain expiry** (layer 7): watches the registration lease over

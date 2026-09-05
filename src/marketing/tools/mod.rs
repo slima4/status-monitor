@@ -29,7 +29,7 @@ const TOOL_CACHE_CONTROL: HeaderValue =
 
 pub const UPTIME_SLA_PATH: &str = "/tools/uptime-sla-calculator";
 const UPTIME_SLA_CREATED: &str = "2026-07-09";
-const UPTIME_SLA_LASTMOD: &str = "2026-08-02";
+const UPTIME_SLA_LASTMOD: &str = "2026-09-04";
 pub const UPTIME_SLA_TITLE: &str = "Uptime SLA & Downtime Calculator";
 pub const UPTIME_SLA_DESCRIPTION: &str = "Turn an uptime percentage into allowed downtime per day, week, month and year. A free SLA and SLO calculator with the full nines reference table.";
 
@@ -356,7 +356,7 @@ async fn uptime_sla(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) ->
 
 pub const CRON_PATH: &str = "/tools/cron-expression-generator";
 const CRON_CREATED: &str = "2026-07-09";
-const CRON_LASTMOD: &str = "2026-07-09";
+const CRON_LASTMOD: &str = "2026-09-04";
 pub const CRON_TITLE: &str = "Cron Expression Generator & Parser";
 pub const CRON_DESCRIPTION: &str = "Build and read cron expressions in plain English, with the next run times and a reference table of the most common schedules. Free, no sign-up.";
 const CRON_DEFAULT_EXPR: &str = "*/15 9-17 * * 1-5";
@@ -491,7 +491,7 @@ const QUARTER: f64 = 7_776_000.0; // 90 days
 
 pub const ERROR_BUDGET_PATH: &str = "/tools/error-budget-calculator";
 const ERROR_BUDGET_CREATED: &str = "2026-07-13";
-const ERROR_BUDGET_LASTMOD: &str = "2026-07-13";
+const ERROR_BUDGET_LASTMOD: &str = "2026-09-04";
 pub const ERROR_BUDGET_TITLE: &str = "Error Budget & Burn Rate Calculator";
 pub const ERROR_BUDGET_DESCRIPTION: &str = "Turn an SLO target and your measured availability into error budget spent, budget left and burn rate, with a burn-rate reference table. Free, no sign-up.";
 
@@ -833,7 +833,7 @@ async fn cron(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) -> Respo
 
 pub const INCIDENT_UPDATE_PATH: &str = "/tools/incident-update-generator";
 const INCIDENT_UPDATE_CREATED: &str = "2026-07-20";
-const INCIDENT_UPDATE_LASTMOD: &str = "2026-07-20";
+const INCIDENT_UPDATE_LASTMOD: &str = "2026-09-04";
 pub const INCIDENT_UPDATE_TITLE: &str = "Incident Update Message Generator";
 pub const INCIDENT_UPDATE_DESCRIPTION: &str = "Write clear investigating, identified, monitoring, resolved and maintenance messages for your status page. Free, private and generated in your browser.";
 
@@ -1081,7 +1081,7 @@ pub const TOOLS: &[ToolMeta] = &[
 
 pub const TOOLS_INDEX_PATH: &str = "/tools";
 const TOOLS_INDEX_CREATED: &str = "2026-07-09";
-pub const TOOLS_INDEX_LASTMOD: &str = "2026-07-13";
+pub const TOOLS_INDEX_LASTMOD: &str = "2026-09-04";
 const TOOLS_INDEX_TITLE: &str = "Free Tools for Developers & SREs";
 const TOOLS_INDEX_DESCRIPTION: &str = "Free, no sign-up calculators and generators for uptime, reliability and scheduling. Built for our own work and kept open for yours.";
 
