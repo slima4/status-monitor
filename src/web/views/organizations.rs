@@ -163,6 +163,8 @@ mod tests {
         );
         assert!(html.contains("data-org-switch"));
         assert!(html.contains("data-org-delete"));
+        // Deleting asks for the name back, so it cannot be a stray double-click.
+        assert!(html.contains(r#"data-confirm-match="client-co""#));
     }
 
     #[test]

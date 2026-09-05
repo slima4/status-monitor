@@ -779,7 +779,7 @@ async fn restore_org_rearms_heartbeats_live_pg() {
     .unwrap();
 
     soft_delete_org(&pool, org_a, user_a).await.unwrap();
-    let outcome = restore_org(&pool, org_a, user_a, 30).await.unwrap();
+    let outcome = restore_org(&pool, org_a, user_a, 30, 3).await.unwrap();
     assert!(matches!(outcome, RestoreOutcome::Restored(_)));
 
     let hb = store.get(org_a, target).await.unwrap().expect("row");

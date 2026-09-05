@@ -149,12 +149,12 @@ async fn restore_org_inside_window_succeeds() {
         .unwrap();
     soft_delete_org(&pool, org.id, user).await.unwrap();
 
-    let outcome = restore_org(&pool, org.id, user, 30).await.unwrap();
+    let outcome = restore_org(&pool, org.id, user, 30, 3).await.unwrap();
     assert!(matches!(outcome, RestoreOutcome::Restored(ref o) if o.id == org.id));
     assert!(is_active_member(&pool, user, org.id).await.unwrap());
 
     // Restoring an already-active org reports NotDeleted, not Restored.
-    let again = restore_org(&pool, org.id, user, 30).await.unwrap();
+    let again = restore_org(&pool, org.id, user, 30, 3).await.unwrap();
     assert!(matches!(again, RestoreOutcome::NotDeleted));
 
     sqlx::query("DELETE FROM users WHERE id = $1")
@@ -184,7 +184,7 @@ async fn restore_org_outside_window_refuses() {
         .await
         .unwrap();
 
-    let outcome = restore_org(&pool, org.id, user, 30).await.unwrap();
+    let outcome = restore_org(&pool, org.id, user, 30, 3).await.unwrap();
     assert!(matches!(outcome, RestoreOutcome::WindowExpired));
 
     sqlx::query("DELETE FROM users WHERE id = $1")
@@ -1047,7 +1047,7 @@ async fn a_tombstoned_slug_stays_held_for_the_restore_window() {
     ));
 
     assert!(matches!(
-        restore_org(&pool, first.id, user, 30).await.unwrap(),
+        restore_org(&pool, first.id, user, 30, 3).await.unwrap(),
         RestoreOutcome::Restored(_)
     ));
     assert!(is_active_member(&pool, user, first.id).await.unwrap());
@@ -1107,7 +1107,7 @@ async fn restore_readopts_sessions_the_delete_orphaned() {
 
     // Or the member keeps failing `CurrentOrg` until they sign in again.
     assert!(matches!(
-        restore_org(&pool, shared.id, owner, 30).await.unwrap(),
+        restore_org(&pool, shared.id, owner, 30, 3).await.unwrap(),
         RestoreOutcome::Restored(_)
     ));
     let (readopted,): (Option<Uuid>,) =
@@ -1162,6 +1162,57 @@ async fn rename_of_a_missing_org_is_not_found_even_when_the_slug_is_held() {
             .unwrap(),
         UpdateOrgOutcome::SlugTaken
     ));
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn restore_is_refused_when_the_owner_slot_was_filled() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs").await;
+    let mut owned = Vec::new();
+    for _ in 0..3 {
+        owned.push(
+            create_org_with_owner(&pool, user, &unique_slug("cap"), "Cap", 3)
+                .await
+                .unwrap()
+                .unwrap(),
+        );
+    }
+
+    // Deleting frees a slot, so the replacement is allowed...
+    soft_delete_org_for_user(&pool, owned[0].id, user)
+        .await
+        .unwrap();
+    assert_eq!(owner_org_count(&pool, user).await.unwrap(), 2);
+    let replacement = create_org_with_owner(&pool, user, &unique_slug("repl"), "Replacement", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // ...but the restore must not hand back a fourth.
+    assert!(matches!(
+        restore_org(&pool, owned[0].id, user, 30, 3).await.unwrap(),
+        RestoreOutcome::OwnerLimit
+    ));
+    assert_eq!(owner_org_count(&pool, user).await.unwrap(), 3);
+
+    // Free a slot again and the same restore goes through.
+    soft_delete_org_for_user(&pool, replacement.id, user)
+        .await
+        .unwrap();
+    assert!(matches!(
+        restore_org(&pool, owned[0].id, user, 30, 3).await.unwrap(),
+        RestoreOutcome::Restored(_)
+    ));
+    assert_eq!(owner_org_count(&pool, user).await.unwrap(), 3);
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)

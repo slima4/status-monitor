@@ -608,8 +608,8 @@ impl UpdateRow {
 /// Soft-delete an org. Audit row shares the transaction so the "who deleted
 /// this" lookup in [`list_deleted_orgs_deleted_by`] is authoritative.
 ///
-/// No last-org guard on purpose — account deletion and the purge job have to
-/// tombstone an account's final org. Owner-initiated deletes take
+/// Guard-free, and with no production caller left — it exists so a test can
+/// tombstone an account's final org. Real deletes take
 /// [`soft_delete_org_for_user`].
 pub async fn soft_delete_org(pool: &PgPool, org: OrgId, actor: UserId) -> Result<bool> {
     let mut tx = pool.begin().await.context("soft_delete_org: begin")?;
@@ -738,8 +738,30 @@ pub async fn restore_org(
     org: OrgId,
     actor: UserId,
     grace_days: u32,
+    owner_limit: u32,
 ) -> Result<RestoreOutcome> {
     let mut tx = pool.begin().await.context("restore_org: begin")?;
+
+    advisory_xact_lock(&mut *tx, &user_lock_key(actor))
+        .await
+        .context("restore_org: advisory lock")?;
+
+    // A tombstone frees an owner slot, so a restore has to re-earn it — else
+    // delete, create a replacement, restore lands the caller above the cap.
+    let (owned,): (i64,) = sqlx::query_as(
+        r#"SELECT count(*) FROM memberships m
+           JOIN organizations o ON o.id = m.org_id
+           WHERE m.user_id = $1 AND m.role = 'owner' AND o.deleted_at IS NULL"#,
+    )
+    .bind(actor.0)
+    .fetch_one(&mut *tx)
+    .await
+    .context("restore_org: owner-org count")?;
+    if owned >= i64::from(owner_limit) {
+        tx.rollback().await.ok();
+        return Ok(RestoreOutcome::OwnerLimit);
+    }
+
     let res: Result<Option<OrgRow>, sqlx::Error> = sqlx::query_as(
         r#"UPDATE organizations
            SET deleted_at = NULL, updated_at = now()
@@ -842,6 +864,8 @@ pub enum RestoreOutcome {
     WindowExpired,
     /// Another org took the slug while this one was tombstoned.
     SlugTaken,
+    /// Restoring would put the caller over the owned-org cap.
+    OwnerLimit,
 }
 
 /// List of (membership, optional display email) for every member of an org,

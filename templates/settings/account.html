@@ -291,6 +291,10 @@
         one a second owner, or delete it. A second owner leaves the org running
         for them; deleting takes it away.
       </p>
+      <p id="delete-sole-org" hidden class="font-mono text-xs text-quiet">
+        # this is your only organisation, so it cannot be deleted — hand it to
+        someone still in it instead
+      </p>
       <ul id="delete-blocking-list" class="space-y-2"></ul>
     </div>
 
@@ -327,6 +331,7 @@
     const result = document.getElementById('delete-result');
     const blocking = document.getElementById('delete-blocking');
     const blockingList = document.getElementById('delete-blocking-list');
+    const soleOrgNote = document.getElementById('delete-sole-org');
 
     const jsonHeaders = {
       'Content-Type': 'application/json',
@@ -434,7 +439,20 @@
       }
     }
 
-    function renderBlocking(orgs) {
+    async function ownedOrgCount() {
+      try {
+        const res = await fetch('/api/v1/me/orgs', { headers: jsonHeaders });
+        if (!res.ok) return null;
+        return (await res.json()).length;
+      } catch { return null; }
+    }
+
+    async function renderBlocking(orgs) {
+      // Deleting the caller's only org is refused by the API, so with one org
+      // left the second owner is the only route past the block.
+      const total = await ownedOrgCount();
+      const canDelete = total === null || total > 1;
+      soleOrgNote.hidden = canDelete;
       blockingList.textContent = '';
       orgs.forEach((org) => {
         const li = document.createElement('li');
@@ -478,8 +496,9 @@
           + 'You can restore it from Settings \u2192 Organizations for {{ grace_days }} days, '
           + 'after which it is erased for good.');
         btn.setAttribute('data-confirm-label', 'delete organisation');
+        if (org.slug) btn.setAttribute('data-confirm-match', org.slug);
         btn.setAttribute('data-confirm-danger', '');
-        actions.appendChild(btn);
+        if (canDelete) actions.appendChild(btn);
 
         row.appendChild(actions);
         li.appendChild(row);

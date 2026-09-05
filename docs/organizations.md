@@ -40,7 +40,7 @@ Changing the **slug is a hard cutover**. The old slug is freed with no redirect 
 
 Owners only, and never your last one: an account with no org has nothing to sign in to, so the button is not offered and the API refuses it. Create the replacement first if you are trying to start over.
 
-Deleting takes effect at once. Checks stop running, the status pages go offline, and every URL referencing the org returns 404. Anyone whose session was pointed at it is moved to another org they belong to.
+Deleting takes effect at once. Checks stop running, the status pages go offline, and every URL referencing the org returns 404. Anyone whose session was pointed at it is moved to another org they belong to — and a member who had no other org is left signed in with nowhere to go until you restore it.
 
 Nothing is erased yet. The org sits in a restore window for 30 days, then a background job purges it for good — the Postgres rows and the ClickHouse check history together.
 

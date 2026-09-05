@@ -3,13 +3,16 @@
 // live in notify.js (`smToast`).
 //
 // Direct calls:
-//   await smConfirm({title, body, confirmLabel, danger}) -> boolean
+//   await smConfirm({title, body, confirmLabel, danger, match}) -> boolean
+//     `match` holds confirm disabled until the name is typed back, with a
+//     copy button so it stays a speed bump rather than a memory test.
 //   await smPrompt({title, body, placeholder, value, splitOnComma}) -> string | string[] | null
 //
 // Declarative wiring (works for hx-delete, vanilla onclick, fetch buttons):
 //   <button hx-delete="/..." data-confirm-modal
 //           data-confirm-title="Delete?" data-confirm-body="Cannot undo."
-//           data-confirm-label="Delete" data-confirm-danger>...
+//           data-confirm-label="Delete" data-confirm-danger
+//           data-confirm-match="acme">...
 //
 // The click-capture interceptor stops the original event, shows the modal,
 // and only re-dispatches the original click when the user confirms. The
@@ -18,6 +21,7 @@
 (function () {
     let dialog = null;
     let titleEl, bodyEl, confirmBtn, cancelBtn;
+    let matchWrap, matchHint, matchToken, matchInput, matchCopy;
     let resolveFn = null;
 
     function mount() {
@@ -32,6 +36,17 @@
             '<div class="space-y-4 p-6">' +
                 '<h2 id="sm-confirm-title" class="text-lg font-semibold"></h2>' +
                 '<p class="text-sm text-muted"></p>' +
+                '<div data-sm-confirm-match hidden class="space-y-2">' +
+                    '<p data-sm-confirm-hint class="font-mono text-xs text-quiet"></p>' +
+                    '<div class="flex items-center gap-2">' +
+                        '<input type="text" readonly data-sm-confirm-token ' +
+                               'class="field w-full text-sm">' +
+                        '<button type="button" data-sm-confirm-copy ' +
+                                'class="btn-ghost px-2 py-1 text-xs font-medium">copy</button>' +
+                    '</div>' +
+                    '<input type="text" autocomplete="off" spellcheck="false" ' +
+                           'data-sm-confirm-typed class="field w-full text-sm">' +
+                '</div>' +
                 '<div class="flex items-center justify-end gap-2 pt-2">' +
                     '<button type="button" data-sm-confirm-cancel ' +
                             'class="btn-ghost px-3 py-1.5 text-sm font-medium"></button>' +
@@ -44,6 +59,27 @@
         bodyEl     = dialog.querySelector("p");
         confirmBtn = dialog.querySelector("[data-sm-confirm-ok]");
         cancelBtn  = dialog.querySelector("[data-sm-confirm-cancel]");
+        matchWrap  = dialog.querySelector("[data-sm-confirm-match]");
+        matchHint  = dialog.querySelector("[data-sm-confirm-hint]");
+        matchToken = dialog.querySelector("[data-sm-confirm-token]");
+        matchInput = dialog.querySelector("[data-sm-confirm-typed]");
+        matchCopy  = dialog.querySelector("[data-sm-confirm-copy]");
+
+        matchInput.addEventListener("input", () => {
+            confirmBtn.disabled = matchInput.value.trim() !== matchToken.value;
+        });
+        matchInput.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" && !confirmBtn.disabled) {
+                e.preventDefault();
+                settle(true);
+            }
+        });
+        matchCopy.addEventListener("click", async () => {
+            const ok = await copyToken();
+            matchCopy.textContent = ok ? "copied" : "copy failed";
+            setTimeout(() => { matchCopy.textContent = "copy"; }, 1200);
+            matchInput.focus();
+        });
 
         confirmBtn.addEventListener("click", () => settle(true));
         cancelBtn.addEventListener("click",  () => settle(false));
@@ -53,6 +89,21 @@
         });
         // ESC fires `cancel` (preventable; native default is to close).
         dialog.addEventListener("cancel", () => settle(false));
+    }
+
+    // A detached textarea is inert under a modal <dialog>, so the legacy
+    // fallback has to copy the on-screen field (same trap share_modal.js hit).
+    async function copyToken() {
+        matchToken.focus();
+        matchToken.select();
+        try { matchToken.setSelectionRange(0, matchToken.value.length); } catch { /* noop */ }
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(matchToken.value);
+                return true;
+            }
+        } catch { /* fall through to legacy */ }
+        try { return document.execCommand("copy"); } catch { return false; }
     }
 
     function settle(ok) {
@@ -77,6 +128,19 @@
         confirmBtn.className = "sticker-btn px-3 py-1.5 text-sm font-medium " +
             (isDanger ? "sticker-btn--danger" : "sticker-btn--primary");
 
+        const match = opts.match ? String(opts.match) : "";
+        matchWrap.hidden = !match;
+        matchToken.value = match;
+        matchInput.value = "";
+        matchCopy.textContent = "copy";
+        // Left enabled without a match, or a plain confirm would be unclickable.
+        confirmBtn.disabled = !!match;
+        if (match) {
+            matchHint.textContent = "# type the name to confirm";
+            matchToken.setAttribute("aria-label", "Name to type: " + match);
+            matchInput.setAttribute("aria-label", "Type " + match + " to confirm");
+        }
+
         // Re-entrance: a prior modal still open (e.g. caller didn't await).
         // Settle it false and close before re-opening, or showModal throws
         // InvalidStateError on an already-open dialog.
@@ -87,8 +151,10 @@
         return new Promise((resolve) => {
             resolveFn = resolve;
             dialog.showModal();
-            // Pre-focus the safer button for destructive actions.
-            (isDanger ? cancelBtn : confirmBtn).focus();
+            // Typing is the next step when a match is required; otherwise
+            // pre-focus the safer button for destructive actions.
+            if (match) matchInput.focus();
+            else (isDanger ? cancelBtn : confirmBtn).focus();
         });
     };
 
@@ -201,6 +267,7 @@
             confirmLabel: d.confirmLabel,
             cancelLabel:  d.confirmCancel,
             danger:       d.confirmDanger !== undefined,
+            match:        d.confirmMatch,
         }).then(function (ok) {
             if (!ok) return;
             trigger.dataset.confirmModalArmed = "1";

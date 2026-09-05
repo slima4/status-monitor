@@ -37,6 +37,7 @@
                   data-confirm-title="Delete {{ o.slug }}?"
                   data-confirm-body="Its monitors stop checking and its status pages go offline immediately. You can restore it from this page for the next {{ grace_days }} days, after which it is purged for good."
                   data-confirm-label="delete organization"
+                  data-confirm-match="{{ o.slug }}"
                   data-confirm-danger
                   class="sticker-btn sticker-btn--danger px-2 py-1 text-xs">delete</button>
           {% endif %}

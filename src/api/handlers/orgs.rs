@@ -364,7 +364,8 @@ pub async fn delete_org(
                            existence to a non-deleter)"),
         (status = 409, body = ApiError,
             description = "Slug was claimed by another org while this one was deleted"),
-        (status = 422, body = ApiError, description = "Past the restore grace window"),
+        (status = 422, body = ApiError,
+            description = "Past the restore grace window, or over the owned-org cap"),
     ),
 )]
 pub async fn restore_org(
@@ -378,11 +379,16 @@ pub async fn restore_org(
     // The storage call performs the deleter check + grace check + UPDATE in
     // one transaction and returns the restored row, so the handler doesn't
     // race with a concurrent re-delete or get a stale read.
-    match orgs_store::restore_org(pool, org_id, user, grace).await? {
+    let owner_limit = state.cfg.tenancy.free_tier_owner_org_limit;
+    match orgs_store::restore_org(pool, org_id, user, grace, owner_limit).await? {
         orgs_store::RestoreOutcome::Restored(org) => Ok(Json(org.into())),
         orgs_store::RestoreOutcome::NotFound | orgs_store::RestoreOutcome::NotDeleted => Err(
             AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"),
         ),
+        orgs_store::RestoreOutcome::OwnerLimit => Err(AppError::unprocessable(
+            codes::OWNER_ORG_LIMIT,
+            format!("restoring would put you over the limit of {owner_limit} organisations"),
+        )),
         orgs_store::RestoreOutcome::SlugTaken => Err(AppError::conflict(
             codes::SLUG_TAKEN,
             "another organisation took this slug while it was deleted",
