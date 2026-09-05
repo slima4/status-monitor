@@ -14,11 +14,11 @@ use uptimepage::domain::{
 };
 use uptimepage::storage::orgs as orgs_store;
 use uptimepage::storage::{
-    PgStatusPageStore, PostgresTargetStore, RemoveOutcome, RestoreOutcome, StatusPageStore,
-    TargetStore, UpdateOrgOutcome, create_org_with_owner, is_active_member, is_owner,
-    list_deleted_orgs_deleted_by, list_members, list_orgs_for_user, oldest_membership_for_user,
-    owner_org_count, remove_member, restore_org, slug_is_available, soft_delete_org,
-    update_org_fields,
+    DeleteOutcome, PgStatusPageStore, PostgresTargetStore, RemoveOutcome, RestoreOutcome,
+    StatusPageStore, TargetStore, UpdateOrgOutcome, create_org_with_owner, is_active_member,
+    is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
+    oldest_membership_for_user, owner_org_count, remove_member, restore_org, slug_is_available,
+    soft_delete_org, soft_delete_org_for_user, update_org_fields,
 };
 use url::Url;
 use uuid::Uuid;
@@ -890,4 +890,224 @@ async fn update_org_slug_resolved_by_find_id_by_slug() {
 fn _imports_used() {
     let _ = orgs_store::is_active_member;
     let _: Option<OrgId> = None;
+}
+
+#[tokio::test]
+#[ignore]
+async fn owner_delete_refuses_the_callers_last_org() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs").await;
+    let first = create_org_with_owner(&pool, user, &unique_slug("solo"), "Solo", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // Sole org: refused, and still active afterwards.
+    let outcome = soft_delete_org_for_user(&pool, first.id, user)
+        .await
+        .unwrap();
+    assert_eq!(outcome, DeleteOutcome::LastOrg);
+    assert!(is_active_member(&pool, user, first.id).await.unwrap());
+
+    // With a sibling in place it goes through.
+    let second = create_org_with_owner(&pool, user, &unique_slug("pair"), "Pair", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let outcome = soft_delete_org_for_user(&pool, first.id, user)
+        .await
+        .unwrap();
+    assert_eq!(outcome, DeleteOutcome::Deleted);
+    assert!(!is_active_member(&pool, user, first.id).await.unwrap());
+
+    // The survivor is now itself undeletable.
+    assert_eq!(
+        soft_delete_org_for_user(&pool, second.id, user)
+            .await
+            .unwrap(),
+        DeleteOutcome::LastOrg
+    );
+
+    // Already tombstoned is NotFound, not LastOrg.
+    assert_eq!(
+        soft_delete_org_for_user(&pool, first.id, user)
+            .await
+            .unwrap(),
+        DeleteOutcome::NotFound
+    );
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn deleting_an_org_repoints_sessions_pinned_to_it() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs").await;
+    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let doomed = create_org_with_owner(&pool, user, &unique_slug("doom"), "Doomed", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let live = format!("live-{}", Uuid::now_v7());
+    let expired = format!("expired-{}", Uuid::now_v7());
+    for (hash, ttl) in [(&live, "1 day"), (&expired, "-1 day")] {
+        sqlx::query(
+            "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \
+             VALUES ($1, $2, $3, now() + $4::interval)",
+        )
+        .bind(hash)
+        .bind(user.0)
+        .bind(doomed.id.0)
+        .bind(ttl)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    soft_delete_org(&pool, doomed.id, user).await.unwrap();
+
+    // Otherwise the session names a tombstone and every page 403s.
+    let (moved,): (Option<Uuid>,) =
+        sqlx::query_as("SELECT active_org_id FROM sessions WHERE id_hash = $1")
+            .bind(&live)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(moved, Some(keep.id.0));
+
+    // An expired session can never be presented.
+    let (untouched,): (Option<Uuid>,) =
+        sqlx::query_as("SELECT active_org_id FROM sessions WHERE id_hash = $1")
+            .bind(&expired)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(untouched, Some(doomed.id.0));
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn restore_reports_slug_taken_instead_of_erroring() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs").await;
+    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let slug = unique_slug("reused");
+    let first = create_org_with_owner(&pool, user, &slug, "First", 3)
+        .await
+        .unwrap()
+        .unwrap();
+
+    soft_delete_org_for_user(&pool, first.id, user)
+        .await
+        .unwrap();
+
+    // The active-only index frees a tombstoned slug on purpose.
+    let second = create_org_with_owner(&pool, user, &slug, "Second", 3)
+        .await
+        .unwrap()
+        .expect("a tombstoned slug is free to retake");
+    assert_ne!(second.id, first.id);
+
+    // Restoring collides on that index — a mapped outcome, not a raw 23505.
+    assert!(matches!(
+        restore_org(&pool, first.id, user, 30).await.unwrap(),
+        RestoreOutcome::SlugTaken
+    ));
+    assert!(!is_active_member(&pool, user, first.id).await.unwrap());
+    assert!(is_active_member(&pool, user, keep.id).await.unwrap());
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn restore_readopts_sessions_the_delete_orphaned() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let owner = make_user(&pool, "orgs").await;
+    let member = make_user(&pool, "orgs").await;
+    // Owner keeps a second org so the delete is allowed at all.
+    create_org_with_owner(&pool, owner, &unique_slug("other"), "Other", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let shared = create_org_with_owner(&pool, owner, &unique_slug("shared"), "Shared", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    orgs_store::add_member(&pool, shared.id, owner, member, Role::Member, 5)
+        .await
+        .unwrap();
+
+    let hash = format!("member-{}", Uuid::now_v7());
+    sqlx::query(
+        "INSERT INTO sessions (id_hash, user_id, active_org_id, expires_at) \
+         VALUES ($1, $2, $3, now() + INTERVAL '1 day')",
+    )
+    .bind(&hash)
+    .bind(member.0)
+    .bind(shared.id.0)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // The member's only org, so the repoint has nowhere to send them.
+    soft_delete_org_for_user(&pool, shared.id, owner)
+        .await
+        .unwrap();
+    let (orphaned,): (Option<Uuid>,) =
+        sqlx::query_as("SELECT active_org_id FROM sessions WHERE id_hash = $1")
+            .bind(&hash)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(orphaned, None);
+
+    // Or the member keeps failing `CurrentOrg` until they sign in again.
+    assert!(matches!(
+        restore_org(&pool, shared.id, owner, 30).await.unwrap(),
+        RestoreOutcome::Restored(_)
+    ));
+    let (readopted,): (Option<Uuid>,) =
+        sqlx::query_as("SELECT active_org_id FROM sessions WHERE id_hash = $1")
+            .bind(&hash)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(readopted, Some(shared.id.0));
+
+    sqlx::query("DELETE FROM users WHERE id = ANY($1)")
+        .bind(vec![owner.0, member.0])
+        .execute(&pool)
+        .await
+        .unwrap();
 }

@@ -1277,6 +1277,14 @@
     .sticker-btn--highlight:not(:disabled):hover {
         background: color-mix(in oklch, var(--theme-state-warn-strong), white 14%);
     }
+    /* Pins a submit to `.field`'s box so the two line up in an `items-end`
+       grid row — the house px-4/py-2/text-sm submit stands ~6px taller. Keep
+       in step with `.field`. */
+    .sticker-btn--field {
+        padding: 0.375rem 0.75rem;
+        font-size: 0.8125rem;
+        line-height: 1.4;
+    }
 
     /* Flat secondary control (Edit/Cancel/toggle…) — the quiet sibling of
        .sticker-btn: same chunky radius + 2px edge, no ink, no raised

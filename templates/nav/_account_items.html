@@ -13,6 +13,8 @@
 {% endif %}
 <div class="monitors-popover__sep"></div>
 <div class="monitors-popover__label">account</div>
+<a href="/settings/organizations" role="menuitem"
+   class="monitors-popover__item"{% if active_tab == "organizations" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-building" /></svg>organizations</a>
 <a href="/settings/usage" role="menuitem"
    class="monitors-popover__item"{% if active_tab == "usage" %} aria-current="page"{% endif %}><svg class="mp-icon" aria-hidden="true"><use href="#i-gauge" /></svg>usage &amp; billing</a>
 <a href="/settings/api-tokens" role="menuitem"

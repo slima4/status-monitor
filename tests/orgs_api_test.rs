@@ -85,6 +85,22 @@ async fn create_then_list_then_delete_round_trip() {
     let arr = read_value(list).await;
     assert!(arr.as_array().unwrap().iter().any(|o| o["id"] == org_id));
 
+    // A second org, so the delete below is not refused as the caller's last.
+    let keep = router
+        .clone()
+        .oneshot(
+            Request::post("/api/v1/orgs")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "slug": unique_slug("keep"), "name": "Keep Co" }))
+                        .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(keep.status(), StatusCode::CREATED);
+
     // Soft-delete (owner-only).
     let del = router
         .clone()
@@ -473,6 +489,67 @@ async fn patch_non_owner_member_gets_forbidden_on_slug_change() {
 
     sqlx::query("DELETE FROM users WHERE id = ANY($1)")
         .bind(&[owner.0, other.0][..])
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn delete_refuses_the_callers_last_org() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs-api").await;
+    let (router, _) = build_test_app_with_pg(pool.clone(), |_cfg| {}).await;
+    let router = with_session(router, user, None, None);
+
+    let create = |slug: String| {
+        router.clone().oneshot(
+            Request::post("/api/v1/orgs")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({ "slug": slug, "name": "Solo Co" })).unwrap(),
+                ))
+                .unwrap(),
+        )
+    };
+
+    let first = create(unique_slug("solo")).await.unwrap();
+    assert_eq!(first.status(), StatusCode::CREATED);
+    let first_id = read_value(first).await["id"].as_str().unwrap().to_string();
+
+    // Sole org: refused, or the account has nothing left to sign in to.
+    let refused = router
+        .clone()
+        .oneshot(
+            Request::delete(format!("/api/v1/orgs/{first_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(read_value(refused).await["error"]["code"], "LAST_ORG");
+
+    // With a sibling in place it goes through.
+    assert_eq!(
+        create(unique_slug("pair")).await.unwrap().status(),
+        StatusCode::CREATED
+    );
+    let allowed = router
+        .clone()
+        .oneshot(
+            Request::delete(format!("/api/v1/orgs/{first_id}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(allowed.status(), StatusCode::NO_CONTENT);
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
         .execute(&pool)
         .await
         .unwrap();

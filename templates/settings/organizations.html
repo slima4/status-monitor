@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% import "_register.html" as reg %}
+{% block title %}Organizations · Uptimepage{% endblock %}
+{% block content %}
+<section class="space-y-6">
+  <header class="space-y-1">
+    <h1 class="page-title"><span class="page-title__prefix" aria-hidden="true">$</span>organizations</h1>
+    <p class="text-sm text-muted">
+      Every organization you belong to. Each keeps its own monitors, status
+      pages and people, with nothing shared between them. Switch here or from
+      the header menu.
+    </p>
+  </header>
+
+  <div id="orgs-list"
+       hx-get="/web/partials/settings/organizations"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       hx-on::response-error="window.smToast({message:'organization list failed to load — refresh the page'})"
+       class="sticker-card overflow-hidden">
+    {% call reg::loading("loading…") %}{% endcall %}
+  </div>
+
+  <form id="org-create-form" novalidate class="sticker-card space-y-3 p-4">
+    <h2 class="panel-label">new organization</h2>
+    <div class="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+      <label class="field-outline">
+        <span class="field-outline__label">Organization name</span>
+        <input id="new-org-name" name="name" type="text" required minlength="1" maxlength="120"
+               placeholder="Acme Inc" autocomplete="off" class="w-full field">
+      </label>
+      <label class="field-outline">
+        <span class="field-outline__label">URL slug</span>
+        <input id="new-org-slug" name="slug" type="text" required minlength="3" maxlength="30"
+               placeholder="acme" autocomplete="off" spellcheck="false"
+               pattern="[a-z][a-z0-9-]*[a-z0-9]" class="w-full field font-mono">
+      </label>
+      <button type="submit"
+              class="sticker-btn sticker-btn--primary sticker-btn--field font-medium">
+        create org
+      </button>
+    </div>
+    <p class="font-mono text-xs text-quiet">
+      # you own it, and creating it switches you into it.
+    </p>
+    <p id="new-org-slug-avail" aria-live="polite" class="font-mono text-xs"></p>
+    <div id="new-org-errors" role="alert" aria-live="polite"
+         class="hidden alert-card alert-card--error"></div>
+  </form>
+
+  <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/org_identity.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/org_create.js"|asset }}"></script>
+  <script defer src="{{ "js/ui/organizations.js"|asset }}"></script>
+</section>
+{% endblock %}

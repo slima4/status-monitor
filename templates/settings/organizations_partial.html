@@ -1,0 +1,120 @@
+<p class="border-b border-[color:var(--theme-line)] px-4 py-2 font-mono text-xs text-muted">
+  › member of <span class="cli-brackets">{{ orgs.len() }}</span> · owned <span class="cli-brackets">{{ owned_used }}/{{ owned_limit }}</span>
+</p>
+<table class="w-full text-left text-sm">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
+    <tr>
+      <th class="px-4 py-2">Organization</th>
+      <th class="px-4 py-2">Role</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
+    {% for o in orgs %}
+    <tr>
+      <td class="px-4 py-2 align-top text-body">
+        <span class="inline-flex items-center gap-2 font-mono">{{ o.slug }}{% if o.is_active %}<span class="cli-brackets font-normal">active</span>{% endif %}</span>
+        <div class="text-xs text-muted">{{ o.name }}</div>
+      </td>
+      <td class="px-4 py-2 align-top">
+        <span class="status-badge status-badge--tag">{{ o.role }}</span>
+      </td>
+      <td class="px-4 py-2">
+        <div class="flex items-center justify-end gap-2">
+          {% if !o.is_active %}
+          <button type="button" data-org-switch="{{ o.id }}"
+                  class="sticker-btn sticker-btn--accent px-2 py-1 text-xs">switch</button>
+          {% endif %}
+          {% if o.is_owner %}
+          <button type="button" data-org-edit="{{ o.id }}"
+                  aria-expanded="false"
+                  class="sticker-btn px-2 py-1 text-xs">rename</button>
+          {# API refuses deleting your last org. #}
+          {% if orgs.len() > 1 %}
+          <button type="button"
+                  data-org-delete="{{ o.id }}"
+                  data-confirm-modal
+                  data-confirm-title="Delete {{ o.slug }}?"
+                  data-confirm-body="Its monitors stop checking and its status pages go offline immediately. You can restore it from this page for the next {{ grace_days }} days, after which it is purged for good."
+                  data-confirm-label="delete organization"
+                  data-confirm-danger
+                  class="sticker-btn sticker-btn--danger px-2 py-1 text-xs">delete</button>
+          {% endif %}
+          {% endif %}
+        </div>
+      </td>
+    </tr>
+    {% if o.is_owner %}
+    <tr data-org-panel="{{ o.id }}" hidden>
+      <td colspan="3" class="bg-[color:var(--theme-surface-sunk)] px-4 py-3">
+        <form data-org-form="{{ o.id }}" data-current-slug="{{ o.slug }}" novalidate class="space-y-3">
+          <div class="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <label class="field-outline">
+              <span class="field-outline__label">Organization name</span>
+              <input data-org-field="name" type="text" required minlength="1" maxlength="120"
+                     value="{{ o.name }}" autocomplete="off" class="w-full field">
+            </label>
+            <label class="field-outline">
+              <span class="field-outline__label">URL slug</span>
+              <input data-org-field="slug" type="text" required minlength="3" maxlength="30"
+                     value="{{ o.slug }}" autocomplete="off" spellcheck="false"
+                     pattern="[a-z][a-z0-9-]*[a-z0-9]" class="w-full field font-mono">
+            </label>
+            <button type="submit"
+                    class="sticker-btn sticker-btn--primary sticker-btn--field font-medium">
+              save
+            </button>
+          </div>
+          <p class="font-mono text-xs text-quiet">
+            # the slug is sent as X-Uptimepage-Org and is your public status-page
+            URL. changing it is a hard cutover — the old one is freed with no redirect.
+          </p>
+          <p data-org-avail aria-live="polite" class="font-mono text-xs"></p>
+          <p data-org-status aria-live="polite" class="flash-text"></p>
+          <div data-org-errors role="alert" aria-live="polite"
+               class="hidden alert-card alert-card--error"></div>
+        </form>
+      </td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+  </tbody>
+</table>
+
+{% if !deleted.is_empty() %}
+<p class="border-t border-[color:var(--theme-line)] bg-[color:var(--theme-surface-sunk)] px-4 py-2 font-mono text-xs text-muted">› recently deleted</p>
+<table class="w-full text-left text-sm">
+  <thead class="table-head bg-[color:var(--theme-surface-sunk)]">
+    <tr>
+      <th class="px-4 py-2">Organization</th>
+      <th class="px-4 py-2">Purged</th>
+      <th class="px-4 py-2"></th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-[color:var(--theme-line)]">
+    {% for o in deleted %}
+    <tr>
+      <td class="px-4 py-2 align-top text-body">
+        <span class="font-mono">{{ o.slug }}</span>
+        <div class="text-xs text-muted">{{ o.name }}</div>
+      </td>
+      <td class="px-4 py-2 align-top text-body tabular-nums"><time datetime="{{ o.restore_by|iso_ts }}" data-tz="exact">{{ o.restore_by|human_ts }}</time></td>
+      <td class="px-4 py-2">
+        <div class="flex items-center justify-end gap-2">
+          <button type="button"
+                  data-org-restore="{{ o.id }}"
+                  data-confirm-modal
+                  data-confirm-title="Restore {{ o.slug }}?"
+                  data-confirm-body="Its monitors start checking again and its status pages come back at the same URLs."
+                  data-confirm-label="restore organization"
+                  class="sticker-btn sticker-btn--highlight px-2 py-1 text-xs">restore</button>
+        </div>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
+<div id="orgs-errors" role="alert" aria-live="polite"
+     class="hidden alert-card alert-card--error m-4"></div>

@@ -196,6 +196,8 @@ pub mod codes {
     pub const NOT_AN_OWNER: &str = "NOT_AN_OWNER";
     pub const MEMBER_NOT_FOUND: &str = "MEMBER_NOT_FOUND";
     pub const LAST_OWNER: &str = "LAST_OWNER";
+    /// Deleting this org would leave the caller with no org to sign in to.
+    pub const LAST_ORG: &str = "LAST_ORG";
     pub const RESTORE_WINDOW_EXPIRED: &str = "RESTORE_WINDOW_EXPIRED";
     // Auth.
     pub const INVALID_STATE: &str = "INVALID_STATE";

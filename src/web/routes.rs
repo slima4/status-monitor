@@ -139,6 +139,11 @@ pub fn routes(state: AppState) -> Router {
         .route("/settings/usage", get(views::auth::settings::usage_page))
         .route("/settings/team", get(views::team::page))
         .route("/web/partials/settings/team", get(views::team::partial))
+        .route("/settings/organizations", get(views::organizations::page))
+        .route(
+            "/web/partials/settings/organizations",
+            get(views::organizations::partial),
+        )
         .route("/settings/pages", get(views::pages::pages_list))
         .route("/settings/pages/{id}", get(views::pages::page_editor))
         .route(

@@ -315,13 +315,16 @@ pub async fn update_org(
     summary = "Soft-delete an organisation (owner-only)",
     description = "The row stays in place for the configured grace period so \
                    the slug remains held and the deleter can restore. After \
-                   the grace period a daily worker purges it for good.",
+                   the grace period a daily worker purges it for good. Live \
+                   sessions pointing at the org are moved to their user's \
+                   oldest surviving one.",
     params(("id" = Uuid, Path)),
     responses(
         (status = 204, description = "Deleted"),
         (status = 401, body = ApiError),
         (status = 403, body = ApiError),
         (status = 404, body = ApiError),
+        (status = 422, body = ApiError, description = "Caller's only organisation"),
     ),
 )]
 pub async fn delete_org(
@@ -332,13 +335,17 @@ pub async fn delete_org(
     let pool = require_db(&state)?;
     let org_id = OrgId(id);
     require_owner(pool, user, org_id).await?;
-    if !orgs_store::soft_delete_org(pool, org_id, user).await? {
-        return Err(AppError::not_found(
+    match orgs_store::soft_delete_org_for_user(pool, org_id, user).await? {
+        orgs_store::DeleteOutcome::Deleted => Ok(StatusCode::NO_CONTENT),
+        orgs_store::DeleteOutcome::LastOrg => Err(AppError::unprocessable(
+            codes::LAST_ORG,
+            "this is your only organisation — create another one before deleting it",
+        )),
+        orgs_store::DeleteOutcome::NotFound => Err(AppError::not_found(
             codes::ORG_NOT_FOUND,
             "organisation not found",
-        ));
+        )),
     }
-    Ok(StatusCode::NO_CONTENT)
 }
 
 #[utoipa::path(
@@ -354,6 +361,8 @@ pub async fn delete_org(
             description = "Org doesn't exist, isn't soft-deleted, or caller \
                            isn't the deleter (cloaked as 404 — never confirm \
                            existence to a non-deleter)"),
+        (status = 409, body = ApiError,
+            description = "Slug was claimed by another org while this one was deleted"),
         (status = 422, body = ApiError, description = "Past the restore grace window"),
     ),
 )]
@@ -373,6 +382,10 @@ pub async fn restore_org(
         orgs_store::RestoreOutcome::NotFound | orgs_store::RestoreOutcome::NotDeleted => Err(
             AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"),
         ),
+        orgs_store::RestoreOutcome::SlugTaken => Err(AppError::conflict(
+            codes::SLUG_TAKEN,
+            "another organisation took this slug while it was deleted",
+        )),
         orgs_store::RestoreOutcome::WindowExpired => Err(AppError::unprocessable(
             codes::RESTORE_WINDOW_EXPIRED,
             "restore window has expired",

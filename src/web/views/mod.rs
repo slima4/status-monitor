@@ -14,6 +14,7 @@ pub mod legal;
 pub mod nav;
 pub mod notification_channels;
 pub mod on_call;
+pub mod organizations;
 pub mod pages;
 pub mod public_status;
 pub mod region_display;

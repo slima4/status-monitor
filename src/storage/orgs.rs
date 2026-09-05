@@ -579,12 +579,75 @@ impl UpdateRow {
     }
 }
 
-/// Soft-delete an org. No-op if already deleted; returns `true` only when the
-/// row actually transitioned. Audit row is written in the same transaction so
-/// the "who deleted this" lookup in [`list_deleted_orgs_deleted_by`] is
-/// authoritative.
+/// Soft-delete an org. Audit row shares the transaction so the "who deleted
+/// this" lookup in [`list_deleted_orgs_deleted_by`] is authoritative.
+///
+/// No last-org guard on purpose — account deletion and the purge job have to
+/// tombstone an account's final org. Owner-initiated deletes take
+/// [`soft_delete_org_for_user`].
 pub async fn soft_delete_org(pool: &PgPool, org: OrgId, actor: UserId) -> Result<bool> {
     let mut tx = pool.begin().await.context("soft_delete_org: begin")?;
+    let deleted = soft_delete_org_tx(&mut tx, org, actor).await?;
+    if !deleted {
+        tx.rollback().await.ok();
+        return Ok(false);
+    }
+    tx.commit().await.context("soft_delete_org: commit")?;
+    Ok(true)
+}
+
+/// Owner-initiated delete: refuses the actor's last active org, so an account
+/// is never left with nothing to sign in to. Holds the per-user lock, or two
+/// concurrent deletes each see a sibling and both commit.
+pub async fn soft_delete_org_for_user(
+    pool: &PgPool,
+    org: OrgId,
+    actor: UserId,
+) -> Result<DeleteOutcome> {
+    let mut tx = pool
+        .begin()
+        .await
+        .context("soft_delete_org_for_user: begin")?;
+
+    advisory_xact_lock(&mut *tx, &user_lock_key(actor))
+        .await
+        .context("soft_delete_org_for_user: advisory lock")?;
+
+    let (has_sibling,): (bool,) = sqlx::query_as(
+        r#"SELECT EXISTS (
+            SELECT 1 FROM memberships m
+            JOIN organizations o ON o.id = m.org_id
+            WHERE m.user_id = $1 AND m.org_id <> $2 AND o.deleted_at IS NULL
+        )"#,
+    )
+    .bind(actor.0)
+    .bind(org.0)
+    .fetch_one(&mut *tx)
+    .await
+    .context("soft_delete_org_for_user: sibling probe")?;
+    if !has_sibling {
+        tx.rollback().await.ok();
+        return Ok(DeleteOutcome::LastOrg);
+    }
+
+    let deleted = soft_delete_org_tx(&mut tx, org, actor).await?;
+    if !deleted {
+        tx.rollback().await.ok();
+        return Ok(DeleteOutcome::NotFound);
+    }
+    tx.commit()
+        .await
+        .context("soft_delete_org_for_user: commit")?;
+    Ok(DeleteOutcome::Deleted)
+}
+
+/// `false` when the row was already deleted or never existed — the caller
+/// decides whether that is a no-op or a 404.
+async fn soft_delete_org_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    org: OrgId,
+    actor: UserId,
+) -> Result<bool> {
     let row: Option<(Uuid,)> = sqlx::query_as(
         r#"UPDATE organizations
            SET deleted_at = now(), updated_at = now()
@@ -592,18 +655,47 @@ pub async fn soft_delete_org(pool: &PgPool, org: OrgId, actor: UserId) -> Result
            RETURNING id"#,
     )
     .bind(org.0)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await
     .context("soft_delete_org: update")?;
-    let Some(_) = row else {
-        tx.rollback().await.ok();
+    if row.is_none() {
         return Ok(false);
-    };
-    record_audit_tx(&mut tx, org, Some(actor), "org.deleted", Value::Null)
+    }
+
+    // A session left pinned to the tombstone fails `is_active_member`, so
+    // `CurrentOrg` rejects every request with no way back through the UI.
+    // Tiebreak matches `oldest_membership_for_user` so a session and a fresh
+    // sign-in never disagree; NULL when nothing is left, which `restore_org`
+    // adopts back.
+    sqlx::query(
+        r#"UPDATE sessions s
+           SET active_org_id = (
+               SELECT m.org_id FROM memberships m
+               JOIN organizations o ON o.id = m.org_id
+               WHERE m.user_id = s.user_id AND o.deleted_at IS NULL
+               ORDER BY m.created_at ASC, m.org_id ASC
+               LIMIT 1
+           )
+           WHERE s.active_org_id = $1 AND s.expires_at > now()"#,
+    )
+    .bind(org.0)
+    .execute(&mut **tx)
+    .await
+    .context("soft_delete_org: repoint sessions")?;
+
+    record_audit_tx(tx, org, Some(actor), "org.deleted", Value::Null)
         .await
         .context("soft_delete_org: audit")?;
-    tx.commit().await.context("soft_delete_org: commit")?;
     Ok(true)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeleteOutcome {
+    Deleted,
+    /// Already tombstoned, or never existed.
+    NotFound,
+    /// The actor's only surviving org — deleting it would strand the account.
+    LastOrg,
 }
 
 /// Clear `deleted_at` on a soft-deleted org, but only if:
@@ -622,7 +714,7 @@ pub async fn restore_org(
     grace_days: u32,
 ) -> Result<RestoreOutcome> {
     let mut tx = pool.begin().await.context("restore_org: begin")?;
-    let updated: Option<OrgRow> = sqlx::query_as(
+    let res: Result<Option<OrgRow>, sqlx::Error> = sqlx::query_as(
         r#"UPDATE organizations
            SET deleted_at = NULL, updated_at = now()
            WHERE id = $1
@@ -639,8 +731,21 @@ pub async fn restore_org(
     .bind(i64::from(grace_days))
     .bind(actor.0)
     .fetch_optional(&mut *tx)
-    .await
-    .context("restore_org: update")?;
+    .await;
+    // `idx_organizations_active` is partial, so a tombstoned slug is free to
+    // retake; clearing `deleted_at` walks the row back into that index.
+    let updated = match res {
+        Ok(row) => row,
+        Err(e) if is_unique_violation(&e) => {
+            tx.rollback().await.ok();
+            return Ok(RestoreOutcome::SlugTaken);
+        }
+        Err(e) => {
+            return Err(AppError::Other(
+                anyhow::Error::from(e).context("restore_org: update"),
+            ));
+        }
+    };
 
     if let Some(row) = updated {
         record_audit_tx(&mut tx, org, Some(actor), "org.restored", Value::Null)
@@ -653,6 +758,22 @@ pub async fn restore_org(
             .execute(&mut *tx)
             .await
             .context("restore_org: re-arm heartbeats")?;
+        // Members with no other org were NULLed by the delete; without this
+        // they keep failing `CurrentOrg` until they sign in again.
+        sqlx::query(
+            r#"UPDATE sessions s
+               SET active_org_id = $1
+               WHERE s.active_org_id IS NULL
+                 AND s.expires_at > now()
+                 AND EXISTS (
+                     SELECT 1 FROM memberships m
+                     WHERE m.org_id = $1 AND m.user_id = s.user_id
+                 )"#,
+        )
+        .bind(org.0)
+        .execute(&mut *tx)
+        .await
+        .context("restore_org: adopt orphaned sessions")?;
         tx.commit().await.context("restore_org: commit")?;
         return Ok(RestoreOutcome::Restored(row.into_org()));
     }
@@ -692,6 +813,8 @@ pub enum RestoreOutcome {
     NotFound,
     NotDeleted,
     WindowExpired,
+    /// Another org took the slug while this one was tombstoned.
+    SlugTaken,
 }
 
 /// List of (membership, optional display email) for every member of an org,
