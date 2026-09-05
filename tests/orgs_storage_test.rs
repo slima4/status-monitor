@@ -1006,7 +1006,7 @@ async fn deleting_an_org_repoints_sessions_pinned_to_it() {
 
 #[tokio::test]
 #[ignore]
-async fn restore_reports_slug_taken_instead_of_erroring() {
+async fn a_tombstoned_slug_stays_held_for_the_restore_window() {
     let Some(pool) = common::pg_pool_from_env().await else {
         return;
     };
@@ -1025,19 +1025,32 @@ async fn restore_reports_slug_taken_instead_of_erroring() {
         .await
         .unwrap();
 
-    // The active-only index frees a tombstoned slug on purpose.
-    let second = create_org_with_owner(&pool, user, &slug, "Second", 3)
+    // Held for the whole window, so the deleter's restore stays possible.
+    assert!(
+        create_org_with_owner(&pool, user, &slug, "Second", 3)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert!(!slug_is_available(&pool, &slug).await.unwrap());
+
+    // Renaming onto it is refused too — the partial index alone would miss it.
+    let other = create_org_with_owner(&pool, user, &unique_slug("other"), "Other", 3)
         .await
         .unwrap()
-        .expect("a tombstoned slug is free to retake");
-    assert_ne!(second.id, first.id);
+        .unwrap();
+    assert!(matches!(
+        update_org_fields(&pool, other.id, user, None, Some(&slug))
+            .await
+            .unwrap(),
+        UpdateOrgOutcome::SlugTaken
+    ));
 
-    // Restoring collides on that index — a mapped outcome, not a raw 23505.
     assert!(matches!(
         restore_org(&pool, first.id, user, 30).await.unwrap(),
-        RestoreOutcome::SlugTaken
+        RestoreOutcome::Restored(_)
     ));
-    assert!(!is_active_member(&pool, user, first.id).await.unwrap());
+    assert!(is_active_member(&pool, user, first.id).await.unwrap());
     assert!(is_active_member(&pool, user, keep.id).await.unwrap());
 
     sqlx::query("DELETE FROM users WHERE id = $1")
@@ -1107,6 +1120,51 @@ async fn restore_readopts_sessions_the_delete_orphaned() {
 
     sqlx::query("DELETE FROM users WHERE id = ANY($1)")
         .bind(vec![owner.0, member.0])
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore]
+async fn rename_of_a_missing_org_is_not_found_even_when_the_slug_is_held() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs").await;
+    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let held = create_org_with_owner(&pool, user, &unique_slug("held"), "Held", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    let gone = create_org_with_owner(&pool, user, &unique_slug("gone"), "Gone", 3)
+        .await
+        .unwrap()
+        .unwrap();
+    soft_delete_org_for_user(&pool, gone.id, user)
+        .await
+        .unwrap();
+
+    // The slug probe must not answer before the org itself is known to exist.
+    assert!(matches!(
+        update_org_fields(&pool, gone.id, user, None, Some(&held.slug))
+            .await
+            .unwrap(),
+        UpdateOrgOutcome::NotFound
+    ));
+    // Live org, same held slug: that one really is SlugTaken.
+    assert!(matches!(
+        update_org_fields(&pool, keep.id, user, None, Some(&held.slug))
+            .await
+            .unwrap(),
+        UpdateOrgOutcome::SlugTaken
+    ));
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
         .execute(&pool)
         .await
         .unwrap();

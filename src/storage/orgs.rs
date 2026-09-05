@@ -85,9 +85,9 @@ pub async fn oldest_membership_for_user(pool: &PgPool, user: UserId) -> Result<O
     Ok(row.map(|(id,)| OrgId(id)))
 }
 
-/// Returns true if the slug is currently free — i.e. no row in
-/// `organizations` holds it, including soft-deleted ones. Mirrors the unique
-/// index behaviour so a "check-slug" API answer and the actual insert agree.
+/// True if no row in `organizations` holds the slug, tombstones included —
+/// the same test the create and rename paths apply, so a "check-slug" answer
+/// and the write that follows it agree.
 pub async fn slug_is_available(pool: &PgPool, slug: &str) -> Result<bool> {
     let (exists,): (bool,) =
         sqlx::query_as(r#"SELECT EXISTS (SELECT 1 FROM organizations WHERE slug = $1)"#)
@@ -103,8 +103,8 @@ pub async fn slug_is_available(pool: &PgPool, slug: &str) -> Result<bool> {
 /// that inserts the membership row, so two concurrent creates cannot exceed the
 /// cap. The limit counts only **active** owner memberships — soft-deleted orgs
 /// during their grace period don't count, which matches what
-/// [`owner_org_count`] reports. Returns `Ok(None)` if the slug is already held
-/// (including by a soft-deleted org).
+/// [`owner_org_count`] reports. Returns `Ok(None)` if any row holds the slug,
+/// a soft-deleted one included — otherwise restoring it later would collide.
 pub async fn create_org_with_owner(
     pool: &PgPool,
     user: UserId,
@@ -125,7 +125,8 @@ pub async fn create_org_with_owner(
 
     let row: Option<OrgRow> = sqlx::query_as(
         r#"INSERT INTO organizations (slug, name)
-           VALUES ($1, $2)
+           SELECT $1, $2
+           WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = $1)
            ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING
            RETURNING id, slug::text AS slug, name, created_at, updated_at, deleted_at"#,
     )
@@ -233,10 +234,11 @@ pub async fn create_signup_org_with_owner_in_tx(
     // freed by purge and must not hold a slot, matching every other org count.
     let row: Option<(Uuid,)> = sqlx::query_as(
         "INSERT INTO organizations (slug, name, plan_id) \
-         VALUES ($1, $2, CASE WHEN \
+         SELECT $1, $2, CASE WHEN \
            (SELECT count(*) FROM organizations \
             WHERE plan_id = 'founding' AND deleted_at IS NULL) < $3 \
-           THEN 'founding' ELSE 'free' END) \
+           THEN 'founding' ELSE 'free' END \
+         WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = $1) \
          ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING RETURNING id",
     )
     .bind(slug)
@@ -464,6 +466,30 @@ pub async fn update_org_fields(
     );
 
     let mut tx = pool.begin().await.context("update_org_fields: begin")?;
+
+    // A tombstoned holder sits outside the partial index, so the rename would
+    // go through and then break that org's restore. Both facts in one probe,
+    // or a missing org would report SlugTaken instead of NotFound.
+    if let Some(slug) = new_slug {
+        let (live, held): (bool, bool) = sqlx::query_as(
+            r#"SELECT
+                 EXISTS (SELECT 1 FROM organizations WHERE id = $2 AND deleted_at IS NULL),
+                 EXISTS (SELECT 1 FROM organizations WHERE slug = $1 AND id <> $2)"#,
+        )
+        .bind(slug)
+        .bind(org.0)
+        .fetch_one(&mut *tx)
+        .await
+        .context("update_org_fields: slug holder probe")?;
+        if !live {
+            tx.rollback().await.ok();
+            return Ok(UpdateOrgOutcome::NotFound);
+        }
+        if held {
+            tx.rollback().await.ok();
+            return Ok(UpdateOrgOutcome::SlugTaken);
+        }
+    }
 
     // One CTE+UPDATE: lock the row, read the prior (slug, name), write only
     // the supplied fields (COALESCE keeps untouched columns), and return both
@@ -732,8 +758,9 @@ pub async fn restore_org(
     .bind(actor.0)
     .fetch_optional(&mut *tx)
     .await;
-    // `idx_organizations_active` is partial, so a tombstoned slug is free to
-    // retake; clearing `deleted_at` walks the row back into that index.
+    // Reachable only for a row that predates the create/rename slug guards —
+    // those hold the slug for the whole window, so nothing can take it out
+    // from under a restorable org. The partial index would not have stopped it.
     let updated = match res {
         Ok(row) => row,
         Err(e) if is_unique_violation(&e) => {
