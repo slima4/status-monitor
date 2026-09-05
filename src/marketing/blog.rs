@@ -777,6 +777,7 @@ mod tests {
         "pingdom-alternatives",
         "do-i-need-an-uptime-monitor",
         "cron-jobs-fail-silently",
+        "uptime-kuma-rest-api",
     ];
 
     #[test]

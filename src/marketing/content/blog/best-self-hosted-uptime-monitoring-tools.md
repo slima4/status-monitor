@@ -1,7 +1,7 @@
 +++
 title = "Best open-source, self-hosted uptime monitors (2026)"
 date = "2026-06-20"
-updated = "2026-08-03"
+updated = "2026-09-05"
 slug = "best-self-hosted-uptime-monitoring-tools"
 excerpt = "A fair look at the open-source, self-hostable tools for watching sites and APIs in 2026: what each is good at, where it stops, and how to pick one."
 tags = ["open-source", "self-hosted", "monitoring", "status-page"]
@@ -76,7 +76,7 @@ Hold those three in mind and the choices get obvious. Here is the whole list aga
 
 The default, and for good reason. Uptime Kuma is the tool most people mean when they say "self-hosted uptime monitor." One Docker container, a clean dashboard, a long list of monitor types, notifications to almost anything. If you run a homelab or a handful of side projects, you can stop reading here and go install it.
 
-Its limit shows up with teams. As of 2026 it still uses a single shared login, so everyone who can see the dashboard can change anything. There is no official REST API for managing monitors, the config lives in the database rather than a file you can commit, and the status pages are basic compared to a customer-facing tool. None of that matters for a Raspberry Pi watching your blog. All of it starts to matter once a second person needs access.
+Its limit shows up with teams. As of 2026 it still uses a single shared login, so everyone who can see the dashboard can change anything. There is [no official REST API for managing monitors](/blog/uptime-kuma-rest-api), the config lives in the database rather than a file you can commit, and the status pages are basic compared to a customer-facing tool. None of that matters for a Raspberry Pi watching your blog. All of it starts to matter once a second person needs access.
 
 If you are hitting those limits, that is the moment the rest of this list becomes interesting. We wrote a longer [comparison with Uptime Kuma](/vs/uptime-kuma) if you want the specifics.
 

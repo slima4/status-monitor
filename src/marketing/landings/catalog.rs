@@ -989,6 +989,10 @@ tail -c 4000 backup.log | curl -fsS --data-binary @- "$URL/$code""#,
                 href: "/blog/best-self-hosted-uptime-monitoring-tools",
             },
             ResourceLink {
+                label: "Uptime Kuma's API, in detail",
+                href: "/blog/uptime-kuma-rest-api",
+            },
+            ResourceLink {
                 label: "vs self-hosted monitors",
                 href: "/vs/self-hosted-monitoring",
             },
@@ -1816,6 +1820,10 @@ resource "uptimepage_target" "api" {
             ResourceLink {
                 label: "Uptimepage vs Uptime Kuma",
                 href: "/vs/uptime-kuma",
+            },
+            ResourceLink {
+                label: "Why Uptime Kuma has no REST API",
+                href: "/blog/uptime-kuma-rest-api",
             },
             ResourceLink {
                 label: "Terraform docs",
