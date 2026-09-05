@@ -9,9 +9,7 @@
 //! deadline. The certificate read itself is `security::cert_probe`, shared with
 //! the `tls_cert` monitor so the two can never disagree about a chain.
 
-use std::io;
-use std::net::{IpAddr, Ipv6Addr, SocketAddr};
-use std::num::NonZeroU32;
+use std::net::SocketAddr;
 use std::sync::{Arc, LazyLock, OnceLock};
 use std::time::Duration;
 
@@ -21,25 +19,20 @@ use axum::Extension;
 use axum::Json;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{ConnectInfo, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use governor::clock::DefaultClock;
-use governor::state::keyed::DashMapStateStore;
-use governor::{Quota, RateLimiter};
-use hickory_resolver::net::NetError;
-use hickory_resolver::{Resolver, TokioResolver};
 use serde::{Deserialize, Serialize};
 
 use crate::marketing::seo::{
     JsonLd, OpenGraph, json_ld_breadcrumb, json_ld_faqpage, json_ld_web_application,
     json_ld_webpage,
 };
-use crate::security::SsrfGuard;
 use crate::security::cert_probe::{self, CertProbeError};
 use crate::web::filters;
 
 use super::super::config::{BRAND, MarketingCfg};
 use super::super::pages::{CachedRender, cached_render, serve_cached};
+use super::probe::{self, Answer, ProbeError, ProbeLimiter};
 use super::{TOOL_CACHE_CONTROL, TOOLS, ToolMeta};
 
 pub const SSL_CHECKER_PATH: &str = "/tools/ssl-certificate-checker";
@@ -64,31 +57,8 @@ const PROBE_BURST: u32 = 5;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(4);
 const PROBE_DEADLINE: Duration = Duration::from_secs(9);
 
-/// Above this many tracked addresses, drop the ones whose budget has fully
-/// refilled. Bounded growth without a background janitor.
-const LIMITER_HIGH_WATER: usize = 10_000;
-
-type ProbeLimiter = RateLimiter<IpAddr, DashMapStateStore<IpAddr>, DefaultClock>;
-
-static LIMITER: LazyLock<ProbeLimiter> = LazyLock::new(|| {
-    let quota = Quota::per_minute(NonZeroU32::new(PROBES_PER_MIN).expect("nonzero"))
-        .allow_burst(NonZeroU32::new(PROBE_BURST).expect("nonzero"));
-    RateLimiter::dashmap(quota)
-});
-
-/// Our own resolver rather than `tokio::net::lookup_host`, which is
-/// `getaddrinfo` on the blocking pool and cannot be cancelled: a nameserver
-/// that simply never answers would hold a pool thread long past the deadline,
-/// and the pool is shared with the rest of the process.
-static RESOLVER: LazyLock<Option<TokioResolver>> = LazyLock::new(|| {
-    let mut builder = Resolver::builder_tokio().ok()?;
-    let opts = builder.options_mut();
-    opts.timeout = DNS_TIMEOUT;
-    opts.attempts = 1;
-    builder.build().ok()
-});
-
-const DNS_TIMEOUT: Duration = Duration::from_secs(3);
+static LIMITER: LazyLock<ProbeLimiter> =
+    LazyLock::new(|| probe::limiter(PROBES_PER_MIN, PROBE_BURST));
 
 const SSL_CHECKER_FAQS: &[(&str, &str)] = &[
     (
@@ -224,20 +194,20 @@ pub(super) async fn probe(
     // string must not fall through to axum's plain-text rejection: the parse
     // would throw and the visitor would be told the server was unreachable.
     let Ok(Query(q)) = q else {
-        return fail(
+        return probe::fail(
             StatusCode::BAD_REQUEST,
             "That request could not be read. Check the host and port.",
         );
     };
-    let Some(host) = q.host.as_deref().and_then(clean_host) else {
-        return fail(
+    let Some(host) = q.host.as_deref().and_then(probe::clean_host) else {
+        return probe::fail(
             StatusCode::BAD_REQUEST,
             "That does not look like a domain name. Enter a hostname such as example.com.",
         );
     };
     let port = q.port.unwrap_or(443);
     if !ALLOWED_PORTS.contains(&port) {
-        return fail(
+        return probe::fail(
             StatusCode::BAD_REQUEST,
             "That port is not one this checker will open. TLS-on-connect ports only.",
         );
@@ -245,8 +215,8 @@ pub(super) async fn probe(
 
     // Metered after parsing, because the budget exists to bound outbound
     // sockets: a typo costs nobody a connection and should not spend a turn.
-    if !spend_budget(&cfg, &headers, peer) {
-        return fail(
+    if !probe::spend_budget(&cfg, &headers, peer, &LIMITER, 1) {
+        return probe::fail(
             StatusCode::TOO_MANY_REQUESTS,
             "Too many checks from this address. Wait a minute and try again.",
         );
@@ -254,7 +224,7 @@ pub(super) async fn probe(
 
     match tokio::time::timeout(PROBE_DEADLINE, run(&host, port)).await {
         Ok(Ok(report)) => (
-            probe_headers(),
+            probe::probe_headers(),
             Json(Answer {
                 ok: true,
                 body: report,
@@ -266,42 +236,8 @@ pub(super) async fn probe(
     }
 }
 
-/// Collapses an IPv6 address to its /64. Any VPS is handed a routed /64 or
-/// wider, so keying on the full address would hand one visitor an unbounded
-/// number of independent budgets against the only route here that opens a
-/// socket.
-fn budget_key(ip: IpAddr) -> IpAddr {
-    match ip {
-        IpAddr::V6(v6) => {
-            let s = v6.segments();
-            IpAddr::V6(Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
-        }
-        v4 => v4,
-    }
-}
-
-/// Charges one probe to the visitor's address. Missing `ConnectInfo` means the
-/// server was built without it, which would silently hand everyone the same
-/// budget; an unspecified address keeps them metered together rather than not
-/// at all.
-fn spend_budget(
-    cfg: &MarketingCfg,
-    headers: &HeaderMap,
-    peer: Option<Extension<ConnectInfo<SocketAddr>>>,
-) -> bool {
-    let peer = peer.map_or(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), |c| {
-        (c.0).0.ip()
-    });
-    let client = crate::web::client_ip::extract(headers, peer, &cfg.trusted_proxies);
-    let allowed = LIMITER.check_key(&budget_key(client)).is_ok();
-    if LIMITER.len() > LIMITER_HIGH_WATER {
-        LIMITER.retain_recent();
-    }
-    allowed
-}
-
 async fn run(host: &str, port: u16) -> Result<ProbeReport, ProbeError> {
-    let addrs = resolve(host).await?;
+    let addrs = probe::resolve(host).await?;
     let facts = cert_probe::connect_and_read(&addrs, port, host, CONNECT_TIMEOUT)
         .await
         .map_err(describe)?;
@@ -326,63 +262,11 @@ async fn run(host: &str, port: u16) -> Result<ProbeReport, ProbeError> {
     })
 }
 
-/// Resolves, then keeps only addresses the SSRF guard allows. A name that
-/// resolves entirely into private space is reported as unreachable rather than
-/// as blocked: the distinction is only useful to someone probing us.
-async fn resolve(host: &str) -> Result<Vec<IpAddr>, ProbeError> {
-    let Some(resolver) = RESOLVER.as_ref() else {
-        return Err(ProbeError::Server(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "The checker has no resolver configured.",
-        ));
-    };
-    let resolved = match tokio::time::timeout(DNS_TIMEOUT, resolver.lookup_ip(host)).await {
-        Ok(Ok(resolved)) => resolved,
-        Ok(Err(e)) if no_nameserver_was_reached(&e) => {
-            return Err(ProbeError::Server(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "The checker could not reach a nameserver.",
-            ));
-        }
-        _ => return Err(ProbeError::Host("That name does not resolve.")),
-    };
-    let guard = SsrfGuard::strict();
-    let addrs: Vec<IpAddr> = resolved.iter().filter(|ip| guard.allow(*ip)).collect();
-    if addrs.is_empty() {
-        return Err(ProbeError::Host(
-            "That name does not resolve to a reachable public address.",
-        ));
-    }
-    Ok(addrs)
-}
-
-/// A DNS answer we never got because nothing on the resolver path answered at
-/// all. A name that times out or comes back empty is the visitor's host.
-fn no_nameserver_was_reached(e: &NetError) -> bool {
-    matches!(
-        e,
-        NetError::Io(_) | NetError::NoConnections | NetError::Busy
-    )
-}
-
-/// A connect that failed before a packet could leave this host. Reporting it as
-/// the host's fault would tell every visitor their site is dead the moment we
-/// lose egress, and record nothing here.
-fn egress_is_broken(e: &io::Error) -> bool {
-    matches!(
-        e.kind(),
-        io::ErrorKind::PermissionDenied
-            | io::ErrorKind::NetworkUnreachable
-            | io::ErrorKind::NetworkDown
-            | io::ErrorKind::AddrNotAvailable
-    )
-}
-
 /// Probe errors carry a platform errno and a rustls internal, neither of which
 /// is meaningful to a visitor. Each becomes a sentence about the host.
 fn describe(err: CertProbeError) -> ProbeError {
     let text = match err {
-        CertProbeError::Connect(ref e) if egress_is_broken(e) => {
+        CertProbeError::Connect(ref e) if probe::egress_is_broken(e) => {
             return ProbeError::Server(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "The checker could not open an outbound connection.",
@@ -401,152 +285,11 @@ fn describe(err: CertProbeError) -> ProbeError {
     ProbeError::Host(text)
 }
 
-/// A certificate and a host that would not answer both come back 200, so the
-/// page needs a field to tell them apart.
-#[derive(Serialize)]
-struct Answer<T> {
-    ok: bool,
-    #[serde(flatten)]
-    body: T,
-}
-
-enum ProbeError {
-    /// A 5xx here would file a stranger's dead host as our own broken response
-    /// and spend the service error budget on it.
-    Host(&'static str),
-    Server(StatusCode, &'static str),
-}
-
-impl IntoResponse for ProbeError {
-    fn into_response(self) -> Response {
-        match self {
-            Self::Host(error) => fail(StatusCode::OK, error),
-            Self::Server(status, error) => fail(status, error),
-        }
-    }
-}
-
-fn fail(status: StatusCode, error: &'static str) -> Response {
-    #[derive(Serialize)]
-    struct Failure<'a> {
-        error: &'a str,
-    }
-    (
-        status,
-        probe_headers(),
-        Json(Answer {
-            ok: false,
-            body: Failure { error },
-        }),
-    )
-        .into_response()
-}
-
-/// Never cached and never indexed: the answer is per-host and changes the day a
-/// certificate is renewed.
-fn probe_headers() -> [(header::HeaderName, HeaderValue); 2] {
-    [
-        (
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("no-store, private"),
-        ),
-        (
-            header::HeaderName::from_static("x-robots-tag"),
-            HeaderValue::from_static("noindex"),
-        ),
-    ]
-}
-
-/// Accepts what a person pastes — a full URL, a trailing dot, mixed case — and
-/// yields a bare DNS name, or nothing. Address literals are refused: they carry
-/// no SNI, and allowing them would turn the resolver guard into the only thing
-/// standing between this endpoint and the internal network.
-fn clean_host(raw: &str) -> Option<String> {
-    let mut s = raw.trim();
-    if let Some((_, rest)) = s.split_once("://") {
-        s = rest;
-    }
-    s = s
-        .split(['/', '?', '#'])
-        .next()?
-        .rsplit('@')
-        .next()?
-        .trim_end_matches('.');
-    if s.is_empty() || s.contains(':') {
-        return None;
-    }
-
-    // An internationalized name is a real name with a real certificate, and
-    // the /start flow already accepts one through `Url::parse`. Fold it to
-    // punycode here so both surfaces agree on what a domain is; the label
-    // rules below then run on the ASCII form either way.
-    let host = if s.is_ascii() {
-        s.to_ascii_lowercase()
-    } else {
-        idna::domain_to_ascii(s).ok()?
-    };
-    if host.len() > 253 {
-        return None;
-    }
-    let labels: Vec<&str> = host.split('.').collect();
-    if labels.len() < 2 {
-        return None;
-    }
-    let well_formed = labels.iter().all(|l| {
-        !l.is_empty()
-            && l.len() <= 63
-            && !l.starts_with('-')
-            && !l.ends_with('-')
-            && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-    });
-    // An all-digit final label is an IPv4 literal, never a registrable name.
-    let is_v4_literal = labels
-        .last()
-        .is_some_and(|l| l.chars().all(|c| c.is_ascii_digit()));
-    (well_formed && !is_v4_literal).then_some(host)
-}
-
 #[cfg(test)]
 mod tests {
+    use std::io;
+
     use super::*;
-
-    #[test]
-    fn cleans_what_a_person_pastes() {
-        assert_eq!(
-            clean_host("https://Acme.com/pricing?x=1").as_deref(),
-            Some("acme.com")
-        );
-        assert_eq!(clean_host("  acme.com.  ").as_deref(), Some("acme.com"));
-        assert_eq!(
-            clean_host("mail.acme.co.uk").as_deref(),
-            Some("mail.acme.co.uk")
-        );
-    }
-
-    #[test]
-    fn refuses_literals_and_malformed_names() {
-        for raw in [
-            "127.0.0.1",
-            "192.168.1.10",
-            "[::1]",
-            "localhost",
-            "acme.com:8443",
-            "-acme.com",
-            "acme..com",
-            "",
-        ] {
-            assert!(clean_host(raw).is_none(), "{raw} should be refused");
-        }
-    }
-
-    /// Same answer the /start flow gives, which folds through `Url::parse`.
-    #[test]
-    fn folds_an_internationalized_name_to_punycode() {
-        assert_eq!(
-            clean_host("münchen.de").as_deref(),
-            Some("xn--mnchen-3ya.de")
-        );
-    }
 
     /// Guards the error budget: none of these may drift back into the 5xx class.
     #[tokio::test]
@@ -572,45 +315,6 @@ mod tests {
             assert_eq!(json["ok"], false);
             assert!(json["error"].is_string(), "the page renders this sentence");
         }
-    }
-
-    #[tokio::test]
-    async fn a_fault_on_this_side_keeps_its_5xx() {
-        let res =
-            ProbeError::Server(StatusCode::SERVICE_UNAVAILABLE, "no resolver").into_response();
-        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
-    }
-
-    /// Losing egress must not read as every visitor's host being dead.
-    #[test]
-    fn a_connect_that_never_left_this_host_is_ours() {
-        for kind in [
-            io::ErrorKind::PermissionDenied,
-            io::ErrorKind::NetworkUnreachable,
-            io::ErrorKind::NetworkDown,
-            io::ErrorKind::AddrNotAvailable,
-        ] {
-            assert!(egress_is_broken(&io::Error::from(kind)), "{kind:?}");
-        }
-        for kind in [
-            io::ErrorKind::ConnectionRefused,
-            io::ErrorKind::ConnectionReset,
-            io::ErrorKind::TimedOut,
-            io::ErrorKind::HostUnreachable,
-        ] {
-            assert!(!egress_is_broken(&io::Error::from(kind)), "{kind:?}");
-        }
-    }
-
-    #[test]
-    fn a_certificate_answer_is_marked_ok_beside_its_fields() {
-        let json = serde_json::to_value(Answer {
-            ok: true,
-            body: serde_json::json!({ "host": "acme.com" }),
-        })
-        .unwrap();
-        assert_eq!(json["ok"], true);
-        assert_eq!(json["host"], "acme.com");
     }
 
     #[test]

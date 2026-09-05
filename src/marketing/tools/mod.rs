@@ -3,6 +3,7 @@
 //! the visitor into the product. Same cached-render contract as the rest
 //! of marketing: one render at boot, ETag + Cache-Control on every hit.
 
+mod probe;
 pub mod ssl;
 
 use std::sync::Arc;
