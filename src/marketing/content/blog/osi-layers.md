@@ -103,7 +103,10 @@ runs a dedicated probe per layer, per failure mode:
 - **HTTP** (layer 7): status code and body, plus a timing breakdown of
   every step in a single request: DNS lookup, TCP connect, TLS
   handshake, time to first byte, transfer. When a page is *slow* rather
-  than *down*, those splits point straight at the guilty layer.
+  than *down*, those splits point straight at the guilty layer. To see what layer 7
+  answers for one URL right now, including every redirect it takes on the
+  way, the [HTTP header and redirect checker](/tools/http-header-checker)
+  runs the same walk once.
 - **TCP** (layer 4): a raw connect to any host and port. The check
   Jamie ran by hand, running automatically, for databases and SSH and
   mail servers that have no web page at all.

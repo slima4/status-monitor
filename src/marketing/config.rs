@@ -88,7 +88,7 @@ pub struct MarketingCfg {
     /// the catalog is a machine contract, that constant is hosted-only copy.
     pub mcp_url: Option<String>,
     /// Reverse proxies whose `X-Forwarded-For` may be believed. Empty means
-    /// the TCP peer is the client. Only the SSL checker reads it, to key its
-    /// per-IP budget on the visitor rather than on Caddy.
+    /// the TCP peer is the client. Read by the tools that open an outbound
+    /// socket, to key their per-IP budget on the visitor rather than on Caddy.
     pub trusted_proxies: Vec<ipnet::IpNet>,
 }

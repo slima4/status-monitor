@@ -285,6 +285,23 @@ async fn robots_txt_points_at_sitemap() {
     assert!(ct.starts_with("text/plain"), "got {ct:?}");
 }
 
+/// A crawler that walks one of these spends our egress on a stranger's host,
+/// and the header checker opens a socket per redirect hop.
+#[tokio::test]
+async fn robots_disallows_every_probe_endpoint() {
+    let (status, body, _) = get("/robots.txt").await;
+    assert_eq!(status, StatusCode::OK);
+    for probe in [
+        "/tools/ssl-certificate-checker/probe",
+        "/tools/http-header-checker/probe",
+    ] {
+        assert!(
+            body.contains(&format!("Disallow: {probe}")),
+            "{probe} must be disallowed, got {body:?}"
+        );
+    }
+}
+
 async fn get_as_markdown(path: &str) -> (StatusCode, String, axum::http::HeaderMap) {
     let resp = router()
         .oneshot(
@@ -750,6 +767,49 @@ async fn ssl_probe_refuses_anything_but_a_public_hostname() {
         "host=",
     ] {
         let (status, body, _) = get(&format!("/tools/ssl-certificate-checker/probe?{query}")).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_REQUEST,
+            "{query} must be refused, got {body}"
+        );
+        assert!(
+            body.contains(r#""ok":false"#),
+            "the page branches on ok, not on the status line: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn header_checker_renders_without_db() {
+    let (status, body, _) = get("/tools/http-header-checker").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        body.contains("header_checker"),
+        "page must load its own script"
+    );
+    assert!(
+        body.contains(r#"data-probe="/tools/http-header-checker/probe""#),
+        "the form must carry the probe endpoint it posts to"
+    );
+}
+
+/// This probe follows redirects, so it can be pointed at more hosts than any
+/// other marketing route. Each of these must be refused before a connection is
+/// attempted, so the test needs no network.
+#[tokio::test]
+async fn header_probe_refuses_anything_but_a_public_web_url() {
+    for query in [
+        "url=http://127.0.0.1/",
+        "url=http://localhost/",
+        "url=http://169.254.169.254/latest/meta-data/",
+        "url=http://[::1]/",
+        "url=file:///etc/passwd",
+        "url=gopher://acme.com",
+        "url=https://acme.com:22/",
+        "url=https://acme.com:5432/",
+        "url=",
+    ] {
+        let (status, body, _) = get(&format!("/tools/http-header-checker/probe?{query}")).await;
         assert_eq!(
             status,
             StatusCode::BAD_REQUEST,

@@ -621,18 +621,29 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
 /// signal is granted. See <https://contentsignals.org/>.
 const CONTENT_SIGNAL: &str = "search=yes, ai-input=yes, ai-train=yes";
 
+/// Endpoints that open an outbound socket. A tool that adds one adds it here,
+/// or a crawler walks it on our egress.
+const PROBE_PATHS: &[&str] = &[
+    crate::marketing::tools::ssl::SSL_PROBE_PATH,
+    crate::marketing::tools::http_headers::HEADER_PROBE_PATH,
+];
+
 fn build_robots(cfg: &MarketingCfg) -> Bytes {
     Bytes::from(format!(
         "# Content preferences: https://contentsignals.org/\n\
          User-agent: *\n\
          Content-Signal: {CONTENT_SIGNAL}\n\
          Allow: /\n\
-         Disallow: {probe}\n\
+         {probes}\
          Sitemap: {origin}/sitemap.xml\n",
         origin = cfg.canonical_origin,
-        // Every hit opens a socket to a host a stranger named. Nothing links
-        // to it, so a crawler reaching it is spending our egress on nothing.
-        probe = crate::marketing::tools::ssl::SSL_PROBE_PATH,
+        // Every hit opens a socket to a host a stranger named, and the header
+        // checker opens one per redirect hop. Nothing links to them, so a
+        // crawler reaching one is spending our egress on nothing.
+        probes = PROBE_PATHS
+            .iter()
+            .map(|p| format!("Disallow: {p}\n"))
+            .collect::<String>(),
     ))
 }
 

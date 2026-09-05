@@ -3,6 +3,7 @@
 //! the visitor into the product. Same cached-render contract as the rest
 //! of marketing: one render at boot, ETag + Cache-Control on every hit.
 
+pub mod http_headers;
 mod probe;
 pub mod ssl;
 
@@ -1104,6 +1105,13 @@ pub const TOOLS: &[ToolMeta] = &[
         lastmod: DNS_LOOKUP_LASTMOD,
     },
     ToolMeta {
+        path: http_headers::HEADER_CHECKER_PATH,
+        title: http_headers::HEADER_CHECKER_TITLE,
+        label: http_headers::HEADER_CHECKER_LABEL,
+        description: http_headers::HEADER_CHECKER_DESCRIPTION,
+        lastmod: http_headers::HEADER_CHECKER_LASTMOD,
+    },
+    ToolMeta {
         path: ssl::SSL_CHECKER_PATH,
         title: ssl::SSL_CHECKER_TITLE,
         label: ssl::SSL_CHECKER_LABEL,
@@ -1116,7 +1124,7 @@ pub const TOOLS: &[ToolMeta] = &[
 
 pub const TOOLS_INDEX_PATH: &str = "/tools";
 const TOOLS_INDEX_CREATED: &str = "2026-07-09";
-pub const TOOLS_INDEX_LASTMOD: &str = "2026-09-04";
+pub const TOOLS_INDEX_LASTMOD: &str = "2026-09-05";
 const TOOLS_INDEX_TITLE: &str = "Free Tools for Developers & SREs";
 const TOOLS_INDEX_DESCRIPTION: &str = "Free, no sign-up calculators and generators for uptime, reliability and scheduling. Built for our own work and kept open for yours.";
 
@@ -1192,6 +1200,14 @@ pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<Market
         .route(DNS_LOOKUP_PATH, axum::routing::get(dns_lookup))
         .route(ssl::SSL_CHECKER_PATH, axum::routing::get(ssl::page))
         .route(ssl::SSL_PROBE_PATH, axum::routing::get(ssl::probe))
+        .route(
+            http_headers::HEADER_CHECKER_PATH,
+            axum::routing::get(http_headers::page),
+        )
+        .route(
+            http_headers::HEADER_PROBE_PATH,
+            axum::routing::get(http_headers::probe),
+        )
 }
 
 pub(crate) fn warm(cfg: &MarketingCfg) {
@@ -1202,6 +1218,7 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     INCIDENT_UPDATE_CACHED.get_or_init(|| render_incident_update(cfg));
     DNS_LOOKUP_CACHED.get_or_init(|| render_dns_lookup(cfg));
     ssl::warm(cfg);
+    http_headers::warm(cfg);
 }
 
 #[cfg(test)]
@@ -1296,6 +1313,10 @@ mod tests {
             (INCIDENT_UPDATE_PATH, render_incident_update(&cfg)),
             (DNS_LOOKUP_PATH, render_dns_lookup(&cfg)),
             (ssl::SSL_CHECKER_PATH, ssl::render(&cfg)),
+            (
+                http_headers::HEADER_CHECKER_PATH,
+                http_headers::render(&cfg),
+            ),
         ];
         assert_eq!(
             pages.len(),

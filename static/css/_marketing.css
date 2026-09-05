@@ -678,6 +678,67 @@ html:has(.marketing-shell) {
     overflow-wrap: anywhere;
 }
 
+/* ── HTTP header & redirect checker ───────────────────────────────── */
+.tool-hdr__verdict {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.125rem;
+    margin: 0 0 1.25rem;
+}
+.tool-hdr__status { font-size: 1.5rem; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.tool-hdr__final { font-size: 0.6875rem; color: var(--mk-quiet); }
+/* Colour marks the code, never fills behind it: the chain is a reading
+   surface, and a row of filled badges reads as six alarms. */
+.tool-hdr__code--ok { color: var(--mk-ok); }
+.tool-hdr__code--hop { color: var(--mk-quiet); }
+.tool-hdr__code--warn { color: var(--mk-warn); }
+.tool-hdr__code--down { color: var(--mk-down); }
+.tool-hdr__chain {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    text-align: left;
+}
+.tool-hdr__hop {
+    display: grid;
+    grid-template-columns: 2.75rem 1fr auto;
+    align-items: baseline;
+    gap: 0.25rem 0.75rem;
+    padding: 0.375rem 0;
+    border-top: 1px solid var(--mk-rule);
+}
+.tool-hdr__hop:first-child { border-top: 0; }
+.tool-hdr__code { font-variant-numeric: tabular-nums; font-size: 0.8125rem; }
+.tool-hdr__url { font-size: 0.8125rem; color: var(--mk-ink); overflow-wrap: anywhere; }
+.tool-hdr__ms {
+    font-size: 0.6875rem;
+    color: var(--mk-quiet);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+/* Second row of the same hop, under the URL rather than beside it: a Location
+   is usually longer than the URL that returned it. */
+.tool-hdr__loc {
+    grid-column: 2 / -1;
+    font-size: 0.6875rem;
+    color: var(--mk-quiet);
+    overflow-wrap: anywhere;
+}
+/* Every header, always open. The response is the thing people came to read,
+   and a disclosure triangle asks them to work for it. */
+.tool-hdr__count {
+    margin: 1.25rem 0 0.5rem;
+    font-size: 0.6875rem;
+    color: var(--mk-quiet);
+    text-align: left;
+}
+.tool-hdr__keys { align-content: start; }
+.tool-hdr__keys dt { text-transform: none; }
+/* The headers that explain the status the walk just returned. Weight, not
+   colour: a long list where six entries are green reads as six verdicts. */
+.tool-hdr__key--notable { color: var(--mk-ink); font-weight: 600; }
+
 /* ── Live pill — bracket-wrapped status indicator ─────────────────── */
 .mk-livepill {
     display: inline-flex;

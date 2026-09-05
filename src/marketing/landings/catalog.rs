@@ -549,6 +549,10 @@ docker compose up -d"#,
                 href: "/tools/ssl-certificate-checker",
             },
             ResourceLink {
+                label: "HTTP header checker",
+                href: "/tools/http-header-checker",
+            },
+            ResourceLink {
                 label: "DNS lookup",
                 href: "/tools/dns-lookup",
             },
