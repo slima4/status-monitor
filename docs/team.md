@@ -2,7 +2,7 @@
 
 An organization is the unit everything belongs to: monitors, channels, status pages, variables, incidents. Adding someone to your org gives them the same view of all of it.
 
-Manage people under **Settings → Team**. Any member can open it and see who is in the org; only owners get the invite form and the row actions.
+Manage people under **Settings → Team**. Any member can open it and see who is in the org; only owners get the invite form and the row actions. The org itself — creating another, renaming, switching, deleting — lives under **Settings → Organizations**, covered in [Organizations](organizations.md).
 
 ## Roles
 
@@ -67,7 +67,7 @@ Current usage against both caps is on **Settings → Usage**. See [Plans and lim
 
 You can be a member of any number of organizations, but you can **own** at most three at once. Being invited into an org never counts against that limit, so consultants and contractors can join as many client orgs as they like.
 
-Your session has one active org at a time, and everything you see belongs to it. Soft-deleted orgs stop counting against the owner limit.
+Your session has one active org at a time, and everything you see belongs to it. [Organizations](organizations.md) covers creating, switching between and deleting them.
 
 ## Related
 

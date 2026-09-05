@@ -31,7 +31,7 @@ A user can be `owner` of at most `free_tier_owner_org_limit` (default 3) **activ
 Deletion is two-phase to give operators a recovery window and to keep ClickHouse rows out of forever-orphan state.
 
 1. **Soft delete.** `DELETE /api/v1/orgs/{id}` flips `organizations.deleted_at = now()`. The org disappears from the user's switcher and every URL referencing it returns 404 — `is_active_member` short-circuits on `deleted_at IS NULL`.
-2. **Restore window.** The original deleter can call `POST /api/v1/orgs/{id}/restore` within `deletion_grace_period_days` (default 30); the slug stays held to prevent squatting during this window.
+2. **Restore window.** The original deleter can call `POST /api/v1/orgs/{id}/restore` within `deletion_grace_period_days` (default 30). The slug stays held so nobody can squat it and leave the org unrestorable: `idx_organizations_active` is partial and does not see tombstones, so create and rename both test the slug against *every* row rather than relying on the index alone. The hold therefore ends at purge, not at the window — a slug can stay taken for up to a day after restore starts refusing, and longer if the purge batch is backed up.
 3. **Purge.** A daily job (`src/jobs/retention.rs`) runs at 03:00 UTC. It first runs the soft-delete purge (`src/jobs/purge_deleted.rs::purge_tick`):
    - Selects up to 10 orgs whose `deleted_at` is past the grace window.
    - **Per org, in one PG transaction:** insert into `clickhouse_purge_queue` (idempotent via `ON CONFLICT (org_id) DO NOTHING`), then `DELETE FROM organizations` — `ON DELETE CASCADE` empties every tenant table.
@@ -79,7 +79,7 @@ See [REST API](api.md) for full schemas. The catalogue:
 | `GET` | `/api/v1/orgs` | List orgs the caller is a member of |
 | `GET` | `/api/v1/orgs/{id}` | Get one org (member-only) |
 | `PATCH` | `/api/v1/orgs/{id}` | Edit org (owner-only) |
-| `DELETE` | `/api/v1/orgs/{id}` | Soft-delete (owner-only) |
+| `DELETE` | `/api/v1/orgs/{id}` | Soft-delete (owner-only; 422 on the caller's last org) |
 | `POST` | `/api/v1/orgs/{id}/restore` | Restore within the grace window (only by the deleter) |
 | `GET` | `/api/v1/orgs/check-slug?slug=…` | Slug availability for signup forms |
 | `GET` | `/api/v1/orgs/{id}/members` | List members (owner-only) |
