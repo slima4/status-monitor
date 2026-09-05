@@ -31,6 +31,7 @@ pub const UPTIME_SLA_PATH: &str = "/tools/uptime-sla-calculator";
 const UPTIME_SLA_CREATED: &str = "2026-07-09";
 const UPTIME_SLA_LASTMOD: &str = "2026-09-04";
 pub const UPTIME_SLA_TITLE: &str = "Uptime SLA & Downtime Calculator";
+const UPTIME_SLA_LABEL: &str = "uptime SLA calculator";
 pub const UPTIME_SLA_DESCRIPTION: &str = "Turn an uptime percentage into allowed downtime per day, week, month and year. A free SLA and SLO calculator with the full nines reference table.";
 
 const DAY: f64 = 86_400.0;
@@ -185,6 +186,8 @@ struct UptimeSlaPage {
     presets: &'static [f64],
     reverse_value: &'static str,
     reverse_uptime: String,
+    tools: &'static [ToolMeta],
+    self_path: &'static str,
     version: &'static str,
 }
 
@@ -337,6 +340,8 @@ fn render_uptime_sla(cfg: &MarketingCfg) -> CachedRender {
         reverse_uptime: format_pct(uptime_for(REVERSE_UNIT_SECS, REVERSE_PERIOD_SECS)),
         canonical_url,
         og,
+        tools: TOOLS,
+        self_path: UPTIME_SLA_PATH,
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page
@@ -358,6 +363,7 @@ pub const CRON_PATH: &str = "/tools/cron-expression-generator";
 const CRON_CREATED: &str = "2026-07-09";
 const CRON_LASTMOD: &str = "2026-09-04";
 pub const CRON_TITLE: &str = "Cron Expression Generator & Parser";
+const CRON_LABEL: &str = "cron expression generator";
 pub const CRON_DESCRIPTION: &str = "Build and read cron expressions in plain English, with the next run times and a reference table of the most common schedules. Free, no sign-up.";
 const CRON_DEFAULT_EXPR: &str = "*/15 9-17 * * 1-5";
 const CRON_DEFAULT_DESC: &str =
@@ -437,6 +443,8 @@ struct CronPage {
     presets: &'static [(&'static str, &'static str)],
     default_expr: &'static str,
     default_desc: &'static str,
+    tools: &'static [ToolMeta],
+    self_path: &'static str,
     version: &'static str,
 }
 
@@ -475,6 +483,8 @@ fn render_cron(cfg: &MarketingCfg) -> CachedRender {
         default_desc: CRON_DEFAULT_DESC,
         canonical_url,
         og,
+        tools: TOOLS,
+        self_path: CRON_PATH,
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page
@@ -493,6 +503,7 @@ pub const ERROR_BUDGET_PATH: &str = "/tools/error-budget-calculator";
 const ERROR_BUDGET_CREATED: &str = "2026-07-13";
 const ERROR_BUDGET_LASTMOD: &str = "2026-09-04";
 pub const ERROR_BUDGET_TITLE: &str = "Error Budget & Burn Rate Calculator";
+const ERROR_BUDGET_LABEL: &str = "error budget calculator";
 pub const ERROR_BUDGET_DESCRIPTION: &str = "Turn an SLO target and your measured availability into error budget spent, budget left and burn rate, with a burn-rate reference table. Free, no sign-up.";
 
 /// One-click SLO targets on the interactive widget.
@@ -756,6 +767,8 @@ struct ErrorBudgetPage {
     default_window: &'static str,
     slo_values: String,
     windows: &'static [(&'static str, f64)],
+    tools: &'static [ToolMeta],
+    self_path: &'static str,
     version: &'static str,
 }
 
@@ -810,6 +823,8 @@ fn render_error_budget(cfg: &MarketingCfg) -> CachedRender {
         windows: ERROR_BUDGET_WINDOWS,
         canonical_url,
         og,
+        tools: TOOLS,
+        self_path: ERROR_BUDGET_PATH,
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page
@@ -835,6 +850,7 @@ pub const INCIDENT_UPDATE_PATH: &str = "/tools/incident-update-generator";
 const INCIDENT_UPDATE_CREATED: &str = "2026-07-20";
 const INCIDENT_UPDATE_LASTMOD: &str = "2026-09-04";
 pub const INCIDENT_UPDATE_TITLE: &str = "Incident Update Message Generator";
+const INCIDENT_UPDATE_LABEL: &str = "incident message generator";
 pub const INCIDENT_UPDATE_DESCRIPTION: &str = "Write clear investigating, identified, monitoring, resolved and maintenance messages for your status page. Free, private and generated in your browser.";
 
 const INCIDENT_UPDATE_FAQS: &[(&str, &str)] = &[
@@ -871,6 +887,8 @@ struct IncidentUpdatePage {
     webpage_json_ld: JsonLd,
     faq_json_ld: JsonLd,
     faqs: &'static [(&'static str, &'static str)],
+    tools: &'static [ToolMeta],
+    self_path: &'static str,
     version: &'static str,
 }
 
@@ -909,6 +927,8 @@ fn render_incident_update(cfg: &MarketingCfg) -> CachedRender {
         faqs: INCIDENT_UPDATE_FAQS,
         canonical_url,
         og,
+        tools: TOOLS,
+        self_path: INCIDENT_UPDATE_PATH,
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page
@@ -928,6 +948,7 @@ pub const DNS_LOOKUP_PATH: &str = "/tools/dns-lookup";
 const DNS_LOOKUP_CREATED: &str = "2026-08-05";
 pub const DNS_LOOKUP_LASTMOD: &str = "2026-08-05";
 pub const DNS_LOOKUP_TITLE: &str = "DNS Lookup: Compare Two Resolvers Side by Side";
+const DNS_LOOKUP_LABEL: &str = "DNS lookup";
 pub const DNS_LOOKUP_DESCRIPTION: &str = "Check A, MX, NS, TXT and CAA records against Cloudflare and Google at once and see where they disagree. Free, no sign-up, runs in your browser.";
 
 /// Offered record types. The number is the DNS RR type the resolvers take, kept
@@ -978,6 +999,8 @@ struct DnsLookupPage {
     faq_json_ld: JsonLd,
     faqs: &'static [(&'static str, &'static str)],
     record_types: &'static [(&'static str, u16, &'static str)],
+    tools: &'static [ToolMeta],
+    self_path: &'static str,
     version: &'static str,
 }
 
@@ -1017,6 +1040,8 @@ fn render_dns_lookup(cfg: &MarketingCfg) -> CachedRender {
         record_types: DNS_RECORD_TYPES,
         canonical_url,
         og,
+        tools: TOOLS,
+        self_path: DNS_LOOKUP_PATH,
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page
@@ -1034,6 +1059,9 @@ async fn dns_lookup(State(cfg): State<Arc<MarketingCfg>>, headers: HeaderMap) ->
 pub struct ToolMeta {
     pub path: &'static str,
     pub title: &'static str,
+    /// Lower-case name for the sibling strip in each tool's footer, where the
+    /// full SEO title reads as shouting.
+    pub label: &'static str,
     pub description: &'static str,
     pub lastmod: &'static str,
 }
@@ -1042,36 +1070,42 @@ pub const TOOLS: &[ToolMeta] = &[
     ToolMeta {
         path: UPTIME_SLA_PATH,
         title: UPTIME_SLA_TITLE,
+        label: UPTIME_SLA_LABEL,
         description: UPTIME_SLA_DESCRIPTION,
         lastmod: UPTIME_SLA_LASTMOD,
     },
     ToolMeta {
         path: CRON_PATH,
         title: CRON_TITLE,
+        label: CRON_LABEL,
         description: CRON_DESCRIPTION,
         lastmod: CRON_LASTMOD,
     },
     ToolMeta {
         path: ERROR_BUDGET_PATH,
         title: ERROR_BUDGET_TITLE,
+        label: ERROR_BUDGET_LABEL,
         description: ERROR_BUDGET_DESCRIPTION,
         lastmod: ERROR_BUDGET_LASTMOD,
     },
     ToolMeta {
         path: INCIDENT_UPDATE_PATH,
         title: INCIDENT_UPDATE_TITLE,
+        label: INCIDENT_UPDATE_LABEL,
         description: INCIDENT_UPDATE_DESCRIPTION,
         lastmod: INCIDENT_UPDATE_LASTMOD,
     },
     ToolMeta {
         path: DNS_LOOKUP_PATH,
         title: DNS_LOOKUP_TITLE,
+        label: DNS_LOOKUP_LABEL,
         description: DNS_LOOKUP_DESCRIPTION,
         lastmod: DNS_LOOKUP_LASTMOD,
     },
     ToolMeta {
         path: ssl::SSL_CHECKER_PATH,
         title: ssl::SSL_CHECKER_TITLE,
+        label: ssl::SSL_CHECKER_LABEL,
         description: ssl::SSL_CHECKER_DESCRIPTION,
         lastmod: ssl::SSL_CHECKER_LASTMOD,
     },
@@ -1237,6 +1271,73 @@ mod tests {
         assert_eq!(r.monthly, "43m 12s");
         // 2592s of monthly downtime is ~43 missed 60s checks.
         assert_eq!(r.checks_monthly, "43");
+    }
+
+    fn test_cfg() -> MarketingCfg {
+        MarketingCfg {
+            app_url: "https://app.uptimepage.dev".into(),
+            canonical_origin: "https://uptimepage.dev".into(),
+            blog_enabled: false,
+            mcp_url: None,
+            trusted_proxies: Vec::new(),
+        }
+    }
+
+    /// The sibling strip used to be hand-typed per template and had already
+    /// drifted: several pages listed four of their five siblings.
+    #[test]
+    fn every_tool_footer_links_every_sibling() {
+        let cfg = test_cfg();
+        let pages: Vec<(&str, CachedRender)> = vec![
+            (UPTIME_SLA_PATH, render_uptime_sla(&cfg)),
+            (CRON_PATH, render_cron(&cfg)),
+            (ERROR_BUDGET_PATH, render_error_budget(&cfg)),
+            (INCIDENT_UPDATE_PATH, render_incident_update(&cfg)),
+            (DNS_LOOKUP_PATH, render_dns_lookup(&cfg)),
+            (ssl::SSL_CHECKER_PATH, ssl::render(&cfg)),
+        ];
+        assert_eq!(
+            pages.len(),
+            TOOLS.len(),
+            "a tool ships without a render here"
+        );
+        for (path, page) in pages {
+            let html = std::str::from_utf8(&page.body).expect("tool renders UTF-8");
+            assert!(!html.contains("render failed"), "{path} failed to render");
+            for sibling in TOOLS.iter().filter(|t| t.path != path) {
+                assert!(
+                    html.contains(&format!(r#"href="{}""#, sibling.path)),
+                    "{path} does not link {}",
+                    sibling.path
+                );
+                assert!(
+                    html.contains(sibling.label),
+                    "{path} omits {}",
+                    sibling.label
+                );
+            }
+            assert!(
+                html.contains(r#"href="/tools""#),
+                "{path} does not link the hub"
+            );
+        }
+    }
+
+    /// A label is the short form the strip prints mid-sentence. Reusing the SEO
+    /// title there reads as shouting and repeats the brand suffix logic.
+    #[test]
+    fn tool_labels_are_short_and_distinct() {
+        let mut seen: Vec<&str> = Vec::new();
+        for t in TOOLS {
+            assert!(!t.label.is_empty(), "{} has no label", t.path);
+            assert!(
+                t.label.len() < t.title.len(),
+                "{} label is not shorter than its title",
+                t.path
+            );
+            assert!(!seen.contains(&t.label), "duplicate label {}", t.label);
+            seen.push(t.label);
+        }
     }
 
     #[test]

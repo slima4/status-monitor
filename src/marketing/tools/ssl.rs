@@ -40,13 +40,14 @@ use crate::web::filters;
 
 use super::super::config::{BRAND, MarketingCfg};
 use super::super::pages::{CachedRender, cached_render, serve_cached};
-use super::TOOL_CACHE_CONTROL;
+use super::{TOOL_CACHE_CONTROL, TOOLS, ToolMeta};
 
 pub const SSL_CHECKER_PATH: &str = "/tools/ssl-certificate-checker";
 pub const SSL_PROBE_PATH: &str = "/tools/ssl-certificate-checker/probe";
 const SSL_CHECKER_CREATED: &str = "2026-09-04";
 pub const SSL_CHECKER_LASTMOD: &str = "2026-09-04";
 pub const SSL_CHECKER_TITLE: &str = "SSL Certificate Checker: Expiry and Chain";
+pub const SSL_CHECKER_LABEL: &str = "SSL certificate checker";
 pub const SSL_CHECKER_DESCRIPTION: &str = "Read any public host's TLS certificate: days until expiry, who issued it, which names it covers and whether the chain is complete. Free, no sign-up.";
 
 /// Ports that speak TLS immediately on connect. Without this list the endpoint
@@ -124,6 +125,8 @@ struct SslCheckerPage {
     faq_json_ld: JsonLd,
     faqs: &'static [(&'static str, &'static str)],
     probe_path: &'static str,
+    tools: &'static [ToolMeta],
+    self_path: &'static str,
     version: &'static str,
 }
 
@@ -163,6 +166,8 @@ pub(super) fn render(cfg: &MarketingCfg) -> CachedRender {
         probe_path: SSL_PROBE_PATH,
         canonical_url,
         og,
+        tools: TOOLS,
+        self_path: SSL_CHECKER_PATH,
         version: env!("CARGO_PKG_VERSION"),
     };
     let body = page
