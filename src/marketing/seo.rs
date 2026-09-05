@@ -624,6 +624,7 @@ const CONTENT_SIGNAL: &str = "search=yes, ai-input=yes, ai-train=yes";
 /// Endpoints that open an outbound socket. A tool that adds one adds it here,
 /// or a crawler walks it on our egress.
 const PROBE_PATHS: &[&str] = &[
+    crate::marketing::tools::domain_expiry::DOMAIN_PROBE_PATH,
     crate::marketing::tools::ssl::SSL_PROBE_PATH,
     crate::marketing::tools::http_headers::HEADER_PROBE_PATH,
 ];

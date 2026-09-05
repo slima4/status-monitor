@@ -17,6 +17,9 @@
 //! `crate::web::client_ip::extract`. Each is a pure function over its
 //! arguments — no pool, no state, no resolver — which is the property
 //! that keeps them copyable rather than couplings.
+//! The domain checker also uses the pure `security::rdap` parser and the
+//! bounded, SSRF-guarded `http_outbound` transport, with its own public budget
+//! and cache. It does not import the scheduled worker or its durable state.
 //! The Markdown renderer is **vendored locally** (`blog::render`) —
 //! deliberately not the trusted-unsanitised legal renderer; blog
 //! content is third-party PR input and has a different trust model.

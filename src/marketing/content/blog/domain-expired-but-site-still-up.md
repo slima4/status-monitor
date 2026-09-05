@@ -88,6 +88,8 @@ Six checks you trust beat one that only ever watches the front door.
 
 ## How to set up domain expiry with an alert
 
+Start with the [domain expiry checker](/tools/domain-expiry-checker) to read the public registration date. If the registry does not publish one, check your registrar account. A future registry date is not proof that your renewal payment is settled.
+
 Two minutes now buys you weeks of warning later. On Uptimepage:
 
 1. Add a monitor and choose the **Domain expiry** type.

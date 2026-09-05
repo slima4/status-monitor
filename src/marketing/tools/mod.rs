@@ -3,6 +3,7 @@
 //! the visitor into the product. Same cached-render contract as the rest
 //! of marketing: one render at boot, ETag + Cache-Control on every hit.
 
+pub mod domain_expiry;
 pub mod http_headers;
 mod probe;
 pub mod ssl;
@@ -1118,6 +1119,13 @@ pub const TOOLS: &[ToolMeta] = &[
         description: ssl::SSL_CHECKER_DESCRIPTION,
         lastmod: ssl::SSL_CHECKER_LASTMOD,
     },
+    ToolMeta {
+        path: domain_expiry::DOMAIN_CHECKER_PATH,
+        title: domain_expiry::DOMAIN_CHECKER_TITLE,
+        label: domain_expiry::DOMAIN_CHECKER_LABEL,
+        description: domain_expiry::DOMAIN_CHECKER_DESCRIPTION,
+        lastmod: domain_expiry::DOMAIN_CHECKER_LASTMOD,
+    },
 ];
 
 // ── Tools index ───────────────────────────────────────────────────────
@@ -1201,6 +1209,14 @@ pub fn mount(router: axum::Router<Arc<MarketingCfg>>) -> axum::Router<Arc<Market
         .route(ssl::SSL_CHECKER_PATH, axum::routing::get(ssl::page))
         .route(ssl::SSL_PROBE_PATH, axum::routing::get(ssl::probe))
         .route(
+            domain_expiry::DOMAIN_CHECKER_PATH,
+            axum::routing::get(domain_expiry::page),
+        )
+        .route(
+            domain_expiry::DOMAIN_PROBE_PATH,
+            axum::routing::get(domain_expiry::probe),
+        )
+        .route(
             http_headers::HEADER_CHECKER_PATH,
             axum::routing::get(http_headers::page),
         )
@@ -1218,6 +1234,7 @@ pub(crate) fn warm(cfg: &MarketingCfg) {
     INCIDENT_UPDATE_CACHED.get_or_init(|| render_incident_update(cfg));
     DNS_LOOKUP_CACHED.get_or_init(|| render_dns_lookup(cfg));
     ssl::warm(cfg);
+    domain_expiry::warm(cfg);
     http_headers::warm(cfg);
 }
 
@@ -1313,6 +1330,10 @@ mod tests {
             (INCIDENT_UPDATE_PATH, render_incident_update(&cfg)),
             (DNS_LOOKUP_PATH, render_dns_lookup(&cfg)),
             (ssl::SSL_CHECKER_PATH, ssl::render(&cfg)),
+            (
+                domain_expiry::DOMAIN_CHECKER_PATH,
+                domain_expiry::render(&cfg),
+            ),
             (
                 http_headers::HEADER_CHECKER_PATH,
                 http_headers::render(&cfg),

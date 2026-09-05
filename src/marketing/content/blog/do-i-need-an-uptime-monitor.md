@@ -107,6 +107,8 @@ For warning thresholds and alert testing, follow the [SSL certificate expiry mon
 
 **The domain expires.** Worse than the certificate, because recovery is not in your hands. The renewal email went to an old address, or the card on file expired. A domain expiry check gives you the same early warning.
 
+Read the public registration date with the [domain expiry checker](/tools/domain-expiry-checker), then confirm the renewal deadline in your registrar account.
+
 **DNS changes and you do not notice.** Someone edits a record, or a registrar migration drops one. Your site is fine from your laptop because your machine cached the old answer. New visitors get nothing. A DNS check compares the answer against what you expect, and does it from outside your network.
 
 If two lookups disagree, [compare DNS resolver answers](/blog/why-dns-returns-different-ip-addresses) before changing the record again. Different CDN addresses can both be correct.

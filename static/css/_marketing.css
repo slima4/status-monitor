@@ -523,6 +523,14 @@ html:has(.marketing-shell) {
     .mk-start__input { font-size: 1rem; }
 }
 
+/* ── Domain expiry form ───────────────────────────────────────────── */
+.tool-domain__form .tool-dns__row { margin-top: 0.5rem; }
+.tool-domain__form .tool-dns__row .mk-start__field,
+.tool-domain__form .tool-dns__row .mk-cta { min-height: 2.75rem; }
+.tool-domain__form .mk-start__field { padding-block: 0; }
+.tool-domain__form .mk-start__input { min-height: 2.75rem; }
+.tool-domain__form button:disabled { cursor: wait; opacity: 0.65; }
+
 /* ── DNS lookup tool ──────────────────────────────────────────────── */
 .tool-dns__row {
     display: flex;

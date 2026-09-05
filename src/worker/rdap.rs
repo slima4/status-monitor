@@ -1,21 +1,18 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, anyhow};
-use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use tokio::sync::OnceCell;
 use url::Url;
 
 use crate::error::Result;
 use crate::http_outbound::{OutboundHttpClient, get_json};
+use crate::security::rdap::{DomainResponse, override_url};
 use crate::worker::registration::{RegistrationAnswer, RegistrationError};
 
 /// IANA-published RDAP bootstrap registry for DNS. Maps TLDs to one or more
 /// RDAP server base URLs. Public and rarely changes.
 const IANA_BOOTSTRAP_URL: &str = "https://data.iana.org/rdap/dns.json";
-
-/// Checked before the bootstrap, so a gap there cannot strand a live TLD.
-const RDAP_OVERRIDES: &[(&str, &str)] = &[("io", "https://rdap.identitydigital.services/rdap/")];
 
 pub struct RdapClient {
     http: OutboundHttpClient,
@@ -52,7 +49,7 @@ impl RdapClient {
         registrable: &str,
         tld: &str,
     ) -> Result<RegistrationAnswer> {
-        let base = match rdap_override(tld) {
+        let base = match override_url(tld) {
             Some(base) => base.to_owned(),
             None => self
                 .bootstrap()
@@ -78,9 +75,13 @@ impl RdapClient {
             .join(&format!("domain/{registrable}"))
             .with_context(|| format!("building RDAP request for '{registrable}'"))?;
 
-        let resp: RdapDomainResponse = get_json(&self.http, &url).await?;
-        parse_answer(&resp).ok_or_else(|| {
+        let resp: DomainResponse = get_json(&self.http, &url).await?;
+        let expiration = resp.expiration().ok_or_else(|| {
             crate::error::AppError::Other(anyhow!("no expiration event in RDAP response"))
+        })?;
+        Ok(RegistrationAnswer {
+            expiration,
+            registrar: resp.registrar(),
         })
     }
 
@@ -89,13 +90,6 @@ impl RdapClient {
             .get_or_try_init(|| async { fetch_bootstrap(&self.http, &self.bootstrap_url).await })
             .await
     }
-}
-
-fn rdap_override(tld: &str) -> Option<&'static str> {
-    RDAP_OVERRIDES
-        .iter()
-        .find(|(t, _)| *t == tld)
-        .map(|(_, base)| *base)
 }
 
 #[derive(Debug)]
@@ -121,61 +115,4 @@ async fn fetch_bootstrap(client: &OutboundHttpClient, url: &str) -> Result<Boots
         }
     }
     Ok(BootstrapMap { by_tld })
-}
-
-#[derive(Debug, Deserialize)]
-struct RdapDomainResponse {
-    #[serde(default)]
-    events: Vec<RdapEvent>,
-    #[serde(default)]
-    entities: Vec<RdapEntity>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RdapEvent {
-    #[serde(rename = "eventAction")]
-    event_action: String,
-    #[serde(rename = "eventDate")]
-    event_date: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct RdapEntity {
-    #[serde(default)]
-    roles: Vec<String>,
-    #[serde(rename = "vcardArray", default)]
-    vcard_array: Option<serde_json::Value>,
-}
-
-fn parse_answer(resp: &RdapDomainResponse) -> Option<RegistrationAnswer> {
-    let expiration_raw = resp
-        .events
-        .iter()
-        .find(|e| e.event_action.eq_ignore_ascii_case("expiration"))?;
-    let expiration = DateTime::parse_from_rfc3339(&expiration_raw.event_date)
-        .ok()?
-        .with_timezone(&Utc);
-    let registrar = resp
-        .entities
-        .iter()
-        .find(|e| e.roles.iter().any(|r| r.eq_ignore_ascii_case("registrar")))
-        .and_then(|e| registrar_name(e.vcard_array.as_ref()?));
-    Some(RegistrationAnswer {
-        expiration,
-        registrar,
-    })
-}
-
-/// Extracts the registrar's `fn` (full name) entry from the vCard array. The
-/// RFC 7095 shape is `["vcard", [["entry-name", {...}, "type", "value"], ...]]`;
-/// we hunt for the first entry whose name is `"fn"`.
-fn registrar_name(vcard: &serde_json::Value) -> Option<String> {
-    let entries = vcard.as_array()?.get(1)?.as_array()?;
-    for entry in entries {
-        let arr = entry.as_array()?;
-        if arr.first().and_then(|v| v.as_str()) == Some("fn") {
-            return arr.get(3).and_then(|v| v.as_str()).map(str::to_owned);
-        }
-    }
-    None
 }

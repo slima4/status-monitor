@@ -804,6 +804,78 @@ async fn ssl_checker_renders_without_db() {
     );
 }
 
+#[tokio::test]
+async fn domain_expiry_checker_renders_and_is_discoverable() {
+    let path = "/tools/domain-expiry-checker";
+    let (status, body, _) = get(path).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("domain_expiry.js"));
+    assert!(body.contains(r#"data-probe="/tools/domain-expiry-checker/probe""#));
+    assert!(body.contains("application/ld+json"));
+    assert!(body.contains("WebApplication"));
+    assert!(body.contains("FAQPage"));
+    assert!(body.contains(r#"role="status""#));
+    assert!(body.contains("does not fall back to WHOIS"));
+    for href in internal_hrefs(&body) {
+        assert_eq!(get(&href).await.0, StatusCode::OK, "{href}");
+    }
+    for source in [
+        "/tools",
+        "/blog/domain-expired-but-site-still-up",
+        "/blog/do-i-need-an-uptime-monitor",
+    ] {
+        assert!(
+            get(source).await.1.contains(&format!("href=\"{path}\"")),
+            "{source}"
+        );
+    }
+    assert!(
+        get("/sitemap.xml")
+            .await
+            .1
+            .contains(&format!("<loc>https://uptimepage.dev{path}</loc>"))
+    );
+    assert!(get("/llms.txt").await.1.contains(path));
+    assert!(
+        get("/robots.txt")
+            .await
+            .1
+            .contains("Disallow: /tools/domain-expiry-checker/probe")
+    );
+    let (_, _, headers) = get("/start?kind=domain_expiry&url=example.com").await;
+    assert!(
+        headers["location"]
+            .to_str()
+            .unwrap()
+            .contains("domain_expiry")
+    );
+}
+
+#[tokio::test]
+async fn domain_expiry_probe_rejects_bad_inputs_without_outbound_requests() {
+    for query in [
+        "",
+        "domain=",
+        "domain=localhost",
+        "domain=127.0.0.1",
+        "domain=169.254.169.254",
+        "domain=%5B%3A%3A1%5D",
+        "domain=co.uk",
+        "domain=example.internal",
+        "domain=example.com%3A43",
+        "domain=a%0D%0A.com",
+        "domain=example..com",
+        "domain=one.com&domain=two.com",
+    ] {
+        let (status, body, headers) =
+            get(&format!("/tools/domain-expiry-checker/probe?{query}")).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{query}: {body}");
+        assert!(body.contains(r#""ok":false"#));
+        assert_eq!(headers["x-robots-tag"], "noindex");
+        assert_eq!(headers["cache-control"], "no-store, private");
+    }
+}
+
 /// The one marketing route that opens a socket. Each of these must be refused
 /// before any connection is attempted, so the test needs no network.
 #[tokio::test]

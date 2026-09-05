@@ -4,6 +4,7 @@ pub mod cert_probe;
 pub mod crypto;
 pub mod email_policy;
 pub mod outbound_connector;
+pub(crate) mod rdap;
 pub mod ssrf;
 
 pub use abuse::{AbuseGuard, AbuseHit, AbuseKind};
