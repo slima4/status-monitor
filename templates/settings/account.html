@@ -350,8 +350,10 @@
         btn.setAttribute('data-confirm-modal', '');
         btn.setAttribute('data-confirm-title', 'Delete organisation?');
         btn.setAttribute('data-confirm-body',
-          'Permanently deletes ' + (org.slug || 'this organisation')
-          + ', its monitors, history, and incidents. Cannot be undone.');
+          'Stops the monitors on ' + (org.slug || 'this organisation')
+          + ' and takes its status pages offline. Its other members lose access. '
+          + 'You can restore it from Settings \u2192 Organizations for {{ grace_days }} days, '
+          + 'after which it is erased for good.');
         btn.setAttribute('data-confirm-label', 'delete organisation');
         btn.setAttribute('data-confirm-danger', '');
         li.appendChild(btn);

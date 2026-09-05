@@ -394,6 +394,7 @@ pub mod settings {
         pub last_seen: Option<chrono::DateTime<chrono::Utc>>,
         pub theme: String,
         pub time_format: String,
+        pub grace_days: u32,
     }
 
     /// `GET /settings/account`. An unauthenticated hit redirects to login
@@ -491,6 +492,7 @@ pub mod settings {
             last_seen,
             theme: prefs.theme.as_str().to_string(),
             time_format: prefs.time_format.as_str().to_string(),
+            grace_days: state.cfg.tenancy.deletion_grace_period_days,
         }
         .into_response())
     }
@@ -866,6 +868,7 @@ pub mod settings {
                 last_seen: Some("2026-05-16T12:00:00Z".parse().unwrap()),
                 theme: "default".into(),
                 time_format: "auto".into(),
+                grace_days: 30,
             }
         }
 
