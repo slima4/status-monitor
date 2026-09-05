@@ -76,13 +76,21 @@ async function run() {
         body = null;
     }
 
-    if (!res.ok || !body) {
+    // A host that would not answer comes back 200, so the status line cannot
+    // decide this.
+    if (!body || body.ok !== true) {
         message(body?.error ?? "The check did not complete.");
-        toolError(TOOL, { reason: res.ok ? "malformed-body" : `status-${res.status}` });
+        toolError(TOOL, { reason: failureReason(res, body) });
         return;
     }
 
     replace(render(body));
+}
+
+function failureReason(res, body) {
+    if (!res.ok) return `status-${res.status}`;
+    if (!body) return "malformed-body";
+    return "host-unreachable";
 }
 
 function verdictClass(r) {

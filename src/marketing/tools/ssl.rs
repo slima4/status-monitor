@@ -9,6 +9,7 @@
 //! deadline. The certificate read itself is `security::cert_probe`, shared with
 //! the `tls_cert` monitor so the two can never disagree about a chain.
 
+use std::io;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -25,6 +26,7 @@ use axum::response::{IntoResponse, Response};
 use governor::clock::DefaultClock;
 use governor::state::keyed::DashMapStateStore;
 use governor::{Quota, RateLimiter};
+use hickory_resolver::net::NetError;
 use hickory_resolver::{Resolver, TokioResolver};
 use serde::{Deserialize, Serialize};
 
@@ -246,12 +248,16 @@ pub(super) async fn probe(
     }
 
     match tokio::time::timeout(PROBE_DEADLINE, run(&host, port)).await {
-        Ok(Ok(report)) => (probe_headers(), Json(report)).into_response(),
+        Ok(Ok(report)) => (
+            probe_headers(),
+            Json(Answer {
+                ok: true,
+                body: report,
+            }),
+        )
+            .into_response(),
         Ok(Err(e)) => e.into_response(),
-        Err(_) => fail(
-            StatusCode::GATEWAY_TIMEOUT,
-            "The host did not finish a handshake in time.",
-        ),
+        Err(_) => ProbeError::Host("The host did not finish a handshake in time.").into_response(),
     }
 }
 
@@ -289,7 +295,7 @@ fn spend_budget(
     allowed
 }
 
-async fn run(host: &str, port: u16) -> Result<ProbeReport, ProbeFailure> {
+async fn run(host: &str, port: u16) -> Result<ProbeReport, ProbeError> {
     let addrs = resolve(host).await?;
     let facts = cert_probe::connect_and_read(&addrs, port, host, CONNECT_TIMEOUT)
         .await
@@ -318,34 +324,65 @@ async fn run(host: &str, port: u16) -> Result<ProbeReport, ProbeFailure> {
 /// Resolves, then keeps only addresses the SSRF guard allows. A name that
 /// resolves entirely into private space is reported as unreachable rather than
 /// as blocked: the distinction is only useful to someone probing us.
-async fn resolve(host: &str) -> Result<Vec<IpAddr>, ProbeFailure> {
+async fn resolve(host: &str) -> Result<Vec<IpAddr>, ProbeError> {
     let Some(resolver) = RESOLVER.as_ref() else {
-        return Err(ProbeFailure::new(
+        return Err(ProbeError::Server(
             StatusCode::SERVICE_UNAVAILABLE,
             "The checker has no resolver configured.",
         ));
     };
-    let Ok(Ok(resolved)) = tokio::time::timeout(DNS_TIMEOUT, resolver.lookup_ip(host)).await else {
-        return Err(ProbeFailure::new(
-            StatusCode::BAD_GATEWAY,
-            "That name does not resolve.",
-        ));
+    let resolved = match tokio::time::timeout(DNS_TIMEOUT, resolver.lookup_ip(host)).await {
+        Ok(Ok(resolved)) => resolved,
+        Ok(Err(e)) if no_nameserver_was_reached(&e) => {
+            return Err(ProbeError::Server(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "The checker could not reach a nameserver.",
+            ));
+        }
+        _ => return Err(ProbeError::Host("That name does not resolve.")),
     };
     let guard = SsrfGuard::strict();
     let addrs: Vec<IpAddr> = resolved.iter().filter(|ip| guard.allow(*ip)).collect();
     if addrs.is_empty() {
-        return Err(ProbeFailure::new(
-            StatusCode::BAD_GATEWAY,
+        return Err(ProbeError::Host(
             "That name does not resolve to a reachable public address.",
         ));
     }
     Ok(addrs)
 }
 
+/// A DNS answer we never got because nothing on the resolver path answered at
+/// all. A name that times out or comes back empty is the visitor's host.
+fn no_nameserver_was_reached(e: &NetError) -> bool {
+    matches!(
+        e,
+        NetError::Io(_) | NetError::NoConnections | NetError::Busy
+    )
+}
+
+/// A connect that failed before a packet could leave this host. Reporting it as
+/// the host's fault would tell every visitor their site is dead the moment we
+/// lose egress, and record nothing here.
+fn egress_is_broken(e: &io::Error) -> bool {
+    matches!(
+        e.kind(),
+        io::ErrorKind::PermissionDenied
+            | io::ErrorKind::NetworkUnreachable
+            | io::ErrorKind::NetworkDown
+            | io::ErrorKind::AddrNotAvailable
+    )
+}
+
 /// Probe errors carry a platform errno and a rustls internal, neither of which
 /// is meaningful to a visitor. Each becomes a sentence about the host.
-fn describe(err: CertProbeError) -> ProbeFailure {
+fn describe(err: CertProbeError) -> ProbeError {
     let text = match err {
+        CertProbeError::Connect(ref e) if egress_is_broken(e) => {
+            return ProbeError::Server(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "The checker could not open an outbound connection.",
+            );
+        }
         CertProbeError::Connect(_) => "Nothing accepted a connection on that port.",
         CertProbeError::Handshake(_) => {
             "The host accepted the connection but did not complete a TLS handshake. It may not speak TLS on that port."
@@ -356,23 +393,31 @@ fn describe(err: CertProbeError) -> ProbeFailure {
         CertProbeError::ServerName(_) => "That name cannot be used in a TLS handshake.",
         CertProbeError::Timeout => "The host did not finish a handshake in time.",
     };
-    ProbeFailure::new(StatusCode::BAD_GATEWAY, text)
+    ProbeError::Host(text)
 }
 
-struct ProbeFailure {
-    status: StatusCode,
-    error: &'static str,
+/// A certificate and a host that would not answer both come back 200, so the
+/// page needs a field to tell them apart.
+#[derive(Serialize)]
+struct Answer<T> {
+    ok: bool,
+    #[serde(flatten)]
+    body: T,
 }
 
-impl ProbeFailure {
-    fn new(status: StatusCode, error: &'static str) -> Self {
-        Self { status, error }
-    }
+enum ProbeError {
+    /// A 5xx here would file a stranger's dead host as our own broken response
+    /// and spend the service error budget on it.
+    Host(&'static str),
+    Server(StatusCode, &'static str),
 }
 
-impl IntoResponse for ProbeFailure {
+impl IntoResponse for ProbeError {
     fn into_response(self) -> Response {
-        fail(self.status, self.error)
+        match self {
+            Self::Host(error) => fail(StatusCode::OK, error),
+            Self::Server(status, error) => fail(status, error),
+        }
     }
 }
 
@@ -381,7 +426,15 @@ fn fail(status: StatusCode, error: &'static str) -> Response {
     struct Failure<'a> {
         error: &'a str,
     }
-    (status, probe_headers(), Json(Failure { error })).into_response()
+    (
+        status,
+        probe_headers(),
+        Json(Answer {
+            ok: false,
+            body: Failure { error },
+        }),
+    )
+        .into_response()
 }
 
 /// Never cached and never indexed: the answer is per-host and changes the day a
@@ -488,6 +541,71 @@ mod tests {
             clean_host("münchen.de").as_deref(),
             Some("xn--mnchen-3ya.de")
         );
+    }
+
+    /// Guards the error budget: none of these may drift back into the 5xx class.
+    #[tokio::test]
+    async fn a_host_verdict_answers_200_with_ok_false() {
+        for err in [
+            describe(CertProbeError::NoChain),
+            describe(CertProbeError::Validity),
+            describe(CertProbeError::Timeout),
+            describe(CertProbeError::Parse(String::new())),
+            describe(CertProbeError::ServerName(String::new())),
+            describe(CertProbeError::Connect(io::Error::from(
+                io::ErrorKind::ConnectionRefused,
+            ))),
+            describe(CertProbeError::Handshake(io::Error::from(
+                io::ErrorKind::UnexpectedEof,
+            ))),
+            ProbeError::Host("That name does not resolve."),
+        ] {
+            let res = err.into_response();
+            assert_eq!(res.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(res.into_body(), 4096).await.unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(json["ok"], false);
+            assert!(json["error"].is_string(), "the page renders this sentence");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_fault_on_this_side_keeps_its_5xx() {
+        let res =
+            ProbeError::Server(StatusCode::SERVICE_UNAVAILABLE, "no resolver").into_response();
+        assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    /// Losing egress must not read as every visitor's host being dead.
+    #[test]
+    fn a_connect_that_never_left_this_host_is_ours() {
+        for kind in [
+            io::ErrorKind::PermissionDenied,
+            io::ErrorKind::NetworkUnreachable,
+            io::ErrorKind::NetworkDown,
+            io::ErrorKind::AddrNotAvailable,
+        ] {
+            assert!(egress_is_broken(&io::Error::from(kind)), "{kind:?}");
+        }
+        for kind in [
+            io::ErrorKind::ConnectionRefused,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::TimedOut,
+            io::ErrorKind::HostUnreachable,
+        ] {
+            assert!(!egress_is_broken(&io::Error::from(kind)), "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn a_certificate_answer_is_marked_ok_beside_its_fields() {
+        let json = serde_json::to_value(Answer {
+            ok: true,
+            body: serde_json::json!({ "host": "acme.com" }),
+        })
+        .unwrap();
+        assert_eq!(json["ok"], true);
+        assert_eq!(json["host"], "acme.com");
     }
 
     #[test]

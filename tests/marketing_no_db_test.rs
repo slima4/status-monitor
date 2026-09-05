@@ -755,6 +755,10 @@ async fn ssl_probe_refuses_anything_but_a_public_hostname() {
             StatusCode::BAD_REQUEST,
             "{query} must be refused, got {body}"
         );
+        assert!(
+            body.contains(r#""ok":false"#),
+            "the page branches on ok, not on the status line: {body}"
+        );
     }
 }
 
