@@ -240,6 +240,12 @@ const CREDENTIAL_BODY_PARAMS: &[&str] = &[
 
 /// The value a body assigns to `param`, in either `param=v` or `"param": "v"`
 /// form, is a literal rather than a `{{ key }}` reference.
+///
+/// Both boundaries are load-bearing. Without the left one `login_password`
+/// would read as `password`; without the right one so would `passwordless=1`,
+/// and — the case that actually bites — the *value* in `grant_type=password`,
+/// whose own assignment is legitimate and whose real `password=` field a few
+/// bytes later may well be a proper `{{ ref }}`.
 fn pastes_credential(body: &str, param: &str) -> bool {
     let lower = body.to_ascii_lowercase();
     let mut from = 0;
@@ -255,13 +261,16 @@ fn pastes_credential(body: &str, param: &str) -> bool {
             from = after;
             continue;
         }
+        // Only an assignment counts. The separator may sit behind a closing
+        // quote (`"password": "v"`) or whitespace; anything else means this
+        // occurrence names nothing.
         let rest = body[after..].trim_start();
-        let rest = rest
-            .strip_prefix('"')
-            .map_or(rest, |r| r.trim_start())
-            .trim_start_matches([':', '='])
-            .trim_start()
-            .trim_start_matches(['"', '\'']);
+        let rest = rest.strip_prefix('"').map_or(rest, |r| r.trim_start());
+        let Some(rest) = rest.strip_prefix([':', '=']) else {
+            from = after;
+            continue;
+        };
+        let rest = rest.trim_start().trim_start_matches(['"', '\'']);
         if !rest.is_empty() && !rest.starts_with("{{") {
             return true;
         }
@@ -688,4 +697,49 @@ pub(super) fn resolve_bindings(
         bindings.push(AlertBinding { channel_id });
     }
     Ok(TargetAlerts(bindings))
+}
+
+#[cfg(test)]
+mod credential_body_tests {
+    use super::pastes_credential;
+
+    #[test]
+    fn a_literal_secret_is_refused_and_a_reference_is_not() {
+        assert!(pastes_credential("client_secret=hunter2", "client_secret"));
+        assert!(!pastes_credential(
+            "client_secret={{ oauth_secret }}",
+            "client_secret"
+        ));
+        assert!(pastes_credential(
+            r#"{"client_secret": "hunter2"}"#,
+            "client_secret"
+        ));
+        assert!(!pastes_credential(
+            r#"{"client_secret": "{{ oauth_secret }}"}"#,
+            "client_secret"
+        ));
+    }
+
+    #[test]
+    fn only_an_assignment_counts_as_pasting_one() {
+        // The OAuth password grant names the word twice: once as a value that
+        // assigns nothing, once as the field, referenced properly.
+        assert!(!pastes_credential(
+            "grant_type=password&password={{ login_pw }}",
+            "password"
+        ));
+        // ... and the same body with the real field pasted is still refused.
+        assert!(pastes_credential(
+            "grant_type=password&password=hunter2",
+            "password"
+        ));
+        // A longer parameter and plain prose are not this field.
+        assert!(!pastes_credential("passwordless=true", "password"));
+        assert!(!pastes_credential(
+            r#"{"msg":"forgot password"}"#,
+            "password"
+        ));
+        // The left boundary still holds.
+        assert!(!pastes_credential("login_password=hunter2", "password"));
+    }
 }
