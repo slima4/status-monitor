@@ -388,7 +388,7 @@ pub async fn update_component(
 /// Mints only when the component has no live share, so an untick then re-tick
 /// returns the same URL. Plan share caps do not apply: the page already
 /// publishes this monitor.
-async fn ensure_detail_share(
+pub(crate) async fn ensure_detail_share(
     state: &AppState,
     org: OrgId,
     page: StatusPageId,
@@ -630,7 +630,7 @@ fn component_not_found() -> AppError {
     AppError::not_found(codes::STATUS_PAGE_NOT_FOUND, "component not on this page")
 }
 
-fn validate_name(name: &str) -> Result<String> {
+pub(crate) fn validate_name(name: &str) -> Result<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() || trimmed.chars().count() > 80 {
         return Err(AppError::bad_request_field(
@@ -675,7 +675,11 @@ fn normalise_opt(s: Option<String>) -> Option<String> {
 /// it to the DB CHECK's max so an over-long value is a 400 with the field name
 /// rather than an opaque 500 from the constraint. `max` is in characters to
 /// match Postgres `char_length`.
-fn clean_curation(v: Option<String>, field: &'static str, max: usize) -> Result<Option<String>> {
+pub(crate) fn clean_curation(
+    v: Option<String>,
+    field: &'static str,
+    max: usize,
+) -> Result<Option<String>> {
     let v = normalise_opt(v);
     if let Some(ref s) = v
         && s.chars().count() > max
@@ -692,7 +696,7 @@ fn clean_curation(v: Option<String>, field: &'static str, max: usize) -> Result<
 /// Patch-flavoured [`clean_curation`]: preserves the present/absent distinction
 /// (outer `None` = leave unchanged) while normalising + validating the inner
 /// value (an explicit blank or `null` clears the override).
-fn clean_curation_patch(
+pub(crate) fn clean_curation_patch(
     v: Option<Option<String>>,
     field: &'static str,
     max: usize,

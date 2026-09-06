@@ -1,8 +1,9 @@
 use super::args::{
-    DEFAULT_INCIDENT_WINDOW_DAYS, MAX_INCIDENT_WINDOW_DAYS, build_monitor_patch,
-    default_interval_secs, incident_window, new_check_spec, parse_expected_status,
-    parse_incident_state_filter, parse_kind, parse_phase, parse_region_policy, parse_state,
-    parse_uuid, parse_window, requested_fields, requested_region, resolve_bindings,
+    CREDENTIAL_HEADERS, DEFAULT_INCIDENT_WINDOW_DAYS, MAX_INCIDENT_WINDOW_DAYS,
+    build_monitor_patch, default_interval_secs, incident_window, new_check_spec,
+    parse_expected_status, parse_incident_state_filter, parse_kind, parse_phase,
+    parse_region_policy, parse_state, parse_uuid, parse_window, requested_fields, requested_region,
+    resolve_bindings,
 };
 use super::support::deny_terraform;
 use super::text::{clean_public_text, create_prompt_lines, sanitize_data, sanitize_prompt};
@@ -675,6 +676,147 @@ fn an_audit_row_can_tell_a_real_change_from_a_no_op() {
     assert_eq!(requested_fields(&args), vec!["interval_secs", "tags"]);
 }
 
+fn http_with_body(body: &str) -> NewCheck {
+    let mut check = http_with_headers(&[]);
+    if let NewCheck::Http { body: b, .. } = &mut check {
+        *b = Some(body.to_string());
+    }
+    check
+}
+
+fn http_with_headers(headers: &[(&str, &str)]) -> NewCheck {
+    NewCheck::Http {
+        url: "https://api.example.com/v1/chat".into(),
+        method: Some("post".into()),
+        expected_status: None,
+        expected_body_contains: None,
+        timeout_ms: None,
+        follow_redirects: None,
+        verify_tls: None,
+        headers: Some(
+            headers
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
+        ),
+        body: None,
+    }
+}
+
+#[test]
+fn a_credential_in_the_body_must_reference_a_variable_too() {
+    for body in [
+        "grant_type=client_credentials&client_secret=sk-live-abc",
+        r#"{"password": "hunter2"}"#,
+        "api_key=abc123",
+    ] {
+        let check = http_with_body(body);
+        let err = new_check_spec(&check).expect_err(body);
+        assert_eq!(err.code, codes::INVALID_ARGUMENT, "{body}");
+        assert!(err.message.contains("list_variables"), "{}", err.message);
+    }
+}
+
+#[test]
+fn a_body_referencing_a_variable_is_accepted() {
+    for body in [
+        "grant_type=client_credentials&client_secret={{ oauth_secret }}",
+        r#"{"password": "{{ login_password }}"}"#,
+        "note=nothing sensitive here",
+    ] {
+        assert!(new_check_spec(&http_with_body(body)).is_ok(), "{body}");
+    }
+}
+
+#[test]
+fn credential_headers_are_redacted_downstream() {
+    for name in CREDENTIAL_HEADERS {
+        assert!(
+            crate::worker::http_check::PROBE_REDACT_HEADERS.contains(name),
+            "`{name}` is gated here but would still be previewed and sent across a redirect"
+        );
+    }
+}
+
+#[test]
+fn a_credential_header_must_reference_a_variable_not_carry_one() {
+    for value in [
+        "Bearer sk-live-abc123",
+        "sk-live-abc123",
+        "Bearer sk-live {{ api_key }}",
+        "{{ api_key }} trailing",
+        "{{ api_key }}{{ other }}",
+        "Bearer {{ Api_Key }}",
+    ] {
+        let err = new_check_spec(&http_with_headers(&[("Authorization", value)]))
+            .expect_err("a pasted credential is refused");
+        assert_eq!(err.code, crate::mcp::error::codes::INVALID_ARGUMENT);
+        assert!(
+            err.message.contains("list_variables"),
+            "the refusal points at the supported path, got: {}",
+            err.message
+        );
+    }
+}
+
+#[test]
+fn a_credential_header_referencing_a_variable_is_accepted() {
+    for value in [
+        "Bearer {{ api_key }}",
+        "{{ session_cookie }}",
+        "Basic {{ b64 }}",
+    ] {
+        let spec = new_check_spec(&http_with_headers(&[("Authorization", value)]))
+            .expect("a reference is the supported shape");
+        let CheckSpec::Http(http) = spec else {
+            panic!("expected http");
+        };
+        assert_eq!(
+            http.headers.get("Authorization").map(String::as_str),
+            Some(value)
+        );
+    }
+}
+
+#[test]
+fn a_plain_header_still_takes_literal_text() {
+    let spec = new_check_spec(&http_with_headers(&[("Content-Type", "application/json")]))
+        .expect("a non-credential header carries literal text");
+    let CheckSpec::Http(http) = spec else {
+        panic!("expected http");
+    };
+    assert_eq!(
+        http.headers.get("Content-Type").map(String::as_str),
+        Some("application/json")
+    );
+}
+
+#[test]
+fn every_credential_header_name_is_covered_case_insensitively() {
+    for name in [
+        "authorization",
+        "Proxy-Authorization",
+        "X-API-Key",
+        "api-key",
+        "Cookie",
+    ] {
+        let err = new_check_spec(&http_with_headers(&[(name, "hunter2")]))
+            .expect_err("a credential header name is matched case-insensitively");
+        assert_eq!(
+            err.code,
+            crate::mcp::error::codes::INVALID_ARGUMENT,
+            "{name} should be treated as credential-bearing"
+        );
+    }
+}
+
+#[test]
+fn a_malformed_header_name_is_refused() {
+    let err = new_check_spec(&http_with_headers(&[("bad header", "x")]))
+        .expect_err("a space is not a header name");
+    assert!(err.message.contains("not a valid header name"));
+}
+
 #[test]
 fn a_new_check_carries_no_credential_slot() {
     let CheckSpec::Http(http) = new_check_spec(&NewCheck::Http {
@@ -685,6 +827,8 @@ fn a_new_check_carries_no_credential_slot() {
         timeout_ms: Some(2_000),
         follow_redirects: Some(false),
         verify_tls: None,
+        headers: None,
+        body: None,
     })
     .unwrap() else {
         panic!("expected http");
@@ -780,6 +924,8 @@ fn a_url_carrying_a_password_is_refused_rather_than_stored() {
         timeout_ms: None,
         follow_redirects: None,
         verify_tls: None,
+        headers: None,
+        body: None,
     })
     .unwrap_err();
     assert_eq!(err.code, codes::INVALID_ARGUMENT);
@@ -838,6 +984,8 @@ fn every_creatable_kind_converts_with_the_defaults_it_documents() {
         timeout_ms: None,
         follow_redirects: None,
         verify_tls: None,
+        headers: None,
+        body: None,
     }) else {
         panic!("expected http");
     };
@@ -922,6 +1070,8 @@ fn an_unknown_method_or_record_type_names_the_choices() {
         timeout_ms: None,
         follow_redirects: None,
         verify_tls: None,
+        headers: None,
+        body: None,
     })
     .unwrap_err();
     assert_eq!(err.code, codes::INVALID_ARGUMENT);

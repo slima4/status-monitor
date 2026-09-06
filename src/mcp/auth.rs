@@ -96,8 +96,8 @@ fn challenge(state: &AppState) -> Response {
     resp
 }
 
-fn forbidden(message: &'static str) -> Response {
-    (StatusCode::FORBIDDEN, message).into_response()
+fn forbidden(message: impl Into<String>) -> Response {
+    (StatusCode::FORBIDDEN, message.into()).into_response()
 }
 
 /// Max body we'll buffer to classify an *unauthenticated* request's JSON-RPC
@@ -205,7 +205,10 @@ async fn authenticate(state: AppState, mut req: Request, next: Next) -> Response
 
     // The connector is single-org: the org comes from the token binding only.
     let Some(org) = row.org else {
-        return forbidden("this token is not bound to an organization; mint an org-scoped token");
+        return forbidden(
+            "this token is not bound to an organization; select the organization you want in \
+             the app, then reconnect the connector to mint an org-scoped token",
+        );
     };
 
     // Re-check membership on every request (defense vs revoked access). The
@@ -214,7 +217,16 @@ async fn authenticate(state: AppState, mut req: Request, next: Next) -> Response
     match is_active_member(pool, row.user_id, org).await {
         Ok(true) => {}
         Ok(false) => {
-            return forbidden("the token owner is no longer a member of this organization");
+            // The client cannot see which org the token is bound to.
+            let slug = match crate::storage::orgs::get_org(pool, org).await {
+                Ok(Some(o)) => o.slug,
+                _ => org.0.to_string(),
+            };
+            return forbidden(format!(
+                "the token owner is no longer a member of `{slug}`, the organization this \
+                 connector is bound to; switch to the organization you want in the app, then \
+                 reconnect the connector to bind a token to it"
+            ));
         }
         Err(err) => {
             tracing::warn!(target: "mcp", error = %err, "mcp membership check failed");

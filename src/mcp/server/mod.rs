@@ -15,6 +15,7 @@ use crate::app::AppState;
 mod args;
 mod incidents;
 mod monitors;
+mod status_pages;
 mod support;
 #[cfg(test)]
 mod tests;
@@ -88,9 +89,21 @@ impl ServerHandler for McpServer {
             "Tools for one Uptimepage organization's monitors, status pages, and health. \
              Most tools are read-only; a few perform actions (create a monitor, pause/resume \
              one, retune how loudly one is watched, run a check, publish an incident, post an \
-             incident update) and each asks the user to confirm before it runs, so they need a \
+             incident update, create or edit a status page and the components on it) and each \
+             asks the user to confirm before it runs, so they need a \
              client that supports elicitation. Creating a monitor runs its check once and shows \
-             the result in that confirmation. A new monitor pages nobody until a notification \
+             the result in that confirmation; when the user names more than one thing to watch, \
+             `create_monitors` does the whole set behind a single prompt instead of one each. \
+             `get_org_usage` names the organization this connector is bound to; a token carries \
+             one org and cannot switch, so when the user means a different org they must select \
+             it in the app and reconnect. \
+             A status page is created unpublished: add its components, then enable it. Give each \
+             component a `public_name` its readers will understand, since a monitor's own name \
+             is operator-facing. \
+             An authenticated check is built by referencing an org variable in a header, as \
+             `Bearer {{ my_key }}`; `list_variables` names the keys. Never paste a credential \
+             into a tool argument: it is refused, and it would persist in the transcript. \
+             A new monitor pages nobody until a notification \
              channel is bound to it, so pass `channel_ids` from `list_notification_channels` \
              when you create it; when the org has no channel yet, or you lack the channels:read \
              scope, finish by telling the user their new monitors alert nobody until they add \

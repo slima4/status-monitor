@@ -34,7 +34,7 @@ use crate::mcp::schema::{
     LatencyPoint, ListIncidentsArgs, ListMonitorsArgs, ListStatusPagesArgs, MetricCount,
     MonitorDetail, MonitorHistory, MonitorList, MonitorListItem, NoisyMonitor, OrgHealth, OrgUsage,
     Quota, RegionList, StatusPageComponent as McpComponent, StatusPageDetail, StatusPageList,
-    StatusPageSummary, TagItem, TagList, WorstMonitor,
+    StatusPageSummary, TagItem, TagList, VariableList, VariableSummary, WorstMonitor,
 };
 
 use super::McpServer;
@@ -973,9 +973,40 @@ impl McpServer {
         }))
     }
 
-    /// Org usage against plan limits. For "am I near my caps?".
+    /// The org's variable keys, so a check can reference one rather than carry
+    /// its value.
     #[tool(
-        description = "Org resource usage against plan limits: monitors, status pages, members, components, and key policy values. Read-only.",
+        description = "The org's reusable variables: key, and whether it is a secret. Values are never returned, and a secret's value is never even read. Write a variable into a monitor's header or body as `{{ key }}`, which is resolved when the check runs: this is how an authenticated check is built here, since pasting the credential itself is refused. Variables are created and edited in the app, not here. Read-only.",
+        title = "List variables",
+        annotations(read_only_hint = true)
+    )]
+    async fn list_variables(
+        &self,
+        ctx: RequestContext<RoleServer>,
+    ) -> Result<Json<VariableList>, McpToolError> {
+        let auth = McpAuth::from_ctx(&ctx)?;
+        auth.require(Scope::VariablesRead)?;
+        let vars = self
+            .state
+            .variable_store
+            .list(auth.org)
+            .await
+            .map_err(|e| McpToolError::internal(format!("list variables: {e}")))?;
+        Ok(Json(VariableList {
+            items: vars
+                .into_iter()
+                .map(|v| VariableSummary {
+                    key: v.key,
+                    is_secret: v.is_secret,
+                })
+                .collect(),
+        }))
+    }
+
+    /// Usage against plan limits, and the cheapest answer to "which org is this
+    /// connector bound to?", which the client cannot see for itself.
+    #[tool(
+        description = "Which org this connector is bound to, and its resource usage against plan limits: monitors, status pages, members, components, and key policy values. Read-only.",
         title = "Usage against plan",
         annotations(read_only_hint = true)
     )]
@@ -985,14 +1016,25 @@ impl McpServer {
     ) -> Result<Json<OrgUsage>, McpToolError> {
         let auth = McpAuth::from_ctx(&ctx)?;
         auth.require(Scope::TargetsRead)?;
-        let u = self
+        let pool = self
             .state
-            .quotas
-            .org_usage(auth.org)
-            .await
-            .map_err(|e| McpToolError::internal(format!("org usage: {e}")))?;
+            .db
+            .as_ref()
+            .ok_or_else(|| McpToolError::internal("db unavailable"))?;
+        let (usage, org_row) = tokio::join!(
+            self.state.quotas.org_usage(auth.org),
+            crate::storage::orgs::get_org(pool, auth.org),
+        );
+        let u = usage.map_err(|e| McpToolError::internal(format!("org usage: {e}")))?;
+        let org_row = org_row.map_err(|e| McpToolError::internal(format!("org usage: {e}")))?;
+        let (org_slug, org_name) = match org_row {
+            Some(o) => (o.slug, sanitize_data(&o.name)),
+            None => (auth.org.0.to_string(), String::new()),
+        };
         let p = &u.plan;
         Ok(Json(OrgUsage {
+            org: org_slug,
+            org_name,
             plan: p.id.clone(),
             targets: Quota {
                 used: u.targets,

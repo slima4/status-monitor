@@ -61,6 +61,9 @@ const GRANTABLE_SCOPES: &[Scope] = &[
     Scope::TargetsWrite,
     Scope::TargetsExecute,
     Scope::IncidentsWrite,
+    Scope::StatusPageWrite,
+    // Keys only; the values are never read on this path.
+    Scope::VariablesRead,
 ];
 
 /// Authorization-code lifetime. Short — it's redeemed immediately.

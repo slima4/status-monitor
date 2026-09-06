@@ -212,6 +212,139 @@ pub(super) fn parse_region_policy(
     }
 }
 
+/// Header names that must reference a variable rather than spell a credential
+/// out: a pasted one echoes back in the transcript and lands in `check_spec` as
+/// plaintext, where a variable would have been sealed.
+pub(super) const CREDENTIAL_HEADERS: &[&str] = &[
+    "authorization",
+    "proxy-authorization",
+    "x-api-key",
+    "api-key",
+    "cookie",
+];
+
+/// Past any real check, under what a runaway generation could bloat a spec to.
+const MAX_HEADERS: usize = 30;
+
+/// Body parameters that name a credential. A token endpoint's `client_secret`
+/// is the same paste the header rule refuses, and refusing it in one field
+/// while waving it through in the other would make the rule theatre.
+const CREDENTIAL_BODY_PARAMS: &[&str] = &[
+    "client_secret",
+    "password",
+    "api_key",
+    "apikey",
+    "access_token",
+    "refresh_token",
+];
+
+/// The value a body assigns to `param`, in either `param=v` or `"param": "v"`
+/// form, is a literal rather than a `{{ key }}` reference.
+fn pastes_credential(body: &str, param: &str) -> bool {
+    let lower = body.to_ascii_lowercase();
+    let mut from = 0;
+    while let Some(at) = lower[from..].find(param) {
+        let start = from + at;
+        let after = start + param.len();
+        // `login_password` is not `password`: only a whole parameter counts.
+        let bounded = !lower[..start]
+            .chars()
+            .next_back()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_');
+        if !bounded {
+            from = after;
+            continue;
+        }
+        let rest = body[after..].trim_start();
+        let rest = rest
+            .strip_prefix('"')
+            .map_or(rest, |r| r.trim_start())
+            .trim_start_matches([':', '='])
+            .trim_start()
+            .trim_start_matches(['"', '\'']);
+        if !rest.is_empty() && !rest.starts_with("{{") {
+            return true;
+        }
+        from = after;
+    }
+    false
+}
+
+fn check_body(body: Option<&String>) -> Result<Option<String>, McpToolError> {
+    let Some(body) = body else {
+        return Ok(None);
+    };
+    if let Some(param) = CREDENTIAL_BODY_PARAMS
+        .iter()
+        .find(|p| pastes_credential(body, p))
+    {
+        return Err(McpToolError::invalid_argument(format!(
+            "the body sets `{param}` to a literal value, so it must reference an org variable \
+             instead, as `{param}={{{{ my_key }}}}`. Call list_variables for the keys this org \
+             has, and add the variable in the app if it is missing. Do not paste the credential \
+             here"
+        )));
+    }
+    Ok(Some(body.clone()))
+}
+
+/// Exactly an optional scheme word plus one `{{ key }}`, as `Bearer {{ k }}`.
+/// Anything looser in a credential header we cannot tell from a pasted secret.
+fn is_variable_reference(value: &str) -> bool {
+    let v = value.trim();
+    let Some(open) = v.find("{{") else {
+        return false;
+    };
+    if !v.ends_with("}}") {
+        return false;
+    }
+    let scheme = v[..open].trim_end();
+    if !scheme.chars().all(|c| c.is_ascii_alphabetic()) {
+        return false;
+    }
+    let key = &v[open + 2..v.len() - 2];
+    // One reference, not a concatenation of several.
+    !key.contains("{{") && crate::domain::validate_var_key(key.trim()).is_ok()
+}
+
+fn check_headers(
+    headers: Option<&std::collections::HashMap<String, String>>,
+) -> Result<std::collections::HashMap<String, String>, McpToolError> {
+    let Some(headers) = headers else {
+        return Ok(Default::default());
+    };
+    if headers.len() > MAX_HEADERS {
+        return Err(McpToolError::invalid_argument(format!(
+            "at most {MAX_HEADERS} request headers"
+        )));
+    }
+    let mut out = std::collections::HashMap::with_capacity(headers.len());
+    for (name, value) in headers {
+        let name = name.trim();
+        if hyper::header::HeaderName::try_from(name).is_err() {
+            return Err(McpToolError::invalid_argument(format!(
+                "`{name}` is not a valid header name"
+            )));
+        }
+        if hyper::header::HeaderValue::try_from(value.as_str()).is_err() {
+            return Err(McpToolError::invalid_argument(format!(
+                "the value of `{name}` is not a valid header value"
+            )));
+        }
+        let lower = name.to_ascii_lowercase();
+        if CREDENTIAL_HEADERS.contains(&lower.as_str()) && !is_variable_reference(value) {
+            return Err(McpToolError::invalid_argument(format!(
+                "`{name}` carries a credential, so it must reference an org variable rather than \
+                 spell one out, as `Bearer {{{{ my_key }}}}`. Call list_variables for the keys \
+                 this org has, and add the variable in the app if it is missing. Do not paste the \
+                 credential here"
+            )));
+        }
+        out.insert(name.to_string(), value.clone());
+    }
+    Ok(out)
+}
+
 /// The narrow create surface widened into a real check, with the fields this
 /// tool refuses to take left at their defaults.
 pub(super) fn new_check_spec(check: &NewCheck) -> Result<CheckSpec, McpToolError> {
@@ -230,6 +363,8 @@ pub(super) fn new_check_spec(check: &NewCheck) -> Result<CheckSpec, McpToolError
             timeout_ms,
             follow_redirects,
             verify_tls,
+            headers,
+            body,
         } => {
             let url = url::Url::parse(url)
                 .map_err(|e| McpToolError::invalid_argument(format!("url: {e}")))?;
@@ -250,8 +385,8 @@ pub(super) fn new_check_spec(check: &NewCheck) -> Result<CheckSpec, McpToolError
                 max_redirects: if follow { 5 } else { 0 },
                 expected_status: parse_expected_status(expected_status.as_deref())?,
                 expected_body_contains: expected_body_contains.clone(),
-                headers: Default::default(),
-                body: None,
+                headers: check_headers(headers.as_ref())?,
+                body: check_body(body.as_ref())?,
                 verify_tls: verify_tls.unwrap_or(true),
                 basic_auth: None,
                 bearer_token: None,

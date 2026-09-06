@@ -95,6 +95,8 @@ fn scope_label(scope: &str) -> &'static str {
         "targets:write" => "Create monitors, and pause, resume or retune existing ones",
         "targets:execute" => "Run checks on your monitors on demand",
         "incidents:write" => "Post updates to your incidents (shown publicly)",
+        "status_page:write" => "Create and edit your status pages, including their public address",
+        "variables:read" => "Read the names of your variables, never their values",
         _ => "Access your data",
     }
 }

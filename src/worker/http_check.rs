@@ -51,14 +51,16 @@ const PROBE_BODY_SNIPPET_BYTES: usize = 1024;
 const DIAGNOSTIC_BODY_BYTES: usize = 16 << 10;
 /// Header-pair cap (after dedup-by-name) for the verbose test-check response.
 const PROBE_HEADERS_MAX: usize = 20;
-/// Header names whose values must not appear in the verbose response.
-const PROBE_REDACT_HEADERS: &[&str] = &[
+/// Header names whose values are credentials: redacted from the verbose
+/// response, and dropped from a request that follows a redirect off-origin.
+pub(crate) const PROBE_REDACT_HEADERS: &[&str] = &[
     "set-cookie",
     "authorization",
     "cookie",
     "proxy-authorization",
     "x-auth-token",
     "x-api-key",
+    "api-key",
     "x-csrf-token",
     "x-amz-security-token",
 ];

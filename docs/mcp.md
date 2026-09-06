@@ -6,7 +6,7 @@ It is another authorized front door to the same stores the web app and [`/api/v1
 
 - **Transport** — Streamable HTTP at `POST/GET /mcp`, served on its own host (`mcp.{DOMAIN}` in production).
 - **Auth** — an org-bound scoped API token (`sm_live_…`), minted either by hand (Settings → API tokens) or by the one-click OAuth 2.1 connector flow.
-- **Surface** — 15 read tools (14 of them under the default grant; `list_notification_channels` needs `channels:read`) + 10 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
+- **Surface** — 16 read tools (14 of them under the default grant; `list_notification_channels` needs `channels:read` and `list_variables` needs `variables:read`) + 15 write tools (each scope-gated, confirmed per action, and audited). Write tools are listed only to clients that can show a confirmation prompt; see [Confirmations](#confirmations).
 
 The server only mounts when enabled (see [Enabling](#enabling)); a deployment that leaves it off never exposes `/mcp`.
 
@@ -16,7 +16,7 @@ All tools return typed `structuredContent`. Customer free text (monitor names, g
 
 ### Read tools
 
-Side-effect-free (`readOnlyHint`). Each requires the scope named in its row: `targets:read`, `status_page:read` and `incidents:read` are in the default grant, `channels:read` is not.
+Side-effect-free (`readOnlyHint`). Each requires the scope named in its row: `targets:read`, `status_page:read` and `incidents:read` are in the default grant; `channels:read` and `variables:read` are not.
 
 | Tool | Scope | Returns |
 |---|---|---|
@@ -33,7 +33,8 @@ Side-effect-free (`readOnlyHint`). Each requires the scope named in its row: `ta
 | `get_incident_metrics` | `incidents:read` | Incident metrics over a trailing window (default 30 days): MTTA/MTTR, total, counts by severity and state, auto- vs human-resolved, and the noisiest monitors. |
 | `list_status_pages` | `status_page:read` | The org's status pages: slug, name, public URL, enabled. Cursor-paginated. |
 | `get_status_page` | `status_page:read` | One status page with its components and each linked monitor's current state. |
-| `get_org_usage` | `targets:read` | Resource usage against plan limits (monitors, status pages, members, components) + key policy values. |
+| `get_org_usage` | `targets:read` | Which org the connector is bound to (slug and name), and resource usage against plan limits (monitors, status pages, members, components) + key policy values. A token carries one org and cannot switch, so this is the one-call answer to "where am I connected?" — see [Org binding](#org-binding). |
+| `list_variables` | `variables:read` | The org's [variables](variables.md): key and whether it is a secret. Values are never returned, and a secret's is never even read. This is how a caller finds the key to write as `{{ key }}` when building an authenticated check. Variables are created and edited in the app, never here — `variables:write` is not grantable to a connector. |
 | `list_notification_channels` | `channels:read` | The org's notification channels: id, operator-set name, kind, enabled, plus two flags for a channel that is not working even where it reads as ready: `awaiting_verification` for an email address that was never confirmed, and `not_delivering` for an enabled channel whose recent alerts all failed to arrive. The settings that make a channel work (webhook URLs, bot tokens, addresses) are withheld. Channels are created in the app, never here. `channels:read` is not one of the default connector scopes: a client that never touches alerting is not offered the inventory. |
 
 A `window` is a request, not a promise: every history tool clamps it to what your plan retains at per-check detail, and one clamp covers the whole response so its fields never describe different spans. See [Quotas and limits](quotas.md).
@@ -49,6 +50,11 @@ Not read-only. Each requires its scope **and** an interactive [confirmation](#co
 | Tool | Scope | Effect |
 |---|---|---|
 | `create_monitor` | `targets:write` + `targets:execute` (+ `channels:read` to bind channels) | Create an `http`, `tcp`, `ping`, `dns`, `tls_cert`, `domain_expiry` or `heartbeat` monitor, optionally naming the `regions` it probes from. See [How creation is guarded](#how-creation-is-guarded). |
+| `create_monitors` | same as `create_monitor` | Create several monitors under **one** confirmation. Every check is trial-run first and all the results are shown together; an item that fails validation or its probe is reported in the results and the rest are still created. Same per-monitor fields and same guards as `create_monitor`. Prefer it whenever the user names more than one thing to watch — ten monitors otherwise costs ten prompts. |
+| `create_status_page` | `status_page:write` + org owner | Create a status page from a `slug` and `name`. Created unpublished unless `enabled` is passed, so its components can be curated before anyone can read it. The slug is the page's public address, first-come across the platform, and moving it later breaks every existing link. |
+| `update_status_page` | `status_page:write` + org owner | Rename a page, move it to a new slug, or publish and unpublish it. An omitted field is left alone. Idempotent. |
+| `add_status_page_components` | `status_page:write` + org owner | Put monitors on a page as public components, in one confirmation. Each takes a `public_name` (the monitor's own name is operator-facing), an optional `public_group` to file related components together, and `detail_link_enabled` to publish a per-monitor detail view. A monitor already on the page is reported as such, never duplicated. |
+| `update_status_page_component` | `status_page:write` + org owner | Change how one monitor is presented on a page: public name, description, group, sort order. An omitted field is left alone. A detail link is set when the component is added. Idempotent. |
 | `run_check_now` | `targets:execute` | Probe a monitor immediately and record the result. A `down` result may fire the org's normal alerts. A heartbeat monitor has nothing to probe and is refused as `invalid_argument`, not as something to retry. |
 | `update_monitor` | `targets:write` (+ `channels:read` to rebind channels) | Change how loudly a monitor is watched: `interval_secs`, `alert_confirmations`, `notify_recovery`, `renotify_interval_secs`, `tags`, `group_name`, `region_policy`, `channel_ids`. Nothing else — see [What it will not change](#what-update-monitor-will-not-change). `tags` replaces the whole list and takes at most 50, each at most 50 characters, with no blank and no invisible characters. The confirmation names the monitor and states old → new for every field, and a request whose values already match writes nothing and never prompts. If the monitor moves between the prompt and the approval, the write is refused as `conflict` instead of landing on top of the newer value. Idempotent. |
 | `pause_monitor` | `targets:write` | Stop a monitor's checks until resumed. Idempotent. |
@@ -71,7 +77,11 @@ Two consequences worth stating plainly. The probe necessarily happens **before**
 
 **The confirmation lists every setting**, not just the address: interval, probe regions, tags, group, how many failing checks it alerts after, whether recovery is announced, the reminder cadence, and the multi-region quorum, resolved against the regions the monitor is being given rather than left as a label a narrower assignment would clamp. A field the prompt omitted would be approved unread.
 
-**Credentials cannot be set here.** No request headers, no request body, no basic auth, no bearer token. A custom `Authorization` or `X-Api-Key` header is a literal secret, and a tool that accepted one would carry it through a chat log. Browser flows are excluded for the same reason: their fill values are withheld from every other MCP tool. Add both in the app, on a monitor that already exists.
+**A credential is referenced, never pasted.** Request headers and a request body can be set, which is what makes an authenticated check — a `POST /v1/chat/completions` carrying an API key — expressible here at all. What cannot be done is spelling the secret out. A header whose name carries a credential (`authorization`, `proxy-authorization`, `x-api-key`, `api-key`, `cookie`) must hold exactly a [variable](variables.md) reference, optionally behind a scheme word: `Bearer {{ openai_key }}`, or a bare `{{ session_cookie }}`. Anything looser is refused, pointing at `list_variables` for the keys the org has.
+
+The reason is where the value would come to rest. A pasted key is echoed back in the tool result and lives on in the chat transcript, and it is stored in the monitor's `check_spec` as plaintext, where a variable would have been sealed at rest — so it also has to be re-pasted into every monitor that needs it instead of being rotated in one place. Referencing costs nothing at probe time: the reference resolves just before the check runs, exactly as it does for a monitor built in the app.
+
+This is a hygiene rule, not a security boundary: it gates the five header names a credential normally travels under, and a caller determined to paste a key under some other name can. What it stops is the accident, which is the common case. Basic auth, bearer tokens and browser flows are still app-only — a flow's fill values are withheld from every other MCP tool, and `update_monitor` refuses to change a URL, header or body on a monitor that already exists.
 
 **Channels are bound by id, never created.** `channel_ids` on `create_monitor` (and on `update_monitor`, which replaces the whole set) binds channels that already exist; `list_notification_channels` is how their ids are found, and `channels:read` is required to use them, since naming and validating them means reading the inventory. A channel id from another org is refused, as is one that does not exist. The channel itself — its webhook URL, bot token or address — is only ever set up in the app. Omit `channel_ids` and the monitor alerts nobody, which is the failure this tool is likeliest to leave behind: monitors that look right in the console and page no one at 3am. The tool description and the server instructions both push the caller to bind as it creates, and to say plainly that nothing is bound when the org has no channel yet or the token lacks `channels:read`.
 
@@ -151,7 +161,7 @@ A read-only request shows "wants read-only access" with no warning banner; a req
 
 ## Scopes
 
-The connector advertises seven grantable scopes. A request with no `scope` (or only unknown scopes) grants the **read-only default**; everything else is opt-in.
+The connector advertises nine grantable scopes. A request with no `scope` (or only unknown scopes) grants the **read-only default**; everything else is opt-in.
 
 | Scope | Grants | In default set? |
 |---|---|---|
@@ -159,11 +169,21 @@ The connector advertises seven grantable scopes. A request with no `scope` (or o
 | `status_page:read` | status-page read tools | ✅ |
 | `incidents:read` | `list_incidents`, `get_incident`, `get_incident_metrics` | ✅ |
 | `channels:read` | `list_notification_channels`, and binding channels on `create_monitor` / `update_monitor` | opt-in |
-| `targets:write` | `create_monitor`, `update_monitor`, `pause_monitor`, `resume_monitor` | opt-in |
-| `targets:execute` | `run_check_now`, and the trial probe `create_monitor` runs | opt-in |
+| `targets:write` | `create_monitor`, `create_monitors`, `update_monitor`, `pause_monitor`, `resume_monitor` | opt-in |
+| `targets:execute` | `run_check_now`, and the trial probes `create_monitor` / `create_monitors` run | opt-in |
 | `incidents:write` | `acknowledge_incident`, `resolve_incident`, `publish_incident`, `unpublish_incident`, `post_incident_update` | opt-in |
+| `status_page:write` | `create_status_page`, `update_status_page`, `add_status_page_components`, `update_status_page_component` — **and** the caller must be an owner of the org, the same bar `/api/v1` holds the public brand surface to | opt-in |
+| `variables:read` | `list_variables` — variable keys only, never a value | opt-in |
 
 A granted write scope is **necessary but not sufficient** — every write tool still asks the user to confirm the specific action at call time.
+
+`variables:write` is deliberately absent. Creating or rotating a variable means carrying its value, which is the one thing this surface will not do; variables are managed in the app or over [`/api/v1`](api.md#operator-endpoints-variables).
+
+## Org binding
+
+A token is bound to **one** org, and there is no tool argument that switches it. The binding is set when the token is minted, from whichever org was active in the app at that moment — the OAuth consent screen displays it but does not offer a picker, and the scope list there is display-only too.
+
+So creating a new org in the app does not make it visible to an existing connection, and reconnecting while the app still has the old org active mints another token on the **old** org. The order that works: switch to the org you want in the app, confirm the consent screen names it, then approve. `get_org_usage` reports the bound org, which is the fastest way to check before wondering why a monitor is missing.
 
 ## Confirmations
 

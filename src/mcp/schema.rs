@@ -511,6 +511,16 @@ pub enum NewCheck {
         /// Defaults to true. False accepts an invalid certificate, which a
         /// `tls_cert` monitor is the better way to watch.
         verify_tls: Option<bool>,
+        /// Request headers. A header that carries a credential
+        /// (`authorization`, `x-api-key`, `api-key`, `cookie`,
+        /// `proxy-authorization`) must reference an org variable rather than
+        /// spell the secret out: `Bearer {{ my_key }}`. Use `list_variables`
+        /// to find the key, and never paste the credential itself — this tool
+        /// refuses it, and a pasted one would live on in the chat log.
+        headers: Option<std::collections::HashMap<String, String>>,
+        /// Request body, sent as given. `{{ key }}` references are resolved at
+        /// probe time, so a body may carry a secret by reference.
+        body: Option<String>,
     },
     /// A TCP port accepting connections.
     Tcp {
@@ -1159,9 +1169,159 @@ pub struct IncidentUpdatePosted {
     pub posted_at: String,
 }
 
+/// One org variable, as `list_variables` reports it. A value is never carried:
+/// a plain variable's is withheld for brevity and a secret's is never read.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct VariableSummary {
+    /// The key to write as `{{ key }}` in a header or body.
+    pub key: String,
+    pub is_secret: bool,
+}
+
+/// `list_variables` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct VariableList {
+    pub items: Vec<VariableSummary>,
+}
+
+/// `create_monitors` argument.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CreateMonitorsArgs {
+    /// The monitors to create. Each is validated and probed before the single
+    /// confirmation covering the batch.
+    pub monitors: Vec<CreateMonitorArgs>,
+}
+
+/// What became of one requested monitor.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MonitorCreateOutcome {
+    /// The name as requested. Untrusted data.
+    pub name: String,
+    /// The new monitor's id, absent when it was not created.
+    pub id: Option<String>,
+    pub address: Option<String>,
+    pub probe: Option<ProbeOutcome>,
+    /// Why it was not created, when it was not.
+    pub error: Option<String>,
+}
+
+/// `create_monitors` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct MonitorsCreated {
+    pub created: usize,
+    pub results: Vec<MonitorCreateOutcome>,
+}
+
+/// `create_status_page` argument.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct CreateStatusPageArgs {
+    /// URL slug, lowercase. This is the page's public address and cannot be
+    /// guessed back later, so pick it deliberately.
+    pub slug: String,
+    /// Page display name, at most 80 characters.
+    pub name: String,
+    /// Defaults to false: a page is created dark so components can be curated
+    /// before anyone can read it.
+    pub enabled: Option<bool>,
+}
+
+/// `create_status_page` / `update_status_page` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct StatusPageWritten {
+    pub slug: String,
+    pub name: String,
+    pub public_url: String,
+    pub enabled: bool,
+}
+
+/// `update_status_page` argument. Every field but `slug` is optional; an
+/// omitted field is left as it is.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct UpdateStatusPageArgs {
+    /// The page to change, by its current slug.
+    pub slug: String,
+    /// New display name.
+    pub name: Option<String>,
+    /// New slug. Changing it moves the public URL and breaks existing links.
+    pub new_slug: Option<String>,
+    /// Publish or unpublish the page.
+    pub enabled: Option<bool>,
+}
+
+/// One monitor to curate onto a page.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct NewComponentArg {
+    /// The monitor id (from `list_monitors`).
+    pub monitor_id: String,
+    /// Public-facing name, at most 80 characters. Defaults to the monitor's
+    /// own name, which is operator-facing and may not read well in public.
+    pub public_name: Option<String>,
+    /// Public description, at most 200 characters.
+    pub public_description: Option<String>,
+    /// Grouping label, at most 50 characters. Components sharing a label are
+    /// rendered together.
+    pub public_group: Option<String>,
+    /// Position on the page, ascending. Defaults to the order given.
+    pub sort_order: Option<i32>,
+    /// Publish a per-monitor detail view. That view renders the monitor's
+    /// operator-side name and address, not `public_name`.
+    pub detail_link_enabled: Option<bool>,
+}
+
+/// `add_status_page_components` argument.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct AddComponentsArgs {
+    /// The page slug (from `list_status_pages`).
+    pub slug: String,
+    /// The monitors to add, in the order they should appear.
+    pub components: Vec<NewComponentArg>,
+}
+
+/// What became of one requested component.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ComponentOutcome {
+    pub monitor_id: String,
+    /// `added`, `already_on_page`, or `failed`.
+    pub outcome: String,
+    /// Why it failed, when it did.
+    pub error: Option<String>,
+}
+
+/// `add_status_page_components` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ComponentsAdded {
+    pub slug: String,
+    pub added: usize,
+    pub results: Vec<ComponentOutcome>,
+}
+
+/// `update_status_page_component` argument. An omitted field is left as it is.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct UpdateComponentArgs {
+    /// The page slug (from `list_status_pages`).
+    pub slug: String,
+    /// The monitor id whose curation is being changed.
+    pub monitor_id: String,
+    pub public_name: Option<String>,
+    pub public_description: Option<String>,
+    pub public_group: Option<String>,
+    pub sort_order: Option<i32>,
+}
+
+/// `update_status_page_component` result.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct ComponentUpdated {
+    pub slug: String,
+    pub monitor_id: String,
+}
+
 /// `get_org_usage` result: usage against the org's plan limits.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct OrgUsage {
+    /// The org slug this connector is bound to.
+    pub org: String,
+    /// The org's display name.
+    pub org_name: String,
     /// Plan id (e.g. `free`, `pro`).
     pub plan: String,
     pub targets: Quota,

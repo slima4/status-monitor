@@ -78,6 +78,20 @@ impl McpToolError {
         }
     }
 
+    /// Properties of the call, not of the item: a batch stops rather than
+    /// collecting the identical error N times.
+    pub fn is_fatal_to_batch(&self) -> bool {
+        matches!(
+            self.code,
+            codes::INSUFFICIENT_SCOPE
+                | codes::RATE_LIMITED
+                | codes::ELICITATION_UNSUPPORTED
+                | codes::UNAUTHENTICATED
+                | codes::INTERNAL
+                | codes::PROBE_UNAVAILABLE
+        )
+    }
+
     pub fn invalid_argument(message: impl Into<String>) -> Self {
         Self::new(codes::INVALID_ARGUMENT, message, false)
     }
@@ -86,10 +100,15 @@ impl McpToolError {
         Self::new(codes::NOT_FOUND, message, false)
     }
 
+    /// Scopes are fixed when the token is minted, so say what the way out is
+    /// or the caller retries forever.
     pub fn insufficient_scope(scope: &str) -> Self {
         Self::new(
             codes::INSUFFICIENT_SCOPE,
-            format!("the connector's token is missing the required scope `{scope}`"),
+            format!(
+                "the connector's token is missing the required scope `{scope}`; \
+                 reconnect the connector to mint a token that carries it"
+            ),
             false,
         )
     }

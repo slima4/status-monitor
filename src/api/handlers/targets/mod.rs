@@ -45,14 +45,14 @@ use validate::{
     canonicalize_check, carry_credentials, carry_flags, carry_flow_secrets, check_abuse,
     ensure_flow_regions_covered, gate_flow, reject_passive_probe, ssrf_guard,
     take_cleared_credentials, validate_alerts, validate_check, validate_new_target,
-    validate_owner_is_member, validate_variable_refs, verify_alert_channels,
+    validate_owner_is_member, verify_alert_channels,
 };
 
 pub(crate) use dispatch::{check_now_via_dispatch, flow_capable_set, run_ad_hoc};
 pub(crate) use validate::{
     default_region_set, normalize_tags, validate_alert_confirmations, validate_group_name,
     validate_patch_interval, validate_region_policy, validate_renotify_interval,
-    vet_requested_regions,
+    validate_variable_refs, vet_requested_regions,
 };
 
 #[derive(Debug, Deserialize, IntoParams)]

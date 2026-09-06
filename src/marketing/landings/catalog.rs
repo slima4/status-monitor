@@ -2251,7 +2251,7 @@ resource "uptimepage_target" "api" {
             },
             Feature {
                 label: "Tools",
-                value: "25 (15 read + 10 fenced writes)",
+                value: "31 (16 read + 15 fenced writes)",
             },
             Feature {
                 label: "Every write",
@@ -2281,7 +2281,7 @@ resource "uptimepage_target" "api" {
             },
             Section {
                 heading: "Every tool, by name",
-                body: "Fifteen read: get_org_health, list_monitors, get_monitor, get_monitor_history, list_regions, list_tags, get_flow_runs, get_flow_step_trend, list_incidents, get_incident, get_incident_metrics, list_status_pages, get_status_page, get_org_usage, list_notification_channels. Ten write: create_monitor, run_check_now, update_monitor, pause_monitor, resume_monitor, acknowledge_incident, resolve_incident, publish_incident, unpublish_incident, post_incident_update. A real outage runs straight through them. get_org_health names what is failing and, for a monitor that sits on a status page, hands back the incident id. get_incident shows the timeline, acknowledge_incident takes ownership and stops the escalation, publish_incident puts it on your status page, and post_incident_update tells your customers what you know so far.",
+                body: "Sixteen read: get_org_health, list_monitors, get_monitor, get_monitor_history, list_regions, list_tags, get_flow_runs, get_flow_step_trend, list_incidents, get_incident, get_incident_metrics, list_status_pages, get_status_page, get_org_usage, list_notification_channels, list_variables. Fifteen write: create_monitor, create_monitors, run_check_now, update_monitor, pause_monitor, resume_monitor, acknowledge_incident, resolve_incident, publish_incident, unpublish_incident, post_incident_update, create_status_page, update_status_page, add_status_page_components, update_status_page_component. A real outage runs straight through them. get_org_health names what is failing and, for a monitor that sits on a status page, hands back the incident id. get_incident shows the timeline, acknowledge_incident takes ownership and stops the escalation, publish_incident puts it on your status page, and post_incident_update tells your customers what you know so far.",
             },
             Section {
                 heading: "It sets the monitoring up too",

@@ -4,7 +4,7 @@ A variable is a reusable named value scoped to your org. A monitor references it
 
 A **secret** variable is the same idea for credentials. Its value is write-only: it is sealed at rest, never returned by any read API, never rendered back in the UI, and only allowed in fields where it cannot leak. Use it for API keys, bearer tokens, and other request secrets so the literal value lives in one place instead of being copied into every monitor.
 
-Manage variables under **Settings → Variables**, or through the [REST API](api.md#operator-endpoints-variables).
+Manage variables under **Settings → Variables**, or through the [REST API](api.md#operator-endpoints-variables). An [MCP](mcp.md) client can read the key list to build a check against one, but never creates, edits or reads a variable — see [From an MCP client](#from-an-mcp-client).
 
 ## References
 
@@ -63,9 +63,15 @@ What is redacted: a secret value is never serialized by any read API and never r
 
 Repointing a URL variable: if a monitor builds its URL from a plain variable and also sends a secret in a header, editing that URL variable sends the credential to whatever host it now names. Nothing blocks this, because it is sometimes what you intend, but the save is logged with the keys involved. Treat a URL variable on a monitor that carries a secret as a credential-scoped setting.
 
-Redirects: when a monitor follows a redirect to a different origin, the probe strips the standard sensitive headers (`Authorization`, cookies, `x-api-key`, and similar) so a credential cannot follow a hostile `Location`. The authentication picker writes its credential into `Authorization` or `x-api-key`, both of which are covered. If you place a secret in a non-standard header name of your own and your monitor follows redirects to hosts you do not control, that header is not on the strip list and could follow the redirect; prefer the picker's headers for credentials.
+Redirects: when a monitor follows a redirect to a different origin, the probe strips the standard sensitive headers (`Authorization`, cookies, `x-api-key`, `api-key`, and similar) so a credential cannot follow a hostile `Location`. The authentication picker writes its credential into `Authorization` or `x-api-key`, both of which are covered. If you place a secret in a non-standard header name of your own and your monitor follows redirects to hosts you do not control, that header is not on the strip list and could follow the redirect; prefer the picker's headers for credentials.
 
 Agent hosts hold credentials: because resolution happens before the request reaches the agent, a probe agent holds decrypted secret values in memory for the duration of each check. Regional agents run on separate hosts from the control plane; treat those hosts as credential-bearing.
+
+## From an MCP client
+
+A connected LLM client can list the org's variable keys with `list_variables` (`variables:read`), which returns the key and whether it is a secret — never a value, and a secret's value is never even read. That is enough to build an authenticated check: write the reference into a request header or the body, as `Bearer {{ api_key }}`.
+
+`variables:write` is not grantable to a connector, so a variable is always created and rotated in the app or over the REST API. Nor will the MCP surface accept a pasted credential: a header named `authorization`, `proxy-authorization`, `x-api-key`, `api-key` or `cookie` has to hold a reference, since a literal would be echoed into the chat transcript and stored in the monitor's spec as plaintext rather than sealed. See [How creation is guarded](mcp.md#how-creation-is-guarded).
 
 ## Managing variables over the API
 

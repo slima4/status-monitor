@@ -17,8 +17,9 @@ use crate::mcp::auth::McpAuth;
 use crate::mcp::confirm::require_confirmation;
 use crate::mcp::error::{McpToolError, codes, config_error, probe_dispatch_error};
 use crate::mcp::schema::{
-    CheckRunResult, CreateMonitorArgs, MonitorCreated, MonitorIdArg, MonitorStateResult,
-    MonitorUpdateResult, ProbeOutcome, UpdateMonitorArgs,
+    CheckRunResult, CreateMonitorArgs, CreateMonitorsArgs, MonitorCreateOutcome, MonitorCreated,
+    MonitorIdArg, MonitorStateResult, MonitorUpdateResult, MonitorsCreated, ProbeOutcome,
+    UpdateMonitorArgs,
 };
 
 use super::McpServer;
@@ -30,6 +31,56 @@ use super::text::{
     create_prompt_lines, field_label, present_error, sanitize_data, sanitize_prompt,
 };
 use super::view::{channel_names, check_diagnostic, check_timing};
+
+/// Past this a batch costs more probes than the per-minute budget allows, so it
+/// would spend them all and still fail whole.
+const MAX_BATCH: usize = 20;
+
+/// A validated, probed create waiting on the user's approval.
+struct PreparedCreate {
+    new: NewTarget,
+    plan: std::sync::Arc<crate::domain::Plan>,
+    regions: Vec<String>,
+    address: String,
+    probe: Option<(String, ProbeOutcome)>,
+    channel_summary: Option<String>,
+    /// The monitor carries tags, so a channel tag rule may still cover it.
+    tagged: bool,
+    reads_channels: bool,
+}
+
+impl PreparedCreate {
+    fn prompt(&self) -> String {
+        format!(
+            "Create monitor \"{}\"?\n\n{}\n{}",
+            sanitize_prompt(&self.new.name),
+            sanitize_prompt(&self.address),
+            create_prompt_lines(
+                &self.new,
+                &self.regions,
+                self.probe.as_ref().map(|(r, p)| (r.as_str(), p)),
+                self.channel_summary.as_deref(),
+            )
+            .join("\n"),
+        )
+    }
+
+    /// One line per monitor: a full settings block each would run to hundreds.
+    fn summary_line(&self) -> String {
+        let outcome = match &self.probe {
+            Some((_, p)) => match p.http_status {
+                Some(code) => format!("{} ({code}, {}ms)", p.state, p.duration_ms),
+                None => format!("{} ({}ms)", p.state, p.duration_ms),
+            },
+            None => "not probed".to_string(),
+        };
+        format!(
+            "{} — {} — {outcome}",
+            sanitize_prompt(&self.new.name),
+            sanitize_prompt(&self.address),
+        )
+    }
+}
 
 impl McpServer {
     /// `run_check_now` body (no audit — the wrapper's `finish` records it).
@@ -134,13 +185,27 @@ impl McpServer {
         auth: &McpAuth,
         args: &CreateMonitorArgs,
     ) -> Result<Json<MonitorCreated>, McpToolError> {
-        use crate::api::handlers::targets as rest;
-
         auth.require(Scope::TargetsWrite)?;
         // The trial run is a real probe against a caller-supplied address, so
         // this needs the scope that dispatching a probe needs, and it is metered
         // against the same probe budget the REST dry run spends.
         auth.require(Scope::TargetsExecute)?;
+
+        let prepared = self.prepare_create(ctx, auth, args).await?;
+        require_confirmation(ctx, prepared.prompt()).await?;
+        self.persist_create(auth, prepared).await
+    }
+
+    /// Everything up to asking the user, so a batch can spend one confirmation
+    /// on many monitors instead of one each.
+    async fn prepare_create(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        auth: &McpAuth,
+        args: &CreateMonitorArgs,
+    ) -> Result<PreparedCreate, McpToolError> {
+        use crate::api::handlers::targets as rest;
+
         self.enforce_rate_limit(auth.org, RateLimitCategory::ApiWrites)
             .await?;
         self.enforce_rate_limit(auth.org, RateLimitCategory::TestNow)
@@ -266,22 +331,36 @@ impl McpServer {
             Some(self.trial_run(auth.org, &new.check, &regions).await?)
         };
 
-        require_confirmation(
-            ctx,
-            format!(
-                "Create monitor \"{}\"?\n\n{}\n{}",
-                sanitize_prompt(&new.name),
-                sanitize_prompt(&address),
-                create_prompt_lines(
-                    &new,
-                    &regions,
-                    probe.as_ref().map(|(r, p)| (r.as_str(), p)),
-                    channel_summary.as_deref(),
-                )
-                .join("\n"),
-            ),
-        )
-        .await?;
+        Ok(PreparedCreate {
+            new,
+            plan,
+            regions,
+            address,
+            probe,
+            channel_summary,
+            tagged: !tags.is_empty(),
+            reads_channels,
+        })
+    }
+
+    /// Runs only once the user has approved the prepared create.
+    async fn persist_create(
+        &self,
+        auth: &McpAuth,
+        prepared: PreparedCreate,
+    ) -> Result<Json<MonitorCreated>, McpToolError> {
+        use crate::api::handlers::targets as rest;
+
+        let PreparedCreate {
+            new,
+            plan,
+            regions,
+            address,
+            probe,
+            channel_summary,
+            tagged,
+            reads_channels,
+        } = prepared;
 
         let created = rest::create_target(
             &self.state,
@@ -308,12 +387,127 @@ impl McpServer {
             alerts: match &channel_summary {
                 Some(s) => s.clone(),
                 // Unread inventory would call a tag-covered monitor unmonitored.
-                None if !tags.is_empty() && !reads_channels => {
+                None if tagged && !reads_channels => {
                     "unknown: a channel tag rule may cover it".to_string()
                 }
                 None => "nobody".to_string(),
             },
         }))
+    }
+
+    /// `create_monitors` body: many monitors, one confirmation. Every item is
+    /// probed first, and one that cannot be prepared is reported without
+    /// discarding the rest.
+    pub(super) async fn create_monitors_inner(
+        &self,
+        ctx: &RequestContext<RoleServer>,
+        auth: &McpAuth,
+        args: &CreateMonitorsArgs,
+    ) -> Result<Json<MonitorsCreated>, McpToolError> {
+        auth.require(Scope::TargetsWrite)?;
+        auth.require(Scope::TargetsExecute)?;
+
+        if args.monitors.is_empty() {
+            return Err(McpToolError::invalid_argument(
+                "pass at least one monitor to create",
+            ));
+        }
+        // Each item spends a real probe before anything is confirmed, so an
+        // oversized batch would burn the probe budget and then fail whole.
+        if args.monitors.len() > MAX_BATCH {
+            return Err(McpToolError::invalid_argument(format!(
+                "at most {MAX_BATCH} monitors per call; split the rest into another call"
+            )));
+        }
+
+        let mut slots: Vec<Result<PreparedCreate, MonitorCreateOutcome>> =
+            Vec::with_capacity(args.monitors.len());
+        for item in &args.monitors {
+            match self.prepare_create(ctx, auth, item).await {
+                Ok(p) => slots.push(Ok(p)),
+                Err(e) if e.is_fatal_to_batch() => return Err(e),
+                Err(e) => slots.push(Err(MonitorCreateOutcome {
+                    name: sanitize_data(item.name.trim()),
+                    id: None,
+                    address: None,
+                    probe: None,
+                    error: Some(e.message.clone()),
+                })),
+            }
+        }
+        let prepared: Vec<&PreparedCreate> = slots.iter().filter_map(|s| s.as_ref().ok()).collect();
+        if prepared.is_empty() {
+            return Err(McpToolError::invalid_argument(format!(
+                "none of the {} monitors could be prepared: {}",
+                slots.len(),
+                slots
+                    .iter()
+                    .filter_map(|s| s.as_ref().err())
+                    .filter_map(|o| o.error.clone())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )));
+        }
+
+        let lines: Vec<String> = prepared
+            .iter()
+            .map(|p| PreparedCreate::summary_line(p))
+            .collect();
+        let count = prepared.len();
+        require_confirmation(
+            ctx,
+            format!("Create {count} monitors?\n\n{}", lines.join("\n")),
+        )
+        .await?;
+
+        let mut results = Vec::with_capacity(slots.len());
+        let mut created = 0usize;
+        for slot in slots {
+            let p = match slot {
+                Ok(p) => p,
+                Err(outcome) => {
+                    results.push(outcome);
+                    continue;
+                }
+            };
+            let name = sanitize_data(&p.new.name);
+            let address = sanitize_data(&p.address);
+            match self.persist_create(auth, p).await {
+                Ok(Json(m)) => {
+                    created += 1;
+                    results.push(MonitorCreateOutcome {
+                        name: m.name,
+                        id: Some(m.id),
+                        address: Some(m.address),
+                        probe: m.probe,
+                        error: None,
+                    });
+                }
+                Err(e) => results.push(MonitorCreateOutcome {
+                    name,
+                    id: None,
+                    address: Some(address),
+                    probe: None,
+                    error: Some(e.message.clone()),
+                }),
+            }
+        }
+
+        if created == 0 {
+            // Nothing exists that did not before, so the audit row must not say
+            // success; the per-item reasons ride along in the message.
+            return Err(McpToolError::invalid_argument(format!(
+                "none of the {} monitors could be created: {}",
+                results.len(),
+                results
+                    .iter()
+                    .filter_map(|o| o.error.clone())
+                    .collect::<Vec<_>>()
+                    .join("; ")
+            )));
+        }
+
+        Ok(Json(MonitorsCreated { created, results }))
     }
 
     /// The org's channel inventory, read once so every diff and prompt names
