@@ -238,7 +238,7 @@ async fn magic_link_disabled_fails_boot() {
 
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn seeded_org_lands_on_pro_without_configuration() {
+async fn seeded_org_lands_on_team_without_configuration() {
     let Some((pool, name)) = fresh_pool().await else {
         return;
     };
@@ -253,7 +253,7 @@ async fn seeded_org_lands_on_pro_without_configuration() {
     .await
     .unwrap();
     assert_eq!(
-        plan, "pro",
+        plan, "team",
         "self-hosted install stayed on the shared-platform plan"
     );
     common::drop_test_db(&name).await;
@@ -330,7 +330,7 @@ async fn an_already_claimed_org_is_never_moved_by_a_later_default() {
 /// Guards the join the app actually reads, not just the column the seed wrote.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL"]
-async fn seeded_org_gets_pro_limits_through_the_quota_service() {
+async fn seeded_org_gets_team_limits_through_the_quota_service() {
     let Some((pool, name)) = fresh_pool().await else {
         return;
     };
@@ -343,7 +343,7 @@ async fn seeded_org_gets_pro_limits_through_the_quota_service() {
         .await
         .expect("effective plan");
 
-    assert_eq!(plan.id, "pro");
+    assert_eq!(plan.id, "team");
     assert_eq!(plan.max_targets, 150);
     assert_eq!(plan.min_check_interval_secs, 30);
     common::drop_test_db(&name).await;
@@ -416,7 +416,7 @@ async fn the_operator_cli_does_not_apply_the_seeding_default() {
 
     let mut cfg = cfg_with("");
     cfg.storage.postgres.url = db.clone();
-    assert_eq!(cfg.quotas.default_plan, "pro", "guard the premise");
+    assert_eq!(cfg.quotas.default_plan, "team", "guard the premise");
 
     uptimepage::bootstrap::run_owner(
         &cfg,

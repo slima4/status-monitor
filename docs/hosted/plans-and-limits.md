@@ -1,6 +1,6 @@
 # Plans and limits
 
-This page covers the hosted service at `uptimepage.dev`. A self-hosted instance has no plan limits at all: it ships with the same code, and you edit the `plans` row yourself. See [Quotas and rate limits](../quotas.md) for the mechanism both modes share.
+This page covers the hosted service at `uptimepage.dev`. Nothing here binds a self-hosted instance: it ships with the same code, an unattended first run seeds its owner onto the largest plan, and a `plan_overrides` row raises any limit you want either way. See [Quotas and rate limits](../quotas.md) for the mechanism both modes share.
 
 ## The plans
 
@@ -17,7 +17,7 @@ Prices, monitor counts, check intervals, history windows, seats, and status-page
 
 Your plan sits on your account. Every limit on it is a total across all of the organizations you own: 50 monitors on Founding means 50 in all, whether they live in one organization or three. Organizations are workspaces for separating environments, clients or teams, and splitting your monitors across more of them never adds capacity.
 
-How many you may open is itself a plan limit: one on Standard, three on Founding, five on Pro. Deleting an organization frees its slot after it leaves the recovery window, and restoring one is refused if you have filled the slot in the meantime.
+How many you may open is itself a plan limit: one on Standard, three on Founding, five on Pro, ten on Team. Deleting an organization frees its slot after it leaves the recovery window, and restoring one is refused if you have filled the slot in the meantime.
 
 Being invited into somebody else's organization is separate. You get access to their workspace, and their limits apply there. Nothing you own is added to theirs, and nothing of theirs is added to yours. A person who belongs to several of your organizations takes one seat, not one per organization.
 
@@ -25,10 +25,10 @@ Browser flow monitors are counted separately from everything else, because each 
 
 | Plan | Flow monitors |
 |---|---|
-| Standard | 1 |
-| Founding | 3 |
-| Pro | 5 |
-| Team | 15 |
+| Standard | 0 |
+| Founding | 1 |
+| Pro | 3 |
+| Team | 10 |
 
 They still count toward your monitor total, and they run no faster than every five minutes. Creating one past the cap returns `422 QUOTA_EXCEEDED` naming `max_flow_checks`. See [Flow](../monitor-types.md#flow) for what one can and cannot do.
 
@@ -41,6 +41,8 @@ Resource quotas (monitors, seats, status pages, channels, tokens) are enforced a
 Request budgets are per minute, per account and per user, split into reads, writes, bulk operations, test runs, and check-now. Crossing one returns `429` with a `Retry-After` header. Checks themselves are never rate limited: the scheduler does not pass through that middleware, so a busy API does not slow your monitoring.
 
 Two limits behave slightly differently. Pending invitations return `409 INVITATIONS_LIMIT`. A check interval below your plan floor returns `422 MIN_CHECK_INTERVAL`, and the floor is the higher of your plan's interval and the minimum for that monitor kind (twelve hours for domain expiry, an hour for TLS, five minutes for flow, a minute for heartbeat, ten seconds for the rest).
+
+If your plan changes, the floor applies to monitors you already have, not only to the next one you create. A monitor set faster than your new floor is checked at the floor instead. We do not edit your monitor to do it: the interval you chose stays on it, so moving back up restores the old rate with nothing for you to redo. Text-message alerts work the same way. A plan without them refuses a new SMS channel with `403 SMS_ALERTS_DISABLED`, and one you already have keeps sending.
 
 ## Seeing where you stand
 

@@ -16,7 +16,7 @@ There are three layers, and a chart reads whichever one covers the range you ask
 
 The raw window is stamped on each row when it is written, from your plan. That means a plan change applies to data written after it, and nothing already stored is retroactively shortened or extended.
 
-Your plan's history window is what the operator UI and API will show you, and it sits on top of these layers. Standard shows 30 days, Founding shows 90 days, and Pro goes to 13 months; the [pricing page](https://uptimepage.dev/pricing) carries the current figure per plan. The hourly rollup is what makes the longer windows cheap: a year of history is hours, not hundreds of millions of raw rows.
+Your plan's history window is what the operator UI and API will show you, and it sits on top of these layers. Standard shows 30 days, Founding and Pro show 90 days, and Team goes to 13 months; the [pricing page](https://uptimepage.dev/pricing) carries the current figure per plan. The hourly rollup is what makes the longer windows cheap: a year of history is hours, not hundreds of millions of raw rows.
 
 The public status page is separate: its per-component history strip always covers 90 days on every plan, painted from confirmed incident windows and the hourly rollup, not from your plan's history window.
 

@@ -2,13 +2,13 @@ use super::runtime::default_user_agent;
 use super::*;
 use config::FileFormat;
 
-/// Self-hosters get the roomier plan without configuring anything, so the
+/// Self-hosters get the roomiest plan without configuring anything, so the
 /// default is the whole feature; a revert to `free` would be silent.
 #[test]
-fn boot_seeding_defaults_to_pro() {
+fn boot_seeding_defaults_to_the_largest_plan() {
     // The `Default` impl, not the merged config: a stray
     // UPTIMEPAGE_QUOTAS__DEFAULT_PLAN in the shell would answer for it.
-    assert_eq!(QuotasConfig::default().default_plan, "pro");
+    assert_eq!(QuotasConfig::default().default_plan, "team");
 }
 
 /// An override naming one quota key must not blank the others.

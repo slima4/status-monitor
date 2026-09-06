@@ -596,8 +596,8 @@ impl AppState {
         outbound_http: OutboundHttpClient,
         email_sender: Arc<dyn EmailSender>,
         cipher: Option<Arc<crate::security::Cipher>>,
+        quotas: Arc<QuotaService>,
     ) -> Self {
-        let quotas = Arc::new(QuotaService::new(&cfg, db.clone()));
         let monitor_share_store: Arc<dyn crate::storage::MonitorShareStore> = match db.clone() {
             Some(pool) => Arc::new(crate::storage::PgMonitorShareStore::new(
                 pool,

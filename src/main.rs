@@ -27,6 +27,7 @@ use uptimepage::{
         AggregatorConfig, IncidentWriter, IncidentWriterConfig, OrgAggregator, OrgPublicSource,
         PageCache, PgIncidentStore, PublicSource,
     },
+    quotas,
     scheduler::{Scheduler, TargetRegistry},
     storage::{
         self, ClickhouseFlowRunSink, ClickhouseHeartbeatPingSink, ClickhouseResultSink,
@@ -315,6 +316,9 @@ async fn main() -> Result<()> {
         .with_flow_engine(flow_engine)
         .with_flow_runs(Some(flow_run_sink)),
     );
+    // Shared with AppState: a second instance would hold its own plan cache.
+    let quotas = Arc::new(quotas::QuotaService::new(&cfg, Some(pg_pool.clone())));
+
     // With in-process probing disabled the scheduler still runs, fed only the
     // passive heartbeat set (agents can't evaluate that state). Both sources
     // reconcile the anchor cache on every refresh before dispatching.
@@ -331,6 +335,10 @@ async fn main() -> Result<()> {
             pool.heartbeat_runtime(),
         ))
     };
+    // Only the local source: a remote agent is governed when its pull is answered.
+    let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> = Arc::new(
+        quotas::PlanGoverned::new(scheduler_source, Arc::clone(&quotas)),
+    );
     let registry = Arc::new(TargetRegistry::new(scheduler_source));
 
     let batcher_cfg = BatcherConfig {
@@ -400,10 +408,15 @@ async fn main() -> Result<()> {
     ));
 
     let pg_pool_for_stores = pg_pool.clone();
-    let admin_repo_for_writer = Arc::new(AdminRepo::new(
-        pg_pool_for_stores.clone(),
-        cipher.clone(),
-        "incident_writer",
+    // Governed like the scheduler: the writer sizes its lookback from the
+    // interval, so it must see the rate the monitor actually runs at.
+    let admin_repo_for_writer = Arc::new(quotas::PlanGoverned::new(
+        Arc::new(AdminRepo::new(
+            pg_pool_for_stores.clone(),
+            cipher.clone(),
+            "incident_writer",
+        )),
+        Arc::clone(&quotas),
     ));
     let writer = IncidentWriter::new(
         admin_repo_for_writer,
@@ -761,6 +774,7 @@ async fn main() -> Result<()> {
         outbound_http,
         email_sender,
         cipher,
+        quotas,
     );
     let state = state
         .with_flow_run_sink(flow_run_sink_for_state)

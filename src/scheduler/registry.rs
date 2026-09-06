@@ -92,7 +92,12 @@ impl TargetRegistry {
             let st = ScheduledTarget::build(org_id, target);
             match self.targets.get(&id) {
                 Some(existing) => {
-                    if existing.target.updated_at != st.target.updated_at {
+                    // The plan floor is applied to the handed-out copy and
+                    // writes nothing back, so a tier change moves the interval
+                    // while `updated_at` stands still.
+                    if existing.target.updated_at != st.target.updated_at
+                        || existing.target.interval != st.target.interval
+                    {
                         drop(existing);
                         self.targets.insert(id, st.clone());
                         diff.updated.push(st);
@@ -116,5 +121,117 @@ impl TargetRegistry {
         diff.removed = removed;
 
         Ok(diff)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+    use std::time::Duration as StdDuration;
+
+    use async_trait::async_trait;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    use super::*;
+    use crate::domain::{
+        CheckSpec, ExpectedStatus, HttpCheck, HttpMethod, OrgId, Target, TargetAlerts, WriteSource,
+    };
+
+    /// Hands out whatever interval the test last set, on an unchanging row.
+    struct FixedSource {
+        target: Mutex<Target>,
+    }
+
+    #[async_trait]
+    impl EnabledTargetSource for FixedSource {
+        async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
+            Ok(vec![(
+                OrgId(Uuid::nil()),
+                self.target.lock().expect("lock").clone(),
+            )])
+        }
+    }
+
+    fn a_target(interval: StdDuration) -> Target {
+        Target {
+            id: Uuid::now_v7(),
+            name: "api".into(),
+            check: CheckSpec::Http(HttpCheck {
+                url: url::Url::parse("https://example.com/").expect("url"),
+                method: HttpMethod::Get,
+                timeout: StdDuration::from_secs(5),
+                follow_redirects: false,
+                max_redirects: 0,
+                expected_status: ExpectedStatus::Exact(200),
+                expected_body_contains: None,
+                headers: HashMap::new(),
+                body: None,
+                verify_tls: true,
+                basic_auth: None,
+                bearer_token: None,
+            }),
+            interval,
+            enabled: true,
+            tags: vec![],
+            alerts: TargetAlerts(vec![]),
+            alert_confirmations: 1,
+            notify_recovery: true,
+            renotify_interval_secs: 3600,
+            region_policy: Default::default(),
+            group_name: None,
+            owner_user_id: None,
+            write_source: WriteSource::Ui,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_clamped_interval_reaches_a_monitor_already_resident() {
+        // The plan floor is applied to the handed-out copy and writes nothing
+        // back, so a downgrade moves the interval on a row whose `updated_at`
+        // never changes. Keying the diff on `updated_at` alone dropped it and
+        // the monitor kept its old rate until the process restarted.
+        let target = a_target(StdDuration::from_secs(30));
+        let id = target.id;
+        let source = Arc::new(FixedSource {
+            target: Mutex::new(target),
+        });
+        let registry = TargetRegistry::new(source.clone());
+
+        let first = registry.refresh().await.expect("first refresh");
+        assert_eq!(first.added.len(), 1);
+        assert_eq!(
+            registry.get(&id).expect("resident").target.interval,
+            StdDuration::from_secs(30)
+        );
+
+        source.target.lock().expect("lock").interval = StdDuration::from_secs(180);
+
+        let second = registry.refresh().await.expect("second refresh");
+        assert_eq!(
+            second.updated.len(),
+            1,
+            "a slowed monitor must be handed to the scheduler again"
+        );
+        assert_eq!(
+            registry.get(&id).expect("resident").target.interval,
+            StdDuration::from_secs(180)
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_monitor_is_not_rescheduled() {
+        let source = Arc::new(FixedSource {
+            target: Mutex::new(a_target(StdDuration::from_secs(30))),
+        });
+        let registry = TargetRegistry::new(source);
+
+        registry.refresh().await.expect("first refresh");
+        let second = registry.refresh().await.expect("second refresh");
+
+        assert!(second.is_empty(), "a steady set must produce no diff");
     }
 }

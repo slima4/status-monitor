@@ -46,6 +46,29 @@ pub struct TestNotificationResponse {
     pub delivered: bool,
 }
 
+/// Only where a plan is something the customer buys: a self-hosted operator
+/// owns the `plans` row and their own SMS credentials. `already_sms` keeps an
+/// existing channel editable, so a number can be corrected and a leaked token
+/// rotated on a plan that would no longer grant a new one.
+fn gate_sms(
+    state: &AppState,
+    config: &ChannelConfig,
+    plan: &crate::domain::Plan,
+    already_sms: bool,
+) -> Result<()> {
+    if state.cfg.marketing.enabled
+        && !already_sms
+        && matches!(config, ChannelConfig::Sms(_))
+        && !plan.sms_alerts_enabled
+    {
+        return Err(AppError::forbidden_code(
+            codes::SMS_ALERTS_DISABLED,
+            "text-message alerts are not available on your plan",
+        ));
+    }
+    Ok(())
+}
+
 #[utoipa::path(
     post,
     path = "/api/v1/notification-channels",
@@ -95,13 +118,9 @@ pub async fn create(
         .quotas
         .check_can_create_notification_channel(org, None)
         .await?;
-    let limit = i64::from(
-        state
-            .quotas
-            .limit_for_org(org)
-            .await?
-            .max_notification_channels,
-    );
+    let plan = state.quotas.limit_for_org(org).await?;
+    gate_sms(&state, &new.config, &plan, false)?;
+    let limit = i64::from(plan.max_notification_channels);
     let ch = state
         .notification_channel_store
         .create(org, new, source, limit, Some(user))
@@ -196,18 +215,22 @@ pub async fn update(
         reject_managed_kind(cfg)?;
         cfg.normalize();
         validate_config(cfg)?;
+        let stored = state.notification_channel_store.get(org, id).await?;
+        let plan = state.quotas.limit_for_org(org).await?;
+        // Gated only for a channel that is there: an unknown id is a 404, and
+        // answering 403 would tell a caller the plan before the lookup.
+        if let Some(held) = &stored {
+            let already_sms = matches!(held.config, ChannelConfig::Sms(_));
+            gate_sms(&state, cfg, &plan, already_sms)?;
+        }
         // A different address is a new destination and gets the full gate.
         let established = match &*cfg {
-            ChannelConfig::Email(new) => state
-                .notification_channel_store
-                .get(org, id)
-                .await?
-                .is_some_and(|c| match &c.config {
-                    ChannelConfig::Email(old) => {
-                        !c.awaiting_verification() && old.to.eq_ignore_ascii_case(&new.to)
-                    }
-                    _ => false,
-                }),
+            ChannelConfig::Email(new) => stored.is_some_and(|c| match &c.config {
+                ChannelConfig::Email(old) => {
+                    !c.awaiting_verification() && old.to.eq_ignore_ascii_case(&new.to)
+                }
+                _ => false,
+            }),
             _ => false,
         };
         check_channel_abuse(&state, org, cfg, established).await?;
@@ -395,6 +418,10 @@ pub async fn test_config(
     // Same cleaning a save would do, or a paste that saves fine fails its test.
     req.config.normalize();
     validate_config(&req.config)?;
+    // This body is a channel the caller has not saved yet, so it gets the gate
+    // create would apply. A channel already stored tests through `/{id}/test`.
+    let plan = state.quotas.limit_for_org(org).await?;
+    gate_sms(&state, &req.config, &plan, false)?;
     check_channel_abuse(&state, org, &req.config, false).await?;
     // An unsaved email config can never have proven its inbox — testing it
     // would mail an arbitrary caller-supplied address.

@@ -276,7 +276,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/targets \
   }'
 ```
 
-`interval` is in seconds and has to meet the plan minimum, which is 180 on the free plan the `bootstrap-owner` step above starts you on. Anything lower returns `422 MIN_CHECK_INTERVAL`. Seeding the owner at first boot instead (see [First-run owner](docs/configuration.md#first-run-owner)) places that org on `quotas.default_plan`, which defaults to `pro` and a 30-second floor. An org created later through signup lands on `founding` while that tier is open, where the floor is 60 seconds.
+`interval` is in seconds and has to meet the plan minimum, which is 180 on the free plan the `bootstrap-owner` step above starts you on. Anything lower returns `422 MIN_CHECK_INTERVAL`. Seeding the owner at first boot instead (see [First-run owner](docs/configuration.md#first-run-owner)) places that org on `quotas.default_plan`, which defaults to `team` and a 30-second floor. An org created later through signup lands on `founding` while that tier is open, where the floor is 60 seconds.
 
 Read uptime and scrape metrics:
 

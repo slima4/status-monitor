@@ -128,12 +128,12 @@ async fn region_pull_resolves_variables_and_etag_tracks_them() {
     assert_eq!(h.headers["x-api-key"], "sk-live");
 
     // A variable edit changes the etag so agents re-pull.
-    let etag1 = repo.region_pull_etag(region).await.unwrap();
+    let etag1 = repo.region_pull_etag(region, "").await.unwrap();
     store
         .update_value(OrgId(org), secret.id, "sk-rotated", None)
         .await
         .unwrap();
-    let etag2 = repo.region_pull_etag(region).await.unwrap();
+    let etag2 = repo.region_pull_etag(region, "").await.unwrap();
     assert_ne!(etag1, etag2, "variable edit must bump the region etag");
 
     // Re-pull serves the rotated secret.

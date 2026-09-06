@@ -24,6 +24,7 @@ use uptimepage::email::{EmailSender, build_email_sender};
 use uptimepage::http_client::{HttpClients, build_clients};
 use uptimepage::http_outbound::{OutboundHttpClient, build_outbound_client};
 use uptimepage::public_status::{NoopPublicSource, PublicSource, source::FeedLinks};
+use uptimepage::quotas::QuotaService;
 use uptimepage::storage::{
     DomainExpiryStateStore, InMemoryDomainExpiryStateStore, InMemoryIncidentNarrationStore,
     InMemoryMaintenanceStore, InMemoryNotificationChannelStore, InMemorySink,
@@ -207,6 +208,7 @@ pub fn build_test_app_with_seedable_incidents(
     let incident_narration_store: Arc<dyn IncidentNarrationStore> = narration.clone();
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
         Arc::new(InMemoryNotificationChannelStore::new());
+    let quotas = Arc::new(QuotaService::new(&cfg, None));
     let state = AppState::new(
         cfg,
         None,
@@ -223,6 +225,7 @@ pub fn build_test_app_with_seedable_incidents(
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
         None,
+        quotas,
     );
     let router = uptimepage::build_app_router_api_only(state, CancellationToken::new());
     // Auto-attach an owner session so operator routes resolve a CurrentOrg.
@@ -281,6 +284,7 @@ fn build_test_app_with_public_source_inner(
         Arc::new(InMemoryIncidentNarrationStore::new());
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
         Arc::new(InMemoryNotificationChannelStore::new());
+    let quotas = Arc::new(QuotaService::new(&cfg, None));
     let state = AppState::new(
         cfg,
         None,
@@ -297,6 +301,7 @@ fn build_test_app_with_public_source_inner(
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
         None,
+        quotas,
     );
     if with_web {
         uptimepage::build_app_router(state, CancellationToken::new())
@@ -447,6 +452,7 @@ pub async fn build_test_app_with_pg_state(
         Arc::new(InMemoryIncidentNarrationStore::new());
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
         Arc::new(InMemoryNotificationChannelStore::new());
+    let quotas = Arc::new(QuotaService::new(&cfg, Some(pool.clone())));
     let state = AppState::new(
         cfg,
         Some(pool),
@@ -463,6 +469,7 @@ pub async fn build_test_app_with_pg_state(
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
         None,
+        quotas,
     );
     let app = uptimepage::build_app_router(state.clone(), CancellationToken::new());
     (app, provisioned_org, state)
@@ -584,6 +591,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
         Arc::new(PgNotificationChannelStore::new(pool.clone(), None));
     let status_page_store = Arc::new(PgStatusPageStore::new(pool.clone()));
+    let quotas = Arc::new(QuotaService::new(&cfg, Some(pool.clone())));
     let state = AppState::new(
         cfg,
         Some(pool),
@@ -600,6 +608,7 @@ fn assemble_pg_router(pool: PgPool, cfg: AppConfig) -> Router {
         build_test_outbound_and_email().0,
         build_test_outbound_and_email().1,
         None,
+        quotas,
     );
     uptimepage::build_app_router(state, CancellationToken::new())
 }
@@ -728,6 +737,7 @@ pub fn build_test_app_state_with_email(
         Arc::new(InMemoryIncidentNarrationStore::new());
     let notification_channel_store: Arc<dyn NotificationChannelStore> =
         Arc::new(InMemoryNotificationChannelStore::new());
+    let quotas = Arc::new(QuotaService::new(&cfg, None));
     AppState::new(
         cfg,
         None,
@@ -744,6 +754,7 @@ pub fn build_test_app_state_with_email(
         build_test_outbound_and_email().0,
         email_sender,
         None,
+        quotas,
     )
 }
 

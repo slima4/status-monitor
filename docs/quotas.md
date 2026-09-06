@@ -16,48 +16,49 @@ grace window (their monitoring is paused), which is why restoring one re-checks
 
 ## The seeded plans
 
-Three plans ship seeded: `free`, `founding` (a more generous
-free tier granted to early accounts and kept for life), and `pro`. Only
-`free` is listed; the other two are assigned by signup or billing. On the
-hosted service `free` is sold as **Standard**, `founding` as **Founding**, and
-`pro` as **Pro**; see the [pricing page](https://uptimepage.dev/pricing).
+Four plans ship seeded: `free`, `founding` (a more generous
+free tier granted to early accounts and kept for life), `pro`, and `team`. Only
+`free` is listed; the others are assigned by signup, by billing, or by the
+self-host boot seed. On the hosted service `free` is sold as **Standard** and
+the rest carry their own names; see the
+[pricing page](https://uptimepage.dev/pricing).
 
-| Quota | free | founding | pro | Meaning |
-|---|---|---|---|---|
-| `max_orgs` | 1 | 3 | 5 | Organizations the account may hold. They share every other quota on this table |
-| `max_targets` | 20 | 50 | 150 | Monitored targets across the account's orgs |
-| `min_check_interval_secs` | 180 | 60 | 30 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 43200 for `domain_expiry`, 3600 for `tls_cert`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `dns` / `ping`. |
-| `retention_days` | 30 | 90 | 395 | History window the UI and API will read |
-| `raw_days` | 30 | 30 | 30 | Per-check detail retention, stamped onto each ClickHouse row at write time |
-| `evidence_days` | 7 | 7 | 7 | How long a failed browser-flow run keeps the page it captured. Clamped to `raw_days`, since the run it explains goes then |
-| `max_flow_steps` | 30 | 30 | 30 | Steps one flow monitor may declare. Clamped to the engine ceiling of 30, so a larger value has no effect |
-| `max_flow_checks` | 0 | 0 | 0 | Browser flow monitors the org can create; 0 doubles as the feature gate, so a create returns `403 FLOW_CHECKS_DISABLED` rather than a quota error. Seeded at 0 because a flow also needs `flow.enabled` on the process that runs it; raise it on the plan row to switch flow on. The hosted service sets its own values, listed on [Plans and limits](hosted/plans-and-limits.md) |
-| `max_regions` | 3 | ∞ | ∞ | Regions a single monitor can be assigned to |
-| `max_members` | 3 | 5 | 15 | Distinct people across the account's orgs — one person in two orgs holds one seat |
-| `max_pending_invitations` | 10 | 15 | 25 | Outstanding (unaccepted) invitations |
-| `max_api_tokens_per_user` | 5 | 7 | 10 | API tokens a single user may hold |
-| `max_status_pages` | 1 | 2 | 5 | Public status pages across the account's orgs |
-| `max_public_components` | 15 | 30 | 75 | Distinct monitors published across all of the account's pages (a monitor on several pages counts once) |
-| `max_share_links_per_monitor` | 1 | 3 | 5 | Live share links on one monitor |
-| `max_shared_monitors` | 2 | 5 | 10 | Monitors with at least one share link |
-| `max_maintenance_windows` | 20 | 30 | 50 | Scheduled maintenance windows |
-| `max_notification_channels` | 20 | 30 | 50 | Notification channels (Slack/webhook/Telegram/WhatsApp/SMS/…) across the account's orgs |
-| `max_escalation_policies` | 10 | 10 | 50 | Escalation policies |
-| `max_on_call_schedules` | 5 | 5 | 25 | On-call schedules |
-| `max_logo_size_bytes` | 1048576 | 1048576 | 1048576 | Status-page logo upload ceiling (1 MiB) |
+| Quota | free | founding | pro | team | Meaning |
+|---|---|---|---|---|---|
+| `max_orgs` | 1 | 3 | 5 | 10 | Organizations the account may hold. They share every other quota on this table |
+| `max_targets` | 20 | 50 | 50 | 150 | Monitored targets across the account's orgs |
+| `min_check_interval_secs` | 180 | 60 | 60 | 30 | Plan-side floor on a target's check interval. The effective floor is `max(this, kind_min)` — `kind_min` is 43200 for `domain_expiry`, 3600 for `tls_cert`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `dns` / `ping`. |
+| `retention_days` | 30 | 90 | 90 | 395 | History window the UI and API will read |
+| `raw_days` | 30 | 30 | 30 | 30 | Per-check detail retention, stamped onto each ClickHouse row at write time |
+| `evidence_days` | 7 | 7 | 7 | 7 | How long a failed browser-flow run keeps the page it captured. Clamped to `raw_days`, since the run it explains goes then |
+| `max_flow_steps` | 30 | 30 | 30 | 30 | Steps one flow monitor may declare. Clamped to the engine ceiling of 30, so a larger value has no effect |
+| `max_flow_checks` | 0 | 1 | 3 | 10 | Browser flow monitors the org can create; 0 doubles as the feature gate, so a create returns `403 FLOW_CHECKS_DISABLED` rather than a quota error. A flow also needs `flow.enabled` on the process that runs it, so a cap alone does not switch it on |
+| `max_regions` | 3 | ∞ | ∞ | ∞ | Regions a single monitor can be assigned to |
+| `max_members` | 3 | 5 | 5 | 15 | Distinct people across the account's orgs — one person in two orgs holds one seat |
+| `max_pending_invitations` | 10 | 15 | 15 | 25 | Outstanding (unaccepted) invitations |
+| `max_api_tokens_per_user` | 5 | 7 | 7 | 10 | API tokens a single user may hold |
+| `max_status_pages` | 1 | 2 | 2 | 5 | Public status pages across the account's orgs |
+| `max_public_components` | 15 | 30 | 30 | 75 | Distinct monitors published across all of the account's pages (a monitor on several pages counts once) |
+| `max_share_links_per_monitor` | 1 | 3 | 3 | 5 | Live share links on one monitor |
+| `max_shared_monitors` | 2 | 5 | 5 | 10 | Monitors with at least one share link |
+| `max_maintenance_windows` | 20 | 30 | 30 | 50 | Scheduled maintenance windows |
+| `max_notification_channels` | 20 | 30 | 30 | 50 | Notification channels (Slack/webhook/Telegram/WhatsApp/SMS/…) across the account's orgs |
+| `max_escalation_policies` | 0 | 0 | 0 | 50 | Escalation policies. On-call and escalation are a `team` feature |
+| `max_on_call_schedules` | 0 | 0 | 0 | 25 | On-call schedules |
+| `max_logo_size_bytes` | 1048576 | 1048576 | 1048576 | 1048576 | Status-page logo upload ceiling (1 MiB) |
 
 Feature flags ride on the same row: `custom_domain_enabled`, `white_label_enabled`,
 `sms_alerts_enabled`, `incident_narration_enabled`, `on_call_enabled`.
 `white_label_enabled` is what makes the status-page "powered by" toggle real:
 on a plan without it the badge always renders, whatever the page setting says.
 
-| Rate budget (per minute) | free | founding | pro | Category |
-|---|---|---|---|---|
-| `api_writes_per_minute` | 600 | 900 | 1200 | POST/PATCH/DELETE on `/api/v1/*` |
-| `api_reads_per_minute` | 6000 | 9000 | 12000 | GET/HEAD/OPTIONS on `/api/v1/*` |
-| `bulk_ops_per_minute` | 30 | 45 | 60 | `/api/v1/targets/bulk*` |
-| `test_now_per_minute` | 60 | 90 | 120 | `POST /api/v1/targets/test` + the notification-channel test endpoints |
-| `check_now_per_minute` | 60 | 90 | 120 | `POST /api/v1/targets/{id}/check-now` |
+| Rate budget (per minute) | free | founding | pro | team | Category |
+|---|---|---|---|---|---|
+| `api_writes_per_minute` | 600 | 900 | 1200 | 1800 | POST/PATCH/DELETE on `/api/v1/*` |
+| `api_reads_per_minute` | 6000 | 9000 | 12000 | 18000 | GET/HEAD/OPTIONS on `/api/v1/*` |
+| `bulk_ops_per_minute` | 30 | 45 | 60 | 90 | `/api/v1/targets/bulk*` |
+| `test_now_per_minute` | 60 | 90 | 120 | 180 | `POST /api/v1/targets/test` + the notification-channel test endpoints |
+| `check_now_per_minute` | 60 | 90 | 120 | 180 | `POST /api/v1/targets/{id}/check-now` |
 
 One category sits outside the plan: `support` (`POST /api/v1/support`, the
 in-app help form) is capped at a fixed 2 per minute on every tier. It spends the
@@ -119,6 +120,30 @@ the per-kind value (43200 for `domain_expiry`, 3600 for `tls_cert`, 300 for
 `flow`, 60 for `heartbeat`, 10 for the rest) applies regardless of plan tier —
 polling an expiry probe faster yields no signal, and `domain_expiry` reads
 RDAP, which rate-limits by source address.
+
+The write is not the last word. A plan can move under a monitor that already
+exists, and refusing the next edit would not slow a monitor already running
+three times faster than its tier allows. So the floor is applied again where
+work is handed out: the scheduler's own set and the answer an agent pulls are
+both clamped to `max(stored interval, plan floor)` on every refresh.
+
+The clamp never writes back. The row keeps the interval its owner asked for,
+so a plan that goes back up restores the original behaviour with nothing to
+repair, and the usage page keeps showing what was requested. A plan change is
+visible within `plan_cache_ttl_secs`; the agent pull's etag digests each org's
+plan, floor and override, so a tier change invalidates a cached pull that no
+target row has touched. If a plan lookup fails, those monitors run as stored
+and a warning is logged: one unreadable org must not stop everyone's
+monitoring.
+
+Feature flags are gated at the write, like the counted caps. Creating an SMS
+channel on a plan without `sms_alerts_enabled` returns **403
+`SMS_ALERTS_DISABLED`**, naming the feature rather than a limit of zero. The
+same answer comes back from a test send of an unsaved SMS config, which is the
+create path's rehearsal. A channel created before the plan moved keeps working:
+it still sends, it still tests through its own endpoint, and its config stays
+editable, so a number can be corrected and a leaked token rotated. Only a
+self-hosted install is exempt, where the `plans` row is the operator's own.
 
 ## Rate limiting
 
@@ -209,7 +234,7 @@ malformed YAML at startup is a clean *config error*, never a crash loop.
 [quotas]
 plan_cache_ttl_secs  = 300   # org→account→plan cache; a plans-table edit
 usage_cache_ttl_secs = 10    #   takes effect within this window
-default_plan         = "pro"   # plan the boot-seeded owner account is placed on
+default_plan         = "team"  # plan the boot-seeded owner account is placed on
 ```
 
 A plans-table change is invisible until the plan cache's TTL elapses (a
@@ -219,7 +244,7 @@ refetches.
 `free` is priced for a shared platform: its ceilings bound what one tenant
 can cost the host. On your own hardware there is no such cost, so a
 self-hosted install needs no setup here — `default_plan` already defaults to
-`pro`, giving the seeded owner account 150 monitors, five orgs to spend them
+`team`, giving the seeded owner account 150 monitors, ten orgs to spend them
 across, a 30s check floor and 13-month retention.
 
 Only boot-time seeding reads it, so it applies to the account behind the owner
@@ -235,10 +260,10 @@ anything, so a typo fails the boot with the name quoted and leaves nothing
 half-seeded behind.
 
 Quota *values* still live only in Postgres — `default_plan` chooses a plan,
-it does not override any number in one. Raise limits the way SaaS does: edit
-(or INSERT) the `plans` row the account is assigned to, or attach a
-`plan_overrides` row (keyed by account, `max_orgs` included) with the cap
-fields you want to raise, so the audit trail covers both modes.
+it does not override any number in one. Raise limits with a `plan_overrides`
+row (keyed by account, `max_orgs` included) naming the cap fields you want
+raised. Edit a shipped `plans` row only if you are prepared to reapply the
+change: the catalog owns those rows and an upgrade can rewrite them.
 
 Every numeric quota / rate / interval is validated at config load —
 `< 1` is rejected with the offending field named, never a panic in

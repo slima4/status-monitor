@@ -26,7 +26,7 @@ The placeholder slug a brand-new user's first org gets at signup takes the shape
 
 Every org belongs to an **account** (`organizations.account_id`), and the plan lives there (`accounts.plan_id`). One account per user today, opened at signup — or lazily, the first time a user who only ever joined someone else's org creates one of their own.
 
-The account is what a quota is counted against. Its orgs share one pool of monitors, status pages, seats, channels and every other cap; a second org is a workspace, not a second allowance. `plans.max_orgs` (free 1, founding 3, pro 5) bounds how many workspaces the pool is split across. The count runs under a per-account advisory lock so two concurrent creates cannot both win, and soft-deleted orgs do not count — which is why restoring one re-checks the cap. Invited memberships (role `member`) are unlimited and carry no capacity: a member brings access to the org they joined, never their own account's quota.
+The account is what a quota is counted against. Its orgs share one pool of monitors, status pages, seats, channels and every other cap; a second org is a workspace, not a second allowance. `plans.max_orgs` (free 1, founding 3, pro 5, team 10) bounds how many workspaces the pool is split across. The count runs under a per-account advisory lock so two concurrent creates cannot both win, and soft-deleted orgs do not count — which is why restoring one re-checks the cap. Invited memberships (role `member`) are unlimited and carry no capacity: a member brings access to the org they joined, never their own account's quota.
 
 An unexpired `plan_overrides` row (keyed by account) can raise `max_orgs` and the other caps for one customer; the writer and the usage view read the same folded number.
 

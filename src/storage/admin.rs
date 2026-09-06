@@ -182,6 +182,13 @@ struct OrgTargetRow {
     target: TargetRow,
 }
 
+type RegionPullEtagRow = (
+    i64,
+    Option<chrono::DateTime<chrono::Utc>>,
+    Option<String>,
+    Option<String>,
+);
+
 /// Single source for the cross-tenant target column list. Both the
 /// scheduler-snapshot and incident-writer-keyset queries return the same
 /// `targets` shape that [`decode_target_row`] consumes.
@@ -427,21 +434,37 @@ impl AdminRepo {
             .collect())
     }
 
+    /// Orgs with an enabled target in this region. The caller resolves their
+    /// plans through the quota service, which is what governs the pull.
+    pub async fn region_org_ids(&self, region: &str) -> Result<Vec<OrgId>> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT DISTINCT t.org_id FROM target_regions tr \
+             JOIN targets t ON t.id = tr.target_id \
+             JOIN organizations o ON o.id = t.org_id \
+             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL",
+        )
+        .bind(region)
+        .fetch_all(&self.pool)
+        .await
+        .context("admin: region org ids")?;
+        Ok(rows.into_iter().map(|(id,)| OrgId(id)).collect())
+    }
+
     /// Cheap config-pull validator for one region: a digest over the assigned
     /// targets' ids and a hash of each `check_spec`, plus count + max
     /// `updated_at`. The per-row `check_spec` hash means the etag changes on any
     /// content rewrite — including a credential re-encrypt (KEK rotation) that
     /// leaves `updated_at` untouched — so an agent never serves stale config off
     /// a `304`. Still no decrypt: it hashes the stored (encrypted) ciphertext.
-    pub async fn region_pull_etag(&self, region: &str) -> Result<String> {
+    ///
+    /// `plan_digest` is supplied by the caller so the etag and the interval
+    /// clamp are derived from one resolution of the plan, not two that can
+    /// disagree: a stale clamp behind a fresh etag latches once the agent
+    /// stores it and never re-pulls.
+    pub async fn region_pull_etag(&self, region: &str, plan_digest: &str) -> Result<String> {
         // The fourth column digests each region org's variables, so a variable
         // edit (which never touches targets.updated_at) still bumps the etag.
-        let row: (
-            i64,
-            Option<chrono::DateTime<chrono::Utc>>,
-            Option<String>,
-            Option<String>,
-        ) = sqlx::query_as(
+        let row: RegionPullEtagRow = sqlx::query_as(
             "SELECT count(*)::bigint, max(t.updated_at), \
                         md5(coalesce(string_agg(t.id::text || ':' || md5(t.check_spec::text), \
                                                 ',' ORDER BY t.id), '')), \
@@ -467,7 +490,7 @@ impl AdminRepo {
         let (count, max_updated, digest, var_digest) = row;
         let ts = max_updated.map(|d| d.timestamp_millis()).unwrap_or(0);
         Ok(format!(
-            "\"{count}-{ts}-{}-{}\"",
+            "\"{count}-{ts}-{}-{}-{plan_digest}\"",
             digest.unwrap_or_default(),
             var_digest.unwrap_or_default()
         ))

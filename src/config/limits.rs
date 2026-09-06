@@ -13,9 +13,9 @@ pub struct QuotasConfig {
     pub usage_cache_ttl_secs: u64,
     /// Plan the boot-seeded owner org lands on. Only the unattended first-run
     /// path reads it, so hosted is untouched: its orgs come from signup and keep
-    /// the schema's `free`. Defaults to `pro` because `free`'s ceilings bound
-    /// what one tenant costs a shared platform, which nobody pays for on their
-    /// own hardware.
+    /// the schema's `free`. Defaults to the largest plan because `free`'s
+    /// ceilings bound what one tenant costs a shared platform, which nobody pays
+    /// for on their own hardware.
     pub default_plan: String,
 }
 
@@ -24,7 +24,7 @@ impl Default for QuotasConfig {
         Self {
             plan_cache_ttl_secs: 300,
             usage_cache_ttl_secs: 10,
-            default_plan: "pro".to_string(),
+            default_plan: "team".to_string(),
         }
     }
 }

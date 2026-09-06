@@ -294,7 +294,9 @@ impl QuotaService {
             db,
             plan_cache: Cache::builder()
                 .time_to_live(plan_ttl)
-                .max_capacity(64)
+                // Below the org count the whole fleet thrashes, since a
+                // scheduler refresh touches every org in one pass.
+                .max_capacity(10_000)
                 .build(),
             usage_cache: Cache::builder()
                 .time_to_live(usage_ttl)
@@ -995,10 +997,10 @@ pub(crate) fn unlimited_plan() -> Plan {
         check_now_per_minute: i32::MAX,
         custom_domain_enabled: false,
         white_label_enabled: false,
-        sms_alerts_enabled: false,
+        sms_alerts_enabled: true,
         incident_narration_enabled: true,
         on_call_enabled: true,
-        // Matches the seed: flow stays off until the plan row raises the cap.
+        // A flow needs an engine behind it, so grant no cap the fixture cannot run.
         max_flow_checks: 0,
         max_flow_steps: 30,
         is_listed: false,

@@ -24,7 +24,7 @@ The slug is a public host on our domain, so it is the one field worth thinking a
 
 Creating an org makes you its owner and switches you into it. It starts empty.
 
-How many you can **own** at once is part of your plan: one on Standard, three on Founding, five on Pro. Being invited into someone else's never counts against that, so you can join as many as you like. Deleted orgs stop counting while they sit in the restore window, which also means a restore is refused if you filled the slot in the meantime.
+How many you can **own** at once is part of your plan: one on Standard, three on Founding, five on Pro, ten on Team. Being invited into someone else's never counts against that, so you can join as many as you like. Deleted orgs stop counting while they sit in the restore window, which also means a restore is refused if you filled the slot in the meantime.
 
 Remember that the organizations you own share one pool of monitors, seats, pages and channels. Creating a second one does not raise any of those numbers.
 

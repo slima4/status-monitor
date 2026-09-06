@@ -53,9 +53,17 @@ pub async fn pull_targets(
     let db = state.require_db()?.clone();
     let repo = AdminRepo::new(db.clone(), state.cipher.clone(), "agent_config_pull");
 
+    // Resolved before the etag and reused for the clamp below, so what the agent
+    // is told changed and what it is handed come from one reading of the plan.
+    let plans =
+        crate::quotas::effective::resolve_plans(&state.quotas, repo.region_org_ids(&region).await?)
+            .await;
+
     // Validate the cheap etag first so an unchanged poll returns 304 without
     // decrypting any credentials.
-    let etag = repo.region_pull_etag(&region).await?;
+    let etag = repo
+        .region_pull_etag(&region, &crate::quotas::effective::plan_digest(&plans))
+        .await?;
     if headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
@@ -75,9 +83,10 @@ pub async fn pull_targets(
         tracing::warn!(error = %err, "persisting agent flow_capable failed");
     }
 
-    let targets = repo
+    let mut targets = repo
         .list_enabled_targets_for_region(&region, flow_capable)
         .await?;
+    crate::quotas::effective::govern_with(&plans, &mut targets);
     let body = AgentTargetsResponse {
         region,
         targets: targets

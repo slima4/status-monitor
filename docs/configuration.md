@@ -82,7 +82,7 @@ The binary refuses to boot in the dangerous combinations: `subdomain_public_rout
 
 ### Org limits and the purge worker
 
-- How many orgs one account may hold comes from its plan's `max_orgs` column (free 1, founding 3, pro 5), counted under a per-account lock so concurrent creates can't exceed it. Soft-deleted orgs don't count.
+- How many orgs one account may hold comes from its plan's `max_orgs` column (free 1, founding 3, pro 5, team 10), counted under a per-account lock so concurrent creates can't exceed it. Soft-deleted orgs don't count.
 
 - `deletion_grace_period_days` (default `30`) is how long a soft-deleted org's slug is held and how long the original deleter has to restore it.
 - The soft-delete purge now runs inside the daily retention job (`src/jobs/retention.rs`) at a fixed 03:00 UTC, not on a configurable interval. Each run cascades up to 10 past-grace orgs, drains any pending entries from `clickhouse_purge_queue` (the outbox between PG cascade and ClickHouse `ALTER TABLE DELETE`), hard-purges past-grace users, then enforces the `[retention]` windows. See [Soft delete and the 30-day purge](multi-tenancy.md#soft-delete-and-the-30-day-purge) for the full implementation and failure-recovery guarantees.
