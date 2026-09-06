@@ -753,12 +753,13 @@ pub mod settings {
             Ok(o) => o,
             Err(resp) => return Ok(*resp),
         };
-        let u = state.quotas.org_usage(org).await?;
+        let u = state.quotas.account_usage(org).await?;
         let p = &u.plan;
         Ok(UsagePage {
             active_tab: TAB_USAGE,
             plan_name: p.name.clone(),
             bars: vec![
+                UsageBar::new("organisations", u.orgs, p.max_orgs),
                 UsageBar::new("targets", u.targets, p.max_targets),
                 UsageBar::new("members", u.members, p.max_members),
                 UsageBar::new(

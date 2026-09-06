@@ -113,7 +113,7 @@ fn secret_monitor() -> NewTarget {
 
 async fn seed_org(pool: &PgPool, prefix: &str) -> (OrgId, UserId) {
     let user = make_user(pool, prefix).await;
-    let org = create_org_with_owner(pool, user, &unique_slug(prefix), "svc", 3)
+    let org = create_org_with_owner(pool, user, &unique_slug(prefix), "svc")
         .await
         .expect("create org")
         .expect("org created")

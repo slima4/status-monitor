@@ -13,7 +13,7 @@ use uuid::Uuid;
 /// Seed an org + target + one incident; return (org, owner, incident id).
 async fn seed(pool: &PgPool, prefix: &str) -> (OrgId, uptimepage::domain::UserId, Uuid) {
     let user = make_user(pool, prefix).await;
-    let org = create_org_with_owner(pool, user, &unique_slug(prefix), "n", 3)
+    let org = create_org_with_owner(pool, user, &unique_slug(prefix), "n")
         .await
         .expect("create org")
         .expect("org created");
@@ -125,7 +125,7 @@ async fn upsert_publish_and_isolation_pg() {
 
     // Cross-tenant: another org can neither read nor attach a postmortem.
     let other_user = make_user(&pool, "pmx").await;
-    let other = create_org_with_owner(&pool, other_user, &unique_slug("pmx"), "n", 3)
+    let other = create_org_with_owner(&pool, other_user, &unique_slug("pmx"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -152,7 +152,7 @@ async fn upsert_unknown_incident_is_none_pg() {
         return;
     };
     let user = make_user(&pool, "pmnone").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("pmnone"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("pmnone"), "n")
         .await
         .unwrap()
         .unwrap();

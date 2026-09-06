@@ -1315,7 +1315,8 @@ pub struct ComponentUpdated {
     pub monitor_id: String,
 }
 
-/// `get_org_usage` result: usage against the org's plan limits.
+/// `get_org_usage` result: the account's usage against its plan limits, pooled
+/// across every org it owns.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct OrgUsage {
     /// The org slug this connector is bound to.

@@ -53,7 +53,7 @@ async fn kind_filter_and_counts_are_org_wide() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "k").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("k"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("k"), "Co")
         .await
         .unwrap()
         .unwrap();
@@ -126,11 +126,11 @@ async fn hosts_by_kind_reads_each_kinds_subject_and_stays_org_scoped() {
 
     let user_a = common::make_user(&pool, "h").await;
     let user_b = common::make_user(&pool, "h").await;
-    let org_a = create_org_with_owner(&pool, user_a, &common::unique_slug("ha"), "A", 10)
+    let org_a = create_org_with_owner(&pool, user_a, &common::unique_slug("ha"), "A")
         .await
         .unwrap()
         .unwrap();
-    let org_b = create_org_with_owner(&pool, user_b, &common::unique_slug("hb"), "B", 10)
+    let org_b = create_org_with_owner(&pool, user_b, &common::unique_slug("hb"), "B")
         .await
         .unwrap()
         .unwrap();
@@ -196,7 +196,7 @@ async fn region_filter_and_distinct_groups_are_org_wide() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "r").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("r"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("r"), "Co")
         .await
         .unwrap()
         .unwrap();
@@ -259,7 +259,7 @@ async fn an_update_can_decline_to_claim_authorship() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "ws").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("ws"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("ws"), "Co")
         .await
         .unwrap()
         .unwrap();
@@ -339,7 +339,7 @@ async fn a_bulk_tag_add_stops_at_the_cap_and_says_which_monitor_was_full() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "cap").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("cap"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("cap"), "Co")
         .await
         .unwrap()
         .unwrap();

@@ -157,7 +157,9 @@ async fn callback_rejects_state_minted_for_a_foreign_org() {
     let (app, _org) = member_app(&pool).await;
 
     let (foreign_org,): (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Foreign') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Foreign', a.id FROM a RETURNING id",
     )
     .bind(unique_slug("slackf"))
     .fetch_one(&pool)

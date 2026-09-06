@@ -126,7 +126,7 @@ async fn fk_cascade_leaves_no_orphans() {
         return;
     };
     let user = make_user(&pool, "purge-user").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("casc"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("casc"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -214,7 +214,7 @@ async fn audit_rows_survive_with_nulled_actor() {
         return;
     };
     let user = make_user(&pool, "purge-user").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("aud"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("aud"), "n")
         .await
         .unwrap()
         .unwrap();

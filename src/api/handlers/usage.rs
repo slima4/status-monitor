@@ -2,10 +2,13 @@
 //! `GET /api/v1/me/usage`.
 //!
 //! Read-only mirrors of the limits the enforcers act on — every number here
-//! comes from the same source the block path uses (the org's `plans` row via
-//! `QuotaService`, the owner-org cap from `tenancy.free_tier_owner_org_limit`,
-//! the per-user token cap from the plan) so "current/limit" can never disagree
-//! with where a request is actually rejected.
+//! comes from the same source the block path uses (the account's `plans` row
+//! via `QuotaService`, the per-user token cap from that plan) so
+//! "current/limit" can never disagree with where a request is actually
+//! rejected.
+//!
+//! The counts are the **account's**, pooled across every live org it owns, not
+//! the one org in the path: that is the pool the caps are enforced against.
 
 use axum::Json;
 use axum::extract::{Path, State};
@@ -43,8 +46,10 @@ pub struct PlanSummary {
     pub description: String,
 }
 
+/// Pooled counts for the account behind the org in the path.
 #[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct OrgQuotas {
+    pub max_orgs: QuotaUsage,
     pub max_targets: QuotaUsage,
     pub max_members: QuotaUsage,
     pub max_pending_invitations: QuotaUsage,
@@ -130,7 +135,7 @@ pub async fn get_org_usage(
         ));
     }
 
-    let u = state.quotas.org_usage(org).await?;
+    let u = state.quotas.account_usage(org).await?;
     let p = &u.plan;
     Ok(Json(OrgUsageResponse {
         plan: PlanSummary {
@@ -139,6 +144,7 @@ pub async fn get_org_usage(
             description: p.description.clone(),
         },
         quotas: OrgQuotas {
+            max_orgs: QuotaUsage::new(u.orgs, p.max_orgs),
             max_targets: QuotaUsage::new(u.targets, p.max_targets),
             max_members: QuotaUsage::new(u.members, p.max_members),
             max_pending_invitations: QuotaUsage::new(
@@ -185,7 +191,7 @@ pub async fn get_org_usage(
     get,
     path = "/api/v1/me/usage",
     tag = "orgs",
-    summary = "Per-user usage (API tokens, owned orgs)",
+    summary = "Per-user usage (API tokens) and the account's org count",
     responses(
         (status = 200, body = MeUsageResponse),
         (status = 401, body = ApiError),
@@ -198,7 +204,7 @@ pub async fn get_me_usage(
 ) -> Result<Json<MeUsageResponse>> {
     let pool = state.require_db()?;
     // Token cap is per-user but plan-scoped: resolve it from the caller's
-    // active org's plan so the reported "limit" matches the cap the
+    // active org's account plan so the reported "limit" matches the cap the
     // token-create enforcer would apply right now.
     let token_limit = state
         .quotas
@@ -206,17 +212,18 @@ pub async fn get_me_usage(
         .await?
         .max_api_tokens_per_user;
     let api_tokens = crate::auth::api_tokens::count_for_user(pool, user).await?;
-    // Owned-org cap has no `plans` column — it is a multitenancy limit. Read
-    // the *same* config value `create_org_with_owner` is enforced at so the
-    // reported limit and the enforced limit are one number.
-    let owned_orgs = crate::storage::orgs::owner_org_count(pool, user).await?;
-    let owned_limit = state.cfg.tenancy.free_tier_owner_org_limit;
+    // The caller's *own* account, never the active org's: a member acting
+    // inside someone else's org must not read that account's numbers back out
+    // of a `/me/` endpoint. Same pair `create_org_with_owner` enforces at, so
+    // the reported limit and the enforced limit are one number.
+    let (owned_orgs, owned_limit) =
+        crate::storage::accounts::org_allowance_for_user(pool, user).await?;
 
     Ok(Json(MeUsageResponse {
         api_tokens: QuotaUsage::new(i64::from(api_tokens), token_limit),
         owned_orgs: QuotaUsage {
-            current: i64::from(owned_orgs),
-            limit: i64::from(owned_limit),
+            current: owned_orgs,
+            limit: owned_limit,
         },
     }))
 }

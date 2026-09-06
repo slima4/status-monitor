@@ -16,18 +16,24 @@ use uuid::Uuid;
 
 async fn seed_two_orgs(pool: &PgPool) -> (Uuid, Uuid) {
     let suffix = Uuid::new_v4().simple().to_string();
-    let a: (Uuid,) =
-        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 'a') RETURNING id")
-            .bind(format!("orgtrig-a-{}", &suffix[..8]))
-            .fetch_one(pool)
-            .await
-            .unwrap();
-    let b: (Uuid,) =
-        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 'b') RETURNING id")
-            .bind(format!("orgtrig-b-{}", &suffix[..8]))
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let a: (Uuid,) = sqlx::query_as(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'a', a.id FROM a RETURNING id",
+    )
+    .bind(format!("orgtrig-a-{}", &suffix[..8]))
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let b: (Uuid,) = sqlx::query_as(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'b', a.id FROM a RETURNING id",
+    )
+    .bind(format!("orgtrig-b-{}", &suffix[..8]))
+    .fetch_one(pool)
+    .await
+    .unwrap();
     (a.0, b.0)
 }
 

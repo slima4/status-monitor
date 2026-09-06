@@ -46,7 +46,9 @@ fi
 echo "==> Postgres: lift the plan gate so six heartbeats fit"
 pg <<SQL
 UPDATE plans SET max_targets = GREATEST(max_targets, 60)
- WHERE id = (SELECT plan_id FROM organizations WHERE id = '${ORG}');
+ WHERE id = (SELECT a.plan_id FROM accounts a
+              JOIN organizations o ON o.account_id = a.id
+             WHERE o.id = '${ORG}');
 SQL
 
 # Read the previous run's ids before the delete takes them away, or its

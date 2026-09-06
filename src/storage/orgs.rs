@@ -10,12 +10,15 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::domain::quota::Plan;
 use crate::domain::{
     Membership, OrgId, Organization, PageRef, PublicOrgBranding, PublicStyle, Role, StatusPageId,
     UserId,
 };
 use crate::error::{AppError, Result};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key, signup_lock_key, user_lock_key};
+use crate::quotas::service::count_sql;
+use crate::storage::accounts;
+use crate::storage::locks::{account_lock_key, advisory_xact_lock, signup_lock_key, user_lock_key};
 
 /// Returns the id of the single live (non-soft-deleted) organisation, or
 /// `None` if zero or more than one exist. Used by the path-based public
@@ -99,39 +102,58 @@ pub async fn slug_is_available(pool: &PgPool, slug: &str) -> Result<bool> {
 }
 
 /// Atomic create: organisation row + `owner` membership for the caller, in one
-/// transaction. Enforces the per-user owner-org limit inside the same statement
-/// that inserts the membership row, so two concurrent creates cannot exceed the
-/// cap. The limit counts only **active** owner memberships — soft-deleted orgs
-/// during their grace period don't count, which matches what
-/// [`owner_org_count`] reports. Returns `Ok(None)` if any row holds the slug,
-/// a soft-deleted one included — otherwise restoring it later would collide.
+/// transaction, on the caller's account. The new org shares that account's
+/// plan and its single pool of caps — it buys a workspace, not capacity.
+///
+/// `plans.max_orgs` bounds how many the account may hold, counted under a
+/// per-account advisory lock so two concurrent creates cannot both pass.
+/// Soft-deleted orgs inside their grace period do not count (their monitoring
+/// is paused), which is why [`restore_org`] re-checks the same cap.
+///
+/// Returns `Ok(None)` if any row holds the slug, a soft-deleted one included —
+/// otherwise restoring it later would collide.
 pub async fn create_org_with_owner(
     pool: &PgPool,
     user: UserId,
     slug: &str,
     name: &str,
-    owner_limit: u32,
 ) -> Result<Option<Organization>> {
     let mut tx = pool.begin().await.context("create_org_with_owner: begin")?;
 
-    // Per-user advisory lock serialises concurrent owner-org creates for the
-    // same user. Without it the count-subquery + INSERT in the membership
-    // step races under READ COMMITTED — two transactions can both observe
-    // count < limit and both succeed, blowing past the cap. The lock is held
-    // for the duration of the transaction and released on commit/rollback.
-    advisory_xact_lock(&mut *tx, &user_lock_key(user))
+    // A user who only ever joined someone else's org has no account yet; their
+    // first own org opens one on the default plan.
+    let account = accounts::ensure_account_for_user(&mut tx, user, DEFAULT_PLAN).await?;
+    // Serialises concurrent creates on the same account. Without it the count
+    // below races under READ COMMITTED — two transactions both observe
+    // count < limit and both succeed, blowing past the cap. Held until commit.
+    advisory_xact_lock(&mut *tx, &account_lock_key(account))
         .await
         .context("create_org_with_owner: advisory lock")?;
 
+    let (owned, max_orgs): (i64, i32) = sqlx::query_as(ORG_ALLOWANCE_SQL)
+        .bind(account.0)
+        .fetch_one(&mut *tx)
+        .await
+        .context("create_org_with_owner: org count")?;
+    let limit = i64::from(max_orgs);
+    if owned >= limit {
+        tx.rollback().await.ok();
+        return Err(AppError::unprocessable(
+            crate::api::error::codes::OWNER_ORG_LIMIT,
+            format!("this account already holds the limit of {limit} organisations"),
+        ));
+    }
+
     let row: Option<OrgRow> = sqlx::query_as(
-        r#"INSERT INTO organizations (slug, name)
-           SELECT $1, $2
+        r#"INSERT INTO organizations (slug, name, account_id)
+           SELECT $1, $2, $3
            WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = $1)
            ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING
            RETURNING id, slug::text AS slug, name, created_at, updated_at, deleted_at"#,
     )
     .bind(slug)
     .bind(name)
+    .bind(account.0)
     .fetch_optional(&mut *tx)
     .await
     .context("create_org_with_owner: insert organization")?;
@@ -141,30 +163,12 @@ pub async fn create_org_with_owner(
         return Ok(None);
     };
 
-    let inserted: Option<(Uuid,)> = sqlx::query_as(
-        r#"INSERT INTO memberships (user_id, org_id, role)
-           SELECT $1, $2, 'owner'
-           WHERE (
-               SELECT count(*) FROM memberships m
-               JOIN organizations o ON o.id = m.org_id
-               WHERE m.user_id = $1 AND m.role = 'owner' AND o.deleted_at IS NULL
-           ) < $3
-           RETURNING org_id"#,
-    )
-    .bind(user.0)
-    .bind(org_row.id)
-    .bind(i64::from(owner_limit))
-    .fetch_optional(&mut *tx)
-    .await
-    .context("create_org_with_owner: insert membership")?;
-
-    if inserted.is_none() {
-        tx.rollback().await.ok();
-        return Err(AppError::unprocessable(
-            crate::api::error::codes::OWNER_ORG_LIMIT,
-            format!("user already owns the limit of {owner_limit} organizations"),
-        ));
-    }
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'owner')")
+        .bind(user.0)
+        .bind(org_row.id)
+        .execute(&mut *tx)
+        .await
+        .context("create_org_with_owner: insert membership")?;
 
     record_audit_tx(
         &mut tx,
@@ -185,10 +189,27 @@ pub async fn create_org_with_owner(
 /// exact under concurrent signups.
 const FOUNDING_CUTOFF: i64 = 1000;
 
-/// First-org-at-signup creator. Bypasses [`create_org_with_owner`]'s
-/// per-user owner-limit because a brand-new account needs at least one
-/// org to be usable; the limit only kicks in for additional, user-named
-/// orgs created after signup.
+/// The plan an account opens on when nothing grants it a better one. Matches
+/// the `accounts.plan_id` column default.
+const DEFAULT_PLAN: &str = "free";
+
+/// `(live orgs, cap)` for one account (`$1`). The cap folds an unexpired
+/// `plan_overrides` row the same way `QuotaService` does, so a raised
+/// allowance is honoured by the writer and not only shown in the UI.
+const ORG_ALLOWANCE_SQL: &str = "SELECT \
+     (SELECT count(*) FROM organizations \
+       WHERE account_id = $1 AND deleted_at IS NULL), \
+     COALESCE((SELECT (po.override_json->>'max_orgs')::int FROM plan_overrides po \
+                WHERE po.account_id = a.id \
+                  AND (po.expires_at IS NULL OR po.expires_at > now()) \
+                  AND jsonb_typeof(po.override_json->'max_orgs') = 'number'), p.max_orgs) \
+     FROM accounts a JOIN plans p ON p.id = a.plan_id WHERE a.id = $1";
+
+/// First-org-at-signup creator. Opens the account (granting the founding plan
+/// while the first-N promise lasts) and its first org together. Bypasses
+/// [`create_org_with_owner`]'s `max_orgs` check because a brand-new account
+/// needs at least one org to be usable; the cap only kicks in for additional,
+/// user-named orgs created afterwards.
 ///
 /// The slug is generated by [`generate_signup_slug`]; on the rare collision
 /// the caller retries with a fresh slug.
@@ -230,20 +251,34 @@ pub async fn create_signup_org_with_owner_in_tx(
     advisory_xact_lock(&mut **tx, signup_lock_key())
         .await
         .context("create_signup_org_with_owner_in_tx: advisory lock")?;
-    // Count only live founding orgs: soft-deleted ones (deleted_at set) are
-    // freed by purge and must not hold a slot, matching every other org count.
-    let row: Option<(Uuid,)> = sqlx::query_as(
-        "INSERT INTO organizations (slug, name, plan_id) \
-         SELECT $1, $2, CASE WHEN \
-           (SELECT count(*) FROM organizations \
-            WHERE plan_id = 'founding' AND deleted_at IS NULL) < $3 \
+    // A founding account that has since dropped all of its orgs holds no slot:
+    // it is on its way out with the purge, matching every other org count.
+    let (account_id,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO accounts (owner_user_id, plan_id) \
+         SELECT $1, CASE WHEN \
+           (SELECT count(*) FROM accounts a WHERE a.plan_id = 'founding' \
+             AND EXISTS (SELECT 1 FROM organizations o \
+                          WHERE o.account_id = a.id AND o.deleted_at IS NULL)) < $2 \
            THEN 'founding' ELSE 'free' END \
+         ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL \
+         DO UPDATE SET owner_user_id = EXCLUDED.owner_user_id \
+         RETURNING id",
+    )
+    .bind(user.0)
+    .bind(FOUNDING_CUTOFF)
+    .fetch_one(&mut **tx)
+    .await
+    .context("create_signup_org_with_owner_in_tx: open account")?;
+
+    let row: Option<(Uuid,)> = sqlx::query_as(
+        "INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, $2, $3 \
          WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = $1) \
          ON CONFLICT (slug) WHERE deleted_at IS NULL DO NOTHING RETURNING id",
     )
     .bind(slug)
     .bind(name)
-    .bind(FOUNDING_CUTOFF)
+    .bind(account_id)
     .fetch_optional(&mut **tx)
     .await
     .context("create_signup_org_with_owner_in_tx: insert org")?;
@@ -268,34 +303,11 @@ pub async fn create_signup_org_with_owner_in_tx(
     Ok(Some(OrgId(org_id)))
 }
 
-/// Counts a user's currently-active owner memberships (soft-deleted orgs do
-/// not count). Matches the filter used by the atomic enforcer in
-/// [`create_org_with_owner`], so a pre-flight "you can create another org"
-/// check agrees with what the insert will allow.
-pub async fn owner_org_count(pool: &PgPool, user: UserId) -> Result<u32> {
-    let (count,): (i64,) = sqlx::query_as(
-        r#"SELECT count(*) FROM memberships m
-           JOIN organizations o ON o.id = m.org_id
-           WHERE m.user_id = $1 AND m.role = 'owner' AND o.deleted_at IS NULL"#,
-    )
-    .bind(user.0)
-    .fetch_one(pool)
-    .await
-    .context("owner_org_count")?;
-    Ok(u32::try_from(count).unwrap_or(u32::MAX))
-}
-
-/// The one membership-count predicate. Shared so the cap enforced inside
-/// [`add_member`] and the number [`active_member_count`] reports (which feeds
-/// `/usage`) can never drift apart — "enforced == reported" is structural,
-/// not comment-enforced.
-pub(crate) const MEMBERSHIP_COUNT_SQL: &str = "SELECT count(*) FROM memberships WHERE org_id = $1";
-
-/// Number of members in an org. Same scope as [`list_members`] (memberships
-/// are hard-deleted on removal, so no soft-delete filter) — the usage view
-/// and the member list never disagree.
+/// Number of members in one org, for the team page's own header. The seat
+/// *cap* is pooled across the account (`count_sql::members`), so this number
+/// is display-only and can be smaller than what `/usage` reports.
 pub async fn active_member_count(pool: &PgPool, org: OrgId) -> Result<u32> {
-    let (count,): (i64,) = sqlx::query_as(MEMBERSHIP_COUNT_SQL)
+    let (count,): (i64,) = sqlx::query_as("SELECT count(*) FROM memberships WHERE org_id = $1")
         .bind(org.0)
         .fetch_one(pool)
         .await
@@ -733,31 +745,31 @@ pub enum DeleteOutcome {
 /// SELECT only fires when nothing was updated, to distinguish the three "no"
 /// cases for the caller. Returns the restored row from the same transaction
 /// so handlers don't re-fetch and race with concurrent mutations.
+/// `plan` is the account's effective plan (overrides and add-ons already
+/// folded in) — the caller resolves it through `QuotaService` and hands the
+/// same numbers the create paths enforce at.
 pub async fn restore_org(
     pool: &PgPool,
     org: OrgId,
     actor: UserId,
     grace_days: u32,
-    owner_limit: u32,
+    plan: &Plan,
 ) -> Result<RestoreOutcome> {
     let mut tx = pool.begin().await.context("restore_org: begin")?;
 
-    advisory_xact_lock(&mut *tx, &user_lock_key(actor))
+    let account = accounts::account_for_org(&mut *tx, org).await?;
+    advisory_xact_lock(&mut *tx, &account_lock_key(account))
         .await
         .context("restore_org: advisory lock")?;
 
-    // A tombstone frees an owner slot, so a restore has to re-earn it — else
-    // delete, create a replacement, restore lands the caller above the cap.
-    let (owned,): (i64,) = sqlx::query_as(
-        r#"SELECT count(*) FROM memberships m
-           JOIN organizations o ON o.id = m.org_id
-           WHERE m.user_id = $1 AND m.role = 'owner' AND o.deleted_at IS NULL"#,
-    )
-    .bind(actor.0)
-    .fetch_one(&mut *tx)
-    .await
-    .context("restore_org: owner-org count")?;
-    if owned >= i64::from(owner_limit) {
+    // A tombstone frees an org slot, so a restore has to re-earn it — else
+    // delete, create a replacement, restore lands the account above the cap.
+    let (owned, max_orgs): (i64, i32) = sqlx::query_as(ORG_ALLOWANCE_SQL)
+        .bind(account.0)
+        .fetch_one(&mut *tx)
+        .await
+        .context("restore_org: org count")?;
+    if owned >= i64::from(max_orgs) {
         tx.rollback().await.ok();
         return Ok(RestoreOutcome::OwnerLimit);
     }
@@ -797,6 +809,25 @@ pub async fn restore_org(
     };
 
     if let Some(row) = updated {
+        // The tombstone is lifted, so the org's monitors, pages, channels and
+        // seats are back in the account's pool — count them here, inside the
+        // same transaction and under the same account lock the create paths
+        // take, and undo the restore if any cap is now breached. Checking
+        // `max_orgs` alone would let a customer park 50 monitors in a deleted
+        // org, refill the pool elsewhere, and restore for double the plan.
+        let counts: PooledCounts = sqlx::query_as(&pooled_counts_sql())
+            .bind(account.0)
+            .fetch_one(&mut *tx)
+            .await
+            .context("restore_org: pooled counts")?;
+        if let Some((quota, current, limit)) = counts.first_breach(plan) {
+            tx.rollback().await.ok();
+            return Ok(RestoreOutcome::QuotaExceeded {
+                quota,
+                current,
+                limit,
+            });
+        }
         record_audit_tx(&mut tx, org, Some(actor), "org.restored", Value::Null)
             .await
             .context("restore_org: audit")?;
@@ -866,6 +897,93 @@ pub enum RestoreOutcome {
     SlugTaken,
     /// Restoring would put the caller over the owned-org cap.
     OwnerLimit,
+    /// The org's own rows would put the account over a pooled cap. A tombstone
+    /// frees its monitors, pages and seats from the pool, so a restore has to
+    /// re-earn all of them, not just the org slot.
+    QuotaExceeded {
+        quota: &'static str,
+        current: i64,
+        limit: i64,
+    },
+}
+
+/// The pooled counts an org brings back with it, in the order they are
+/// checked. Built by lifting the tombstone inside the transaction and counting
+/// through the same `count_sql` the create paths use, so "what restore
+/// enforces" and "what create enforces" cannot drift.
+#[derive(sqlx::FromRow)]
+struct PooledCounts {
+    targets: i64,
+    flow: i64,
+    status_pages: i64,
+    public_components: i64,
+    notification_channels: i64,
+    escalation_policies: i64,
+    on_call_schedules: i64,
+    maintenance_windows: i64,
+    members: i64,
+}
+
+impl PooledCounts {
+    /// The first cap this breaches, if any.
+    fn first_breach(&self, plan: &Plan) -> Option<(&'static str, i64, i64)> {
+        use crate::quotas::service::usage_keys as k;
+        [
+            (k::TARGETS, self.targets, plan.max_targets),
+            (k::FLOW_CHECKS, self.flow, plan.max_flow_checks),
+            (k::STATUS_PAGES, self.status_pages, plan.max_status_pages),
+            (
+                k::PUBLIC_COMPONENTS,
+                self.public_components,
+                plan.max_public_components,
+            ),
+            (
+                k::NOTIFICATION_CHANNELS,
+                self.notification_channels,
+                plan.max_notification_channels,
+            ),
+            (
+                k::ESCALATION_POLICIES,
+                self.escalation_policies,
+                plan.max_escalation_policies,
+            ),
+            (
+                k::ON_CALL_SCHEDULES,
+                self.on_call_schedules,
+                plan.max_on_call_schedules,
+            ),
+            (
+                k::MAINTENANCE_WINDOWS,
+                self.maintenance_windows,
+                plan.max_maintenance_windows,
+            ),
+            (k::MEMBERS, self.members, plan.max_members),
+        ]
+        .into_iter()
+        .map(|(name, current, limit)| (name, current, i64::from(limit)))
+        .find(|(_, current, limit)| current > limit)
+    }
+}
+
+/// Pooled counts for one account (`$1`), assembled from the same per-quota
+/// queries every other enforcement site runs.
+fn pooled_counts_sql() -> String {
+    use crate::quotas::service::count_sql as c;
+    format!(
+        "SELECT ({}) AS targets, ({}) AS flow, ({}) AS status_pages, \
+         ({}) AS public_components, ({}) AS notification_channels, \
+         ({}) AS escalation_policies, ({}) AS on_call_schedules, \
+         ({}) AS maintenance_windows, ({}) AS members",
+        c::targets(),
+        c::flow(),
+        c::status_pages(),
+        c::public_components(),
+        c::notification_channels(),
+        c::escalation_policies(),
+        c::on_call_schedules(),
+        c::maintenance_windows(),
+        c::members(),
+    )
 }
 
 /// List of (membership, optional display email) for every member of an org,
@@ -1080,12 +1198,13 @@ pub enum AddMemberOutcome {
 /// signature so the audit log records *who* effected the change, not just
 /// *who* was changed.
 ///
-/// `max_members` is the plan cap. It is enforced atomically here under a
-/// per-org advisory lock (same lock key as `invitations::create`, so an
-/// invite and an accept on the same org serialise): the row is inserted,
-/// then the post-insert count is taken inside the same transaction and the
-/// insert is rolled back if it crossed the cap. Re-adding an existing member
-/// stays a no-op and is never rejected by the cap.
+/// `max_members` is the plan cap, and it counts *people across the account's
+/// orgs*: the same person in two of them holds one seat, so adding them to a
+/// second org costs nothing. Enforced atomically here under a per-account
+/// advisory lock (the same key every other pooled cap takes): the row is
+/// inserted, then the post-insert count is taken inside the same transaction
+/// and the insert is rolled back if it crossed the cap. Re-adding an existing
+/// member stays a no-op and is never rejected by the cap.
 pub async fn add_member(
     pool: &PgPool,
     org: OrgId,
@@ -1095,7 +1214,8 @@ pub async fn add_member(
     max_members: u32,
 ) -> Result<AddMemberOutcome> {
     let mut tx = pool.begin().await.context("add_member: begin")?;
-    advisory_xact_lock(&mut *tx, &org_lock_key(org))
+    let account = accounts::account_for_org(&mut *tx, org).await?;
+    advisory_xact_lock(&mut *tx, &account_lock_key(account))
         .await
         .context("add_member: advisory lock")?;
     let inserted: Option<(Uuid,)> = sqlx::query_as(
@@ -1114,11 +1234,11 @@ pub async fn add_member(
         tx.rollback().await.ok();
         return Ok(AddMemberOutcome::AlreadyMember);
     }
-    // Count *after* the insert (same predicate as `active_member_count`, so
-    // the enforced number equals the number `/usage` reports). If this fresh
-    // row crossed the cap, undo it — never let the org exceed `max_members`.
-    let (members,): (i64,) = sqlx::query_as(MEMBERSHIP_COUNT_SQL)
-        .bind(org.0)
+    // Count *after* the insert, over the account's pool (the same query
+    // `/usage` reports from, so the enforced number equals the shown one). If
+    // this fresh row crossed the cap, undo it.
+    let (members,): (i64,) = sqlx::query_as(&count_sql::members())
+        .bind(account.0)
         .fetch_one(&mut *tx)
         .await
         .context("add_member: count members")?;

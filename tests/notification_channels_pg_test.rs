@@ -52,12 +52,12 @@ async fn two_orgs(
 ) {
     let user_a = make_user(pool, tag).await;
     let user_b = make_user(pool, tag).await;
-    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A", 3)
+    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A")
         .await
         .unwrap()
         .expect("org a")
         .id;
-    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B", 3)
+    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B")
         .await
         .unwrap()
         .expect("org b")
@@ -541,7 +541,7 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
         return;
     };
     let user = make_user(&pool, "renotify").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("renotify"), "R", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("renotify"), "R")
         .await
         .unwrap()
         .expect("org")

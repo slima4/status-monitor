@@ -19,9 +19,9 @@ use sqlx::{PgPool, Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::api::error::codes;
-use crate::domain::{OrgId, UserId};
+use crate::domain::{AccountId, OrgId, UserId};
 use crate::error::{AppError, Result};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key, user_delete_lock_key};
+use crate::storage::locks::{account_lock_key, advisory_xact_lock, user_delete_lock_key};
 use crate::storage::orgs::record_audit_tx;
 
 /// One blocking org in an `OWNS_SHARED_ORGS` rejection.
@@ -54,10 +54,10 @@ pub async fn request_deletion(
     let mut tx = pool.begin().await.context("delete_account: begin")?;
 
     // Per-user lock: serialises a double-submit of the delete button and
-    // pairs with the per-org locks below so membership is frozen across the
-    // blocking decision. `user_delete_lock_key` is a deliberately distinct
-    // namespace from `user_lock_key` (owner-org / API-token caps), so account
-    // deletion never contends with those — see `storage::locks`.
+    // pairs with the per-account locks below so membership is frozen across
+    // the blocking decision. `user_delete_lock_key` is a deliberately distinct
+    // namespace from `user_lock_key` (the API-token cap), so account deletion
+    // never contends with that — see `storage::locks`.
     advisory_xact_lock(&mut *tx, &user_delete_lock_key(user_id))
         .await
         .context("delete_account: user advisory lock")?;
@@ -82,13 +82,25 @@ pub async fn request_deletion(
     .await
     .context("delete_account: select solo-owned orgs")?;
 
-    for org_id in &candidate_ids {
-        // Same `org_lock_key` as `orgs::add_member` / `invitations::create`,
-        // so holding it means no member can be added to this org until our
-        // transaction ends.
-        advisory_xact_lock(&mut *tx, &org_lock_key(OrgId(*org_id)))
+    // Same `account_lock_key` as `orgs::add_member` / `invitations::create`,
+    // so holding it means no member can be added to these orgs until our
+    // transaction ends. Those writers moved to the account key when the caps
+    // became pooled; locking the org here instead would leave the freeze
+    // contending with nothing, and a member could join a solo-owned org
+    // between the re-read below and the tombstone. Sorted and deduplicated so
+    // two concurrent deletions cannot take the same pair in opposite orders.
+    let accounts: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT /* SAFE: bound to the caller's own solo-owned orgs, gathered above under their user-delete lock */ \
+         DISTINCT account_id FROM organizations WHERE id = ANY($1) ORDER BY 1",
+    )
+    .bind(&candidate_ids)
+    .fetch_all(&mut *tx)
+    .await
+    .context("delete_account: resolve accounts")?;
+    for account_id in &accounts {
+        advisory_xact_lock(&mut *tx, &account_lock_key(AccountId(*account_id)))
             .await
-            .context("delete_account: org advisory lock")?;
+            .context("delete_account: account advisory lock")?;
     }
 
     // Re-read the candidates *under the locks* in one query, computing the
@@ -273,6 +285,24 @@ async fn undelete_in_tx(
         .await
         .context("undelete: user advisory lock")?;
 
+    // Read when the account was closed *before* clearing it. That timestamp is
+    // what separates the orgs this deletion tombstoned from ones the user had
+    // already deleted on their own, and only the former are this recovery's to
+    // undo. Read as its own statement rather than a subquery inside the
+    // UPDATE's RETURNING: the lock above already makes it race-free, and the
+    // intent survives a reader who does not know when a RETURNING subquery is
+    // evaluated.
+    let deleted_at: Option<DateTime<Utc>> =
+        sqlx::query_scalar("SELECT deleted_at FROM users WHERE id = $1")
+            .bind(user_id.0)
+            .fetch_optional(&mut **tx)
+            .await
+            .context("undelete: read deletion time")?
+            .flatten();
+    let Some(deleted_at) = deleted_at else {
+        return Ok(None);
+    };
+
     let row: Option<(String,)> = sqlx::query_as(
         "UPDATE users SET deleted_at = NULL, updated_at = now() \
          WHERE id = $1 AND deleted_at IS NOT NULL \
@@ -286,8 +316,16 @@ async fn undelete_in_tx(
         return Ok(None);
     };
 
-    // Lift the tombstone on every org the user still owns (the solo orgs whose
-    // owner membership we deliberately kept at deletion time).
+    // Lift the tombstone on the solo orgs this deletion took down — the ones
+    // whose owner membership it deliberately kept. `delete_account` stamps the
+    // user and those orgs from a single transaction-stable `now()`, so their
+    // `deleted_at` is never earlier than the user's.
+    //
+    // An org the user deleted *before* asking to close the account is not part
+    // of this recovery: sweeping it back in would restore capacity the account
+    // had already given up, past `max_orgs` and past every pooled cap. It stays
+    // tombstoned and recoverable on its own, through `restore_org`, which
+    // counts what comes back.
     let restored: Vec<(Uuid,)> = sqlx::query_as(
         r#"UPDATE organizations o
               SET deleted_at = NULL, updated_at = now()
@@ -296,9 +334,11 @@ async fn undelete_in_tx(
               AND m.user_id = $1
               AND m.role = 'owner'
               AND o.deleted_at IS NOT NULL
+              AND o.deleted_at >= $2
         RETURNING o.id"#,
     )
     .bind(user_id.0)
+    .bind(deleted_at)
     .fetch_all(&mut **tx)
     .await
     .context("undelete: un-delete solo orgs")?;

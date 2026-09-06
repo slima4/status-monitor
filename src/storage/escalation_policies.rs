@@ -20,7 +20,8 @@ use crate::domain::{
     EscalationTargetType, NewEscalationPolicy, OrgId,
 };
 use crate::error::{AppError, Result};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+use crate::storage::accounts;
+use crate::storage::locks::{account_lock_key, advisory_xact_lock};
 
 #[async_trait]
 pub trait EscalationPolicyStore: Send + Sync {
@@ -355,21 +356,24 @@ impl EscalationPolicyStore for PgEscalationPolicyStore {
             .begin()
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("begin: {e}")))?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("advisory lock: {e}")))?;
-        let row: Option<PolicyRow> = sqlx::query_as(
+        let pool_orgs = accounts::live_orgs("$6");
+        let row: Option<PolicyRow> = sqlx::query_as(&format!(
             r#"INSERT INTO escalation_policies (org_id, name, description, repeat_count)
                SELECT $1, $2, $3, $4
                WHERE (SELECT count(*) FROM escalation_policies
-                      WHERE org_id = $1 AND deleted_at IS NULL) < $5
-               RETURNING id, name, description, repeat_count, created_at, updated_at"#,
-        )
+                      WHERE org_id IN ({pool_orgs}) AND deleted_at IS NULL) < $5
+               RETURNING id, name, description, repeat_count, created_at, updated_at"#
+        ))
         .bind(org.0)
         .bind(&new.name)
         .bind(&new.description)
         .bind(new.repeat_count)
         .bind(max_policies)
+        .bind(account.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {

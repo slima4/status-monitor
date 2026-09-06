@@ -161,8 +161,6 @@ path_based_public_routes = true
 # Set true together with a well-formed `public_status.base_domain` to serve
 # per-org status pages on dedicated subdomains.
 subdomain_public_routes = false
-# Free-tier cap on orgs a single user can own.
-free_tier_owner_org_limit = 3
 # Grace period before soft-deleted orgs *and users* are purged. Also the
 # account-recovery window; the Privacy Policy quotes this number.
 deletion_grace_period_days = 30

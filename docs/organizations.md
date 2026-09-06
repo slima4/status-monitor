@@ -1,6 +1,8 @@
 # Organizations
 
-An organization owns everything: monitors, channels, status pages, variables, incidents. Nothing is shared between two of them — separate monitors, separate people, separate plan and quota, separate status pages. Switching orgs changes everything you see.
+An organization owns everything: monitors, channels, status pages, variables, incidents. Nothing is shared between two of them: separate monitors, separate people, separate status pages. Switching orgs changes everything you see.
+
+One thing is shared, and it is the plan. Your limits belong to your account and are spent across every organization you own, so 50 monitors is 50 in total, not 50 each. A second organization buys separation, never extra capacity.
 
 Manage them under **Settings → Organizations**. That screen lists every org you belong to with your role in each, and is where you create, rename, delete and restore them. [Team](team.md) covers the people inside one.
 
@@ -10,7 +12,7 @@ Most accounts never need one. The cases that do:
 
 - **A hard boundary between two things you run.** A side project whose alerts should not page the same people as the main product.
 - **Staging kept away from production**, so a noisy pre-release environment cannot dent the numbers on a page customers read.
-- **Client work you own.** If the client owns their own account, ask them to invite you instead — an invited membership costs you nothing against your limit.
+- **Client work you own.** If the client owns their own account, ask them to invite you instead: an invited membership is billed to them, and their monitors never count against your plan.
 
 If you are running status pages for several clients out of one account, you probably want several status pages in one org rather than several orgs. Pages carry their own branding and their own subdomain, and one org keeps the billing and the roster in one place.
 
@@ -22,7 +24,9 @@ The slug is a public host on our domain, so it is the one field worth thinking a
 
 Creating an org makes you its owner and switches you into it. It starts empty.
 
-You can **own** at most three organizations at once. Being invited into one never counts against that, so you can join as many as you like. Deleted orgs stop counting while they sit in the restore window.
+How many you can **own** at once is part of your plan: one on Standard, three on Founding, five on Pro. Being invited into someone else's never counts against that, so you can join as many as you like. Deleted orgs stop counting while they sit in the restore window, which also means a restore is refused if you filled the slot in the meantime.
+
+Remember that the organizations you own share one pool of monitors, seats, pages and channels. Creating a second one does not raise any of those numbers.
 
 ## Switching
 

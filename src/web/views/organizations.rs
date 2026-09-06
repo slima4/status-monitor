@@ -29,8 +29,8 @@ pub struct OrganizationsPage {
 pub struct OrganizationsPartial {
     pub orgs: Vec<OrgRow>,
     pub deleted: Vec<DeletedOrgRow>,
-    pub owned_used: u32,
-    pub owned_limit: u32,
+    pub owned_used: i64,
+    pub owned_limit: i64,
     pub grace_days: u32,
 }
 
@@ -97,11 +97,16 @@ pub async fn partial(State(state): State<AppState>, session: Session) -> WebResu
         })
         .collect();
 
+    // Orgs are held by the account, not by the membership rows: what bounds a
+    // new one is `plans.max_orgs`, and every org shares the account's one pool.
+    let (owned_used, owned_limit) =
+        crate::storage::accounts::org_allowance_for_user(pool, user.id).await?;
+
     Ok(OrganizationsPartial {
         orgs,
         deleted,
-        owned_used: orgs_store::owner_org_count(pool, user.id).await?,
-        owned_limit: state.cfg.tenancy.free_tier_owner_org_limit,
+        owned_used,
+        owned_limit,
         grace_days: state.cfg.tenancy.deletion_grace_period_days,
     }
     .into_response())

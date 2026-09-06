@@ -1,4 +1,4 @@
-//! Per-org / per-user rate-limit middleware.
+//! Per-account / per-user rate-limit middleware.
 //!
 //! Runs *after* the API-token auth middleware (so `AuthContext` is present
 //! for the Bearer path) and resolves the subject via the same `CurrentUser`
@@ -80,16 +80,23 @@ pub async fn rate_limit_middleware(
         return next.run(Request::from_parts(parts, body)).await;
     };
 
-    // Per-org first (protects shared resources), then per-user. Whichever is
-    // hit first produces the 429.
-    if let Some(o) = org
-        && let Err(d) = state
-            .rate_limits
-            .check(RateLimitKey::Org(o, category), "per_org", &plan)
+    // Per-account first (protects shared resources), then per-user. Whichever
+    // is hit first produces the 429. The account tier is keyed on the account
+    // rather than the org so the plan's budget stays one budget however many
+    // workspaces the customer holds — the same reason resource caps pool.
+    let account = match org {
+        Some(o) => state.quotas.account_for_org(o).await.ok().flatten(),
+        None => None,
+    };
+    if let Some(a) = account
+        && let Err(d) =
+            state
+                .rate_limits
+                .check(RateLimitKey::Account(a, category), "per_account", &plan)
     {
         record_quota_event(
             state.db.clone(),
-            Some(o),
+            org,
             user,
             "rate_limited",
             None,

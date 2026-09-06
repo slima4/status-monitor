@@ -151,7 +151,9 @@ async fn callback_rejects_cross_provider_and_foreign_org_states() {
     assert_eq!(status, StatusCode::FORBIDDEN, "cross-provider state");
 
     let (foreign_org,): (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Foreign') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Foreign', a.id FROM a RETURNING id",
     )
     .bind(unique_slug("discf"))
     .fetch_one(&pool)

@@ -45,7 +45,7 @@ async fn read(resp: axum::http::Response<Body>) -> (StatusCode, Value) {
 async fn owner_page(pool: PgPool) -> (axum::Router, String) {
     let user = make_user(&pool, "sp").await;
     let slug = unique_slug("sp");
-    let org = create_org_with_owner(&pool, user, &slug, "SP Co", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "SP Co")
         .await
         .unwrap()
         .expect("org");

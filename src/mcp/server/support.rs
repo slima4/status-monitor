@@ -28,11 +28,11 @@ impl McpServer {
             .ok_or_else(|| McpToolError::internal("db unavailable"))
     }
 
-    /// Enforce the org's rate limit for `category` at the tool layer. The `/mcp`
-    /// middleware buckets every JSON-RPC call as a read (the tool name isn't in
-    /// the URL); probe-spawning and write tools pass the stricter category here.
-    /// A plan-resolution error degrades to "no app-side limit" — the reads
-    /// budget and Caddy's per-IP tier still hold the line.
+    /// Enforce the account's rate limit for `category` at the tool layer. The
+    /// `/mcp` middleware buckets every JSON-RPC call as a read (the tool name
+    /// isn't in the URL); probe-spawning and write tools pass the stricter
+    /// category here. A plan-resolution error degrades to "no app-side limit" —
+    /// the reads budget and Caddy's per-IP tier still hold the line.
     pub(super) async fn enforce_rate_limit(
         &self,
         org: crate::domain::OrgId,
@@ -41,9 +41,16 @@ impl McpServer {
         let Ok(plan) = self.state.quotas.limit_for_org(org).await else {
             return Ok(());
         };
+        let Ok(Some(account)) = self.state.quotas.account_for_org(org).await else {
+            return Ok(());
+        };
         self.state
             .rate_limits
-            .check(RateLimitKey::Org(org, category), "per_org", &plan)
+            .check(
+                RateLimitKey::Account(account, category),
+                "per_account",
+                &plan,
+            )
             .map_err(|d| McpToolError::rate_limited(d.retry_after_secs))
     }
 

@@ -83,12 +83,12 @@ async fn logged_in_operator_cannot_read_another_orgs_target() {
 
     let user_a = make_user(&pool, "idor").await;
     let user_b = make_user(&pool, "idor").await;
-    let org_a = create_org_with_owner(&pool, user_a, &unique_slug("idor-a"), "A", 3)
+    let org_a = create_org_with_owner(&pool, user_a, &unique_slug("idor-a"), "A")
         .await
         .unwrap()
         .expect("org a")
         .id;
-    let org_b = create_org_with_owner(&pool, user_b, &unique_slug("idor-b"), "B", 3)
+    let org_b = create_org_with_owner(&pool, user_b, &unique_slug("idor-b"), "B")
         .await
         .unwrap()
         .expect("org b")
@@ -194,12 +194,12 @@ async fn logged_in_operator_cannot_touch_another_orgs_status_page() {
 
     let user_a = make_user(&pool, "sp-idor").await;
     let user_b = make_user(&pool, "sp-idor").await;
-    let org_a = create_org_with_owner(&pool, user_a, &unique_slug("sp-idor-a"), "A", 3)
+    let org_a = create_org_with_owner(&pool, user_a, &unique_slug("sp-idor-a"), "A")
         .await
         .unwrap()
         .expect("org a")
         .id;
-    let org_b = create_org_with_owner(&pool, user_b, &unique_slug("sp-idor-b"), "B", 3)
+    let org_b = create_org_with_owner(&pool, user_b, &unique_slug("sp-idor-b"), "B")
         .await
         .unwrap()
         .expect("org b")
@@ -301,7 +301,7 @@ async fn non_owner_member_cannot_mutate_status_pages() {
 
     let owner = make_user(&pool, "sp-owner").await;
     let member = make_user(&pool, "sp-member").await;
-    let org = create_org_with_owner(&pool, owner, &unique_slug("sp-owner"), "O", 3)
+    let org = create_org_with_owner(&pool, owner, &unique_slug("sp-owner"), "O")
         .await
         .unwrap()
         .expect("org")

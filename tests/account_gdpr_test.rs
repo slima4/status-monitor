@@ -50,13 +50,16 @@ async fn seed_user(pool: &sqlx::PgPool, email: &str, name: &str) -> Uuid {
 }
 
 async fn seed_org(pool: &sqlx::PgPool, slug: &str, owner: Uuid) -> Uuid {
-    let (id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, $2) RETURNING id")
-            .bind(slug)
-            .bind(slug)
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let (id,): (Uuid,) = sqlx::query_as(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, $2, a.id FROM a RETURNING id",
+    )
+    .bind(slug)
+    .bind(slug)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'owner')")
         .bind(owner)
         .bind(id)
@@ -199,6 +202,54 @@ async fn deletion_then_restore_round_trip() {
         .expect("account was scheduled for deletion");
     assert_user_deleted(&pool, user, false).await;
     assert_org_deleted(&pool, org, false).await;
+
+    pool.close().await;
+    drop_pg(&name).await;
+}
+
+/// Recovering an account undoes *that* deletion, nothing older. An org the
+/// user had already deleted on their own stays deleted: sweeping it back in
+/// would hand the account capacity it had given up, past `max_orgs` and past
+/// every pooled cap, without any of the checks `restore_org` runs.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn account_recovery_leaves_earlier_org_deletions_alone() {
+    let Some((db, name)) = fresh_pg().await else {
+        return;
+    };
+    let pool = open_pool(&db).await;
+    MIGRATOR.run(&pool).await.unwrap();
+
+    let user = seed_user(&pool, "two-orgs@example.test", "Two").await;
+    let uid = uptimepage::domain::UserId(user);
+    let earlier = seed_org(&pool, "given-up-org", user).await;
+    let current = seed_org(&pool, "still-running-org", user).await;
+
+    // The user deletes one org a week before closing the account.
+    sqlx::query("UPDATE organizations SET deleted_at = now() - interval '7 days' WHERE id = $1")
+        .bind(earlier)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    account::request_deletion(&pool, uid, 30)
+        .await
+        .expect("deletion succeeds");
+    assert_org_deleted(&pool, current, true).await;
+
+    let restored = account::restore_account(&pool, uid)
+        .await
+        .expect("restore succeeds")
+        .expect("account was scheduled for deletion");
+
+    assert_user_deleted(&pool, user, false).await;
+    assert_org_deleted(&pool, current, false).await;
+    assert_org_deleted(&pool, earlier, true).await;
+    assert_eq!(
+        restored.orgs,
+        vec![current],
+        "recovery reports only what this deletion took"
+    );
 
     pool.close().await;
     drop_pg(&name).await;

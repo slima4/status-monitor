@@ -166,7 +166,7 @@ async fn build_fixture() -> Option<Fixture> {
 
     for i in 0..ORG_COUNT {
         let user = make_user(&pool).await;
-        let org = create_org_with_owner(&pool, user, &unique_slug(&format!("conc{i}")), "conc", 3)
+        let org = create_org_with_owner(&pool, user, &unique_slug(&format!("conc{i}")), "conc")
             .await
             .expect("create org")
             .expect("slug fresh");

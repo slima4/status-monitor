@@ -40,7 +40,7 @@ async fn purges_past_window_and_keeps_fresh_rows() {
     let marker = format!("ret-{}", Uuid::new_v4().simple());
     let user = make_user(&pool, "retention").await;
     let slug = format!("retn-{}", &Uuid::new_v4().simple().to_string()[..6]);
-    let org = create_org_with_owner(&pool, user, &slug, "Retention Test", 100)
+    let org = create_org_with_owner(&pool, user, &slug, "Retention Test")
         .await
         .expect("create org")
         .expect("org created")

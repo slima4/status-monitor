@@ -25,7 +25,7 @@ use uuid::Uuid;
 /// Returns (org, owner user, incident id).
 async fn seed(pool: &PgPool, prefix: &str) -> (OrgId, uptimepage::domain::UserId, Uuid) {
     let user = make_user(pool, prefix).await;
-    let org = create_org_with_owner(pool, user, &unique_slug(prefix), "n", 3)
+    let org = create_org_with_owner(pool, user, &unique_slug(prefix), "n")
         .await
         .expect("create org")
         .expect("org created");
@@ -399,7 +399,7 @@ async fn writer_opens_internal_incident_for_private_monitor_pg() {
         return;
     };
     let user = make_user(&pool, "incvis").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("incvis"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("incvis"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -451,7 +451,7 @@ async fn cross_org_cannot_touch_incident_pg() {
     let (_org_a, _user_a, id) = seed(&pool, "incown").await;
     // A second, unrelated org must not see or mutate org A's incident.
     let other_user = make_user(&pool, "incother").await;
-    let other_org = create_org_with_owner(&pool, other_user, &unique_slug("incother"), "n", 3)
+    let other_org = create_org_with_owner(&pool, other_user, &unique_slug("incother"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -595,7 +595,7 @@ async fn notification_log_record_retry_and_scope_pg() {
     assert!(tl.iter().any(|e| e.kind == IncidentEventKind::Notified));
 
     let other_user = make_user(&pool, "incnotifx").await;
-    let other = create_org_with_owner(&pool, other_user, &unique_slug("incnotifx"), "n", 3)
+    let other = create_org_with_owner(&pool, other_user, &unique_slug("incnotifx"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -674,7 +674,7 @@ async fn publish_sets_visibility_and_narration_then_unpublish_pg() {
 
     // Cross-tenant publish is a no-op (returns None, leaves the row internal).
     let other_user = make_user(&pool, "incpubx").await;
-    let other = create_org_with_owner(&pool, other_user, &unique_slug("incpubx"), "n", 3)
+    let other = create_org_with_owner(&pool, other_user, &unique_slug("incpubx"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -744,7 +744,7 @@ async fn metrics_rolls_up_mtta_mttr_and_counts_pg() {
 
     // Cross-tenant isolation: a fresh org sees none of these.
     let other_user = make_user(&pool, "incmetricsx").await;
-    let other_org = create_org_with_owner(&pool, other_user, &unique_slug("incmetricsx"), "n", 3)
+    let other_org = create_org_with_owner(&pool, other_user, &unique_slug("incmetricsx"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -1134,7 +1134,7 @@ async fn assign_rejects_non_member_assignee_pg() {
 
     // A user who belongs to a different org must not be assignable.
     let outsider = make_user(&pool, "incassignx").await;
-    create_org_with_owner(&pool, outsider, &unique_slug("incassignx"), "n", 3)
+    create_org_with_owner(&pool, outsider, &unique_slug("incassignx"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -1170,7 +1170,7 @@ async fn declare_conflicts_when_target_already_has_open_incident_pg() {
         return;
     };
     let user = make_user(&pool, "incdup").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("incdup"), "svc", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("incdup"), "svc")
         .await
         .unwrap()
         .unwrap();
@@ -1222,7 +1222,7 @@ async fn reopen_conflicts_when_target_has_a_newer_open_incident_pg() {
         return;
     };
     let user = make_user(&pool, "increopen").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("increopen"), "svc", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("increopen"), "svc")
         .await
         .unwrap()
         .unwrap();

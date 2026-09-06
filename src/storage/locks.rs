@@ -14,11 +14,14 @@
 //! the key derivation, so the relationships live in one place and are
 //! reviewed together rather than re-derived at each call site:
 //!
-//! - [`org_lock_key`] — one org. Shared by org-member adds, invitation
-//!   creation, target create / bulk-create caps, and account deletion's
-//!   per-org freeze. All of these must serialise on the same org.
-//! - [`user_lock_key`] — one user. Shared by owner-org-create and API-token
-//!   caps (per-user count guards).
+//! - [`org_lock_key`] — one org. Left for guards whose subject really is a
+//!   single org, such as one org's outstanding channel-link codes.
+//! - [`account_lock_key`] — one account. Every pooled resource cap (targets,
+//!   status pages, channels, members, invitations, …) counts across the
+//!   account's orgs, so its guard must serialise on the account, not on one of
+//!   its orgs. Account deletion's membership freeze takes the same key: it
+//!   holds against member adds only if it contends with them.
+//! - [`user_lock_key`] — one user. The per-user API-token cap guard.
 //! - [`user_delete_lock_key`] — one user, a deliberately distinct namespace
 //!   from [`user_lock_key`] so account deletion does not serialise against
 //!   unrelated per-user cap writes.
@@ -36,7 +39,7 @@ use std::panic::AssertUnwindSafe;
 use futures::FutureExt;
 use sqlx::{PgExecutor, PgPool};
 
-use crate::domain::{OrgId, UserId};
+use crate::domain::{AccountId, OrgId, UserId};
 
 /// Lock key for a per-org critical section (membership / target caps, the
 /// deletion-time membership freeze).
@@ -44,8 +47,15 @@ pub fn org_lock_key(org: OrgId) -> String {
     org.0.to_string()
 }
 
-/// Lock key for a per-user cap critical section (owner-org / API-token
-/// counts).
+/// Lock key for a per-account critical section. Every pooled resource cap
+/// serialises here rather than on the org, because the count spans all of the
+/// account's orgs: two creates in two orgs of one account must contend.
+pub fn account_lock_key(account: AccountId) -> String {
+    format!("account:{}", account.0)
+}
+
+/// Lock key for a per-user cap critical section (the API-token count, and the
+/// org-delete double-submit guard).
 pub fn user_lock_key(user: UserId) -> String {
     user.0.to_string()
 }

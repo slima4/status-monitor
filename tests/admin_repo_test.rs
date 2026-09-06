@@ -43,12 +43,15 @@ fn flow_check_spec() -> serde_json::Value {
 }
 
 async fn seed_org_with_target(pool: &PgPool, slug: &str) -> (Uuid, Uuid) {
-    let (org_id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
-            .bind(slug)
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let (org_id,): (Uuid,) = sqlx::query_as(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 's', a.id FROM a RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     let (target_id,): (Uuid,) = sqlx::query_as(
         r#"INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled)
            VALUES ($1, 't', $2::jsonb, 60, true)
@@ -120,12 +123,15 @@ async fn bind_to_new_page(pool: &PgPool, org_id: Uuid, target_id: Uuid) {
 }
 
 async fn seed_org(pool: &PgPool, slug: &str) -> Uuid {
-    let (org_id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
-            .bind(slug)
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let (org_id,): (Uuid,) = sqlx::query_as(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 's', a.id FROM a RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     org_id
 }
 
@@ -613,12 +619,15 @@ async fn all_targets_undecodable_errors_not_empty() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let slug = format!("admsys-{}", &Uuid::new_v4().simple().to_string()[..8]);
-    let (org_id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
-            .bind(&slug)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let (org_id,): (Uuid,) = sqlx::query_as(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 's', a.id FROM a RETURNING id",
+    )
+    .bind(&slug)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
          VALUES ($1, 'bad', '{}'::jsonb, 60, true)",

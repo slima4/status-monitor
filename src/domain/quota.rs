@@ -39,6 +39,9 @@ pub struct Plan {
     pub max_on_call_schedules: i32,
     pub max_logo_size_bytes: i32,
     pub max_regions: i32,
+    /// Orgs one account may hold. Orgs are workspaces over one shared pool of
+    /// caps, so this bounds sprawl, not capacity.
+    pub max_orgs: i32,
 
     // Per-org rate limits (per minute)
     pub api_writes_per_minute: i32,

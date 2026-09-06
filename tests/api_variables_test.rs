@@ -164,7 +164,7 @@ async fn used_by_counts_and_delete_is_blocked_when_referenced() {
         return;
     };
     let user = make_user(&pool, "var-api").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("var-api"), "O", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("var-api"), "O")
         .await
         .unwrap()
         .expect("org")

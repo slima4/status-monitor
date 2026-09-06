@@ -20,7 +20,7 @@ pub struct ClickhouseResultSink {
     /// scheduler. Agent-submitted batches carry their own via [`write_batch_tagged`].
     region: String,
     agent_id: String,
-    /// Per-org physical retention, resolved from the org's plan at write time.
+    /// Per-org physical retention, resolved from the org's account plan at write time.
     org_ttl: OrgTtlDays,
 }
 

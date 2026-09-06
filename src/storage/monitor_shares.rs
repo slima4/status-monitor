@@ -19,8 +19,9 @@ use crate::domain::{
 };
 use crate::error::{AppError, Result};
 use crate::security::Cipher;
+use crate::storage::accounts;
 use crate::storage::capability_token;
-use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+use crate::storage::locks::{account_lock_key, advisory_xact_lock};
 
 /// Result of [`MonitorShareStore::create`]. The store stays free of HTTP/plan
 /// concerns; the handler maps each limit outcome to the quota error with the
@@ -39,7 +40,7 @@ pub enum CreateShareOutcome {
 #[async_trait]
 pub trait MonitorShareStore: Send + Sync {
     /// Mint a share for a monitor, enforcing the per-monitor link cap and the
-    /// per-org shared-monitor cap (both from the org's plan). `None` for either
+    /// account-wide shared-monitor cap (both from the account's plan). `None` for either
     /// cap exempts it — the status-page detail link mints that way, since the
     /// page already publishes the monitor and its own component cap applies.
     /// See [`CreateShareOutcome`].
@@ -150,29 +151,33 @@ impl MonitorShareStore for PgMonitorShareStore {
             sealed: token_enc,
         } = capability_token::mint(self.cipher.as_deref())?;
         let mut tx = self.pool.begin().await.map_err(db_err)?;
-        // Per-org lock serialises the count→insert so a burst can't race past
-        // either cap (mirrors the status_pages create).
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        // The shared-monitor cap is pooled, so the lock takes the account
+        // (mirrors the status_pages create).
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .map_err(db_err)?;
         // One snapshot under the lock: org-membership of the target, this
-        // monitor's active-link count, and the org's distinct shared-monitor
-        // count (the second cap only bites when this monitor has no links yet).
-        // Page-minted shares are excluded from both counts: the operator did not
-        // spend quota on them, so they must not block the links they do mint.
-        let (target_ok, links_here, shared_monitors): (bool, i64, i64) = sqlx::query_as(
+        // monitor's active-link count, and the account's distinct
+        // shared-monitor count (the second cap only bites when this monitor has
+        // no links yet). Page-minted shares are excluded from both counts: the
+        // operator did not spend quota on them, so they must not block the
+        // links they do mint.
+        let pool_orgs = accounts::live_orgs("$3");
+        let (target_ok, links_here, shared_monitors): (bool, i64, i64) = sqlx::query_as(&format!(
             "SELECT EXISTS (SELECT 1 FROM targets WHERE id = $2 AND org_id = $1), \
              (SELECT count(*) FROM monitor_shares ms \
               WHERE ms.org_id = $1 AND ms.target_id = $2 AND ms.revoked_at IS NULL \
                 AND NOT EXISTS (SELECT 1 FROM status_page_components spc \
                                 WHERE spc.share_id = ms.id)), \
              (SELECT count(DISTINCT ms.target_id) FROM monitor_shares ms \
-              WHERE ms.org_id = $1 AND ms.revoked_at IS NULL \
+              WHERE ms.org_id IN ({pool_orgs}) AND ms.revoked_at IS NULL \
                 AND NOT EXISTS (SELECT 1 FROM status_page_components spc \
-                                WHERE spc.share_id = ms.id))",
-        )
+                                WHERE spc.share_id = ms.id))"
+        ))
         .bind(org.0)
         .bind(target_id)
+        .bind(account.0)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;

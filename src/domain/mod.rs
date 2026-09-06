@@ -69,7 +69,8 @@ pub use on_call::{
     RotationType, resolve_on_call,
 };
 pub use org::{
-    BrandingError, OrgId, Organization, PublicOrgBranding, PublicStyle, SlugError, validate_slug,
+    AccountId, BrandingError, OrgId, Organization, PublicOrgBranding, PublicStyle, SlugError,
+    validate_slug,
 };
 pub use page_asset::{AssetSlot, SlotPolicy};
 pub use preferences::{DisplayPrefs, TimeFormat};

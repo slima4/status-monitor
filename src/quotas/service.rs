@@ -1,7 +1,12 @@
 //! Plan resolution + resource-quota checks.
 //!
-//! `limit_for_org` is the single read path for an org's effective limits:
-//! the plan row, with a per-org `plan_overrides` row folded in (cached; an
+//! The quota subject is the **account**, not the org: the plan lives on the
+//! account and every count spans the account's live orgs. An extra org buys a
+//! workspace, never extra capacity, and a member invited into someone else's
+//! org contributes none of their own.
+//!
+//! `limit_for_org` is the single read path for an org's effective limits: the
+//! account's plan row, with its `plan_overrides` row folded in (cached; an
 //! expired override reverts to the plan default). The `check_*` methods are
 //! the *friendly-error* fast path called at handler entry; the race-safe
 //! guarantee lives in the store INSERTs that take the same limit number
@@ -23,7 +28,7 @@ use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::domain::quota::{Plan, evidence_ttl_days, raw_ttl_days};
-use crate::domain::{OrgId, UserId};
+use crate::domain::{AccountId, OrgId, UserId};
 use crate::error::{AppError, Result};
 use crate::storage::{ClampedRange, TimeRange};
 
@@ -38,13 +43,15 @@ pub struct RetentionDays {
 /// Bulk `org_id → physical retention days`, one query, the same ceilings as
 /// [`Plan::raw_window_days`] via [`raw_ttl_days`] / [`evidence_ttl_days`]. Feeds
 /// the write-path TTL snapshot ([`crate::storage::org_ttl`]), which must read
-/// every active org without thrashing the per-org plan cache. Plan-level:
-/// neither column carries a per-org override or add-on today, so no override
+/// every active org without thrashing the plan cache. Plan-level:
+/// neither column carries an override or add-on today, so no override
 /// folding is applied.
 pub async fn retention_days_by_org(pool: &PgPool) -> Result<HashMap<Uuid, RetentionDays>> {
     let rows: Vec<(Uuid, i32, i32)> = sqlx::query_as(
         "SELECT o.id, p.raw_days, p.evidence_days \
-         FROM organizations o JOIN plans p ON p.id = o.plan_id",
+         FROM organizations o \
+         JOIN accounts a ON a.id = o.account_id \
+         JOIN plans p ON p.id = a.plan_id",
     )
     .fetch_all(pool)
     .await
@@ -79,32 +86,82 @@ pub mod usage_keys {
     pub const ESCALATION_POLICIES: &str = "max_escalation_policies";
     pub const ON_CALL_SCHEDULES: &str = "max_on_call_schedules";
     pub const FLOW_CHECKS: &str = "max_flow_checks";
+    pub const ORGS: &str = "max_orgs";
 }
 
-/// The org-scoped count queries. Declared once and shared by the atomic
-/// friendly-check path *and* the usage snapshot so the number a customer is
-/// blocked at always equals the number the usage page shows (single source).
-const SQL_COUNT_TARGETS: &str = "SELECT count(*) FROM targets WHERE org_id = $1";
-const SQL_COUNT_FLOW: &str = "SELECT count(*) FROM targets WHERE org_id = $1 AND kind = 'flow'";
-// Public components are now distinct monitors curated onto any page — the
-// per-org cap counts a monitor once no matter how many pages it sits on.
-const SQL_COUNT_PUBLIC_COMPONENTS: &str =
-    "SELECT count(DISTINCT target_id) FROM status_page_components WHERE org_id = $1";
-const SQL_COUNT_STATUS_PAGES: &str = "SELECT count(*) FROM status_pages WHERE org_id = $1";
-const SQL_COUNT_MAINTENANCE_WINDOWS: &str =
-    "SELECT count(*) FROM maintenance_windows WHERE org_id = $1";
-const SQL_COUNT_NOTIFICATION_CHANNELS: &str =
-    "SELECT count(*) FROM notification_channels WHERE org_id = $1";
-const SQL_COUNT_ESCALATION_POLICIES: &str =
-    "SELECT count(*) FROM escalation_policies WHERE org_id = $1 AND deleted_at IS NULL";
-const SQL_COUNT_ON_CALL_SCHEDULES: &str =
-    "SELECT count(*) FROM on_call_schedules WHERE org_id = $1 AND deleted_at IS NULL";
+/// The account-pooled count queries: `$1` is the account, and each counts
+/// across its live orgs via [`crate::storage::accounts::live_orgs`]. Declared
+/// once and shared by the atomic friendly-check path, the store-side race-safe
+/// guards, *and* the usage snapshot, so the number a customer is blocked at
+/// always equals the number the usage page shows (single source).
+pub(crate) mod count_sql {
+    use crate::storage::accounts::live_orgs;
+
+    macro_rules! pooled {
+        ($name:ident, $sql:literal) => {
+            pub fn $name() -> String {
+                format!($sql, orgs = live_orgs("$1"))
+            }
+        };
+    }
+
+    pooled!(
+        targets,
+        "SELECT count(*) FROM targets WHERE org_id IN ({orgs})"
+    );
+    pooled!(
+        flow,
+        "SELECT count(*) FROM targets WHERE org_id IN ({orgs}) AND kind = 'flow'"
+    );
+    // Public components are distinct monitors curated onto any page — the cap
+    // counts a monitor once no matter how many pages it sits on.
+    pooled!(
+        public_components,
+        "SELECT count(DISTINCT target_id) FROM status_page_components WHERE org_id IN ({orgs})"
+    );
+    pooled!(
+        status_pages,
+        "SELECT count(*) FROM status_pages WHERE org_id IN ({orgs})"
+    );
+    pooled!(
+        maintenance_windows,
+        "SELECT count(*) FROM maintenance_windows WHERE org_id IN ({orgs})"
+    );
+    pooled!(
+        notification_channels,
+        "SELECT count(*) FROM notification_channels WHERE org_id IN ({orgs})"
+    );
+    pooled!(
+        escalation_policies,
+        "SELECT count(*) FROM escalation_policies WHERE org_id IN ({orgs}) AND deleted_at IS NULL"
+    );
+    pooled!(
+        on_call_schedules,
+        "SELECT count(*) FROM on_call_schedules WHERE org_id IN ({orgs}) AND deleted_at IS NULL"
+    );
+    // Seats are people, not memberships: one person in three of the account's
+    // orgs takes one seat.
+    pooled!(
+        members,
+        "SELECT count(DISTINCT user_id) FROM memberships WHERE org_id IN ({orgs})"
+    );
+    // Same "pending" predicate as `auth::invitations`, so the usage view and
+    // the atomic invite-cap enforcer agree on what counts.
+    pooled!(
+        pending_invitations,
+        "SELECT count(*) FROM invitations WHERE org_id IN ({orgs}) \
+         AND accepted_at IS NULL AND declined_at IS NULL AND expires_at > now()"
+    );
+}
 
 /// Storage-layer row for `plans`. The domain `Plan` stays `sqlx`-free
 /// (per the domain/storage split); this is the only place that maps the
 /// table. Field order matches the SELECT.
 #[derive(sqlx::FromRow)]
 struct PlanRow {
+    /// The account the plan was resolved through, carried on the same row so
+    /// resolution stays one query.
+    account_id: Uuid,
     id: String,
     name: String,
     description: String,
@@ -126,6 +183,7 @@ struct PlanRow {
     max_on_call_schedules: i32,
     max_logo_size_bytes: i32,
     max_regions: i32,
+    max_orgs: i32,
     api_writes_per_minute: i32,
     api_reads_per_minute: i32,
     bulk_ops_per_minute: i32,
@@ -167,6 +225,7 @@ impl From<PlanRow> for Plan {
             max_on_call_schedules: r.max_on_call_schedules,
             max_logo_size_bytes: r.max_logo_size_bytes,
             max_regions: r.max_regions,
+            max_orgs: r.max_orgs,
             api_writes_per_minute: r.api_writes_per_minute,
             api_reads_per_minute: r.api_reads_per_minute,
             bulk_ops_per_minute: r.bulk_ops_per_minute,
@@ -186,24 +245,38 @@ impl From<PlanRow> for Plan {
     }
 }
 
+/// An org's quota subject: the account that owns it and that account's
+/// effective plan. Resolved together because every check needs both — the cap
+/// from the plan, the count from the account's pool.
+#[derive(Clone)]
+struct Resolved {
+    account: AccountId,
+    plan: Arc<Plan>,
+}
+
 #[derive(Clone)]
 pub struct QuotaService {
     db: Option<PgPool>,
-    /// Org → effective plan. Keyed by org (not plan id) and populated by a
-    /// single `organizations ⋈ plans` query, so a steady-state cache hit is
+    /// Org → its account + that account's effective plan. Keyed by org because
+    /// that is what request paths carry, and populated by a single
+    /// `organizations ⋈ accounts ⋈ plans` query, so a steady-state cache hit is
     /// **zero** DB round-trips on the per-request hot path.
-    plan_cache: Cache<OrgId, Arc<Plan>>,
-    /// `(org, quota_name)` → current count for the usage snapshot. TTL-only
-    /// and recompute-from-DB on miss; never incremented, so a write path that
-    /// forgets to adjust a counter cannot drift it (the cache contract).
-    usage_cache: Cache<(OrgId, &'static str), u32>,
+    plan_cache: Cache<OrgId, Resolved>,
+    /// `(account, quota_name)` → current pooled count for the usage snapshot.
+    /// TTL-only and recompute-from-DB on miss; never incremented, so a write
+    /// path that forgets to adjust a counter cannot drift it (the cache
+    /// contract).
+    usage_cache: Cache<(AccountId, &'static str), u32>,
 }
 
-/// One org's plan plus its current resource counts. The handler shapes this
-/// into the public usage JSON; keeping the service free of the API DTO keeps
-/// the count logic in one place and the wire shape in the API layer.
-pub struct OrgUsage {
+/// The account's plan plus its current pooled counts — the totals across
+/// every live org it owns, which is what the caps apply to. The handler shapes
+/// this into the public usage JSON; keeping the service free of the API DTO
+/// keeps the count logic in one place and the wire shape in the API layer.
+pub struct AccountUsage {
     pub plan: Arc<Plan>,
+    /// Live orgs the account holds, against `plan.max_orgs`.
+    pub orgs: i64,
     pub targets: i64,
     pub members: i64,
     pub pending_invitations: i64,
@@ -230,22 +303,39 @@ impl QuotaService {
         }
     }
 
-    /// Effective plan for an org. Without a DB (in-memory dev/test fixtures
-    /// that always run single-tenant) there is no `plans` table, so quotas
-    /// are not enforced — return an unlimited synthetic plan.
+    /// Effective plan for an org — its account's plan. Without a DB (in-memory
+    /// dev/test fixtures that always run single-tenant) there is no `plans`
+    /// table, so quotas are not enforced — return an unlimited synthetic plan.
     pub async fn limit_for_org(&self, org: OrgId) -> Result<Arc<Plan>> {
+        Ok(match self.resolve(org).await? {
+            Some(r) => r.plan,
+            None => Arc::new(unlimited_plan()),
+        })
+    }
+
+    /// The account an org's quota is counted against. `None` only in the
+    /// DB-less fixture case, where nothing is enforced.
+    pub async fn account_for_org(&self, org: OrgId) -> Result<Option<AccountId>> {
+        Ok(self.resolve(org).await?.map(|r| r.account))
+    }
+
+    /// Org → (account, effective plan), cached. One query joins the org to its
+    /// account and plan; the account-scoped override and add-on rows are folded
+    /// in before the value is cached, so the TTL bounds every input equally.
+    async fn resolve(&self, org: OrgId) -> Result<Option<Resolved>> {
         let Some(db) = &self.db else {
-            return Ok(Arc::new(unlimited_plan()));
+            return Ok(None);
         };
 
         let db2 = db.clone();
-        let plan = self
+        let resolved = self
             .plan_cache
             .try_get_with(org, async move {
-                // One join: org row → its plan. Cached by org id, so a hit
-                // costs zero queries (the cache TTL bounds staleness).
+                // One join: org row → account → plan. Cached by org id, so a
+                // hit costs zero queries (the cache TTL bounds staleness).
                 let p: PlanRow = sqlx::query_as(
-                    "SELECT p.id, p.name, p.description, p.max_targets, \
+                    "SELECT o.account_id, \
+                     p.id, p.name, p.description, p.max_targets, \
                      p.min_check_interval_secs, p.retention_days, p.raw_days, p.evidence_days, \
                      p.max_members, \
                      p.max_pending_invitations, p.max_api_tokens_per_user, \
@@ -254,7 +344,7 @@ impl QuotaService {
                      p.max_maintenance_windows, \
                      p.max_notification_channels, p.max_escalation_policies, \
                      p.max_on_call_schedules, \
-                     p.max_logo_size_bytes, p.max_regions, \
+                     p.max_logo_size_bytes, p.max_regions, p.max_orgs, \
                      p.api_writes_per_minute, \
                      p.api_reads_per_minute, p.bulk_ops_per_minute, \
                      p.test_now_per_minute, p.check_now_per_minute, \
@@ -262,26 +352,34 @@ impl QuotaService {
                      p.sms_alerts_enabled, p.incident_narration_enabled, \
                      p.on_call_enabled, p.max_flow_checks, p.max_flow_steps, \
                      p.is_listed, p.created_at, p.updated_at \
-                     FROM organizations o JOIN plans p ON p.id = o.plan_id \
+                     FROM organizations o \
+                     JOIN accounts a ON a.id = o.account_id \
+                     JOIN plans p ON p.id = a.plan_id \
                      WHERE o.id = $1",
                 )
                 .bind(org.0)
                 .fetch_one(&db2)
                 .await?;
+                let account = AccountId(p.account_id);
                 let mut plan: Plan = p.into();
-                // Per-org exception (beta customers, friends-of-the-
+                // Per-account exception (beta customers, friends-of-the-
                 // project): a present, unexpired plan_overrides row
                 // replaces the named caps. Folded into the cached value, so
                 // the TTL bounds an override edit/expiry exactly as it
                 // bounds a plans-table edit (same staleness contract).
-                if let Some(ov) = plan_override(&db2, org).await? {
+                if let Some(ov) = plan_override(&db2, account).await? {
                     plan = apply_overrides(&plan, &ov);
                 }
                 // Billed add-ons stack on the resolved plan/override base.
-                plan = apply_addons(&plan, &org_addons(&db2, org).await?);
+                plan = apply_addons(&plan, &account_addons(&db2, account).await?);
                 // Creation assigns a region regardless, so zero is unhonourable.
                 plan.max_regions = plan.max_regions.max(1);
-                Ok::<Arc<Plan>, sqlx::Error>(Arc::new(plan))
+                // An account always holds the org being resolved.
+                plan.max_orgs = plan.max_orgs.max(1);
+                Ok::<Resolved, sqlx::Error>(Resolved {
+                    account,
+                    plan: Arc::new(plan),
+                })
             })
             .await
             .map_err(|e| match e.as_ref() {
@@ -291,7 +389,7 @@ impl QuotaService {
                 _ => AppError::Other(anyhow::anyhow!("limit_for_org: {e}")),
             })?;
 
-        Ok(plan)
+        Ok(Some(resolved))
     }
 
     /// Clamp a read range to the org's raw forensics window (raw-table reads).
@@ -314,39 +412,67 @@ impl QuotaService {
         ))
     }
 
-    async fn count(&self, sql: &str, org: OrgId) -> Result<i64> {
+    /// Run one pooled count for an account. `sql` comes from [`count_sql`],
+    /// where `$1` is always the account.
+    async fn count(&self, sql: &str, account: AccountId) -> Result<i64> {
         let Some(db) = &self.db else { return Ok(0) };
         let n: i64 = sqlx::query_scalar(sql)
-            .bind(org.0)
+            .bind(account.0)
             .fetch_one(db)
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("quota count: {e}")))?;
         Ok(n)
     }
 
-    /// Friendly pre-check for `n` new targets. The atomic guarantee is the
-    /// `WHERE (count) + n <= limit` inside `TargetStore::create`/`bulk_create`
-    /// which is handed the same `max_targets` — this only produces the nice
-    /// 422 on the common (uncontended) path.
+    /// The shared body of every "may this account hold one more X?" check:
+    /// resolve the org's account and plan, count that account's pool, and
+    /// record a block when `n` more would cross the cap.
+    async fn check_pooled(
+        &self,
+        org: OrgId,
+        user: Option<UserId>,
+        quota: &'static str,
+        cap: impl Fn(&Plan) -> i32,
+        sql: String,
+        n: i64,
+    ) -> Result<()> {
+        let Some(r) = self.resolve(org).await? else {
+            return Ok(());
+        };
+        let limit = i64::from(cap(&r.plan));
+        let current = self.count(&sql, r.account).await?;
+        if current + n > limit {
+            self.record_block(org, user, quota, current, limit);
+            return Err(AppError::quota_exceeded(
+                quota,
+                current,
+                limit,
+                r.plan.id.clone(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Friendly pre-check for `n` new targets, counted across the account's
+    /// orgs. The atomic guarantee is the `WHERE (count) + n <= limit` inside
+    /// `TargetStore::create`/`bulk_create`, which pools the same way and is
+    /// handed the same `max_targets` — this only produces the nice 422 on the
+    /// common (uncontended) path.
     pub async fn check_can_create_targets(
         &self,
         org: OrgId,
         user: Option<UserId>,
         n: i64,
     ) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_targets);
-        let current = self.count(SQL_COUNT_TARGETS, org).await?;
-        if current + n > limit {
-            self.record_block(org, user, "max_targets", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_targets",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::TARGETS,
+            |p| p.max_targets,
+            count_sql::targets(),
+            n,
+        )
+        .await
     }
 
     /// Friendly pre-check for `n` new flow monitors against the plan's
@@ -359,19 +485,15 @@ impl QuotaService {
         user: Option<UserId>,
         n: i64,
     ) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_flow_checks);
-        let current = self.count(SQL_COUNT_FLOW, org).await?;
-        if current + n > limit {
-            self.record_block(org, user, usage_keys::FLOW_CHECKS, current, limit);
-            return Err(AppError::quota_exceeded(
-                usage_keys::FLOW_CHECKS,
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::FLOW_CHECKS,
+            |p| p.max_flow_checks,
+            count_sql::flow(),
+            n,
+        )
+        .await
     }
 
     /// Region-assignment cap. `requested` is the size of the region set the
@@ -402,19 +524,15 @@ impl QuotaService {
         org: OrgId,
         user: Option<UserId>,
     ) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_maintenance_windows);
-        let current = self.count(SQL_COUNT_MAINTENANCE_WINDOWS, org).await?;
-        if current + 1 > limit {
-            self.record_block(org, user, "max_maintenance_windows", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_maintenance_windows",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::MAINTENANCE_WINDOWS,
+            |p| p.max_maintenance_windows,
+            count_sql::maintenance_windows(),
+            1,
+        )
+        .await
     }
 
     /// Friendly pre-check for one new status page. The race-safe guarantee is
@@ -425,19 +543,15 @@ impl QuotaService {
         org: OrgId,
         user: Option<UserId>,
     ) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_status_pages);
-        let current = self.count(SQL_COUNT_STATUS_PAGES, org).await?;
-        if current + 1 > limit {
-            self.record_block(org, user, "max_status_pages", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_status_pages",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::STATUS_PAGES,
+            |p| p.max_status_pages,
+            count_sql::status_pages(),
+            1,
+        )
+        .await
     }
 
     /// Friendly pre-check for one new notification channel. The race-safe
@@ -450,19 +564,15 @@ impl QuotaService {
         org: OrgId,
         user: Option<UserId>,
     ) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_notification_channels);
-        let current = self.count(SQL_COUNT_NOTIFICATION_CHANNELS, org).await?;
-        if current + 1 > limit {
-            self.record_block(org, user, "max_notification_channels", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_notification_channels",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::NOTIFICATION_CHANNELS,
+            |p| p.max_notification_channels,
+            count_sql::notification_channels(),
+            1,
+        )
+        .await
     }
 
     /// Friendly pre-check for one new escalation policy. The race-safe
@@ -473,19 +583,15 @@ impl QuotaService {
         org: OrgId,
         user: Option<UserId>,
     ) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_escalation_policies);
-        let current = self.count(SQL_COUNT_ESCALATION_POLICIES, org).await?;
-        if current + 1 > limit {
-            self.record_block(org, user, "max_escalation_policies", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_escalation_policies",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::ESCALATION_POLICIES,
+            |p| p.max_escalation_policies,
+            count_sql::escalation_policies(),
+            1,
+        )
+        .await
     }
 
     /// Friendly pre-check for one new on-call schedule. The race-safe guarantee
@@ -496,67 +602,68 @@ impl QuotaService {
         org: OrgId,
         user: Option<UserId>,
     ) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let limit = i64::from(plan.max_on_call_schedules);
-        let current = self.count(SQL_COUNT_ON_CALL_SCHEDULES, org).await?;
-        if current + 1 > limit {
-            self.record_block(org, user, "max_on_call_schedules", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_on_call_schedules",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::ON_CALL_SCHEDULES,
+            |p| p.max_on_call_schedules,
+            count_sql::on_call_schedules(),
+            1,
+        )
+        .await
     }
 
     /// Friendly pre-check for adding one member, so an over-cap invitation
-    /// accept fails with a clean 422 before the token is consumed. The
-    /// race-safe guarantee is the advisory-locked count inside
-    /// `orgs::add_member`, handed the same `max_members`.
+    /// accept fails with a clean 422 before the token is consumed. Seats are
+    /// pooled *people*: the same person in two of the account's orgs takes one
+    /// seat, and re-adding them to a second org costs nothing. The race-safe
+    /// guarantee is the advisory-locked count inside `orgs::add_member`, handed
+    /// the same `max_members`.
     pub async fn check_can_add_member(&self, org: OrgId, user: Option<UserId>) -> Result<()> {
-        let plan = self.limit_for_org(org).await?;
-        let Some(db) = &self.db else { return Ok(()) };
-        let limit = i64::from(plan.max_members);
-        let current = i64::from(crate::storage::orgs::active_member_count(db, org).await?);
-        if current + 1 > limit {
-            self.record_block(org, user, "max_members", current, limit);
-            return Err(AppError::quota_exceeded(
-                "max_members",
-                current,
-                limit,
-                plan.id.clone(),
-            ));
-        }
-        Ok(())
+        self.check_pooled(
+            org,
+            user,
+            usage_keys::MEMBERS,
+            |p| p.max_members,
+            count_sql::members(),
+            1,
+        )
+        .await
     }
 
-    /// Read-through the usage cache for one `(org, quota_name)` count.
+    /// Read-through the usage cache for one `(account, quota_name)` count.
     /// TTL-only and recompute-from-DB on miss — never an increment, so a path
     /// that forgets to adjust a counter cannot drift it (the cache contract).
     /// Two racing misses recompute the same idempotent `COUNT(*)`; harmless.
-    async fn cached_count<F>(&self, org: OrgId, key: &'static str, compute: F) -> Result<i64>
+    async fn cached_count<F>(
+        &self,
+        account: AccountId,
+        key: &'static str,
+        compute: F,
+    ) -> Result<i64>
     where
         F: Future<Output = Result<i64>>,
     {
-        if let Some(v) = self.usage_cache.get(&(org, key)).await {
+        if let Some(v) = self.usage_cache.get(&(account, key)).await {
             return Ok(i64::from(v));
         }
         let n = compute.await?.max(0);
         let stored = u32::try_from(n).unwrap_or(u32::MAX);
-        self.usage_cache.insert((org, key), stored).await;
+        self.usage_cache.insert((account, key), stored).await;
         Ok(i64::from(stored))
     }
 
-    /// Plan + current counts for the usage endpoint / UI. Counts go through
-    /// the 10 s usage cache. Without a DB (in-memory fixtures) the counts are
-    /// zero against the synthetic unlimited plan.
-    pub async fn org_usage(&self, org: OrgId) -> Result<OrgUsage> {
-        let plan = self.limit_for_org(org).await?;
-        let Some(db) = &self.db else {
-            return Ok(OrgUsage {
-                plan,
+    /// Plan + current pooled counts for the usage endpoint / UI. The numbers
+    /// are the account's totals across its live orgs — the same pool the caps
+    /// are enforced against, so what a customer reads here explains what they
+    /// are blocked at. Counts go through the 10 s usage cache. Without a DB
+    /// (in-memory fixtures) the counts are zero against the synthetic
+    /// unlimited plan.
+    pub async fn account_usage(&self, org: OrgId) -> Result<AccountUsage> {
+        let Some(r) = self.resolve(org).await? else {
+            return Ok(AccountUsage {
+                plan: Arc::new(unlimited_plan()),
+                orgs: 0,
                 targets: 0,
                 members: 0,
                 pending_invitations: 0,
@@ -566,55 +673,77 @@ impl QuotaService {
                 notification_channels: 0,
             });
         };
+        let Some(db) = &self.db else {
+            return Ok(AccountUsage {
+                plan: r.plan,
+                orgs: 0,
+                targets: 0,
+                members: 0,
+                pending_invitations: 0,
+                public_components: 0,
+                status_pages: 0,
+                maintenance_windows: 0,
+                notification_channels: 0,
+            });
+        };
+        let account = r.account;
+        let orgs = self
+            .cached_count(account, usage_keys::ORGS, async {
+                crate::storage::accounts::live_org_count(db, account).await
+            })
+            .await?;
         let targets = self
-            .cached_count(org, usage_keys::TARGETS, self.count(SQL_COUNT_TARGETS, org))
+            .cached_count(
+                account,
+                usage_keys::TARGETS,
+                self.count(&count_sql::targets(), account),
+            )
             .await?;
         let members = self
-            .cached_count(org, usage_keys::MEMBERS, async {
-                crate::storage::orgs::active_member_count(db, org)
-                    .await
-                    .map(i64::from)
-            })
+            .cached_count(
+                account,
+                usage_keys::MEMBERS,
+                self.count(&count_sql::members(), account),
+            )
             .await?;
-        // Reuse the invitation module's "pending" predicate so the usage view
-        // and the atomic invite-cap enforcer agree on what counts as pending.
         let pending_invitations = self
-            .cached_count(org, usage_keys::PENDING_INVITATIONS, async {
-                crate::auth::invitations::count_pending_for_org(db, org)
-                    .await
-                    .map(i64::from)
-            })
+            .cached_count(
+                account,
+                usage_keys::PENDING_INVITATIONS,
+                self.count(&count_sql::pending_invitations(), account),
+            )
             .await?;
         let public_components = self
             .cached_count(
-                org,
+                account,
                 usage_keys::PUBLIC_COMPONENTS,
-                self.count(SQL_COUNT_PUBLIC_COMPONENTS, org),
+                self.count(&count_sql::public_components(), account),
             )
             .await?;
         let status_pages = self
             .cached_count(
-                org,
+                account,
                 usage_keys::STATUS_PAGES,
-                self.count(SQL_COUNT_STATUS_PAGES, org),
+                self.count(&count_sql::status_pages(), account),
             )
             .await?;
         let maintenance_windows = self
             .cached_count(
-                org,
+                account,
                 usage_keys::MAINTENANCE_WINDOWS,
-                self.count(SQL_COUNT_MAINTENANCE_WINDOWS, org),
+                self.count(&count_sql::maintenance_windows(), account),
             )
             .await?;
         let notification_channels = self
             .cached_count(
-                org,
+                account,
                 usage_keys::NOTIFICATION_CHANNELS,
-                self.count(SQL_COUNT_NOTIFICATION_CHANNELS, org),
+                self.count(&count_sql::notification_channels(), account),
             )
             .await?;
-        Ok(OrgUsage {
-            plan,
+        Ok(AccountUsage {
+            plan: r.plan,
+            orgs,
             targets,
             members,
             pending_invitations,
@@ -720,6 +849,7 @@ struct PlanOverrides {
     max_on_call_schedules: Option<u32>,
     max_regions: Option<u32>,
     max_logo_size_bytes: Option<u32>,
+    max_orgs: Option<u32>,
 }
 
 fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {
@@ -747,22 +877,26 @@ fn apply_overrides(base: &Plan, ov: &PlanOverrides) -> Plan {
     p.max_on_call_schedules = take(ov.max_on_call_schedules, p.max_on_call_schedules);
     p.max_regions = take(ov.max_regions, p.max_regions);
     p.max_logo_size_bytes = take(ov.max_logo_size_bytes, p.max_logo_size_bytes);
+    p.max_orgs = take(ov.max_orgs, p.max_orgs);
     p
 }
 
-/// Active per-org limit override, if any. Expired rows are filtered in SQL,
+/// Active per-account limit override, if any. Expired rows are filtered in SQL,
 /// so an override past its `expires_at` reverts to the plan default. A
 /// *query* error propagates (so the caller's cache does not memoize a
 /// degraded plan for the whole TTL on a transient DB blip — a healthy
 /// override must not be dropped by unrelated infra trouble). Only the
 /// benign cases are `Ok(None)`: no row, or a malformed `override_json`
 /// (logged) — a bad admin row must never take an org's limits down with it.
-async fn plan_override(db: &PgPool, org: OrgId) -> Result<Option<PlanOverrides>, sqlx::Error> {
+async fn plan_override(
+    db: &PgPool,
+    account: AccountId,
+) -> Result<Option<PlanOverrides>, sqlx::Error> {
     let json: Option<serde_json::Value> = sqlx::query_scalar(
         "SELECT override_json FROM plan_overrides \
-         WHERE org_id = $1 AND (expires_at IS NULL OR expires_at > now())",
+         WHERE account_id = $1 AND (expires_at IS NULL OR expires_at > now())",
     )
-    .bind(org.0)
+    .bind(account.0)
     .fetch_optional(db)
     .await?;
     let Some(json) = json else { return Ok(None) };
@@ -777,7 +911,7 @@ async fn plan_override(db: &PgPool, org: OrgId) -> Result<Option<PlanOverrides>,
 
 /// Additive, billed capacity on top of the base plan (Stripe quantity items).
 /// Unlike `PlanOverrides` (which replaces a cap), add-ons stack on the resolved
-/// plan/override. Count caps only. Summed per type from `org_addons`.
+/// plan/override. Count caps only. Summed per type from `account_addons`.
 #[derive(Debug, Default)]
 struct Addons {
     extra_targets: i64,
@@ -801,14 +935,15 @@ fn apply_addons(base: &Plan, a: &Addons) -> Plan {
     p
 }
 
-/// Add-on quantities for an org, summed by type. Like `plan_override`: a query
-/// error propagates (never memoize a degraded plan on a transient blip); empty
-/// is `Ok(default)`. Unknown type (CHECK makes it impossible) is logged + ignored.
-async fn org_addons(db: &PgPool, org: OrgId) -> Result<Addons, sqlx::Error> {
-    // PK (org_id, addon_type) → at most one row per type, no aggregation needed.
+/// Add-on quantities for an account, summed by type. Like `plan_override`: a
+/// query error propagates (never memoize a degraded plan on a transient blip);
+/// empty is `Ok(default)`. Unknown type (CHECK makes it impossible) is logged +
+/// ignored.
+async fn account_addons(db: &PgPool, account: AccountId) -> Result<Addons, sqlx::Error> {
+    // PK (account_id, addon_type) → at most one row per type, no aggregation.
     let rows: Vec<(String, i32)> =
-        sqlx::query_as("SELECT addon_type, quantity FROM org_addons WHERE org_id = $1")
-            .bind(org.0)
+        sqlx::query_as("SELECT addon_type, quantity FROM account_addons WHERE account_id = $1")
+            .bind(account.0)
             .fetch_all(db)
             .await?;
     let mut a = Addons::default();
@@ -820,7 +955,7 @@ async fn org_addons(db: &PgPool, org: OrgId) -> Result<Addons, sqlx::Error> {
             "extra_members" => a.extra_members = qty,
             "extra_shared_monitors" => a.extra_shared_monitors = qty,
             "extra_notification_channels" => a.extra_notification_channels = qty,
-            other => tracing::warn!(addon_type = other, "unknown org_addons type; ignoring"),
+            other => tracing::warn!(addon_type = other, "unknown account_addons type; ignoring"),
         }
     }
     Ok(a)
@@ -852,6 +987,7 @@ pub(crate) fn unlimited_plan() -> Plan {
         max_on_call_schedules: i32::MAX,
         max_logo_size_bytes: i32::MAX,
         max_regions: i32::MAX,
+        max_orgs: i32::MAX,
         api_writes_per_minute: i32::MAX,
         api_reads_per_minute: i32::MAX,
         bulk_ops_per_minute: i32::MAX,

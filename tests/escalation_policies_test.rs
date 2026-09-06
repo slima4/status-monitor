@@ -20,7 +20,7 @@ use uuid::Uuid;
 
 async fn seed_org(pool: &PgPool, prefix: &str) -> OrgId {
     let user = make_user(pool, prefix).await;
-    create_org_with_owner(pool, user, &unique_slug(prefix), "n", 3)
+    create_org_with_owner(pool, user, &unique_slug(prefix), "n")
         .await
         .expect("create org")
         .expect("org created")

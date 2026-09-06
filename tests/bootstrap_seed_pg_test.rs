@@ -246,10 +246,12 @@ async fn seeded_org_lands_on_pro_without_configuration() {
 
     seed_first_owner(&pool, &cfg).await.expect("seed");
 
-    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let plan: String = sqlx::query_scalar(
+        "SELECT a.plan_id FROM accounts a JOIN organizations o ON o.account_id = a.id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(
         plan, "pro",
         "self-hosted install stayed on the shared-platform plan"
@@ -268,10 +270,12 @@ async fn opting_back_to_free_leaves_the_schema_default_alone() {
 
     seed_first_owner(&pool, &cfg).await.expect("seed");
 
-    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let plan: String = sqlx::query_scalar(
+        "SELECT a.plan_id FROM accounts a JOIN organizations o ON o.account_id = a.id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(plan, "free", "an explicit opt-out must be honoured");
     common::drop_test_db(&name).await;
 }
@@ -313,10 +317,12 @@ async fn an_already_claimed_org_is_never_moved_by_a_later_default() {
         .await
         .expect("restart on the new default");
 
-    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let plan: String = sqlx::query_scalar(
+        "SELECT a.plan_id FROM accounts a JOIN organizations o ON o.account_id = a.id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(plan, "free", "a claimed instance was re-planned on restart");
     common::drop_test_db(&name).await;
 }
@@ -381,11 +387,14 @@ async fn signup_orgs_ignore_the_boot_seeding_default() {
         .expect("slug free");
     tx.commit().await.unwrap();
 
-    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations WHERE id = $1")
-        .bind(org.0)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let plan: String = sqlx::query_scalar(
+        "SELECT a.plan_id FROM accounts a \
+         JOIN organizations o ON o.account_id = a.id WHERE o.id = $1",
+    )
+    .bind(org.0)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert!(
         plan == "founding" || plan == "free",
         "signup landed on {plan}, so the self-host default leaked into hosted"
@@ -419,10 +428,12 @@ async fn the_operator_cli_does_not_apply_the_seeding_default() {
     .await
     .expect("cli bootstrap");
 
-    let plan: String = sqlx::query_scalar("SELECT plan_id FROM organizations")
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let plan: String = sqlx::query_scalar(
+        "SELECT a.plan_id FROM accounts a JOIN organizations o ON o.account_id = a.id",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(plan, "free", "the CLI inherited the boot-seeding default");
     common::drop_test_db(&name).await;
 }

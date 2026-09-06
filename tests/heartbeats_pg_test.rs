@@ -27,12 +27,12 @@ use common::{default_http_check, make_user, pg_pool_from_env, unique_slug};
 async fn two_orgs(pool: &sqlx::PgPool, tag: &str) -> (OrgId, OrgId, UserId, UserId) {
     let user_a = make_user(pool, tag).await;
     let user_b = make_user(pool, tag).await;
-    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A", 3)
+    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A")
         .await
         .unwrap()
         .expect("org a")
         .id;
-    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B", 3)
+    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B")
         .await
         .unwrap()
         .expect("org b")
@@ -779,7 +779,15 @@ async fn restore_org_rearms_heartbeats_live_pg() {
     .unwrap();
 
     soft_delete_org(&pool, org_a, user_a).await.unwrap();
-    let outcome = restore_org(&pool, org_a, user_a, 30, 3).await.unwrap();
+    let outcome = restore_org(
+        &pool,
+        org_a,
+        user_a,
+        30,
+        &common::plan_for(&pool, org_a).await,
+    )
+    .await
+    .unwrap();
     assert!(matches!(outcome, RestoreOutcome::Restored(_)));
 
     let hb = store.get(org_a, target).await.unwrap().expect("row");

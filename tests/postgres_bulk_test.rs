@@ -26,7 +26,9 @@ async fn store_with_default_org(
     let slug = format!("bulk-{}", Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Bulk Test') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Bulk Test', a.id FROM a RETURNING id",
     )
     .bind(slug)
     .fetch_one(&pool)
@@ -246,7 +248,9 @@ async fn legacy_plaintext_row_decrypts_passthrough(pool: PgPool) {
     let slug = format!("bulk-{}", Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (org_uuid,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Bulk Test') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Bulk Test', a.id FROM a RETURNING id",
     )
     .bind(slug)
     .fetch_one(&pool)

@@ -87,7 +87,9 @@ async fn seed_org(pool: &sqlx::PgPool, prefix: &str) -> uptimepage::domain::OrgI
     let slug = format!("{prefix}-{}", Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Agg Test') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Agg Test', a.id FROM a RETURNING id",
     )
     .bind(slug)
     .fetch_one(pool)

@@ -32,7 +32,7 @@ async fn page_asset_roundtrip_live_pg() {
         return;
     };
     let user = make_user(&pool, "pa").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("pa"), "PA Co", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("pa"), "PA Co")
         .await
         .unwrap()
         .expect("org")

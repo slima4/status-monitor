@@ -34,7 +34,7 @@ async fn signing_in_does_not_restore_but_the_restore_call_does() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "leaver").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co")
         .await
         .unwrap()
         .unwrap();
@@ -153,7 +153,7 @@ async fn restore_repairs_sessions_minted_on_other_devices() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "twodevice").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co")
         .await
         .unwrap()
         .unwrap();
@@ -220,7 +220,7 @@ async fn restore_page_is_closed_to_everyone_else() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "active").await;
-    create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co", 10)
+    create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co")
         .await
         .unwrap()
         .unwrap();

@@ -1,7 +1,7 @@
-//! Per-org / per-user request rate limiting.
+//! Per-account / per-user request rate limiting.
 //!
 //! One `governor` direct limiter per `(scope, category)` key in a `DashMap`.
-//! Both the org tier and the user tier are checked; whichever is hit first
+//! Both the account tier and the user tier are checked; whichever is hit first
 //! produces the 429. Per-IP limiting is Caddy's job (it sees the real peer);
 //! this tier keys on the authenticated subject, never the TCP peer, so a
 //! single reverse-proxy hop cannot collapse every tenant into one bucket.
@@ -19,7 +19,7 @@ use tokio::time::{MissedTickBehavior, interval};
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::quota::Plan;
-use crate::domain::{OrgId, UserId};
+use crate::domain::{AccountId, UserId};
 
 type DirectLimiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
@@ -69,7 +69,10 @@ impl RateLimitCategory {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum RateLimitKey {
-    Org(OrgId, RateLimitCategory),
+    /// The account behind the request's org. Keyed on the account, not the
+    /// org, so the plan's budget is one budget however many workspaces the
+    /// customer splits their monitors across.
+    Account(AccountId, RateLimitCategory),
     User(UserId, RateLimitCategory),
 }
 
@@ -106,7 +109,7 @@ impl RateLimitService {
     /// Check one tier. `Ok(())` = allowed; `Err(Denied)` = 429.
     pub fn check(&self, key: RateLimitKey, tier: &'static str, plan: &Plan) -> Result<(), Denied> {
         let category = match &key {
-            RateLimitKey::Org(_, c) | RateLimitKey::User(_, c) => *c,
+            RateLimitKey::Account(_, c) | RateLimitKey::User(_, c) => *c,
         };
         let entry = self
             .limiters

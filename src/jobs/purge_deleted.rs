@@ -105,6 +105,13 @@ pub async fn purge_tick(
     // Users last: an org the user solo-owns may be cascaded above in the
     // same tick, so the user purge runs against already-settled org state.
     let users = purge_users_past_grace(pool, grace_days).await?;
+    // A purged owner leaves their account behind (the FK is SET NULL so a
+    // cascade can never reach a live org through it); once its orgs are gone
+    // too, nothing references it.
+    let accounts = crate::storage::accounts::reap_orphaned(pool).await?;
+    if accounts > 0 {
+        tracing::info!(accounts, "orphaned accounts reaped");
+    }
     Ok(PurgeStats {
         cascaded,
         drained,

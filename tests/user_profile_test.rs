@@ -25,7 +25,9 @@ async fn seed_user_with_org(pool: &sqlx::PgPool, email: &str, slug: &str) -> (Uu
     .await
     .unwrap();
     let (org_id,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Test Org') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Test Org', a.id FROM a RETURNING id",
     )
     .bind(slug)
     .fetch_one(pool)

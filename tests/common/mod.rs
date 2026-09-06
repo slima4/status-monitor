@@ -333,6 +333,81 @@ pub async fn build_test_app_with_pg(
     (app, org)
 }
 
+/// Pin the account's monitor cap through the same account-scoped override the
+/// writers read, so a quota test does not have to create dozens of rows.
+pub async fn set_account_targets_cap(pool: &PgPool, user: uptimepage::domain::UserId, cap: i32) {
+    sqlx::query(
+        "UPDATE plan_overrides po \
+            SET override_json = po.override_json || jsonb_build_object('max_targets', $2::int) \
+           FROM accounts a \
+          WHERE a.id = po.account_id AND a.owner_user_id = $1",
+    )
+    .bind(user.0)
+    .bind(cap)
+    .execute(pool)
+    .await
+    .expect("set_account_targets_cap");
+}
+
+/// Insert `n` monitors straight into `org`, bypassing the cap under test.
+pub async fn seed_targets(pool: &PgPool, org: OrgId, n: i32) {
+    for i in 0..n {
+        sqlx::query(
+            "INSERT INTO targets (org_id, name, check_spec, interval_secs, enabled) \
+             VALUES ($1, $2, '{\"type\":\"http\",\"url\":\"https://example.test\"}'::jsonb, 300, false)",
+        )
+        .bind(org.0)
+        .bind(format!("seeded-{i}-{}", Uuid::now_v7()))
+        .execute(pool)
+        .await
+        .expect("seed target");
+    }
+}
+
+/// The org's account plan, resolved the way the handlers do. `restore_org`
+/// takes it because a restore has to re-earn every pooled cap, not just the
+/// org slot.
+pub async fn plan_for(pool: &PgPool, org: OrgId) -> uptimepage::domain::quota::Plan {
+    let cfg = test_config(|_| {});
+    let quotas = uptimepage::quotas::QuotaService::new(&cfg, Some(pool.clone()));
+    (*quotas.limit_for_org(org).await.expect("resolve plan")).clone()
+}
+
+/// Org allowance [`make_user`] grants every fixture user. Well past what any
+/// test needs, so a fixture never trips the cap it is not testing.
+pub const FIXTURE_MAX_ORGS: i32 = 25;
+
+/// Open `user`'s account if they have none yet and pin how many orgs it may
+/// hold, through the same account-scoped override the writers read. The free
+/// plan allows one org, so any test that wants several for one user says so
+/// here rather than depending on a plan's number.
+pub async fn allow_orgs(pool: &PgPool, user: uptimepage::domain::UserId, max_orgs: i32) {
+    sqlx::query(
+        "WITH a AS ( \
+             INSERT INTO accounts (owner_user_id) VALUES ($1) \
+             ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL \
+             DO UPDATE SET owner_user_id = EXCLUDED.owner_user_id \
+             RETURNING id) \
+         INSERT INTO plan_overrides (account_id, override_json, reason) \
+         SELECT a.id, jsonb_build_object('max_orgs', $2::int), 'test fixture' FROM a \
+         ON CONFLICT (account_id) DO UPDATE SET override_json = EXCLUDED.override_json",
+    )
+    .bind(user.0)
+    .bind(max_orgs)
+    .execute(pool)
+    .await
+    .expect("allow_orgs");
+}
+
+/// Live orgs the user's account holds — the count the org cap is measured
+/// against, and what the console shows as "n of m".
+pub async fn live_orgs(pool: &PgPool, user: uptimepage::domain::UserId) -> u32 {
+    let (used, _cap) = uptimepage::storage::accounts::org_allowance_for_user(pool, user)
+        .await
+        .expect("org_allowance_for_user");
+    u32::try_from(used).unwrap()
+}
+
 /// [`build_test_app_with_pg`] plus a clone of the router's `AppState`. Shares
 /// every `Arc`, so a test can seed state the router then reads.
 pub async fn build_test_app_with_pg_state(
@@ -343,7 +418,9 @@ pub async fn build_test_app_with_pg_state(
     let slug = format!("test-{}", uuid::Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (org_uuid,): (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Test Org') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Test Org', a.id FROM a RETURNING id",
     )
     .bind(slug)
     .fetch_one(&pool)
@@ -393,7 +470,7 @@ pub async fn build_test_app_with_pg_state(
 
 /// Like [`build_test_app_with_pg`] but the target store is the real
 /// `PostgresTargetStore` bound to a **freshly inserted org** (unique slug,
-/// `plan_id` pinned to `free`) with an owner user already attached as
+/// on an account whose `plan_id` is pinned to `free`) with an owner user attached as
 /// a session on the returned router. Quota counts (`QuotaService`) and the
 /// store's atomic count-in-INSERT both read the same `targets` table, and
 /// the unique org isolates parallel quota tests from each other. Used by
@@ -413,6 +490,19 @@ pub async fn build_test_app_with_pg_store(
         .execute(&pool)
         .await
         .expect("seed owner membership");
+    // Signup hangs the org off the owner's own account; the anon builder had
+    // nobody to hang it off yet, so repoint it now. Both accounts are on the
+    // free plan, so no cap moves. Without this the org's account is ownerless
+    // and `/me/usage` reports the owner holding zero orgs.
+    sqlx::query(
+        "UPDATE organizations SET account_id = a.id FROM accounts a \
+         WHERE organizations.id = $1 AND a.owner_user_id = $2",
+    )
+    .bind(org.0)
+    .bind(owner.0)
+    .execute(&pool)
+    .await
+    .expect("point the seeded org at the owner's account");
     let app = with_session(app, owner, Some(org), Some("default-owner-session"));
     (app, org)
 }
@@ -428,7 +518,9 @@ pub async fn build_test_app_with_pg_store_anon(
     let slug = format!("qt{}", uuid::Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (org_uuid,): (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name, plan_id) VALUES ($1, 'Quota Test', 'free') RETURNING id",
+        "WITH a AS (INSERT INTO accounts (plan_id) VALUES ('free') RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Quota Test', a.id FROM a RETURNING id",
     )
     .bind(slug)
     .fetch_one(&pool)
@@ -524,6 +616,12 @@ pub fn session_layer(
 /// Insert a fresh user with a unique email and return its id. `prefix` only
 /// disambiguates the email in shared-DB logs — uniqueness comes from the
 /// `Uuid::now_v7()` suffix, so concurrent suites never collide.
+///
+/// The user's account is opened with room for several orgs: fixtures that
+/// happen to need a second org are not testing the org cap, and the free
+/// plan's real allowance is one. Tests that *do* exercise the cap set their
+/// own number with [`allow_orgs`], or drop to the plan's with
+/// [`plan_default_orgs`].
 pub async fn make_user(pool: &PgPool, prefix: &str) -> uptimepage::domain::UserId {
     let email = format!("{prefix}-{}@test.example", Uuid::now_v7());
     let (id,): (Uuid,) = sqlx::query_as(
@@ -534,7 +632,22 @@ pub async fn make_user(pool: &PgPool, prefix: &str) -> uptimepage::domain::UserI
     .fetch_one(pool)
     .await
     .expect("insert user");
-    uptimepage::domain::UserId(id)
+    let user = uptimepage::domain::UserId(id);
+    allow_orgs(pool, user, FIXTURE_MAX_ORGS).await;
+    user
+}
+
+/// Drop the fixture's org allowance so the user's account is measured against
+/// its plan again.
+pub async fn plan_default_orgs(pool: &PgPool, user: uptimepage::domain::UserId) {
+    sqlx::query(
+        "DELETE FROM plan_overrides po USING accounts a \
+         WHERE a.id = po.account_id AND a.owner_user_id = $1",
+    )
+    .bind(user.0)
+    .execute(pool)
+    .await
+    .expect("plan_default_orgs");
 }
 
 /// `{prefix}-{8 hex}` — the tail of a v4 (pure-random) UUID, so two slugs

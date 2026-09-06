@@ -24,7 +24,7 @@ use uuid::Uuid;
 use crate::auth::token_hash::{self, slice_prefix};
 use crate::domain::{OrgId, Role, UserId};
 use crate::error::{AppError, Result};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+use crate::storage::locks::{account_lock_key, advisory_xact_lock};
 
 /// Hash-friendly invitation record. `token_hash` is the encoded argon2id
 /// PHC string; only the hash leaves this row.
@@ -110,22 +110,6 @@ pub async fn record_send(
     Ok(())
 }
 
-/// Number of pending invitations on the org. The cap is enforced
-/// atomically inside `create` against the plan; this helper is read-only
-/// reporting.
-pub async fn count_pending_for_org(pool: &PgPool, org: OrgId) -> Result<u32> {
-    let (n,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM invitations \
-         WHERE org_id = $1 AND accepted_at IS NULL AND declined_at IS NULL \
-         AND expires_at > now()",
-    )
-    .bind(org.0)
-    .fetch_one(pool)
-    .await
-    .context("invitations::count_pending_for_org")?;
-    Ok(u32::try_from(n).unwrap_or(u32::MAX))
-}
-
 /// Already-pending (non-accepted, non-declined, unexpired) invitation for the
 /// given (org, email) pair. CITEXT email comparison.
 pub async fn exists_pending_for_email(pool: &PgPool, org: OrgId, email: &str) -> Result<bool> {
@@ -169,7 +153,10 @@ pub async fn create(
 
     let mut tx = pool.begin().await.context("invitations::create: begin")?;
 
-    advisory_xact_lock(&mut *tx, &org_lock_key(org))
+    // Pending invitations are capped per account, so the guard serialises on
+    // the account; the duplicate check below stays scoped to this org.
+    let account = crate::storage::accounts::account_for_org(&mut *tx, org).await?;
+    advisory_xact_lock(&mut *tx, &account_lock_key(account))
         .await
         .context("invitations::create: advisory lock")?;
 
@@ -195,15 +182,12 @@ pub async fn create(
         ));
     }
 
-    let (pending,): (i64,) = sqlx::query_as(
-        "SELECT COUNT(*) FROM invitations \
-         WHERE org_id = $1 AND accepted_at IS NULL AND declined_at IS NULL \
-         AND expires_at > now()",
-    )
-    .bind(org.0)
-    .fetch_one(&mut *tx)
-    .await
-    .context("invitations::create: count pending")?;
+    let (pending,): (i64,) =
+        sqlx::query_as(&crate::quotas::service::count_sql::pending_invitations())
+            .bind(account.0)
+            .fetch_one(&mut *tx)
+            .await
+            .context("invitations::create: count pending")?;
     if u32::try_from(pending).unwrap_or(u32::MAX) >= max_pending {
         tx.rollback().await.ok();
         crate::quotas::service::record_quota_event(

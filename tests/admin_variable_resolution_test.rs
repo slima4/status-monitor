@@ -29,12 +29,15 @@ fn var_check_spec() -> serde_json::Value {
 }
 
 async fn seed_org(pool: &PgPool, slug: &str) -> Uuid {
-    let (org_id,): (Uuid,) =
-        sqlx::query_as("INSERT INTO organizations (slug, name) VALUES ($1, 's') RETURNING id")
-            .bind(slug)
-            .fetch_one(pool)
-            .await
-            .unwrap();
+    let (org_id,): (Uuid,) = sqlx::query_as(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 's', a.id FROM a RETURNING id",
+    )
+    .bind(slug)
+    .fetch_one(pool)
+    .await
+    .unwrap();
     org_id
 }
 

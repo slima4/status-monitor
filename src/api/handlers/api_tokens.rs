@@ -122,8 +122,9 @@ pub async fn create(
         None => None,
     };
 
-    // Tokens are user-scoped; the cap is read from the active org's plan so a
-    // user acting in two orgs sees each org's plan limit, not a single global.
+    // Tokens are user-scoped; the cap is read from the active org's account
+    // plan, so a user acting in two accounts sees each one's limit rather than a
+    // single global number.
     let max_tokens = i64::from(
         state
             .quotas

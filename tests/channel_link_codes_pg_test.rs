@@ -25,7 +25,7 @@ use common::{make_user, pg_pool_from_env, unique_slug};
 
 async fn one_org(pool: &sqlx::PgPool, tag: &str) -> (OrgId, UserId) {
     let user = make_user(pool, tag).await;
-    let org = create_org_with_owner(pool, user, &unique_slug(tag), "T", 3)
+    let org = create_org_with_owner(pool, user, &unique_slug(tag), "T")
         .await
         .unwrap()
         .expect("org")

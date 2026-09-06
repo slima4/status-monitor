@@ -310,7 +310,7 @@ fn register_descriptions() {
     );
     describe_counter!(
         "uptimepage_ratelimit_drops_total",
-        "Per-org and per-user rate-limit rejections (HTTP 429), labelled by `scope` (the same string carried in the error response — e.g. `per_org_api_writes`, `per_user_bulk_ops`). Abuse signal: a sudden rate growth on one scope is the first indicator of a single tenant hammering the API"
+        "Per-account and per-user rate-limit rejections (HTTP 429), labelled by `scope` (the same string carried in the error response — e.g. `per_account_api_writes`, `per_user_bulk_ops`). Abuse signal: a sudden rate growth on one scope is the first indicator of a single tenant hammering the API"
     );
     describe_counter!(
         "uptimepage_account_deletions_requested_total",

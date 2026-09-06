@@ -19,7 +19,8 @@ use crate::domain::{
     UserId, WriteSource,
 };
 use crate::error::{AppError, Result};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+use crate::storage::accounts;
+use crate::storage::locks::{account_lock_key, advisory_xact_lock};
 
 /// Outcome of [`StatusPageStore::add_component`]. The store stays free of
 /// plan/HTTP concerns; the handler maps `OverCap` to a quota 422 with the real
@@ -220,13 +221,17 @@ impl StatusPageStore for PgStatusPageStore {
         actor: Option<UserId>,
     ) -> Result<Option<StatusPage>> {
         let mut tx = self.pool.begin().await.map_err(db_err)?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        // Pages are capped per account, so the lock and the count both take the
+        // account: two orgs of one account must contend, not race.
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .map_err(db_err)?;
+        let pool_orgs = accounts::live_orgs("$7");
         let row: Option<PageRow> = sqlx::query_as(&format!(
             r#"INSERT INTO status_pages (org_id, slug, name, enabled, write_source)
                SELECT $1, $2, $3, $4, $5
-               WHERE (SELECT count(*) FROM status_pages WHERE org_id = $1) < $6
+               WHERE (SELECT count(*) FROM status_pages WHERE org_id IN ({pool_orgs})) < $6
                RETURNING {PAGE_COLUMNS}"#
         ))
         .bind(org.0)
@@ -235,6 +240,7 @@ impl StatusPageStore for PgStatusPageStore {
         .bind(new.enabled)
         .bind(source.as_str())
         .bind(max_pages)
+        .bind(account.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -397,27 +403,30 @@ impl StatusPageStore for PgStatusPageStore {
         actor: Option<UserId>,
     ) -> Result<AddComponentOutcome> {
         let mut tx = self.pool.begin().await.map_err(db_err)?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .map_err(db_err)?;
         // One snapshot under the lock distinguishes every outcome: org-membership
         // of the page and target (404, not a quota error), idempotent re-add, and
-        // the distinct-target cap (a target already counted on another page is
-        // free; a brand-new one costs 1).
-        let g: PreInsertGuard = sqlx::query_as(
+        // the distinct-target cap. A monitor already published by *any* org of
+        // the account is free; a brand-new one costs 1.
+        let pool_orgs = accounts::live_orgs("$4");
+        let g: PreInsertGuard = sqlx::query_as(&format!(
             r#"SELECT
                  EXISTS (SELECT 1 FROM status_pages WHERE id = $2 AND org_id = $1) AS page_ok,
                  EXISTS (SELECT 1 FROM targets WHERE id = $3 AND org_id = $1) AS target_ok,
                  EXISTS (SELECT 1 FROM status_page_components
                          WHERE status_page_id = $2 AND target_id = $3) AS already_on_page,
                  EXISTS (SELECT 1 FROM status_page_components
-                         WHERE org_id = $1 AND target_id = $3) AS already_counted,
+                         WHERE org_id IN ({pool_orgs}) AND target_id = $3) AS already_counted,
                  (SELECT count(DISTINCT target_id) FROM status_page_components
-                  WHERE org_id = $1) AS used"#,
-        )
+                  WHERE org_id IN ({pool_orgs})) AS used"#
+        ))
         .bind(org.0)
         .bind(page.0)
         .bind(new.target_id)
+        .bind(account.0)
         .fetch_one(&mut *tx)
         .await
         .map_err(db_err)?;

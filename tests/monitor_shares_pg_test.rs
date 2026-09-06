@@ -59,12 +59,12 @@ async fn mk_share(
 async fn two_orgs(pool: &sqlx::PgPool, tag: &str) -> (OrgId, OrgId, UserId, UserId) {
     let user_a = make_user(pool, tag).await;
     let user_b = make_user(pool, tag).await;
-    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A", 3)
+    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A")
         .await
         .unwrap()
         .expect("org a")
         .id;
-    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B", 3)
+    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B")
         .await
         .unwrap()
         .expect("org b")
@@ -217,7 +217,7 @@ async fn page_minted_shares_do_not_consume_the_operator_caps_live_pg() {
         return;
     };
     let user = make_user(&pool, "ms-pgcap").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("ms-pgcap"), "O", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("ms-pgcap"), "O")
         .await
         .unwrap()
         .expect("org")
@@ -289,7 +289,7 @@ async fn create_enforces_per_monitor_and_per_org_caps_live_pg() {
         return;
     };
     let user = make_user(&pool, "ms-cap").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("ms-cap"), "O", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("ms-cap"), "O")
         .await
         .unwrap()
         .expect("org")
@@ -339,7 +339,7 @@ async fn token_is_encrypted_at_rest_and_recopyable_live_pg() {
         return;
     };
     let user = make_user(&pool, "ms-enc").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("ms-enc"), "O", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("ms-enc"), "O")
         .await
         .unwrap()
         .expect("org")
@@ -384,7 +384,7 @@ async fn shares_api_create_list_revoke_http_round_trip_live_pg() {
         return;
     };
     let user = make_user(&pool, "ms-http").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("ms-http"), "O", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("ms-http"), "O")
         .await
         .unwrap()
         .expect("org")
@@ -469,7 +469,7 @@ async fn expired_and_unknown_tokens_resolve_to_none_live_pg() {
         return;
     };
     let user = make_user(&pool, "ms-exp").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("ms-exp"), "O", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("ms-exp"), "O")
         .await
         .unwrap()
         .expect("org")

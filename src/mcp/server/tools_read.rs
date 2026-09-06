@@ -1006,7 +1006,7 @@ impl McpServer {
     /// Usage against plan limits, and the cheapest answer to "which org is this
     /// connector bound to?", which the client cannot see for itself.
     #[tool(
-        description = "Which org this connector is bound to, and its resource usage against plan limits: monitors, status pages, members, components, and key policy values. Read-only.",
+        description = "Which org this connector is bound to, and the account's resource usage against plan limits: monitors, status pages, members, components, and key policy values. Caps are pooled across every org the account owns, so the counts can exceed what this one org holds. Read-only.",
         title = "Usage against plan",
         annotations(read_only_hint = true)
     )]
@@ -1022,7 +1022,7 @@ impl McpServer {
             .as_ref()
             .ok_or_else(|| McpToolError::internal("db unavailable"))?;
         let (usage, org_row) = tokio::join!(
-            self.state.quotas.org_usage(auth.org),
+            self.state.quotas.account_usage(auth.org),
             crate::storage::orgs::get_org(pool, auth.org),
         );
         let u = usage.map_err(|e| McpToolError::internal(format!("org usage: {e}")))?;

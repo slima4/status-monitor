@@ -16,8 +16,10 @@ use crate::domain::{
     CheckSpec, NewTarget, OrgId, Target, TargetAlerts, TargetUpdate, UserId, WriteSource,
 };
 use crate::error::{AppError, Result};
+use crate::quotas::service::count_sql;
 use crate::security::Cipher;
-use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+use crate::storage::accounts;
+use crate::storage::locks::{account_lock_key, advisory_xact_lock};
 use crate::storage::postgres_secrets::{decrypt_in_place, encrypt_in_place};
 use crate::storage::traits::{RegionOption, TagAddOutcome, TargetFilter, TargetSort, TargetStore};
 
@@ -456,17 +458,19 @@ impl TargetStore for PostgresTargetStore {
         let alerts_json = serde_json::to_value(&new.alerts).context("encoding alerts JSON")?;
         let region_policy_json = serde_json::to_value(new.region_policy.unwrap_or_default())
             .context("encoding region_policy JSON")?;
-        // A per-org advisory lock held across count+INSERT in one tx. The
+        // A per-account advisory lock held across count+INSERT in one tx. The
         // count-in-INSERT predicate alone is NOT race-safe under READ
         // COMMITTED — concurrent creators each see a snapshot count and all
-        // pass `+1 <= limit`, overshooting. This mirrors the owner-org and
-        // invitation caps: lock the subject, then count, then write.
+        // pass `+1 <= limit`, overshooting. The subject is the account, not
+        // the org: the cap is pooled, so two creates in two orgs of one
+        // account have to contend.
         let mut tx = self.pool.begin().await.context("create target: begin")?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .context("create target: advisory lock")?;
-        let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")
-            .bind(org.0)
+        let (current,): (i64,) = sqlx::query_as(&count_sql::targets())
+            .bind(account.0)
             .fetch_one(&mut *tx)
             .await
             .context("create target: count")?;
@@ -482,12 +486,11 @@ impl TargetStore for PostgresTargetStore {
         // Flow carries a tighter sub-cap, enforced under the same lock so
         // concurrent creators can't each pass a stale snapshot and overshoot it.
         if matches!(new.check, CheckSpec::Flow(_)) {
-            let (flow_current,): (i64,) =
-                sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1 AND kind = 'flow'")
-                    .bind(org.0)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .context("create target: flow count")?;
+            let (flow_current,): (i64,) = sqlx::query_as(&count_sql::flow())
+                .bind(account.0)
+                .fetch_one(&mut *tx)
+                .await
+                .context("create target: flow count")?;
             if flow_current + 1 > max_flow_checks {
                 tx.rollback().await.ok();
                 return Err(AppError::quota_exceeded(
@@ -773,11 +776,12 @@ impl TargetStore for PostgresTargetStore {
         let mut renotifies: Vec<i32> = Vec::with_capacity(len);
 
         let mut tx = self.pool.begin().await.context("bulk create: begin")?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .context("bulk create: advisory lock")?;
-        let (current,): (i64,) = sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1")
-            .bind(org.0)
+        let (current,): (i64,) = sqlx::query_as(&count_sql::targets())
+            .bind(account.0)
             .fetch_one(&mut *tx)
             .await
             .context("bulk create: count")?;
@@ -791,12 +795,11 @@ impl TargetStore for PostgresTargetStore {
             ));
         }
         if flow_len > 0 {
-            let (flow_current,): (i64,) =
-                sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1 AND kind = 'flow'")
-                    .bind(org.0)
-                    .fetch_one(&mut *tx)
-                    .await
-                    .context("bulk create: flow count")?;
+            let (flow_current,): (i64,) = sqlx::query_as(&count_sql::flow())
+                .bind(account.0)
+                .fetch_one(&mut *tx)
+                .await
+                .context("bulk create: flow count")?;
             if flow_current + flow_len > max_flow_checks {
                 tx.rollback().await.ok();
                 return Err(AppError::quota_exceeded(

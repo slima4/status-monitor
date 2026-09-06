@@ -1,9 +1,10 @@
 //! Resource quotas + request rate limiting.
 //!
-//! - [`service::QuotaService`] resolves an org's effective plan (cached) and
-//!   provides the friendly-error quota checks; the race-safe guarantee is in
-//!   the store INSERTs that take the same limit number.
-//! - [`ratelimit::RateLimitService`] is the per-org / per-user limiter.
+//! - [`service::QuotaService`] resolves an org's account and that account's
+//!   effective plan (cached) and provides the friendly-error quota checks;
+//!   every count spans the account's live orgs, and the race-safe guarantee is
+//!   in the store INSERTs that pool the same way and take the same limit.
+//! - [`ratelimit::RateLimitService`] is the per-account / per-user limiter.
 //! - [`middleware::rate_limit_middleware`] wires the limiter into `/api/v1`.
 
 pub mod middleware;

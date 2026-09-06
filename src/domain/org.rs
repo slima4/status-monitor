@@ -6,6 +6,21 @@ use uuid::Uuid;
 
 use crate::domain::reserved_slugs::is_reserved;
 
+/// Strongly-typed account id. An account is the quota subject: it holds the
+/// plan and pools every cap across the orgs it owns, so an extra org buys a
+/// workspace, never extra capacity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, ToSchema)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+#[schema(value_type = String, format = "uuid")]
+pub struct AccountId(pub Uuid);
+
+impl std::fmt::Display for AccountId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Strongly-typed organisation id. Wrapping `Uuid` blocks the easy mistake of
 /// passing a `UserId` where an `OrgId` is expected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Type, ToSchema)]

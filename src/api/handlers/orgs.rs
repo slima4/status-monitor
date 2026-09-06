@@ -127,7 +127,7 @@ pub struct SwitchActiveOrgRequest {
         (status = 409, body = ApiError,
             description = "Slug already taken (including by a soft-deleted org)"),
         (status = 422, body = ApiError,
-            description = "Caller has reached the free-tier owner-org limit"),
+            description = "Account is at its plan's org limit"),
     ),
 )]
 pub async fn create_org(
@@ -143,9 +143,7 @@ pub async fn create_org(
     let slug = normalize_slug(&req.slug)?;
     let name = trim_name(&req.name)?;
 
-    let limit = state.cfg.tenancy.free_tier_owner_org_limit;
-    let Some(org) = orgs_store::create_org_with_owner(pool, user, &slug, &name, limit).await?
-    else {
+    let Some(org) = orgs_store::create_org_with_owner(pool, user, &slug, &name).await? else {
         return Err(AppError::conflict(
             codes::SLUG_TAKEN,
             "slug is already in use",
@@ -365,7 +363,8 @@ pub async fn delete_org(
         (status = 409, body = ApiError,
             description = "Slug was claimed by another org while this one was deleted"),
         (status = 422, body = ApiError,
-            description = "Past the restore grace window, or over the owned-org cap"),
+            description = "Past the restore grace window, or the org's rows would put \
+                           the account over a pooled cap"),
     ),
 )]
 pub async fn restore_org(
@@ -379,15 +378,27 @@ pub async fn restore_org(
     // The storage call performs the deleter check + grace check + UPDATE in
     // one transaction and returns the restored row, so the handler doesn't
     // race with a concurrent re-delete or get a stale read.
-    let owner_limit = state.cfg.tenancy.free_tier_owner_org_limit;
-    match orgs_store::restore_org(pool, org_id, user, grace, owner_limit).await? {
+    // The org is still tombstoned, so its account resolves through it and the
+    // plan carries the caps its rows are about to be counted against.
+    let plan = state.quotas.limit_for_org(org_id).await?;
+    match orgs_store::restore_org(pool, org_id, user, grace, &plan).await? {
         orgs_store::RestoreOutcome::Restored(org) => Ok(Json(org.into())),
         orgs_store::RestoreOutcome::NotFound | orgs_store::RestoreOutcome::NotDeleted => Err(
             AppError::not_found(codes::ORG_NOT_FOUND, "organisation not found"),
         ),
         orgs_store::RestoreOutcome::OwnerLimit => Err(AppError::unprocessable(
             codes::OWNER_ORG_LIMIT,
-            format!("restoring would put you over the limit of {owner_limit} organisations"),
+            "restoring would put this account over its plan's organisation limit",
+        )),
+        orgs_store::RestoreOutcome::QuotaExceeded {
+            quota,
+            current,
+            limit,
+        } => Err(AppError::quota_exceeded(
+            quota,
+            current,
+            limit,
+            plan.id.clone(),
         )),
         orgs_store::RestoreOutcome::SlugTaken => Err(AppError::conflict(
             codes::SLUG_TAKEN,

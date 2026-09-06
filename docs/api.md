@@ -142,7 +142,7 @@ A share link is a capability URL that renders one monitor's full read-only detai
 | `GET` | `/api/v1/targets/{id}/shares` | list live (non-revoked) shares |
 | `DELETE` | `/api/v1/targets/{id}/shares/{share_id}` | revoke immediately — the link 404s on its next request |
 
-Both `POST` and `GET` return the `token`; build the link as `/m/{token}` (prepend your origin). The token stays re-copyable — it is stored encrypted at rest (the app KEK, same as `basic_auth`/`bearer_token`); the public resolve path matches on a separate hash, so a hot link never triggers a decrypt. `token` is `null` only when a row was sealed under a KEK that is no longer configured. Two plan caps apply (columns on `plans`, overridable per-org via `plan_overrides`): `max_share_links_per_monitor` (active links on one monitor) and `max_shared_monitors` (distinct monitors in the org that have any link). The free plan is **1** and **2**. Exceeding either is `422 QUOTA_EXCEEDED` (the body names the `quota`). A label longer than 80 characters is `400 SHARE_LABEL_INVALID`; an `expires_at` in the past is `400 INVALID_EXPIRY`.
+Both `POST` and `GET` return the `token`; build the link as `/m/{token}` (prepend your origin). The token stays re-copyable — it is stored encrypted at rest (the app KEK, same as `basic_auth`/`bearer_token`); the public resolve path matches on a separate hash, so a hot link never triggers a decrypt. `token` is `null` only when a row was sealed under a KEK that is no longer configured. Two plan caps apply (columns on `plans`, overridable per-account via `plan_overrides`): `max_share_links_per_monitor` (active links on one monitor) and `max_shared_monitors` (distinct monitors with any link, counted across the account's orgs). The free plan is **1** and **2**. Exceeding either is `422 QUOTA_EXCEEDED` (the body names the `quota`). A label longer than 80 characters is `400 SHARE_LABEL_INVALID`; an `expires_at` in the past is `400 INVALID_EXPIRY`.
 
 ### Operator endpoints (variables)
 
@@ -607,7 +607,7 @@ Common codes: `INVALID_URL_SCHEME`, `INVALID_URL_FORMAT`, `SSRF_BLOCKED`, `INVAL
 | `QUOTA_EXCEEDED` | 422 | A plan quota would be exceeded. `details` carries `quota` (e.g. `max_targets`, `max_members`, `max_public_components`), `current`, `limit`, `plan`. |
 | `MIN_CHECK_INTERVAL` | 422 | Requested check interval is below the effective floor (`max(plan.min_check_interval_secs, kind_min)`), where `kind_min` is 43200 for `domain_expiry`, 3600 for `tls_cert`, 300 for `flow`, 60 for `heartbeat`, and 10 for `http` / `tcp` / `ping` / `dns`. Enforced on create, bulk, **and** PATCH. |
 | `INVITATIONS_LIMIT` | 409 | The org is at its pending-invitation cap. |
-| `RATE_LIMITED` | 429 | A per-minute rate budget was exceeded. `Retry-After` (seconds) is set; `details.scope` names the tier, e.g. `per_org_api_writes`. |
+| `RATE_LIMITED` | 429 | A per-minute rate budget was exceeded. `Retry-After` (seconds) is set; `details.scope` names the tier, e.g. `per_account_api_writes`. |
 | `ABUSE_BLOCKED` | 400 | Target blocked by abuse protection. `details.reason` explains. |
 | `URL_PATTERN_BLOCKED` | 400 | Target URL matched an abuse pattern (recon path). |
 | `DOMAIN_DENYLISTED` | 400 | Target domain (or a parent) is on the deny-list. |

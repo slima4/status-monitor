@@ -59,7 +59,9 @@ echo "==> Postgres: lift the plan gate so the monitor is creatable and editable"
 pg <<SQL
 UPDATE plans SET max_flow_checks = GREATEST(max_flow_checks, 5),
                  max_flow_steps  = GREATEST(max_flow_steps, 30)
- WHERE id = (SELECT plan_id FROM organizations WHERE slug = '${SLUG}');
+ WHERE id = (SELECT a.plan_id FROM accounts a
+              JOIN organizations o ON o.account_id = a.id
+             WHERE o.slug = '${SLUG}');
 SQL
 
 echo "==> Postgres: (re)create the seeded flow monitor"

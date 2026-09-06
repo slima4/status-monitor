@@ -20,12 +20,12 @@ async fn page_asset_put_delete_write_audit_rows_and_delete_is_org_scoped() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "a").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co")
         .await
         .unwrap()
         .unwrap();
     let other_user = common::make_user(&pool, "b").await;
-    let other_org = create_org_with_owner(&pool, other_user, &common::unique_slug("b"), "Co2", 10)
+    let other_org = create_org_with_owner(&pool, other_user, &common::unique_slug("b"), "Co2")
         .await
         .unwrap()
         .unwrap();

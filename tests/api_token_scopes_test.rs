@@ -145,7 +145,7 @@ async fn read_only_token_gets_but_cannot_write_targets() {
 
     let user = make_user(&pool, "scope").await;
     let slug = unique_slug("scope");
-    create_org_with_owner(&pool, user, &slug, "Scope", 3)
+    create_org_with_owner(&pool, user, &slug, "Scope")
         .await
         .unwrap()
         .expect("org");
@@ -290,11 +290,11 @@ async fn org_bound_token_is_pinned_to_its_org() {
     let user = make_user(&pool, "bind").await;
     let slug_a = unique_slug("bind-a");
     let slug_b = unique_slug("bind-b");
-    let org_a = create_org_with_owner(&pool, user, &slug_a, "A", 3)
+    let org_a = create_org_with_owner(&pool, user, &slug_a, "A")
         .await
         .unwrap()
         .expect("org A");
-    create_org_with_owner(&pool, user, &slug_b, "B", 3)
+    create_org_with_owner(&pool, user, &slug_b, "B")
         .await
         .unwrap()
         .expect("org B");
@@ -396,7 +396,7 @@ async fn status_page_settings_require_status_page_scope() {
 
     let user = make_user(&pool, "sp").await;
     let slug = unique_slug("sp");
-    let org = create_org_with_owner(&pool, user, &slug, "SP", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "SP")
         .await
         .unwrap()
         .expect("org");
@@ -554,7 +554,7 @@ async fn token_creation_validates_scopes_org_and_expiry() {
         .await
         .unwrap();
     let slug = unique_slug("create");
-    let org = create_org_with_owner(&pool, user, &slug, "Create", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "Create")
         .await
         .unwrap()
         .expect("org")
@@ -601,7 +601,7 @@ async fn token_creation_validates_scopes_org_and_expiry() {
     // org_slug the caller is not a member of → 403.
     let other = make_user(&pool, "other").await;
     let other_slug = unique_slug("other");
-    create_org_with_owner(&pool, other, &other_slug, "Other", 3)
+    create_org_with_owner(&pool, other, &other_slug, "Other")
         .await
         .unwrap()
         .expect("other org");
@@ -689,7 +689,7 @@ async fn api_token_cannot_reach_account_admin() {
         .await
         .unwrap();
     let slug = unique_slug("noesc");
-    let org = create_org_with_owner(&pool, user, &slug, "NoEsc", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "NoEsc")
         .await
         .unwrap()
         .expect("org")
@@ -745,7 +745,7 @@ async fn targets_delete_and_execute_are_separate_from_write() {
 
     let user = make_user(&pool, "split").await;
     let slug = unique_slug("split");
-    create_org_with_owner(&pool, user, &slug, "Split", 3)
+    create_org_with_owner(&pool, user, &slug, "Split")
         .await
         .unwrap()
         .expect("org");
@@ -903,7 +903,7 @@ async fn token_on_org_mutation_gets_session_required() {
 
     let user = make_user(&pool, "session-req").await;
     let slug = unique_slug("sreq");
-    let org = create_org_with_owner(&pool, user, &slug, "SReq", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "SReq")
         .await
         .unwrap()
         .expect("org");

@@ -1,6 +1,6 @@
 //! Quota & rate-limit coverage.
 //!
-//! Integration cases need Postgres (the `plans` table + org `plan_id`); they
+//! Integration cases need Postgres (the `plans` table + `accounts.plan_id`); they
 //! no-op when `DATABASE_URL` is unset, like the other live-PG suites. The
 //! pure-logic cases (rate-limit keying/janitor, config validation, Caddy
 //! parity) always run.
@@ -24,10 +24,10 @@ use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 use uptimepage::config::AppConfig;
 use uptimepage::domain::quota::Plan;
-use uptimepage::domain::{NewStatusPage, OrgId, Role, UserId, WriteSource};
+use uptimepage::domain::{AccountId, NewStatusPage, OrgId, Role, UserId, WriteSource};
 use uptimepage::error::AppError;
 use uptimepage::quotas::{QuotaService, RateLimitCategory, RateLimitKey, RateLimitService};
-use uptimepage::storage::{PgStatusPageStore, StatusPageStore};
+use uptimepage::storage::{PgStatusPageStore, StatusPageStore, TargetStore};
 use uuid::Uuid;
 
 /// A `Plan` whose every per-minute rate is `per_min` and whose resource caps
@@ -58,6 +58,7 @@ fn test_plan(per_min: i32) -> Plan {
         max_on_call_schedules: 1,
         max_logo_size_bytes: 1,
         max_regions: 1,
+        max_orgs: 1,
         api_writes_per_minute: per_min,
         api_reads_per_minute: per_min,
         bulk_ops_per_minute: per_min,
@@ -111,7 +112,9 @@ async fn seed_org_on_plan(
     .expect("seed plan");
     let slug = format!("qs{}", Uuid::now_v7().simple());
     let (oid,): (Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name, plan_id) VALUES ($1, 'seeded', $2) RETURNING id",
+        "WITH a AS (INSERT INTO accounts (plan_id) VALUES ($2) RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'seeded', a.id FROM a RETURNING id",
     )
     .bind(&slug[..slug.len().min(30)])
     .bind(&pid)
@@ -150,8 +153,8 @@ async fn seed_member(pool: &PgPool, org: OrgId) -> UserId {
     UserId(uid)
 }
 
-/// Insert a per-org `plan_overrides` row. `expired` backdates `expires_at`
-/// so the read path must treat the override as absent.
+/// Insert a `plan_overrides` row for the account behind `org`. `expired`
+/// backdates `expires_at` so the read path must treat the override as absent.
 async fn seed_override(pool: &PgPool, org: OrgId, json: &str, expired: bool) {
     let exp = if expired {
         "now() - interval '1 hour'"
@@ -159,8 +162,10 @@ async fn seed_override(pool: &PgPool, org: OrgId, json: &str, expired: bool) {
         "NULL"
     };
     sqlx::query(&format!(
-        "INSERT INTO plan_overrides (org_id, override_json, reason, expires_at) \
-         VALUES ($1, $2::jsonb, 'test', {exp})"
+        "INSERT INTO plan_overrides (account_id, override_json, reason, expires_at) \
+         SELECT account_id, $2::jsonb, 'test', {exp} FROM organizations WHERE id = $1 \
+         ON CONFLICT (account_id) DO UPDATE \
+         SET override_json = EXCLUDED.override_json, expires_at = EXCLUDED.expires_at"
     ))
     .bind(org.0)
     .bind(json)
@@ -169,15 +174,18 @@ async fn seed_override(pool: &PgPool, org: OrgId, json: &str, expired: bool) {
     .expect("seed override");
 }
 
-/// Insert a billed add-on row (`org_addons`) for `org`.
+/// Insert a billed add-on row for the account behind `org`.
 async fn seed_addon(pool: &PgPool, org: OrgId, addon_type: &str, quantity: i32) {
-    sqlx::query("INSERT INTO org_addons (org_id, addon_type, quantity) VALUES ($1, $2, $3)")
-        .bind(org.0)
-        .bind(addon_type)
-        .bind(quantity)
-        .execute(pool)
-        .await
-        .expect("seed addon");
+    sqlx::query(
+        "INSERT INTO account_addons (account_id, addon_type, quantity) \
+         SELECT account_id, $2, $3 FROM organizations WHERE id = $1",
+    )
+    .bind(org.0)
+    .bind(addon_type)
+    .bind(quantity)
+    .execute(pool)
+    .await
+    .expect("seed addon");
 }
 
 fn target_payload(name: &str, interval: u64) -> Value {
@@ -286,12 +294,15 @@ async fn the_interval_refusal_names_the_orgs_own_plan() {
     // first request, since the quota service caches the plan per org.
     let (paid_app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
     let (pid, _seeded) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
-    sqlx::query("UPDATE organizations SET plan_id = $1 WHERE id = $2")
-        .bind(&pid)
-        .bind(org.0)
-        .execute(&pool)
-        .await
-        .expect("move the org onto the cloned plan");
+    sqlx::query(
+        "UPDATE accounts SET plan_id = $1 \
+         WHERE id = (SELECT account_id FROM organizations WHERE id = $2)",
+    )
+    .bind(&pid)
+    .bind(org.0)
+    .execute(&pool)
+    .await
+    .expect("move the org onto the cloned plan");
 
     let paid = body_json(post_target(&paid_app, &format!("p-{}", Uuid::now_v7()), 59).await).await;
     assert_eq!(paid["error"]["code"], "MIN_CHECK_INTERVAL");
@@ -631,31 +642,31 @@ async fn api_writes_over_plan_rate_return_429_with_retry_after() {
     assert_eq!(body_json(resp).await["error"]["code"], "RATE_LIMITED");
 }
 
-// ── per-org and per-user buckets are independent ───────────────────
+// ── per-account and per-user buckets are independent ───────────────
 #[test]
 fn rate_limit_keys_are_independent_per_subject() {
     let svc = RateLimitService::new();
     let plan = test_plan(1); // 1/min → 2nd hit on a key denied
-    let org_a = OrgId(Uuid::now_v7());
-    let org_b = OrgId(Uuid::now_v7());
+    let acct_a = AccountId(Uuid::now_v7());
+    let acct_b = AccountId(Uuid::now_v7());
     let user = UserId(Uuid::now_v7());
     let cat = RateLimitCategory::ApiWrites;
 
-    // Exhaust org A.
+    // Exhaust account A.
     assert!(
-        svc.check(RateLimitKey::Org(org_a, cat), "per_org", &plan)
+        svc.check(RateLimitKey::Account(acct_a, cat), "per_account", &plan)
             .is_ok()
     );
     assert!(
-        svc.check(RateLimitKey::Org(org_a, cat), "per_org", &plan)
+        svc.check(RateLimitKey::Account(acct_a, cat), "per_account", &plan)
             .is_err()
     );
-    // Org B has its own bucket.
+    // Account B has its own bucket.
     assert!(
-        svc.check(RateLimitKey::Org(org_b, cat), "per_org", &plan)
+        svc.check(RateLimitKey::Account(acct_b, cat), "per_account", &plan)
             .is_ok()
     );
-    // The user tier is independent of the org tier.
+    // The user tier is independent of the account tier.
     assert!(
         svc.check(RateLimitKey::User(user, cat), "per_user", &plan)
             .is_ok()
@@ -669,8 +680,8 @@ async fn janitor_sweep_shrinks_idle_map() {
     let plan = test_plan(100);
     for _ in 0..50 {
         let _ = svc.check(
-            RateLimitKey::Org(OrgId(Uuid::now_v7()), RateLimitCategory::ApiReads),
-            "per_org",
+            RateLimitKey::Account(AccountId(Uuid::now_v7()), RateLimitCategory::ApiReads),
+            "per_account",
             &plan,
         );
     }
@@ -794,6 +805,203 @@ fn merged_write_subrouters_are_rate_limited() {
         bulk.contains("api_token::middleware"),
         "the bulk sub-router must re-apply api-token auth for the same reason"
     );
+}
+
+/// A second org on the *same account* as `org` — the shape that used to hand a
+/// customer a second full set of caps.
+async fn seed_sibling_org(pool: &PgPool, org: OrgId) -> OrgId {
+    let slug = format!("qsib{}", Uuid::now_v7().simple());
+    let (oid,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'sibling', account_id FROM organizations WHERE id = $2 \
+         RETURNING id",
+    )
+    .bind(&slug[..slug.len().min(30)])
+    .bind(org.0)
+    .fetch_one(pool)
+    .await
+    .expect("seed sibling org");
+    OrgId(oid)
+}
+
+/// Insert `n` monitors straight into `org`, bypassing the cap the test is
+/// about to assert.
+async fn seed_targets(pool: &PgPool, org: OrgId, n: i32) {
+    for i in 0..n {
+        sqlx::query(
+            "INSERT INTO targets (org_id, name, check_spec, interval_secs) \
+             VALUES ($1, $2, '{\"type\":\"http\",\"url\":\"https://example.test\"}'::jsonb, 300)",
+        )
+        .bind(org.0)
+        .bind(format!("seeded-{i}"))
+        .execute(pool)
+        .await
+        .expect("seed target");
+    }
+}
+
+// ── caps are pooled across the account's orgs, not granted per org ──────
+#[tokio::test]
+async fn a_second_org_shares_the_accounts_monitor_pool() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (pid, org_a) = seed_org_on_plan(&pool, 5, 5, 10, 10).await;
+    let org_b = seed_sibling_org(&pool, org_a).await;
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+
+    // Fill the account's whole allowance inside org A.
+    seed_targets(&pool, org_a, 5).await;
+
+    // Org B is empty, but the pool is spent: the old per-org accounting gave
+    // it another 5 here.
+    match svc.check_can_create_targets(org_b, None, 1).await {
+        Err(AppError::QuotaExceeded { quota, current, .. }) => {
+            assert_eq!(quota, "max_targets");
+            assert_eq!(current, 5, "the count spans both orgs");
+        }
+        other => panic!("expected max_targets quota error, got {other:?}"),
+    }
+
+    // And the usage the customer reads is the same pooled number.
+    let usage = svc.account_usage(org_b).await.expect("usage");
+    assert_eq!(usage.targets, 5);
+    assert_eq!(usage.orgs, 2);
+
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = ANY($1)")
+        .bind(vec![org_a.0, org_b.0])
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM plans WHERE id = $1")
+        .bind(&pid)
+        .execute(&pool)
+        .await;
+}
+
+/// The race-safe writer pools too, not just the friendly pre-check.
+#[tokio::test]
+async fn the_atomic_writer_counts_the_siblings_monitors() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (pid, org_a) = seed_org_on_plan(&pool, 2, 5, 10, 10).await;
+    let org_b = seed_sibling_org(&pool, org_a).await;
+    seed_targets(&pool, org_a, 2).await;
+
+    let store = uptimepage::storage::PostgresTargetStore::from_pool(pool.clone(), None);
+    let new = uptimepage::domain::NewTarget {
+        name: "over".into(),
+        check: uptimepage::domain::CheckSpec::Http(common::default_http_check(
+            url::Url::parse("https://example.test/").unwrap(),
+            uptimepage::domain::ExpectedStatus::Exact(200),
+        )),
+        interval: Duration::from_secs(300),
+        enabled: true,
+        tags: vec![],
+        alerts: Default::default(),
+        region_policy: Default::default(),
+        alert_confirmations: 2,
+        notify_recovery: true,
+        renotify_interval_secs: 3600,
+        group_name: None,
+        owner_user_id: None,
+    };
+    let err = store
+        .create(org_b, new, WriteSource::Ui, 2, 0)
+        .await
+        .expect_err("pooled cap must refuse the write");
+    match err {
+        AppError::QuotaExceeded { quota, current, .. } => {
+            assert_eq!(quota, "max_targets");
+            assert_eq!(current, 2);
+        }
+        other => panic!("expected max_targets quota error, got {other:?}"),
+    }
+
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = ANY($1)")
+        .bind(vec![org_a.0, org_b.0])
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM plans WHERE id = $1")
+        .bind(&pid)
+        .execute(&pool)
+        .await;
+}
+
+/// Seats count people, not memberships: the same person in two of the
+/// account's orgs holds one seat.
+#[tokio::test]
+async fn one_person_in_two_orgs_holds_one_seat() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (pid, org_a) = seed_org_on_plan(&pool, 5, 2, 10, 10).await;
+    let org_b = seed_sibling_org(&pool, org_a).await;
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+
+    let user = seed_member(&pool, org_a).await;
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'member')")
+        .bind(user.0)
+        .bind(org_b.0)
+        .execute(&pool)
+        .await
+        .expect("second membership");
+
+    let usage = svc.account_usage(org_a).await.expect("usage");
+    assert_eq!(usage.members, 1, "two memberships, one person, one seat");
+
+    let _ = sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = ANY($1)")
+        .bind(vec![org_a.0, org_b.0])
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM plans WHERE id = $1")
+        .bind(&pid)
+        .execute(&pool)
+        .await;
+}
+
+/// An org created after signup lands on the account's plan; it used to fall
+/// back to the `free` default and hand a paying customer free-tier caps.
+#[tokio::test]
+async fn a_new_org_inherits_the_accounts_plan() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "inherit").await;
+    sqlx::query(
+        "INSERT INTO accounts (owner_user_id, plan_id) VALUES ($1, 'pro') \
+         ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL \
+         DO UPDATE SET plan_id = 'pro'",
+    )
+    .bind(user.0)
+    .execute(&pool)
+    .await
+    .expect("account on pro");
+
+    let org = uptimepage::storage::create_org_with_owner(&pool, user, &unique_slug("inh"), "Inh")
+        .await
+        .expect("create call")
+        .expect("created");
+
+    let cfg = AppConfig::load().expect("config");
+    let svc = QuotaService::new(&cfg, Some(pool.clone()));
+    let plan = svc.limit_for_org(org.id).await.expect("plan");
+    assert_eq!(plan.id, "pro");
+
+    let _ = sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM organizations WHERE id = $1")
+        .bind(org.id.0)
+        .execute(&pool)
+        .await;
 }
 
 // ── max_status_pages is enforced by the friendly pre-check ──────────
@@ -1100,15 +1308,15 @@ async fn usage_cache_holds_counts_until_ttl() {
     cfg.quotas.usage_cache_ttl_secs = 1;
     let svc = QuotaService::new(&cfg, Some(pool.clone()));
 
-    assert_eq!(svc.org_usage(org).await.unwrap().members, 1);
+    assert_eq!(svc.account_usage(org).await.unwrap().members, 1);
     seed_member(&pool, org).await; // DB now has 2
     assert_eq!(
-        svc.org_usage(org).await.unwrap().members,
+        svc.account_usage(org).await.unwrap().members,
         1,
         "the snapshot is cached for the TTL, not recomputed per call"
     );
     tokio::time::sleep(Duration::from_millis(1200)).await;
-    assert_eq!(svc.org_usage(org).await.unwrap().members, 2);
+    assert_eq!(svc.account_usage(org).await.unwrap().members, 2);
 }
 
 // ── the pending-invitation cap is atomic ──────────────────
@@ -1314,12 +1522,15 @@ async fn add_component_hits_public_component_cap() {
     // Build the app, then point its org at the cap-1 plan. The plan cache is
     // cold until the first request, so no TTL wait is needed.
     let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
-    sqlx::query("UPDATE organizations SET plan_id = $1 WHERE id = $2")
-        .bind(&pid)
-        .bind(org.0)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE accounts SET plan_id = $1 \
+         WHERE id = (SELECT account_id FROM organizations WHERE id = $2)",
+    )
+    .bind(&pid)
+    .bind(org.0)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // A page to curate (within the inherited max_status_pages = 1).
     let page = app
@@ -1446,12 +1657,15 @@ async fn bulk_and_read_rates_trip_429_independently() {
     .await
     .unwrap();
     let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
-    sqlx::query("UPDATE organizations SET plan_id = $1 WHERE id = $2")
-        .bind(&pid)
-        .bind(org.0)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE accounts SET plan_id = $1 \
+         WHERE id = (SELECT account_id FROM organizations WHERE id = $2)",
+    )
+    .bind(&pid)
+    .bind(org.0)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     // First 429 index for a request builder, scanning a generous window.
     async fn first_limited(
@@ -1551,12 +1765,15 @@ async fn plan_upgrade_lifts_the_cap_after_cache_ttl() {
     );
 
     let (pid, _seed) = seed_org_on_plan(&pool, cap + 2, 50, 10, 10).await;
-    sqlx::query("UPDATE organizations SET plan_id = $1 WHERE id = $2")
-        .bind(&pid)
-        .bind(org.0)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE accounts SET plan_id = $1 \
+         WHERE id = (SELECT account_id FROM organizations WHERE id = $2)",
+    )
+    .bind(&pid)
+    .bind(org.0)
+    .execute(&pool)
+    .await
+    .unwrap();
     // The cached lower cap is still in force until the TTL lapses.
     assert_eq!(
         post_target(&app, &format!("still-{}", Uuid::now_v7()), 180)
@@ -1630,9 +1847,11 @@ fn every_quota_create_path_is_gated() {
             "pub(crate) async fn vet_new_target(",
             "check_can_create_targets",
         ),
+        // MCP's create splits confirmation from persistence; the cap is vetted
+        // while preparing, before the user is asked.
         (
             "src/mcp/server/monitors.rs",
-            "async fn create_monitor_inner(",
+            "async fn prepare_create(",
             "vet_new_target",
         ),
         (
@@ -1673,7 +1892,7 @@ fn every_quota_create_path_is_gated() {
         (
             "src/storage/orgs.rs",
             "pub async fn create_org_with_owner(",
-            "owner_limit",
+            "ORG_ALLOWANCE_SQL",
         ),
     ];
     let mut missing = Vec::new();
@@ -1704,8 +1923,8 @@ async fn cancelled_janitor_stops_sweeping() {
 
     for _ in 0..10 {
         let _ = svc.check(
-            RateLimitKey::Org(OrgId(Uuid::now_v7()), RateLimitCategory::ApiReads),
-            "per_org",
+            RateLimitKey::Account(AccountId(Uuid::now_v7()), RateLimitCategory::ApiReads),
+            "per_account",
             &plan,
         );
     }
@@ -1717,8 +1936,8 @@ async fn cancelled_janitor_stops_sweeping() {
     tokio::time::sleep(Duration::from_millis(40)).await;
     for _ in 0..10 {
         let _ = svc.check(
-            RateLimitKey::Org(OrgId(Uuid::now_v7()), RateLimitCategory::ApiReads),
-            "per_org",
+            RateLimitKey::Account(AccountId(Uuid::now_v7()), RateLimitCategory::ApiReads),
+            "per_account",
             &plan,
         );
     }
@@ -1753,12 +1972,15 @@ async fn forwarded_ip_cannot_bypass_the_org_bucket() {
     .await
     .unwrap();
     let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
-    sqlx::query("UPDATE organizations SET plan_id = $1 WHERE id = $2")
-        .bind(&pid)
-        .bind(org.0)
-        .execute(&pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE accounts SET plan_id = $1 \
+         WHERE id = (SELECT account_id FROM organizations WHERE id = $2)",
+    )
+    .bind(&pid)
+    .bind(org.0)
+    .execute(&pool)
+    .await
+    .unwrap();
 
     let write = |xff: &'static str| {
         let app = app.clone();
@@ -1800,7 +2022,7 @@ async fn forwarded_ip_cannot_bypass_the_org_bucket() {
 fn rate_limit_map_is_bounded_and_sweeps_to_zero() {
     let svc = RateLimitService::new();
     let plan = test_plan(1_000_000); // never denies; we only count keys
-    let orgs: Vec<OrgId> = (0..200).map(|_| OrgId(Uuid::now_v7())).collect();
+    let accounts: Vec<AccountId> = (0..200).map(|_| AccountId(Uuid::now_v7())).collect();
     let cats = [
         RateLimitCategory::ApiWrites,
         RateLimitCategory::ApiReads,
@@ -1808,13 +2030,13 @@ fn rate_limit_map_is_bounded_and_sweeps_to_zero() {
         RateLimitCategory::TestNow,
         RateLimitCategory::CheckNow,
     ];
-    // Exactly 1,000,000 checks over 200 orgs × 5 categories = 1000 distinct
+    // Exactly 1,000,000 checks over 200 accounts × 5 categories = 1000 distinct
     // keys. (Indexing by `i % 200` / `i % 5` would alias — 5 divides 200, so
-    // the category would be a function of the org and only 200 keys form.)
+    // the category would be a function of the account and only 200 keys form.)
     for _round in 0..1000 {
-        for o in &orgs {
+        for o in &accounts {
             for c in cats {
-                let _ = svc.check(RateLimitKey::Org(*o, c), "per_org", &plan);
+                let _ = svc.check(RateLimitKey::Account(*o, c), "per_account", &plan);
             }
         }
     }

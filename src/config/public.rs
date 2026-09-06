@@ -52,8 +52,6 @@ pub struct TenancyConfig {
     /// Requires a well-formed `public_status.base_domain`; a startup
     /// assertion refuses to boot otherwise.
     pub subdomain_public_routes: bool,
-    /// Free-tier cap on the number of orgs a single user can own.
-    pub free_tier_owner_org_limit: u32,
     /// Grace period before soft-deleted orgs *and users* are purged. Single
     /// source of truth for the recovery window: the daily retention job binds
     /// this, and the Privacy Policy's "recoverable for 30 days" line is
@@ -66,7 +64,6 @@ impl Default for TenancyConfig {
         Self {
             path_based_public_routes: true,
             subdomain_public_routes: false,
-            free_tier_owner_org_limit: 3,
             deletion_grace_period_days: 30,
         }
     }

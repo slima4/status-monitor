@@ -164,19 +164,22 @@ async fn auth_tables_accept_representative_inserts() {
         .expect("connect");
     MIGRATOR.run(&pool).await.expect("migrate");
 
-    let org_id: Uuid =
-        sqlx::query("INSERT INTO organizations (slug, name) VALUES ($1, $2) RETURNING id")
-            .bind(
-                format!("test-org-{}", Uuid::now_v7().simple())
-                    .chars()
-                    .take(30)
-                    .collect::<String>(),
-            )
-            .bind("Test Org")
-            .fetch_one(&pool)
-            .await
-            .expect("insert org")
-            .get(0);
+    let org_id: Uuid = sqlx::query(
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, $2, a.id FROM a RETURNING id",
+    )
+    .bind(
+        format!("test-org-{}", Uuid::now_v7().simple())
+            .chars()
+            .take(30)
+            .collect::<String>(),
+    )
+    .bind("Test Org")
+    .fetch_one(&pool)
+    .await
+    .expect("insert org")
+    .get(0);
 
     let user_id: Uuid = sqlx::query(
         "INSERT INTO users (email, email_verified_at, terms_version, privacy_version) \

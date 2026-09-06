@@ -21,11 +21,10 @@ const STALE_AFTER: u64 = 120;
 /// Create org + target. Returns (org, target_id).
 async fn seed_target(pool: &PgPool, prefix: &str) -> (OrgId, Uuid) {
     let user = make_user(pool, prefix).await;
-    let org =
-        uptimepage::storage::create_org_with_owner(pool, user, &unique_slug(prefix), "svc", 3)
-            .await
-            .expect("create org")
-            .expect("org created");
+    let org = uptimepage::storage::create_org_with_owner(pool, user, &unique_slug(prefix), "svc")
+        .await
+        .expect("create org")
+        .expect("org created");
     let target_id: Uuid = sqlx::query_scalar(
         "INSERT INTO targets (org_id, name, check_spec, interval_secs) \
          VALUES ($1, 'svc', '{}'::jsonb, 30) RETURNING id",

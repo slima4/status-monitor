@@ -41,7 +41,7 @@ fn status_host(slug: &str) -> String {
 /// org plus its owner.
 async fn seed_org(pool: &sqlx::PgPool, slug: &str, enabled: bool) -> (OrgId, UserId) {
     let user = make_user(pool, "subdomain").await;
-    let org = create_org_with_owner(pool, user, slug, slug, 100)
+    let org = create_org_with_owner(pool, user, slug, slug)
         .await
         .expect("create org")
         .expect("slug not taken");

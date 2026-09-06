@@ -78,7 +78,7 @@ struct Tenant {
 
 async fn provision_tenant(pool: &PgPool, label: &str) -> Tenant {
     let user = make_user(pool, "isol").await;
-    let org = create_org_with_owner(pool, user, &unique_slug(label), label, 3)
+    let org = create_org_with_owner(pool, user, &unique_slug(label), label)
         .await
         .unwrap()
         .expect("provision org");

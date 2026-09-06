@@ -88,9 +88,7 @@ async fn ensure_owner_org(
             let mut created = None;
             for _ in 0..8 {
                 let slug = generate_signup_slug();
-                if let Some(org) =
-                    orgs::create_org_with_owner(pool, user, &slug, org_name, u32::MAX).await?
-                {
+                if let Some(org) = orgs::create_org_with_owner(pool, user, &slug, org_name).await? {
                     created = Some(org.id);
                     break;
                 }
@@ -204,8 +202,9 @@ pub async fn seed_first_owner(pool: &PgPool, cfg: &AppConfig) -> Result<()> {
     // just created; an org the operator re-planned later is never touched.
     if let Some(plan) = plan {
         sqlx::query(
-            "UPDATE organizations /* SAFE: the tenant key of this table is its own id, bound here to the org seeding just created */ \
-             SET plan_id = $1 WHERE id = $2",
+            "UPDATE accounts /* SAFE: bound to the account behind the org seeding just created */ \
+             SET plan_id = $1, updated_at = now() \
+             WHERE id = (SELECT account_id FROM organizations WHERE id = $2)",
         )
         .bind(plan)
         .bind(org.0)

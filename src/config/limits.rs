@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-/// `[quotas]`. Cache TTLs for plan/usage lookups, and the boot-seeded org's plan.
+/// `[quotas]`. Cache TTLs for plan/usage lookups, and the plan the boot-seeded
+/// owner's account opens on.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct QuotasConfig {

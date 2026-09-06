@@ -52,12 +52,12 @@ fn component(target_id: Uuid) -> NewStatusPageComponent {
 async fn two_orgs(pool: &sqlx::PgPool, tag: &str) -> (OrgId, OrgId, UserId, UserId) {
     let user_a = make_user(pool, tag).await;
     let user_b = make_user(pool, tag).await;
-    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A", 3)
+    let org_a = create_org_with_owner(pool, user_a, &unique_slug(tag), "A")
         .await
         .unwrap()
         .expect("org a")
         .id;
-    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B", 3)
+    let org_b = create_org_with_owner(pool, user_b, &unique_slug(tag), "B")
         .await
         .unwrap()
         .expect("org b")

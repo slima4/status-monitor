@@ -41,8 +41,17 @@ WITH u AS (
   ON CONFLICT (email) WHERE deleted_at IS NULL
     DO UPDATE SET email_verified_at = COALESCE(users.email_verified_at, now())
   RETURNING id
+), a AS (
+  -- Quotas hang off the account, not the org: open the dev user's the way
+  -- signup does, on `founding` because that is what a real signup still gets.
+  INSERT INTO accounts (owner_user_id, plan_id)
+  SELECT u.id, 'founding' FROM u
+  ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL
+    DO UPDATE SET owner_user_id = EXCLUDED.owner_user_id
+  RETURNING id
 ), o AS (
-  INSERT INTO organizations (slug, name) VALUES ('${SLUG}', '${ORG_NAME}')
+  INSERT INTO organizations (slug, name, account_id)
+  SELECT '${SLUG}', '${ORG_NAME}', a.id FROM a
   ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET name = EXCLUDED.name
   RETURNING id
 ), m AS (

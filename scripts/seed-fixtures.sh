@@ -151,10 +151,14 @@ SELECT id, '${OWNER_USER_ID}'::uuid, 'pending@fixture.test', 'member',
 
 -- Second org owned by the dev user: makes the nav org picker render
 -- (it only appears for multi-org sessions).
-INSERT INTO organizations (slug, name)
-SELECT 'fixture-second', 'Fixture Second Org'
- WHERE NOT EXISTS (
-   SELECT 1 FROM organizations WHERE slug = 'fixture-second' AND deleted_at IS NULL);
+-- On the same account as the first org, so the two share one pool of caps
+-- exactly as a real second org would.
+INSERT INTO organizations (slug, name, account_id)
+SELECT 'fixture-second', 'Fixture Second Org', a.id
+  FROM accounts a
+ WHERE a.owner_user_id = '${OWNER_USER_ID}'::uuid
+   AND NOT EXISTS (
+     SELECT 1 FROM organizations WHERE slug = 'fixture-second' AND deleted_at IS NULL);
 INSERT INTO memberships (org_id, user_id, role)
 SELECT o.id, '${OWNER_USER_ID}'::uuid, 'owner'
   FROM organizations o

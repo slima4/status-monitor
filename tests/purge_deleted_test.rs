@@ -55,7 +55,7 @@ async fn grace_window_blocks_purge() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("grace"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("grace"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -103,7 +103,7 @@ async fn past_grace_cascades_and_enqueues_ch() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("past"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("past"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -157,7 +157,7 @@ async fn restore_cancels_purge() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("cncl"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("cncl"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -209,7 +209,7 @@ async fn cascade_predicate_blocks_post_select_recovery_race() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("race"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("race"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -309,7 +309,7 @@ async fn drain_is_idempotent_on_repeat() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("drn"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("drn"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -359,7 +359,7 @@ async fn enqueue_is_dedup_on_conflict() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("dup"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("dup"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -418,7 +418,7 @@ async fn drain_erases_ch_rows_then_completes() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("erase"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("erase"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -489,7 +489,7 @@ async fn queue_depth_counts_pending_not_completed() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("depth"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("depth"), "n")
         .await
         .unwrap()
         .unwrap();
@@ -561,7 +561,7 @@ async fn purge_resilient_to_kill_between_pg_cascade_and_ch_drain() {
         return;
     };
     let user = make_user(&pool, "purge").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("kill"), "n", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("kill"), "n")
         .await
         .unwrap()
         .unwrap();

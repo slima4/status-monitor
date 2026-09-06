@@ -25,7 +25,8 @@ use crate::domain::{
 };
 use crate::error::{AppError, Result};
 use crate::security::{Cipher, envelope_str, wrap_envelope};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+use crate::storage::accounts;
+use crate::storage::locks::{account_lock_key, advisory_xact_lock};
 
 /// Serialize + (optionally) seal a config for storage. With no KEK the JSON is
 /// stored as-is (no-KEK self-host); with a KEK the whole blob becomes
@@ -306,17 +307,19 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .map_err(|e| AppError::Other(anyhow!("begin: {e}")))?;
         // The count-subquery + INSERT is not race-safe on its own under READ
         // COMMITTED — two creates at count == cap-1 each see `< cap` and both
-        // insert, overshooting the cap. A per-org advisory lock (the same key
-        // every other org-cap writer uses) serialises them; it is held until
-        // this transaction commits or rolls back.
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        // insert, overshooting the cap. A per-account advisory lock (the same
+        // key every other pooled-cap writer uses) serialises them; it is held
+        // until this transaction commits or rolls back.
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .map_err(|e| AppError::Other(anyhow!("advisory lock: {e}")))?;
+        let pool_orgs = accounts::live_orgs("$10");
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"INSERT INTO notification_channels (org_id, name, kind, config, external_ref, enabled, write_source, auto_bind_tags)
+            &format!(r#"INSERT INTO notification_channels (org_id, name, kind, config, external_ref, enabled, write_source, auto_bind_tags)
                SELECT $1, $2, $3, $4, $5, $6, $8, $9
-               WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $7
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at"#,
+               WHERE (SELECT count(*) FROM notification_channels WHERE org_id IN ({pool_orgs})) < $7
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at"#),
         )
         .bind(org.0)
         .bind(&new.name)
@@ -327,6 +330,7 @@ impl NotificationChannelStore for PgNotificationChannelStore {
         .bind(max_channels)
         .bind(source.as_str())
         .bind(&new.auto_bind_tags)
+        .bind(account.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {
@@ -381,21 +385,24 @@ impl NotificationChannelStore for PgNotificationChannelStore {
             .map_err(|e| AppError::Other(anyhow!("begin: {e}")))?;
         // Same lock the other cap-checked writers take, so a signup racing a
         // manual create cannot overshoot the plan cap.
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .map_err(|e| AppError::Other(anyhow!("advisory lock: {e}")))?;
+        let pool_orgs = accounts::live_orgs("$5");
         let row: Option<ChannelRow> = sqlx::query_as(
-            r#"INSERT INTO notification_channels /* SAFE: seeded pre-verified — the signup that reached here already proved control of this inbox (OAuth verified_email, or a claimed magic link), which is the same proof the verification mail collects */
+            &format!(r#"INSERT INTO notification_channels /* SAFE: seeded pre-verified — the signup that reached here already proved control of this inbox (OAuth verified_email, or a claimed magic link), which is the same proof the verification mail collects */
                (org_id, name, kind, config, external_ref, enabled, verified_at, write_source)
                SELECT $1, $2, 'email', $3, $2, true, now(), 'ui'
-               WHERE (SELECT count(*) FROM notification_channels WHERE org_id = $1) < $4
+               WHERE (SELECT count(*) FROM notification_channels WHERE org_id IN ({pool_orgs})) < $4
                ON CONFLICT (org_id, name) DO NOTHING
-               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at"#,
+               RETURNING id, name, config, enabled, disabled_reason, verified_at, consecutive_failures, failing_since, last_delivered_at, auto_bind_tags, write_source, created_at, updated_at"#),
         )
         .bind(org.0)
         .bind(&address)
         .bind(&sealed)
         .bind(max_channels)
+        .bind(account.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| AppError::Other(anyhow!("seed owner email channel: {e}")))?;

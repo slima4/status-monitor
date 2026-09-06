@@ -51,7 +51,7 @@ async fn target_delete_writes_audit_rows() {
     MIGRATOR.run(&pool).await.unwrap();
 
     let user = common::make_user(&pool, "a").await;
-    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co", 10)
+    let org = create_org_with_owner(&pool, user, &common::unique_slug("a"), "Co")
         .await
         .unwrap()
         .unwrap();

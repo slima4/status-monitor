@@ -22,9 +22,13 @@ Org slugs are case-insensitive (`CITEXT`), 3–30 characters, must start with a 
 
 The placeholder slug a brand-new user's first org gets at signup takes the shape `{adj}-{noun}-{6char}` from inline word lists in `src/domain/word_lists.rs`. The signup transaction returns `Ok(None)` on a slug collision so the caller wraps the generate-and-insert pair in a 5-attempt retry loop; the birthday-paradox tail above 5 retries is astronomically small. Users typically rename the slug after signup from settings; the org's default status page is created with the same slug, which the owner can change independently in the page editor.
 
-### Three-org owner limit
+### Accounts own orgs, and the plan sits on the account
 
-A user can be `owner` of at most `free_tier_owner_org_limit` (default 3) **active** organisations. Enforced in a single SQL statement that puts the count subquery inside the `INSERT … WHERE …` so two concurrent creates cannot both win. Soft-deleted orgs do not count against the cap. Invited memberships (role `member`) are unlimited.
+Every org belongs to an **account** (`organizations.account_id`), and the plan lives there (`accounts.plan_id`). One account per user today, opened at signup — or lazily, the first time a user who only ever joined someone else's org creates one of their own.
+
+The account is what a quota is counted against. Its orgs share one pool of monitors, status pages, seats, channels and every other cap; a second org is a workspace, not a second allowance. `plans.max_orgs` (free 1, founding 3, pro 5) bounds how many workspaces the pool is split across. The count runs under a per-account advisory lock so two concurrent creates cannot both win, and soft-deleted orgs do not count — which is why restoring one re-checks the cap. Invited memberships (role `member`) are unlimited and carry no capacity: a member brings access to the org they joined, never their own account's quota.
+
+An unexpired `plan_overrides` row (keyed by account) can raise `max_orgs` and the other caps for one customer; the writer and the usage view read the same folded number.
 
 ## Soft delete and the 30-day purge
 

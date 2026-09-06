@@ -21,7 +21,8 @@ use crate::domain::{
     RotationType, UserId, resolve_on_call,
 };
 use crate::error::{AppError, Result};
-use crate::storage::locks::{advisory_xact_lock, org_lock_key};
+use crate::storage::accounts;
+use crate::storage::locks::{account_lock_key, advisory_xact_lock};
 
 #[async_trait]
 pub trait OnCallStore: Send + Sync {
@@ -354,20 +355,23 @@ impl OnCallStore for PgOnCallStore {
             .begin()
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("begin: {e}")))?;
-        advisory_xact_lock(&mut *tx, &org_lock_key(org))
+        let account = accounts::account_for_org(&mut *tx, org).await?;
+        advisory_xact_lock(&mut *tx, &account_lock_key(account))
             .await
             .map_err(|e| AppError::Other(anyhow::anyhow!("advisory lock: {e}")))?;
-        let row: Option<(Uuid,)> = sqlx::query_as(
+        let pool_orgs = accounts::live_orgs("$5");
+        let row: Option<(Uuid,)> = sqlx::query_as(&format!(
             r#"INSERT INTO on_call_schedules (org_id, name, timezone)
                SELECT $1, $2, $3
                WHERE (SELECT count(*) FROM on_call_schedules
-                      WHERE org_id = $1 AND deleted_at IS NULL) < $4
-               RETURNING id"#,
-        )
+                      WHERE org_id IN ({pool_orgs}) AND deleted_at IS NULL) < $4
+               RETURNING id"#
+        ))
         .bind(org.0)
         .bind(&new.name)
         .bind(&new.timezone)
         .bind(max_schedules)
+        .bind(account.0)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| {

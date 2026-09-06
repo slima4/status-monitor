@@ -13,6 +13,14 @@ This page covers the hosted service at `uptimepage.dev`. A self-hosted instance 
 
 Prices, monitor counts, check intervals, history windows, seats, and status-page limits are on the [pricing page](https://uptimepage.dev/pricing), which is the number you are actually enforced at.
 
+## Limits belong to your account, not to one organization
+
+Your plan sits on your account. Every limit on it is a total across all of the organizations you own: 50 monitors on Founding means 50 in all, whether they live in one organization or three. Organizations are workspaces for separating environments, clients or teams, and splitting your monitors across more of them never adds capacity.
+
+How many you may open is itself a plan limit: one on Standard, three on Founding, five on Pro. Deleting an organization frees its slot after it leaves the recovery window, and restoring one is refused if you have filled the slot in the meantime.
+
+Being invited into somebody else's organization is separate. You get access to their workspace, and their limits apply there. Nothing you own is added to theirs, and nothing of theirs is added to yours. A person who belongs to several of your organizations takes one seat, not one per organization.
+
 Browser flow monitors are counted separately from everything else, because each run drives a real browser rather than sending a request:
 
 | Plan | Flow monitors |
@@ -30,13 +38,13 @@ Founding is granted automatically while spots remain. There is nothing to claim 
 
 Resource quotas (monitors, seats, status pages, channels, tokens) are enforced at the write, inside the same statement that creates the row, so parallel creates settle exactly at the limit and never above it. Crossing one returns `422` with `QUOTA_EXCEEDED` and a `details` object naming the quota, your current count, and the limit.
 
-Request budgets are per minute, per organization and per user, split into reads, writes, bulk operations, test runs, and check-now. Crossing one returns `429` with a `Retry-After` header. Checks themselves are never rate limited: the scheduler does not pass through that middleware, so a busy API does not slow your monitoring.
+Request budgets are per minute, per account and per user, split into reads, writes, bulk operations, test runs, and check-now. Crossing one returns `429` with a `Retry-After` header. Checks themselves are never rate limited: the scheduler does not pass through that middleware, so a busy API does not slow your monitoring.
 
 Two limits behave slightly differently. Pending invitations return `409 INVITATIONS_LIMIT`. A check interval below your plan floor returns `422 MIN_CHECK_INTERVAL`, and the floor is the higher of your plan's interval and the minimum for that monitor kind (twelve hours for domain expiry, an hour for TLS, five minutes for flow, a minute for heartbeat, ten seconds for the rest).
 
 ## Seeing where you stand
 
-`GET /api/v1/orgs/{id}/usage` returns your plan plus current-versus-limit for every quota, the rate budgets, and the feature flags. The same numbers render as progress bars under **Settings → Usage** in the app. The reported limit is the enforced limit by construction: both read the same plan row and the same count query.
+`GET /api/v1/orgs/{id}/usage` returns your plan plus current-versus-limit for every quota, the rate budgets, and the feature flags. The counts are your account's totals across every organization you own, which is what the limits apply to, so they can be larger than what the organization in the URL holds by itself. The same numbers render as progress bars under **Settings → Usage** in the app. The reported limit is the enforced limit by construction: both read the same plan row and the same count query.
 
 ## Raising a limit
 

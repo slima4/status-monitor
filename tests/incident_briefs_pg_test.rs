@@ -72,7 +72,7 @@ async fn list_briefs_windows_filters_and_pages_pg() {
         return;
     };
     let user = make_user(&pool, "brf").await;
-    let org = create_org_with_owner(&pool, user, &unique_slug("brf"), "svc", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("brf"), "svc")
         .await
         .expect("create org")
         .expect("org created")

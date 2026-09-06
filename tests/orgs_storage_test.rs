@@ -17,8 +17,8 @@ use uptimepage::storage::{
     DeleteOutcome, PgStatusPageStore, PostgresTargetStore, RemoveOutcome, RestoreOutcome,
     StatusPageStore, TargetStore, UpdateOrgOutcome, create_org_with_owner, is_active_member,
     is_owner, list_deleted_orgs_deleted_by, list_members, list_orgs_for_user,
-    oldest_membership_for_user, owner_org_count, remove_member, restore_org, slug_is_available,
-    soft_delete_org, soft_delete_org_for_user, update_org_fields,
+    oldest_membership_for_user, remove_member, restore_org, slug_is_available, soft_delete_org,
+    soft_delete_org_for_user, update_org_fields,
 };
 use url::Url;
 use uuid::Uuid;
@@ -33,7 +33,7 @@ async fn create_org_and_slug_check_round_trip() {
     let slug = unique_slug("acme");
 
     assert!(slug_is_available(&pool, &slug).await.unwrap());
-    let created = create_org_with_owner(&pool, user, &slug, "Acme", 3)
+    let created = create_org_with_owner(&pool, user, &slug, "Acme")
         .await
         .unwrap()
         .expect("created");
@@ -41,7 +41,7 @@ async fn create_org_and_slug_check_round_trip() {
     assert!(!slug_is_available(&pool, &slug).await.unwrap());
 
     // Second attempt at the same slug collides → None.
-    let collision = create_org_with_owner(&pool, user, &slug, "Acme2", 3)
+    let collision = create_org_with_owner(&pool, user, &slug, "Acme2")
         .await
         .unwrap();
     assert!(collision.is_none(), "expected slug-collision None");
@@ -58,6 +58,113 @@ async fn create_org_and_slug_check_round_trip() {
         .unwrap();
 }
 
+/// A tombstone frees the org's monitors from the account's pool, so a restore
+/// has to re-earn them. Without this the deleted org is a parking space:
+/// fill it, delete it, refill the pool elsewhere, restore, and the account
+/// runs at double its plan.
+#[tokio::test]
+#[ignore]
+async fn restoring_an_org_cannot_smuggle_its_monitors_past_the_pool() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs").await;
+    let parked = create_org_with_owner(&pool, user, &unique_slug("park"), "Parked")
+        .await
+        .unwrap()
+        .expect("first org");
+    let live = create_org_with_owner(&pool, user, &unique_slug("live"), "Live")
+        .await
+        .unwrap()
+        .expect("second org");
+
+    // Cap the account at four monitors, then spend all four in the org that
+    // is about to be tombstoned.
+    common::set_account_targets_cap(&pool, user, 4).await;
+    common::seed_targets(&pool, parked.id, 4).await;
+    soft_delete_org_for_user(&pool, parked.id, user)
+        .await
+        .unwrap();
+
+    // The tombstone released the pool, so the surviving org can spend it again.
+    common::seed_targets(&pool, live.id, 4).await;
+
+    let outcome = restore_org(
+        &pool,
+        parked.id,
+        user,
+        30,
+        &common::plan_for(&pool, parked.id).await,
+    )
+    .await
+    .unwrap();
+    match outcome {
+        RestoreOutcome::QuotaExceeded {
+            quota,
+            current,
+            limit,
+        } => {
+            assert_eq!(quota, "max_targets");
+            assert_eq!((current, limit), (8, 4));
+        }
+        other => panic!("restore must not double the pool, got {other:?}"),
+    }
+
+    // Refused means refused: the org is still tombstoned and the pool intact.
+    let (deleted, live_targets): (bool, i64) = sqlx::query_as(
+        "SELECT (SELECT deleted_at IS NOT NULL FROM organizations WHERE id = $1), \
+                (SELECT count(*) FROM targets t JOIN organizations o ON o.id = t.org_id \
+                  WHERE o.deleted_at IS NULL AND o.id = ANY($2))",
+    )
+    .bind(parked.id.0)
+    .bind(vec![parked.id.0, live.id.0])
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(deleted, "the refused restore must leave the tombstone");
+    assert_eq!(live_targets, 4, "the live pool is unchanged");
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// The plan is the only source of the org cap: with no override in play, a
+/// free account holds exactly what `plans.max_orgs` says.
+#[tokio::test]
+#[ignore]
+async fn free_account_org_cap_comes_from_the_plan() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let user = make_user(&pool, "orgs").await;
+    create_org_with_owner(&pool, user, &unique_slug("plan"), "one")
+        .await
+        .unwrap()
+        .expect("first org");
+    common::plan_default_orgs(&pool, user).await;
+
+    let cap: i32 = sqlx::query_scalar("SELECT max_orgs FROM plans WHERE id = 'free'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(cap, 1, "free plan holds one org");
+
+    let err = create_org_with_owner(&pool, user, &unique_slug("plan"), "two")
+        .await
+        .unwrap_err();
+    assert!(format!("{err:?}").contains("OWNER_ORG_LIMIT"), "{err:?}");
+    assert_eq!(common::live_orgs(&pool, user).await, 1);
+
+    sqlx::query("DELETE FROM users WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 #[ignore]
 async fn owner_org_limit_is_atomic() {
@@ -65,25 +172,26 @@ async fn owner_org_limit_is_atomic() {
         return;
     };
     let user = make_user(&pool, "orgs").await;
-    // Limit 2 — first two creates succeed, third fails with OWNER_ORG_LIMIT.
+    // Cap 2 — first two creates succeed, third fails with OWNER_ORG_LIMIT.
+    common::allow_orgs(&pool, user, 2).await;
     let s1 = unique_slug("lim");
     let s2 = unique_slug("lim");
     let s3 = unique_slug("lim");
-    create_org_with_owner(&pool, user, &s1, "one", 2)
+    create_org_with_owner(&pool, user, &s1, "one")
         .await
         .unwrap()
         .expect("first");
-    create_org_with_owner(&pool, user, &s2, "two", 2)
+    create_org_with_owner(&pool, user, &s2, "two")
         .await
         .unwrap()
         .expect("second");
-    let err = create_org_with_owner(&pool, user, &s3, "three", 2)
+    let err = create_org_with_owner(&pool, user, &s3, "three")
         .await
         .unwrap_err();
     let msg = format!("{err:?}");
     assert!(msg.contains("OWNER_ORG_LIMIT"), "got {msg}");
 
-    assert_eq!(owner_org_count(&pool, user).await.unwrap(), 2);
+    assert_eq!(common::live_orgs(&pool, user).await, 2);
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)
@@ -100,7 +208,7 @@ async fn list_orgs_excludes_soft_deleted_and_update_name_works() {
     };
     let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("list");
-    let org = create_org_with_owner(&pool, user, &slug, "Old name", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "Old name")
         .await
         .unwrap()
         .unwrap();
@@ -143,18 +251,34 @@ async fn restore_org_inside_window_succeeds() {
     };
     let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("rest");
-    let org = create_org_with_owner(&pool, user, &slug, "n", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "n")
         .await
         .unwrap()
         .unwrap();
     soft_delete_org(&pool, org.id, user).await.unwrap();
 
-    let outcome = restore_org(&pool, org.id, user, 30, 3).await.unwrap();
+    let outcome = restore_org(
+        &pool,
+        org.id,
+        user,
+        30,
+        &common::plan_for(&pool, org.id).await,
+    )
+    .await
+    .unwrap();
     assert!(matches!(outcome, RestoreOutcome::Restored(ref o) if o.id == org.id));
     assert!(is_active_member(&pool, user, org.id).await.unwrap());
 
     // Restoring an already-active org reports NotDeleted, not Restored.
-    let again = restore_org(&pool, org.id, user, 30, 3).await.unwrap();
+    let again = restore_org(
+        &pool,
+        org.id,
+        user,
+        30,
+        &common::plan_for(&pool, org.id).await,
+    )
+    .await
+    .unwrap();
     assert!(matches!(again, RestoreOutcome::NotDeleted));
 
     sqlx::query("DELETE FROM users WHERE id = $1")
@@ -172,7 +296,7 @@ async fn restore_org_outside_window_refuses() {
     };
     let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("expr");
-    let org = create_org_with_owner(&pool, user, &slug, "n", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "n")
         .await
         .unwrap()
         .unwrap();
@@ -184,7 +308,15 @@ async fn restore_org_outside_window_refuses() {
         .await
         .unwrap();
 
-    let outcome = restore_org(&pool, org.id, user, 30, 3).await.unwrap();
+    let outcome = restore_org(
+        &pool,
+        org.id,
+        user,
+        30,
+        &common::plan_for(&pool, org.id).await,
+    )
+    .await
+    .unwrap();
     assert!(matches!(outcome, RestoreOutcome::WindowExpired));
 
     sqlx::query("DELETE FROM users WHERE id = $1")
@@ -202,7 +334,7 @@ async fn remove_member_refuses_last_owner() {
     };
     let user = make_user(&pool, "orgs").await;
     let slug = unique_slug("solo");
-    let org = create_org_with_owner(&pool, user, &slug, "Solo", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "Solo")
         .await
         .unwrap()
         .unwrap();
@@ -227,7 +359,7 @@ async fn remove_member_succeeds_when_other_owners_exist() {
     let a = make_user(&pool, "orgs").await;
     let b = make_user(&pool, "orgs").await;
     let slug = unique_slug("pair");
-    let org = create_org_with_owner(&pool, a, &slug, "Pair", 3)
+    let org = create_org_with_owner(&pool, a, &slug, "Pair")
         .await
         .unwrap()
         .unwrap();
@@ -281,7 +413,7 @@ async fn removing_a_member_clears_the_monitors_they_owned() {
     };
     let owner = make_user(&pool, "orgs-own").await;
     let member = make_user(&pool, "orgs-own").await;
-    let org = create_org_with_owner(&pool, owner, &unique_slug("own"), "Own", 3)
+    let org = create_org_with_owner(&pool, owner, &unique_slug("own"), "Own")
         .await
         .unwrap()
         .unwrap();
@@ -354,7 +486,7 @@ async fn a_monitor_cannot_name_an_owner_from_outside_the_org() {
     };
     let owner = make_user(&pool, "orgs-out").await;
     let outsider = make_user(&pool, "orgs-out").await;
-    let org = create_org_with_owner(&pool, owner, &unique_slug("out"), "Out", 3)
+    let org = create_org_with_owner(&pool, owner, &unique_slug("out"), "Out")
         .await
         .unwrap()
         .unwrap();
@@ -427,13 +559,14 @@ async fn owner_limit_holds_under_50_concurrent_creates() {
     let user = make_user(&pool, "orgs").await;
 
     let limit: u32 = 3;
+    common::allow_orgs(&pool, user, i32::try_from(limit).unwrap()).await;
     let attempts: usize = 50;
     let mut tasks = Vec::with_capacity(attempts);
     for i in 0..attempts {
         let pool = pool.clone();
         let slug = unique_slug(&format!("race-{i:02}"));
         tasks.push(tokio::spawn(async move {
-            create_org_with_owner(&pool, user, &slug, "n", limit).await
+            create_org_with_owner(&pool, user, &slug, "n").await
         }));
     }
 
@@ -454,7 +587,7 @@ async fn owner_limit_holds_under_50_concurrent_creates() {
         u32::try_from(attempts).unwrap() - limit,
         "every loser should report OWNER_ORG_LIMIT"
     );
-    assert_eq!(owner_org_count(&pool, user).await.unwrap(), limit);
+    assert_eq!(common::live_orgs(&pool, user).await, limit);
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)
@@ -482,13 +615,13 @@ async fn signup_org_collision_retry_succeeds() {
     // Fixed slug distinct enough that two concurrent test runs won't collide.
     let suffix = &Uuid::new_v4().simple().to_string()[..6];
     let collided = format!("fixed-test-{suffix}");
-    let _ = create_org_with_owner(&pool, user_a, &collided, "A", 3)
+    let _ = create_org_with_owner(&pool, user_a, &collided, "A")
         .await
         .unwrap()
         .expect("first user takes the slug");
 
     // user_b tries the same slug and collides.
-    let none = create_org_with_owner(&pool, user_b, &collided, "B", 3)
+    let none = create_org_with_owner(&pool, user_b, &collided, "B")
         .await
         .unwrap();
     assert!(none.is_none(), "expected slug-collision None");
@@ -501,7 +634,7 @@ async fn signup_org_collision_retry_succeeds() {
         if retry_slug == collided {
             continue;
         }
-        if let Some(o) = create_org_with_owner(&pool, user_b, &retry_slug, "B", 3)
+        if let Some(o) = create_org_with_owner(&pool, user_b, &retry_slug, "B")
             .await
             .unwrap()
         {
@@ -529,7 +662,7 @@ async fn update_org_slug_happy_path_records_audit() {
     };
     let user = make_user(&pool, "slug").await;
     let from = unique_slug("from");
-    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+    let org = create_org_with_owner(&pool, user, &from, "Co")
         .await
         .unwrap()
         .unwrap();
@@ -578,7 +711,7 @@ async fn update_org_slug_same_slug_is_noop_updated() {
     };
     let user = make_user(&pool, "slug").await;
     let slug = unique_slug("same");
-    let org = create_org_with_owner(&pool, user, &slug, "Co", 3)
+    let org = create_org_with_owner(&pool, user, &slug, "Co")
         .await
         .unwrap()
         .unwrap();
@@ -615,11 +748,11 @@ async fn update_org_slug_conflict_returns_slug_taken() {
     let user = make_user(&pool, "slug").await;
     let mine = unique_slug("mine");
     let taken = unique_slug("taken");
-    create_org_with_owner(&pool, user, &taken, "T", 3)
+    create_org_with_owner(&pool, user, &taken, "T")
         .await
         .unwrap()
         .unwrap();
-    let org = create_org_with_owner(&pool, user, &mine, "M", 3)
+    let org = create_org_with_owner(&pool, user, &mine, "M")
         .await
         .unwrap()
         .unwrap();
@@ -654,7 +787,7 @@ async fn update_org_slug_not_found_on_missing_or_soft_deleted() {
     assert!(matches!(outcome, UpdateOrgOutcome::NotFound));
 
     // Soft-deleted org.
-    let org = create_org_with_owner(&pool, user, &unique_slug("del"), "D", 3)
+    let org = create_org_with_owner(&pool, user, &unique_slug("del"), "D")
         .await
         .unwrap()
         .unwrap();
@@ -680,7 +813,7 @@ async fn update_org_fields_combined_name_and_slug_is_atomic() {
     };
     let user = make_user(&pool, "slug").await;
     let from = unique_slug("comb");
-    let org = create_org_with_owner(&pool, user, &from, "Old name", 3)
+    let org = create_org_with_owner(&pool, user, &from, "Old name")
         .await
         .unwrap()
         .unwrap();
@@ -729,7 +862,7 @@ async fn update_org_slug_does_not_touch_status_page_slug() {
     };
     let user = make_user(&pool, "slug").await;
     let from = unique_slug("decouple");
-    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+    let org = create_org_with_owner(&pool, user, &from, "Co")
         .await
         .unwrap()
         .unwrap();
@@ -788,7 +921,7 @@ async fn update_org_slug_keeps_resources_reachable_by_id() {
     };
     let user = make_user(&pool, "slug").await;
     let from = unique_slug("orphan");
-    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+    let org = create_org_with_owner(&pool, user, &from, "Co")
         .await
         .unwrap()
         .unwrap();
@@ -848,7 +981,7 @@ async fn update_org_slug_resolved_by_find_id_by_slug() {
     };
     let user = make_user(&pool, "slug").await;
     let from = unique_slug("resolve");
-    let org = create_org_with_owner(&pool, user, &from, "Co", 3)
+    let org = create_org_with_owner(&pool, user, &from, "Co")
         .await
         .unwrap()
         .unwrap();
@@ -899,7 +1032,7 @@ async fn owner_delete_refuses_the_callers_last_org() {
         return;
     };
     let user = make_user(&pool, "orgs").await;
-    let first = create_org_with_owner(&pool, user, &unique_slug("solo"), "Solo", 3)
+    let first = create_org_with_owner(&pool, user, &unique_slug("solo"), "Solo")
         .await
         .unwrap()
         .unwrap();
@@ -912,7 +1045,7 @@ async fn owner_delete_refuses_the_callers_last_org() {
     assert!(is_active_member(&pool, user, first.id).await.unwrap());
 
     // With a sibling in place it goes through.
-    let second = create_org_with_owner(&pool, user, &unique_slug("pair"), "Pair", 3)
+    let second = create_org_with_owner(&pool, user, &unique_slug("pair"), "Pair")
         .await
         .unwrap()
         .unwrap();
@@ -952,11 +1085,11 @@ async fn deleting_an_org_repoints_sessions_pinned_to_it() {
         return;
     };
     let user = make_user(&pool, "orgs").await;
-    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep", 3)
+    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep")
         .await
         .unwrap()
         .unwrap();
-    let doomed = create_org_with_owner(&pool, user, &unique_slug("doom"), "Doomed", 3)
+    let doomed = create_org_with_owner(&pool, user, &unique_slug("doom"), "Doomed")
         .await
         .unwrap()
         .unwrap();
@@ -1011,12 +1144,12 @@ async fn a_tombstoned_slug_stays_held_for_the_restore_window() {
         return;
     };
     let user = make_user(&pool, "orgs").await;
-    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep", 3)
+    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep")
         .await
         .unwrap()
         .unwrap();
     let slug = unique_slug("reused");
-    let first = create_org_with_owner(&pool, user, &slug, "First", 3)
+    let first = create_org_with_owner(&pool, user, &slug, "First")
         .await
         .unwrap()
         .unwrap();
@@ -1027,7 +1160,7 @@ async fn a_tombstoned_slug_stays_held_for_the_restore_window() {
 
     // Held for the whole window, so the deleter's restore stays possible.
     assert!(
-        create_org_with_owner(&pool, user, &slug, "Second", 3)
+        create_org_with_owner(&pool, user, &slug, "Second")
             .await
             .unwrap()
             .is_none()
@@ -1035,7 +1168,7 @@ async fn a_tombstoned_slug_stays_held_for_the_restore_window() {
     assert!(!slug_is_available(&pool, &slug).await.unwrap());
 
     // Renaming onto it is refused too — the partial index alone would miss it.
-    let other = create_org_with_owner(&pool, user, &unique_slug("other"), "Other", 3)
+    let other = create_org_with_owner(&pool, user, &unique_slug("other"), "Other")
         .await
         .unwrap()
         .unwrap();
@@ -1047,7 +1180,15 @@ async fn a_tombstoned_slug_stays_held_for_the_restore_window() {
     ));
 
     assert!(matches!(
-        restore_org(&pool, first.id, user, 30, 3).await.unwrap(),
+        restore_org(
+            &pool,
+            first.id,
+            user,
+            30,
+            &common::plan_for(&pool, first.id).await
+        )
+        .await
+        .unwrap(),
         RestoreOutcome::Restored(_)
     ));
     assert!(is_active_member(&pool, user, first.id).await.unwrap());
@@ -1069,11 +1210,11 @@ async fn restore_readopts_sessions_the_delete_orphaned() {
     let owner = make_user(&pool, "orgs").await;
     let member = make_user(&pool, "orgs").await;
     // Owner keeps a second org so the delete is allowed at all.
-    create_org_with_owner(&pool, owner, &unique_slug("other"), "Other", 3)
+    create_org_with_owner(&pool, owner, &unique_slug("other"), "Other")
         .await
         .unwrap()
         .unwrap();
-    let shared = create_org_with_owner(&pool, owner, &unique_slug("shared"), "Shared", 3)
+    let shared = create_org_with_owner(&pool, owner, &unique_slug("shared"), "Shared")
         .await
         .unwrap()
         .unwrap();
@@ -1107,7 +1248,15 @@ async fn restore_readopts_sessions_the_delete_orphaned() {
 
     // Or the member keeps failing `CurrentOrg` until they sign in again.
     assert!(matches!(
-        restore_org(&pool, shared.id, owner, 30, 3).await.unwrap(),
+        restore_org(
+            &pool,
+            shared.id,
+            owner,
+            30,
+            &common::plan_for(&pool, shared.id).await
+        )
+        .await
+        .unwrap(),
         RestoreOutcome::Restored(_)
     ));
     let (readopted,): (Option<Uuid>,) =
@@ -1132,15 +1281,15 @@ async fn rename_of_a_missing_org_is_not_found_even_when_the_slug_is_held() {
         return;
     };
     let user = make_user(&pool, "orgs").await;
-    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep", 3)
+    let keep = create_org_with_owner(&pool, user, &unique_slug("keep"), "Keep")
         .await
         .unwrap()
         .unwrap();
-    let held = create_org_with_owner(&pool, user, &unique_slug("held"), "Held", 3)
+    let held = create_org_with_owner(&pool, user, &unique_slug("held"), "Held")
         .await
         .unwrap()
         .unwrap();
-    let gone = create_org_with_owner(&pool, user, &unique_slug("gone"), "Gone", 3)
+    let gone = create_org_with_owner(&pool, user, &unique_slug("gone"), "Gone")
         .await
         .unwrap()
         .unwrap();
@@ -1177,10 +1326,11 @@ async fn restore_is_refused_when_the_owner_slot_was_filled() {
         return;
     };
     let user = make_user(&pool, "orgs").await;
+    common::allow_orgs(&pool, user, 3).await;
     let mut owned = Vec::new();
     for _ in 0..3 {
         owned.push(
-            create_org_with_owner(&pool, user, &unique_slug("cap"), "Cap", 3)
+            create_org_with_owner(&pool, user, &unique_slug("cap"), "Cap")
                 .await
                 .unwrap()
                 .unwrap(),
@@ -1191,28 +1341,44 @@ async fn restore_is_refused_when_the_owner_slot_was_filled() {
     soft_delete_org_for_user(&pool, owned[0].id, user)
         .await
         .unwrap();
-    assert_eq!(owner_org_count(&pool, user).await.unwrap(), 2);
-    let replacement = create_org_with_owner(&pool, user, &unique_slug("repl"), "Replacement", 3)
+    assert_eq!(common::live_orgs(&pool, user).await, 2);
+    let replacement = create_org_with_owner(&pool, user, &unique_slug("repl"), "Replacement")
         .await
         .unwrap()
         .unwrap();
 
     // ...but the restore must not hand back a fourth.
     assert!(matches!(
-        restore_org(&pool, owned[0].id, user, 30, 3).await.unwrap(),
+        restore_org(
+            &pool,
+            owned[0].id,
+            user,
+            30,
+            &common::plan_for(&pool, owned[0].id).await
+        )
+        .await
+        .unwrap(),
         RestoreOutcome::OwnerLimit
     ));
-    assert_eq!(owner_org_count(&pool, user).await.unwrap(), 3);
+    assert_eq!(common::live_orgs(&pool, user).await, 3);
 
     // Free a slot again and the same restore goes through.
     soft_delete_org_for_user(&pool, replacement.id, user)
         .await
         .unwrap();
     assert!(matches!(
-        restore_org(&pool, owned[0].id, user, 30, 3).await.unwrap(),
+        restore_org(
+            &pool,
+            owned[0].id,
+            user,
+            30,
+            &common::plan_for(&pool, owned[0].id).await
+        )
+        .await
+        .unwrap(),
         RestoreOutcome::Restored(_)
     ));
-    assert_eq!(owner_org_count(&pool, user).await.unwrap(), 3);
+    assert_eq!(common::live_orgs(&pool, user).await, 3);
 
     sqlx::query("DELETE FROM users WHERE id = $1")
         .bind(user.0)

@@ -1,3 +1,4 @@
+pub mod accounts;
 pub mod admin;
 pub mod app_secrets;
 pub mod capability_token;
@@ -86,7 +87,7 @@ pub use orgs::{
     ResolvedPublicPage, RestoreOutcome, UpdateOrgOutcome, create_org_with_owner,
     find_lone_active_org, find_public_status_page_by_slug, get_org, is_active_member, is_owner,
     list_deleted_orgs_deleted_by, list_members, list_orgs_for_user, load_page_branding,
-    membership_status, oldest_membership_for_user, owner_org_count, remove_member,
+    membership_status, oldest_membership_for_user, remove_member,
     resolve_default_page_for_lone_org, restore_org, slug_is_available, soft_delete_org,
     soft_delete_org_for_user, update_org_fields,
 };

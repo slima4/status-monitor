@@ -83,7 +83,9 @@ async fn make_signup_org(pool: &PgPool, user: UserId, prefix: &str) -> OrgId {
     let slug = format!("{prefix}-{}", uuid::Uuid::now_v7().simple());
     let slug = &slug[..slug.len().min(30)];
     let (id,): (uuid::Uuid,) = sqlx::query_as(
-        "INSERT INTO organizations (slug, name) VALUES ($1, 'Stranger Org') RETURNING id",
+        "WITH a AS (INSERT INTO accounts DEFAULT VALUES RETURNING id) \
+         INSERT INTO organizations (slug, name, account_id) \
+         SELECT $1, 'Stranger Org', a.id FROM a RETURNING id",
     )
     .bind(slug)
     .fetch_one(pool)
@@ -243,9 +245,10 @@ async fn me_usage_reports_tokens_and_owned_orgs() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let (app, org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
-    let user = make_owner(&pool, org).await;
-    let app = with_session(app, user, Some(org), None);
+    // The builder's own session is the caller here: layering a second session
+    // over it leaves which identity the handler sees ambiguous, and this
+    // endpoint answers strictly about the caller.
+    let (app, _org) = build_test_app_with_pg_store(pool.clone(), |_| {}).await;
 
     let resp = app
         .oneshot(
@@ -260,7 +263,8 @@ async fn me_usage_reports_tokens_and_owned_orgs() {
 
     assert_eq!(b["api_tokens"]["current"], 0);
     assert_eq!(b["api_tokens"]["limit"], 5);
-    // Owner of exactly the one seeded org; limit is the multitenancy cap.
+    // The caller's own account holds the one seeded org, measured against the
+    // allowance the fixture pinned on it.
     assert_eq!(b["owned_orgs"]["current"], 1);
-    assert_eq!(b["owned_orgs"]["limit"], 3);
+    assert_eq!(b["owned_orgs"]["limit"], common::FIXTURE_MAX_ORGS);
 }
