@@ -70,6 +70,9 @@ pub mod codes {
     pub const INVALID_FLOW_PARAMS: &str = "INVALID_FLOW_PARAMS";
     pub const FLOW_CHECKS_DISABLED: &str = "FLOW_CHECKS_DISABLED";
     pub const SMS_ALERTS_DISABLED: &str = "SMS_ALERTS_DISABLED";
+    pub const ON_CALL_DISABLED: &str = "ON_CALL_DISABLED";
+    pub const PLAN_HOLD: &str = "PLAN_HOLD";
+    pub const ACCOUNT_OWNER_REQUIRED: &str = "ACCOUNT_OWNER_REQUIRED";
     pub const NO_FLOW_CAPABLE_AGENT: &str = "NO_FLOW_CAPABLE_AGENT";
     pub const INVALID_TLS_CRED_COMBO: &str = "INVALID_TLS_CRED_COMBO";
     pub const INVALID_ALERT_CONFIG: &str = "INVALID_ALERT_CONFIG";

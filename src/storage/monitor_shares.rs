@@ -329,13 +329,17 @@ impl MonitorShareStore for PgMonitorShareStore {
 
     async fn resolve_active(&self, raw_token: &str) -> Result<Option<ResolvedShare>> {
         let token_hash = capability_token::hash(raw_token);
-        // All-or-nothing: live share, target still present, org not soft-deleted.
+        // All-or-nothing: live share, target still present and covered by the
+        // plan, org not soft-deleted. A held monitor drops off its status page,
+        // so leaving its share link live would keep the same data reachable by
+        // whoever already has the URL.
         let row: Option<(Uuid, Uuid, Uuid)> = sqlx::query_as(
             r#"SELECT ms.id, ms.target_id, ms.org_id
                FROM monitor_shares ms
                JOIN targets t       ON t.id = ms.target_id AND t.org_id = ms.org_id
                JOIN organizations o ON o.id = ms.org_id AND o.deleted_at IS NULL
                WHERE ms.token_hash = $1
+                 AND t.plan_hold_at IS NULL
                  AND ms.revoked_at IS NULL
                  AND (ms.expires_at IS NULL OR ms.expires_at > now())"#,
         )

@@ -12,7 +12,8 @@ use crate::auth::sha256_hex;
 use crate::auth::token_hash::generate_raw_token;
 use crate::domain::{NewSubscriber, Subscriber, SubscriberChannel};
 use crate::error::Result;
-use crate::storage::status_pages::{PAGE_CUSTOM_DOMAIN_LIVE, PAGE_PLAN_JOIN};
+use crate::storage::admin::not_held_sql;
+use crate::storage::status_pages::{PAGE_CUSTOM_DOMAIN_LIVE, PAGE_NOT_HELD, PAGE_PLAN_JOIN};
 
 pub const CONFIRM_TTL_HOURS: i64 = 24;
 /// Confirm mints per subscriber per 24 h — bounds re-subscribe mail spam.
@@ -278,6 +279,11 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
                        AND EXISTS (SELECT 1 FROM incident_events e
                                    WHERE e.incident_id = i.id AND e.kind = 'published')))
          WHERE s.channel IN ('email', 'webhook') AND s.verified_at IS NOT NULL
+           AND {PAGE_NOT_HELD}
+           -- The page drops a held monitor from its component list, so mailing
+           -- about one would send readers to a page that shows neither the
+           -- component nor the incident.
+           AND {COMPONENT_NOT_HELD}
            AND u.posted_at >= s.verified_at
            AND u.posted_at >= now() - make_interval(hours => $2)
            AND NOT EXISTS (
@@ -288,7 +294,8 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
                    OR (n.status = 'queued' AND n.created_at > now() - make_interval(mins => $3))
                    OR (n.status = 'failed' AND n.attempts >= $4)))
          ORDER BY u.posted_at
-         LIMIT $1"
+         LIMIT $1",
+        COMPONENT_NOT_HELD = not_held_sql("c.target_id"),
     );
     let rows = sqlx::query_as::<_, PendingUpdate>(&sql)
         .bind(limit)

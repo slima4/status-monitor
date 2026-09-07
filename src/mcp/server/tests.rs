@@ -467,6 +467,7 @@ fn stored_monitor() -> Target {
         created_at: Utc::now(),
         updated_at: Utc::now(),
         write_source: WriteSource::Ui,
+        plan_hold_at: None,
     }
 }
 

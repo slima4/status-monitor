@@ -22,6 +22,12 @@ pub(crate) const PAGE_PLAN_JOIN: &str = "JOIN organizations sp_org ON sp_org.id 
 pub(crate) const PAGE_CUSTOM_DOMAIN_LIVE: &str =
     "(sp.custom_domain_verified_at IS NOT NULL AND sp_plan.custom_domain_enabled)";
 
+/// Whether the plan still covers this page. Over cap, the excess pages carry a
+/// `plan_hold_at`: they 404 publicly and their subscribers hear nothing, while
+/// the console keeps them whole so the operator can see what is waiting and
+/// choose differently. For a query that aliases the page `sp`.
+pub(crate) const PAGE_NOT_HELD: &str = "sp.plan_hold_at IS NULL";
+
 use crate::api::error::codes;
 use crate::domain::{
     MonitorShareId, NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle,
@@ -167,6 +173,7 @@ struct PageRow {
     write_source: String,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    plan_hold_at: Option<DateTime<Utc>>,
 }
 
 impl PageRow {
@@ -188,6 +195,7 @@ impl PageRow {
             write_source: WriteSource::from_db(&self.write_source),
             created_at: self.created_at,
             updated_at: self.updated_at,
+            plan_hold_at: self.plan_hold_at,
         }
     }
 }
@@ -196,7 +204,8 @@ const PAGE_COLUMNS: &str = "id, org_id, slug::text AS slug, name, enabled, \
      public_display_name, public_about, public_brand_color, \
      (SELECT pa.content_hash FROM page_assets pa \
       WHERE pa.status_page_id = status_pages.id AND pa.slot = 'logo') AS logo_hash, \
-     public_show_powered_by, public_style, write_source, created_at, updated_at";
+     public_show_powered_by, public_style, write_source, created_at, updated_at, \
+     plan_hold_at";
 
 fn is_unique_violation(e: &sqlx::Error) -> bool {
     e.as_database_error()
@@ -699,6 +708,7 @@ impl StatusPageStore for InMemoryStatusPageStore {
             write_source: source,
             created_at: now,
             updated_at: now,
+            plan_hold_at: None,
         };
         st.pages.push(page.clone());
         Ok(Some(page))

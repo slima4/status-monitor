@@ -12,12 +12,24 @@ use crate::error::{AppError, Result};
 /// Run an immediate check on `target` via an agent in its region and return the
 /// result. Shared by the REST check-now handler and the MCP tool so both go
 /// through the same region-aware dispatch (the agent persists the result).
+///
+/// The preconditions live here rather than in either caller precisely because
+/// there are two of them: a guard on one front door is not a guard.
 pub(crate) async fn check_now_via_dispatch(
     state: &AppState,
     org: OrgId,
     target: &Target,
 ) -> Result<CheckResult> {
     reject_passive_probe(&target.check)?;
+    // Every scheduled hand-out already skips a held monitor, so the interactive
+    // run has to agree; otherwise this is the one path left that probes what
+    // the plan stopped covering and writes a result for it.
+    if target.plan_hold_at.is_some() {
+        return Err(AppError::forbidden_code(
+            codes::PLAN_HOLD,
+            "this monitor is paused because your plan no longer covers it",
+        ));
+    }
     let region = if matches!(&target.check, CheckSpec::Flow(_)) {
         let assigned = state
             .target_store

@@ -48,6 +48,18 @@ If your plan changes, the floor applies to monitors you already have, not only t
 
 `GET /api/v1/orgs/{id}/usage` returns your plan plus current-versus-limit for every quota, the rate budgets, and the feature flags. The counts are your account's totals across every organization you own, which is what the limits apply to, so they can be larger than what the organization in the URL holds by itself. The same numbers render as progress bars under **Settings → Usage** in the app. The reported limit is the enforced limit by construction: both read the same plan row and the same count query.
 
+## If you move to a smaller plan
+
+Nothing is deleted. Whatever no longer fits is put on hold: monitors stop being
+checked and disappear from your status page, extra status pages stop answering,
+and everything keeps its settings exactly as you left them. Moving back up
+releases them as they were.
+
+We hold the newest first, on the assumption that the ones you set up earliest
+are the ones you rely on. If that is wrong, tell us what to keep and we will
+hold the rest instead. Held items still count toward your limit, so freeing a
+slot means deleting something rather than leaving it parked.
+
 ## Raising a limit
 
 Delete monitors you no longer need, or write to us at <hello@uptimepage.dev> and say what you are running into. Paid plans are not open for self-service yet, so limit changes today are a conversation rather than a checkout.

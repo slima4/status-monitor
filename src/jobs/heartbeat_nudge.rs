@@ -62,6 +62,7 @@ pub async fn nudge_unwired_heartbeats(
            FROM heartbeat_monitors hm \
            JOIN targets t ON t.id = hm.target_id AND t.org_id = hm.org_id \
            JOIN organizations o ON o.id = hm.org_id AND o.deleted_at IS NULL \
+            AND t.plan_hold_at IS NULL \
            LEFT JOIN users mon_owner \
                   ON mon_owner.id = t.owner_user_id AND mon_owner.deleted_at IS NULL \
            LEFT JOIN LATERAL ( \

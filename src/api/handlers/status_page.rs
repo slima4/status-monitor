@@ -272,6 +272,9 @@ pub async fn delete_page(
         return Err(page_not_found());
     }
     state.public_source.invalidate(StatusPageId(id)).await;
+    if let Ok(pool) = state.require_db() {
+        crate::quotas::holds::release_after_delete(pool, &state.quotas, org).await;
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 

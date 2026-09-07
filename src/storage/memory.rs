@@ -618,6 +618,7 @@ impl InMemoryTargetStore {
             write_source: source,
             created_at: now,
             updated_at: now,
+            plan_hold_at: None,
         }
     }
 }

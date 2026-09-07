@@ -23,7 +23,7 @@ use uuid::Uuid;
 use crate::domain::OrgId;
 use crate::error::Result;
 use crate::quotas::effective::RegionCaps;
-use crate::storage::admin::{REGION_CAP_JOIN, REGION_CAP_PREDICATE};
+use crate::storage::admin::{NOT_HELD_PREDICATE, REGION_CAP_JOIN, REGION_CAP_PREDICATE};
 
 /// An open (unresolved) silence row. `notified` = the customer was already told.
 #[derive(Debug, Clone, Copy)]
@@ -93,7 +93,7 @@ impl SilenceStore for PgSilenceStore {
                FROM targets t
                JOIN organizations o ON o.id = t.org_id
                {REGION_CAP_JOIN}
-               WHERE t.enabled AND o.deleted_at IS NULL
+               WHERE t.enabled AND o.deleted_at IS NULL AND {NOT_HELD_PREDICATE}
                  -- Heartbeats run on the control plane; agent liveness is moot.
                  AND t.kind IS DISTINCT FROM 'heartbeat'
                  AND EXISTS (SELECT 1 FROM target_regions tr WHERE tr.target_id = t.id)
@@ -123,7 +123,7 @@ impl SilenceStore for PgSilenceStore {
             "SELECT DISTINCT t.org_id \
              FROM targets t \
              JOIN organizations o ON o.id = t.org_id \
-             WHERE t.enabled AND o.deleted_at IS NULL \
+             WHERE t.enabled AND o.deleted_at IS NULL AND t.plan_hold_at IS NULL \
                AND t.kind IS DISTINCT FROM 'heartbeat' \
                AND EXISTS (SELECT 1 FROM target_regions tr WHERE tr.target_id = t.id)",
         )
@@ -182,7 +182,7 @@ impl SilenceStore for PgSilenceStore {
         let (n,): (i64,) = sqlx::query_as(
             "SELECT count(*) FROM targets t \
              JOIN organizations o ON o.id = t.org_id \
-             WHERE t.enabled AND o.deleted_at IS NULL",
+             WHERE t.enabled AND o.deleted_at IS NULL AND t.plan_hold_at IS NULL",
         )
         .fetch_one(&self.pool)
         .await

@@ -1296,9 +1296,13 @@ pub async fn find_id_by_slug(pool: &PgPool, slug: &str) -> Result<Option<OrgId>>
 pub struct ResolvedPublicPage(pub PageRef);
 
 /// PUBLIC-STATUS PATH ONLY. Resolves a page slug to a [`ResolvedPublicPage`]
-/// for the `*.{base_domain}` surface. Filters `status_pages.enabled = true` and
-/// the owning org not soft-deleted — if either fails the row is invisible (the
-/// handler maps `None` to 404).
+/// for the `*.{base_domain}` surface. Filters `status_pages.enabled = true`, the
+/// page not held by its plan, and the owning org not soft-deleted — if any fails
+/// the row is invisible (the handler maps `None` to 404).
+///
+/// This and [`resolve_default_page_for_lone_org`] are the only two doors onto
+/// the public surface, so gating both is what lets everything downstream —
+/// branding, components, incidents, the logo, the badge — skip the check.
 pub async fn find_public_status_page_by_slug(
     pool: &PgPool,
     slug: &str,
@@ -1310,6 +1314,7 @@ pub async fn find_public_status_page_by_slug(
            JOIN organizations o ON o.id = sp.org_id
            WHERE sp.slug = $1
              AND sp.enabled = true
+             AND sp.plan_hold_at IS NULL
              AND o.deleted_at IS NULL"#,
     )
     .bind(slug)
@@ -1328,14 +1333,16 @@ pub async fn find_public_status_page_by_slug(
 /// page — its oldest page (the one signup created), if enabled. Pinning to the
 /// oldest page keeps `/status` stable as other pages are added or toggled:
 /// disabling the primary page 404s rather than silently switching the public
-/// surface to a younger (e.g. internal) page. 404s (via `None`) if there is no
-/// single live org, the org has no page, or the primary page is disabled.
+/// surface to a younger (e.g. internal) page. A plan hold reads the same way and
+/// for the same reason: the page is unavailable, not replaced. 404s (via `None`)
+/// if there is no single live org, the org has no page, or the primary page is
+/// disabled or held.
 pub async fn resolve_default_page_for_lone_org(pool: &PgPool) -> Result<Option<PageRef>> {
     let Some(org) = find_lone_active_org(pool).await? else {
         return Ok(None);
     };
-    let row: Option<(Uuid, bool)> = sqlx::query_as(
-        r#"SELECT id, enabled FROM status_pages
+    let row: Option<(Uuid, bool, Option<DateTime<Utc>>)> = sqlx::query_as(
+        r#"SELECT id, enabled, plan_hold_at FROM status_pages
            WHERE org_id = $1
            ORDER BY created_at ASC, id ASC
            LIMIT 1"#,
@@ -1345,8 +1352,8 @@ pub async fn resolve_default_page_for_lone_org(pool: &PgPool) -> Result<Option<P
     .await
     .context("resolve_default_page_for_lone_org")?;
     Ok(row
-        .filter(|(_, enabled)| *enabled)
-        .map(|(page, _)| PageRef {
+        .filter(|(_, enabled, held)| *enabled && held.is_none())
+        .map(|(page, _, _)| PageRef {
             page: StatusPageId(page),
             org,
         }))

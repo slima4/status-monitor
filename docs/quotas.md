@@ -275,6 +275,41 @@ row (keyed by account, `max_orgs` included) naming the cap fields you want
 raised. Edit a shipped `plans` row only if you are prepared to reapply the
 change: the catalog owns those rows and an upgrade can rewrite them.
 
+## When a plan no longer covers what an account has
+
+A plan can move under an account that is already using more than it sells. The
+excess is never deleted. What does not fit is **held**: the row keeps every
+setting it has and stops being served, and the plan growing back releases it
+untouched.
+
+| Resource | Held effect |
+|---|---|
+| Monitors | Not probed, no alerting, drops off public pages and share links |
+| Status pages | 404 publicly, no subscriber mail |
+
+`enabled` is the customer's own switch and is never written, so a monitor that
+was paused before the hold comes back paused. Held rows still count against the
+cap: the slot is what they are waiting for, and excluding them would let an
+account create fresh monitors on top of the ones it has parked.
+
+By default the oldest rows keep the slots and the newest are held, on the
+grounds that the oldest are what the account was built around. `PUT
+/api/v1/account/holds` replaces that guess with a list of ids to keep;
+`GET` on the same path lists what is currently held. Every hold and release
+writes an org audit row (`target.plan_hold` / `target.plan_release`, and the
+`status_page.` pair).
+
+Reconciliation runs when a monitor or page is deleted, when the customer picks,
+and once a day for every account that is over a cap or holding something. The
+daily pass is what notices a plan changed by an operator `UPDATE`, which
+notifies nothing on its own.
+
+On-call and escalation are gated separately and at write time only, like text
+message alerts: a plan without `on_call_enabled` refuses a new policy, schedule,
+override or contact wiring with `403 ON_CALL_DISABLED`, while everything already
+built keeps paging and stays editable. Clearing a binding is always allowed. A
+self-hosted install is exempt, since the operator owns the `plans` row.
+
 Every numeric quota / rate / interval is validated at config load —
 `< 1` is rejected with the offending field named, never a panic in
 router or limiter construction.

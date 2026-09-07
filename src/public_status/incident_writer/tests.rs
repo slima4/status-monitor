@@ -770,6 +770,7 @@ fn make_public_target(name: &str) -> Target {
         write_source: crate::domain::WriteSource::Ui,
         created_at: Utc::now(),
         updated_at: Utc::now(),
+        plan_hold_at: None,
     }
 }
 

@@ -9,7 +9,8 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::Result;
-use crate::storage::status_pages::{PAGE_CUSTOM_DOMAIN_LIVE, PAGE_PLAN_JOIN};
+use crate::storage::admin::not_held_sql;
+use crate::storage::status_pages::{PAGE_CUSTOM_DOMAIN_LIVE, PAGE_NOT_HELD, PAGE_PLAN_JOIN};
 use crate::storage::subscribers::{
     CLAIM_ORPHAN_MINUTES, FANOUT_LOOKBACK_HOURS, FANOUT_MAX_ATTEMPTS,
 };
@@ -62,6 +63,8 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
                   ON mwc.target_id = c.target_id AND mwc.org_id = c.org_id
              JOIN maintenance_windows mw ON mw.id = mwc.maintenance_id AND mw.org_id = mwc.org_id
              WHERE s.channel IN ('email', 'webhook') AND s.verified_at IS NOT NULL
+               AND {PAGE_NOT_HELD}
+               AND {COMPONENT_NOT_HELD}
          ) cand
          WHERE event_at >= verified_at
            AND event_at >= now() - make_interval(hours => $2)
@@ -75,7 +78,8 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
                    OR (n.status = 'queued' AND n.created_at > now() - make_interval(mins => $3))
                    OR (n.status = 'failed' AND n.attempts >= $4)))
          ORDER BY starts_at
-         LIMIT $1"
+         LIMIT $1",
+        COMPONENT_NOT_HELD = not_held_sql("c.target_id"),
     );
     let rows = sqlx::query_as::<_, PendingMaintenance>(&sql)
         .bind(limit)

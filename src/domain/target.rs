@@ -114,6 +114,12 @@ pub struct Target {
     /// Where this target was last changed from (UI, API, or Terraform).
     #[serde(default)]
     pub write_source: WriteSource,
+    /// Set while the plan no longer covers this monitor. The row is kept whole
+    /// and stops being probed; the plan growing back releases it untouched.
+    /// Independent of `enabled`, which stays the customer's own switch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = true)]
+    pub plan_hold_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

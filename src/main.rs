@@ -712,6 +712,20 @@ async fn main() -> Result<()> {
         uptimepage::storage::subscriber_deliveries::purge_old,
     ));
 
+    // Daily: a plan moves by an operator UPDATE today, which notifies nothing,
+    // so this is what turns a downgrade into holds and an upgrade into their
+    // release. The candidate query skips every account that already fits.
+    let plan_holds_handle: JoinHandle<()> = {
+        let quotas = Arc::clone(&quotas);
+        tokio::spawn(run_purge_loop(
+            pg_pool_for_stores.clone(),
+            root.clone(),
+            Duration::from_secs(24 * 60 * 60),
+            "plan_holds",
+            async move |pool: &sqlx::PgPool| uptimepage::quotas::holds::sweep(pool, &quotas).await,
+        ))
+    };
+
     let heartbeat_prev_token_cleanup_handle: JoinHandle<()> = tokio::spawn(run_purge_loop(
         pg_pool_for_stores.clone(),
         root.clone(),
@@ -961,6 +975,7 @@ async fn main() -> Result<()> {
             subscriber_delivery_cleanup_handle,
             heartbeat_prev_token_cleanup_handle,
             heartbeat_nudge_handle,
+            plan_holds_handle,
         );
         if let Some(h) = magic_link_cleanup_handle {
             let _ = h.await;

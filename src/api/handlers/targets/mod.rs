@@ -789,6 +789,9 @@ pub async fn delete(
             state.public_source.invalidate(page).await;
         }
         note_if_emptied(&state, org, 1).await;
+        if let Ok(pool) = state.require_db() {
+            crate::quotas::holds::release_after_delete(pool, &state.quotas, org).await;
+        }
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::not_found(
@@ -1035,6 +1038,9 @@ pub async fn bulk_action(
                 state.public_source.invalidate(page).await;
             }
             note_if_emptied(&state, org, succeeded.len()).await;
+            if let Ok(pool) = state.require_db() {
+                crate::quotas::holds::release_after_delete(pool, &state.quotas, org).await;
+            }
             succeeded
         }
         BulkAction::TagAdd { tags } => {

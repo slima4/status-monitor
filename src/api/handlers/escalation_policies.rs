@@ -21,6 +21,21 @@ use crate::domain::{
 use crate::error::{AppError, Result};
 use crate::web::{Authorized, OnCallRead, OnCallWrite, OwnerAuthorized};
 
+/// Pointing something at a policy is new paging coverage and needs the plan to
+/// sell it; clearing a binding is always allowed, so an org that has lost the
+/// feature can still unwire what it has.
+async fn gate_binding(
+    state: &AppState,
+    org: crate::domain::OrgId,
+    b: &PolicyBinding,
+) -> Result<()> {
+    if b.policy_id.is_none() {
+        return Ok(());
+    }
+    let plan = state.quotas.limit_for_org(org).await?;
+    crate::api::handlers::on_call::gate_on_call(state, &plan)
+}
+
 const MAX_NAME: usize = 100;
 const MAX_DESCRIPTION: usize = 2000;
 const MAX_STEPS: usize = 20;
@@ -136,18 +151,14 @@ pub async fn create(
     Json(new): Json<NewEscalationPolicy>,
 ) -> Result<(StatusCode, Json<EscalationPolicy>)> {
     validate(&new)?;
+    let plan = state.quotas.limit_for_org(org).await?;
+    crate::api::handlers::on_call::gate_on_call(&state, &plan)?;
     // Friendly pre-check; the store INSERT enforces the same cap atomically.
     state
         .quotas
         .check_can_create_escalation_policy(org, None)
         .await?;
-    let limit = i64::from(
-        state
-            .quotas
-            .limit_for_org(org)
-            .await?
-            .max_escalation_policies,
-    );
+    let limit = i64::from(plan.max_escalation_policies);
     let policy = state
         .escalation_policy_store
         .create(org, new, limit)
@@ -251,6 +262,7 @@ pub async fn set_org_default(
     OwnerAuthorized(org, _): OwnerAuthorized<OnCallWrite>,
     Json(b): Json<PolicyBinding>,
 ) -> Result<Json<PolicyBinding>> {
+    gate_binding(&state, org, &b).await?;
     validate_binding(&state, org, &b).await?;
     state
         .escalation_policy_store
@@ -294,6 +306,7 @@ pub async fn set_target_policy(
     Path(id): Path<Uuid>,
     Json(b): Json<PolicyBinding>,
 ) -> Result<Json<PolicyBinding>> {
+    gate_binding(&state, org, &b).await?;
     validate_binding(&state, org, &b).await?;
     if !state
         .escalation_policy_store

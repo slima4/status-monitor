@@ -153,6 +153,8 @@ use crate::storage::UptimeStats;
         handlers::orgs::update_org_member_role,
         handlers::orgs::switch_active_org,
         handlers::usage::get_org_usage,
+        handlers::holds::list_holds,
+        handlers::holds::set_holds,
         handlers::usage::get_me_usage,
         handlers::status_page::list_pages,
         handlers::status_page::create_page,

@@ -107,7 +107,9 @@ impl IncidentStore for PgIncidentStore {
         // to monitor origin so an operator's open declaration cannot shadow a
         // real detection.
         // Visibility is derived here, not by the caller: an incident is public
-        // only while its monitor is a component of an enabled status page.
+        // only while its monitor is a component of an enabled status page that
+        // the plan still covers. A held page shows nobody anything, so an
+        // incident opened behind one starts internal and is not fanned out.
         let row: Option<(Uuid,)> = sqlx::query_as(
             r#"INSERT INTO incidents (org_id, target_id, started_at, status_at_start, check_count, error_sample, region, regions_down, regions_up, origin, visibility)
                SELECT $6, $1, $2, $3, $4, $5, $7, $8, $9, 'monitor',
@@ -115,6 +117,7 @@ impl IncidentStore for PgIncidentStore {
                           SELECT 1 FROM status_page_components spc
                           JOIN status_pages sp ON sp.id = spc.status_page_id
                           WHERE spc.target_id = $1 AND spc.org_id = $6 AND sp.enabled = true
+                            AND sp.plan_hold_at IS NULL
                       ) THEN 'public' ELSE 'internal' END
                ON CONFLICT (org_id, target_id) WHERE ended_at IS NULL AND origin = 'monitor'
                DO NOTHING

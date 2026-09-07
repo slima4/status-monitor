@@ -308,6 +308,7 @@ impl OrgAggregator {
                      AND ms.revoked_at IS NULL
                      AND (ms.expires_at IS NULL OR ms.expires_at > now())
                WHERE spc.status_page_id = $1 AND spc.org_id = $2
+                 AND t.plan_hold_at IS NULL
                ORDER BY spc.public_group NULLS LAST, spc.sort_order, t.name"#,
         )
         .bind(page.0)

@@ -1376,6 +1376,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
              WHERE i.state = 'triggered' AND i.ended_at IS NULL \
                  AND i.next_escalation_at IS NULL \
                  AND t.renotify_interval_secs > 0 \
+                 AND {not_held} \
                  AND NOT {window} \
                  AND ( \
                      SELECT max(n.created_at) FROM incident_notifications n \
@@ -1392,6 +1393,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                        AND n.channel_id IS NOT NULL \
                  ) ASC \
              LIMIT $2",
+            not_held = crate::storage::admin::NOT_HELD_PREDICATE,
             window = crate::storage::suppressing_window_sql("t.id", "t.org_id"),
         );
         let rows: Vec<Row> = sqlx::query_as(&sql)
@@ -1464,7 +1466,9 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                      AND n.created_at > held.held_at \
                ) \
                AND NOT {window} \
+               AND {not_held} \
              ORDER BY held.held_at ASC LIMIT $1",
+            not_held = crate::storage::admin::not_held_sql("i.target_id"),
             window = crate::storage::suppressing_window_sql("i.target_id", "i.org_id"),
         );
         let rows: Vec<Row> = sqlx::query_as(&sql)

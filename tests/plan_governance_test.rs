@@ -865,3 +865,196 @@ fn plan_fixture() -> uptimepage::domain::quota::Plan {
         updated_at: now,
     }
 }
+
+fn escalation_policy_request() -> Request<Body> {
+    Request::builder()
+        .method("POST")
+        .uri("/api/v1/escalation-policies")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            // No steps: the payload has to be valid for the plan gate to be
+            // what answers, and an empty ladder is a legal one.
+            serde_json::json!({ "name": "ladder", "steps": [] }).to_string(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_plan_without_on_call_refuses_a_new_escalation_policy() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    // The test app's org lands on the seeded default, which 060 left without
+    // on-call; the gate must answer before the cap does, so the customer is
+    // told the tier is the reason rather than being shown a limit of zero.
+    let (app, _org) = build_test_app_with_pg_store(pool, |cfg| cfg.marketing.enabled = true).await;
+
+    let resp = app
+        .oneshot(escalation_policy_request())
+        .await
+        .expect("create");
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp).await;
+    assert_eq!(body["error"]["code"], "ON_CALL_DISABLED");
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_plan_without_on_call_refuses_a_new_schedule() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool, |cfg| cfg.marketing.enabled = true).await;
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/on-call/schedules")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "name": "primary",
+                        "timezone": "UTC",
+                        "layers": []
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("create");
+
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    let body = body_json(resp).await;
+    assert_eq!(body["error"]["code"], "ON_CALL_DISABLED");
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn clearing_an_escalation_binding_is_allowed_without_the_feature() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool, |cfg| cfg.marketing.enabled = true).await;
+
+    // Unwiring is never new coverage, so an org that has lost the tier can
+    // still take itself off a ladder it is already on.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/escalation-policies/default")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({ "policy_id": null }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .expect("clear");
+
+    assert_ne!(resp.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_self_hosted_install_may_build_an_on_call_ladder() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (app, _org) = build_test_app_with_pg_store(pool, |cfg| cfg.marketing.enabled = false).await;
+
+    let resp = app
+        .oneshot(escalation_policy_request())
+        .await
+        .expect("create");
+
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "the plans row is the operator's own on a self-hosted install"
+    );
+}
+
+async fn seed_contact(pool: &PgPool, org: OrgId, user: UserId, name: &str) -> Uuid {
+    let (channel,): (Uuid,) = sqlx::query_as(
+        "INSERT INTO notification_channels (org_id, name, kind, config, verified_at) \
+         VALUES ($1, $2, 'sms', $3, now()) RETURNING id",
+    )
+    .bind(org.0)
+    .bind(unique_slug(name))
+    .bind(sms_config("+15551234567", "tok"))
+    .fetch_one(pool)
+    .await
+    .expect("channel");
+    sqlx::query(
+        "INSERT INTO user_contact_channels (org_id, user_id, channel_id) VALUES ($1, $2, $3)",
+    )
+    .bind(org.0)
+    .bind(user.0)
+    .bind(channel)
+    .execute(pool)
+    .await
+    .expect("contact");
+    channel
+}
+
+fn put_contacts(ids: &[Uuid]) -> Request<Body> {
+    Request::builder()
+        .method("PUT")
+        .uri("/api/v1/on-call/my-contacts")
+        .header("content-type", "application/json")
+        .body(Body::from(
+            serde_json::json!({ "channel_ids": ids }).to_string(),
+        ))
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn dropping_one_of_two_contacts_works_without_the_on_call_tier() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org, _target, user) = org_on_plan(&pool, "free", 60).await;
+    sqlx::query("INSERT INTO memberships (user_id, org_id, role) VALUES ($1, $2, 'owner')")
+        .bind(user.0)
+        .bind(org.0)
+        .execute(&pool)
+        .await
+        .expect("membership");
+    let a = seed_contact(&pool, org, user, "ca").await;
+    let b = seed_contact(&pool, org, user, "cb").await;
+
+    let app = common::with_session(
+        common::build_saas_router_with_pg_cfg(pool.clone(), |cfg| cfg.marketing.enabled = true)
+            .await,
+        user,
+        Some(org),
+        None,
+    );
+
+    // The endpoint replaces the whole set, so a removal arrives as a shorter
+    // non-empty list. Gating on "not empty" would refuse exactly the case the
+    // tier is not allowed to block: taking someone off the page rota.
+    let resp = app
+        .clone()
+        .oneshot(put_contacts(&[a]))
+        .await
+        .expect("drop one");
+    assert_ne!(
+        resp.status(),
+        StatusCode::FORBIDDEN,
+        "removing a contact is not new paging coverage"
+    );
+
+    // Adding one back is, and stays refused.
+    let resp = app.oneshot(put_contacts(&[a, b])).await.expect("add back");
+    assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    assert_eq!(body_json(resp).await["error"]["code"], "ON_CALL_DISABLED");
+
+    cleanup(&pool, org, user).await;
+}

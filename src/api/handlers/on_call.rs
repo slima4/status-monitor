@@ -113,11 +113,13 @@ pub async fn create(
     Json(new): Json<NewOnCallSchedule>,
 ) -> Result<(StatusCode, Json<OnCallScheduleDetail>)> {
     validate(&new)?;
+    let plan = state.quotas.limit_for_org(org).await?;
+    gate_on_call(&state, &plan)?;
     state
         .quotas
         .check_can_create_on_call_schedule(org, None)
         .await?;
-    let limit = i64::from(state.quotas.limit_for_org(org).await?.max_on_call_schedules);
+    let limit = i64::from(plan.max_on_call_schedules);
     let detail = state.on_call_store.create(org, new, limit).await?;
     Ok((StatusCode::CREATED, Json(detail)))
 }
@@ -194,6 +196,8 @@ pub async fn add_override(
     Json(new): Json<NewOnCallOverride>,
 ) -> Result<(StatusCode, Json<OnCallOverride>)> {
     validate_override(&new)?;
+    let plan = state.quotas.limit_for_org(org).await?;
+    gate_on_call(&state, &plan)?;
     state
         .on_call_store
         .add_override(org, id, Some(actor), new)
@@ -304,11 +308,45 @@ pub async fn set_my_contacts(
     CurrentUser(user): CurrentUser,
     Json(body): Json<ContactChannels>,
 ) -> Result<Json<ContactChannels>> {
+    // These rows are what a rung resolves a person to, so wiring up a new one
+    // is new paging coverage even though no schedule is touched. Taking one
+    // away is not, and must stay open: an org that has lost the tier still has
+    // to be able to stop paging someone who has left.
+    //
+    // This is a whole-set replace, so the question is which channels the set
+    // *gains*, not whether it is empty. Testing emptiness would refuse
+    // [A, B] -> [A], which is a removal and the very case the tier must not
+    // block. Same shape as the text-message gate's `already_sms`.
+    let current = state.contact_store.for_user(org, user).await?;
+    if body.channel_ids.iter().any(|id| !current.contains(id)) {
+        let plan = state.quotas.limit_for_org(org).await?;
+        gate_on_call(&state, &plan)?;
+    }
     state
         .contact_store
         .replace_for_user(org, user, body.channel_ids.clone())
         .await?;
     Ok(Json(body))
+}
+
+/// Refuses new on-call coverage on a plan that does not sell it.
+///
+/// Write-time only, following the text-message gate: an org that already has
+/// policies or schedules keeps them working and keeps them editable, so a
+/// rota can still be corrected and a departing engineer removed. Silencing
+/// live paging on a plan change would be a far worse failure than carrying a
+/// feature the account has stopped paying for.
+///
+/// Self-host is exempt for the same reason it is exempt from the SMS gate: the
+/// operator owns the `plans` row, so gating them against it means nothing.
+pub(crate) fn gate_on_call(state: &AppState, plan: &crate::domain::Plan) -> Result<()> {
+    if state.cfg.marketing.enabled && !plan.on_call_enabled {
+        return Err(AppError::forbidden_code(
+            crate::api::error::codes::ON_CALL_DISABLED,
+            "on-call scheduling and escalation are not available on your plan",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

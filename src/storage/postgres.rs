@@ -198,6 +198,7 @@ pub(crate) struct TargetRow {
     pub(crate) write_source: String,
     pub(crate) created_at: DateTime<Utc>,
     pub(crate) updated_at: DateTime<Utc>,
+    pub(crate) plan_hold_at: Option<DateTime<Utc>>,
 }
 
 /// Cap on named monitors in one audit row's metadata: past this the count
@@ -264,6 +265,7 @@ pub(crate) fn decode_target_row(row: TargetRow, cipher: Option<&Cipher>) -> Resu
         write_source: WriteSource::from_db(&row.write_source),
         created_at: row.created_at,
         updated_at: row.updated_at,
+        plan_hold_at: row.plan_hold_at,
     })
 }
 
@@ -294,7 +296,7 @@ impl TargetStore for PostgresTargetStore {
                       alert_confirmations, notify_recovery, renotify_interval_secs,
                       group_name, owner_user_id,
                       write_source,
-                      created_at, updated_at
+                      created_at, updated_at, plan_hold_at
                FROM targets
                WHERE org_id = $1
                  AND ($2::bool IS NULL OR enabled = $2)
@@ -432,7 +434,7 @@ impl TargetStore for PostgresTargetStore {
                       alert_confirmations, notify_recovery, renotify_interval_secs,
                       group_name, owner_user_id,
                       write_source,
-                      created_at, updated_at
+                      created_at, updated_at, plan_hold_at
                FROM targets WHERE id = $1 AND org_id = $2"#,
         )
         .bind(id)
@@ -510,7 +512,7 @@ impl TargetStore for PostgresTargetStore {
                       alert_confirmations, notify_recovery, renotify_interval_secs,
                       group_name, owner_user_id,
                       write_source,
-                      created_at, updated_at"#,
+                      created_at, updated_at, plan_hold_at"#,
         )
         .bind(org.0)
         .bind(&new.name)
@@ -620,7 +622,7 @@ impl TargetStore for PostgresTargetStore {
                       alert_confirmations, notify_recovery, renotify_interval_secs,
                       group_name, owner_user_id,
                       write_source,
-                      created_at, updated_at"#,
+                      created_at, updated_at, plan_hold_at"#,
         );
         let query = sqlx::query_as::<_, TargetRow>(&sql)
             .bind(id)
@@ -759,7 +761,7 @@ impl TargetStore for PostgresTargetStore {
                       alert_confirmations, notify_recovery, renotify_interval_secs,
                       group_name, owner_user_id,
                       write_source,
-                      created_at, updated_at"#;
+                      created_at, updated_at, plan_hold_at"#;
 
         let len = items.len();
         let mut names: Vec<String> = Vec::with_capacity(len);
@@ -895,7 +897,7 @@ impl TargetStore for PostgresTargetStore {
                       alert_confirmations, notify_recovery, renotify_interval_secs,
                       group_name, owner_user_id,
                       write_source,
-                      created_at, updated_at
+                      created_at, updated_at, plan_hold_at
                FROM targets WHERE org_id = $1 AND updated_at > $2"#,
         )
         .bind(org.0)

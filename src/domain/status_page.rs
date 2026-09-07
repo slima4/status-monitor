@@ -51,6 +51,12 @@ pub struct StatusPage {
     pub write_source: WriteSource,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Set while the plan no longer covers this page. It 404s publicly and
+    /// sends no subscriber mail, but stays editable in the console and comes
+    /// back exactly as it was, `enabled` included.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = true)]
+    pub plan_hold_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]

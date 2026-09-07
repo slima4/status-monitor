@@ -1155,6 +1155,7 @@ mod tests {
             write_source: WriteSource::Ui,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            plan_hold_at: None,
         }
     }
 

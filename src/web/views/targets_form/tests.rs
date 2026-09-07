@@ -263,6 +263,7 @@ fn headers_render_as_row_inputs() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Edit).unwrap();
     assert_eq!(form.http.headers.len(), 2);
@@ -520,6 +521,7 @@ fn edit_form_renders_target_with_sealed_auth() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Edit).unwrap();
     assert_eq!(form.submit_method, "PATCH");
@@ -556,6 +558,7 @@ fn edit_form_maps_tcp_target_fields() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Edit).unwrap();
     assert_eq!(form.check_type, "tcp");
@@ -596,6 +599,7 @@ fn edit_form_maps_tls_cert_target_fields() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Edit).unwrap();
     assert_eq!(form.check_type, "tls_cert");
@@ -633,6 +637,7 @@ fn edit_form_maps_domain_expiry_target_fields() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Edit).unwrap();
     assert_eq!(form.check_type, "domain_expiry");
@@ -667,6 +672,7 @@ fn edit_form_maps_heartbeat_target_fields() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Edit).unwrap();
     assert_eq!(form.check_type, "heartbeat");
@@ -715,6 +721,7 @@ fn edit_form_maps_dns_target_fields() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Edit).unwrap();
     assert_eq!(form.check_type, "dns");
@@ -812,6 +819,7 @@ fn copy_form_seeds_create_from_existing() {
         write_source: crate::domain::WriteSource::Ui,
         created_at: chrono::Utc::now(),
         updated_at: chrono::Utc::now(),
+        plan_hold_at: None,
     };
     let form = form_from_target(t, FormKind::Copy).unwrap();
     assert_eq!(form.mode, "create");

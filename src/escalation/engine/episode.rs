@@ -259,7 +259,15 @@ impl Worker {
             return Ok(());
         };
         match reason {
-            _ if !target.enabled && reason != NotificationReason::Resolved => Ok(()),
+            // A held monitor rides the pause branch: the writer already skips
+            // it, so this only catches an episode that was open when the hold
+            // landed. Resolution still goes out, or an outage that ended would
+            // stay on the customer's timeline forever.
+            _ if (!target.enabled || target.plan_hold_at.is_some())
+                && reason != NotificationReason::Resolved =>
+            {
+                Ok(())
+            }
             NotificationReason::Opened | NotificationReason::Reopened => {
                 self.open_episode(org, &incident, &target, reason, damper)
                     .await
@@ -628,7 +636,8 @@ impl Worker {
         let Some(target_id) = incident.target_id else {
             return false;
         };
-        matches!(self.targets.get(ack.org, target_id).await, Ok(Some(t)) if !t.enabled)
+        matches!(self.targets.get(ack.org, target_id).await,
+            Ok(Some(t)) if !t.enabled || t.plan_hold_at.is_some())
     }
 
     /// Poll outstanding emergency receipts: record acknowledgement on the

@@ -202,7 +202,7 @@ type RegionPullEtagRow = (
 /// Single source for the cross-tenant target column list. Both the
 /// scheduler-snapshot and incident-writer-keyset queries return the same
 /// `targets` shape that [`decode_target_row`] consumes.
-const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.region_policy, t.alert_confirmations, t.notify_recovery, t.renotify_interval_secs, t.group_name, t.owner_user_id, t.write_source, t.created_at, t.updated_at";
+const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.region_policy, t.alert_confirmations, t.notify_recovery, t.renotify_interval_secs, t.group_name, t.owner_user_id, t.write_source, t.created_at, t.updated_at, t.plan_hold_at";
 
 /// The per-org region ceiling, joined in as `cap`. `$2` carries the org ids and
 /// `$3` their limits; an org missing from the arrays has no ceiling. Written
@@ -231,6 +231,24 @@ pub(crate) const REGION_CAP_PREDICATE: &str = "(cap.max_regions IS NULL \
        AND (rg2.default_selected > rg.default_selected \
             OR (rg2.default_selected = rg.default_selected \
                 AND tr2.region <= tr.region))))";
+
+/// Whether the plan still covers this monitor. An account over its cap keeps
+/// every row it has; the excess carries a `plan_hold_at` and stops being served
+/// until the plan grows back. Written against a `targets` aliased `t`; use
+/// [`not_held_sql`] where the alias differs or the query reaches `targets`
+/// through a target id.
+///
+/// Shared by every hand-out for the same reason [`REGION_CAP_PREDICATE`] is: a
+/// hold has to reach the pull, the etag that validates it, the incident writer
+/// and silence detection together, or an agent keeps probing a monitor the
+/// account no longer holds and the no-data alarm fires for the one it does.
+pub(crate) const NOT_HELD_PREDICATE: &str = "t.plan_hold_at IS NULL";
+
+/// [`NOT_HELD_PREDICATE`] for a query whose `targets` is aliased something
+/// other than `t`, or which names a target only by id.
+pub(crate) fn not_held_sql(target_col: &str) -> String {
+    format!("(SELECT th.plan_hold_at FROM targets th WHERE th.id = {target_col}) IS NULL")
+}
 
 /// Per-row lenient decode: skip (logged + counted) any row whose `check_spec`,
 /// `alerts`, or credential decrypt won't parse, rather than failing the whole
@@ -324,7 +342,7 @@ impl AdminRepo {
         let sql = format!(
             "SELECT {TARGET_COLUMNS} \
              FROM targets t JOIN organizations o ON o.id = t.org_id \
-             WHERE t.enabled = true AND o.deleted_at IS NULL"
+             WHERE t.enabled = true AND o.deleted_at IS NULL AND {NOT_HELD_PREDICATE}"
         );
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
             .fetch_all(&self.pool)
@@ -380,7 +398,8 @@ impl AdminRepo {
              FROM targets t \
              JOIN organizations o ON o.id = t.org_id \
              JOIN heartbeat_monitors hm ON hm.target_id = t.id \
-             WHERE t.enabled = true AND o.deleted_at IS NULL AND t.kind = 'heartbeat' \
+             WHERE t.enabled = true AND o.deleted_at IS NULL AND {NOT_HELD_PREDICATE} \
+               AND t.kind = 'heartbeat' \
                AND hm.first_ping_at IS NOT NULL"
         );
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
@@ -479,7 +498,8 @@ impl AdminRepo {
             "SELECT DISTINCT t.org_id FROM target_regions tr \
              JOIN targets t ON t.id = tr.target_id \
              JOIN organizations o ON o.id = t.org_id \
-             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL",
+             WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
+               AND t.plan_hold_at IS NULL",
         )
         .bind(region)
         .fetch_all(&self.pool)
@@ -520,13 +540,15 @@ impl AdminRepo {
                          WHERE v.org_id IN ( \
                             SELECT DISTINCT t2.org_id FROM target_regions tr2 \
                             JOIN targets t2 ON t2.id = tr2.target_id \
-                            WHERE tr2.region = $1 AND t2.enabled = true)) \
+                            WHERE tr2.region = $1 AND t2.enabled = true \
+                              AND t2.plan_hold_at IS NULL)) \
                  FROM target_regions tr \
                  JOIN targets t ON t.id = tr.target_id \
                  JOIN organizations o ON o.id = t.org_id \
                  JOIN regions rg ON rg.id = tr.region \
                  {REGION_CAP_JOIN} \
                  WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
+                   AND {NOT_HELD_PREDICATE} \
                    AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat' \
                    AND {REGION_CAP_PREDICATE}"
         );
@@ -573,6 +595,7 @@ impl AdminRepo {
              JOIN regions rg ON rg.id = tr.region \
              {REGION_CAP_JOIN} \
              WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1 \
+               AND {NOT_HELD_PREDICATE} \
                AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat' \
                AND ($4 OR t.kind IS DISTINCT FROM 'flow') \
                AND {REGION_CAP_PREDICATE}"
@@ -665,6 +688,13 @@ impl AdminRepo {
     /// Map of enabled `target_id -> owning org` for one region. Ingest uses it
     /// both to reject results for targets outside the agent's region and to
     /// stamp the authoritative `org_id` (never trusting the agent-supplied one).
+    ///
+    /// Deliberately blind to the region cap and to a plan hold, matching the
+    /// region cap's own reasoning: this is a scope check against cross-region
+    /// spoofing, not a quota. Between a hold landing and the agent's next pull
+    /// the agent still holds the target and probes it; discarding those results
+    /// here would buy nothing (the writer and the silence sweep already skip a
+    /// held monitor) and would turn a normal pull delay into an error stream.
     pub async fn assigned_targets_for_region(
         &self,
         region: &str,
@@ -700,7 +730,7 @@ impl AdminRepo {
         let base = format!(
             "SELECT {TARGET_COLUMNS} \
              FROM targets t JOIN organizations o ON o.id = t.org_id \
-             WHERE t.enabled = true AND o.deleted_at IS NULL"
+             WHERE t.enabled = true AND o.deleted_at IS NULL AND {NOT_HELD_PREDICATE}"
         );
         // Advance by the raw last row, not the last *decoded* one: if an entire
         // page decodes to nothing (a clustered run of bad rows), skip past it

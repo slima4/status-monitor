@@ -353,6 +353,10 @@ pub fn build_router(state: AppState, shutdown: CancellationToken) -> Router {
             axum::routing::delete(handlers::status_page::remove_subscriber),
         )
         .route("/orgs/{id}/usage", get(handlers::usage::get_org_usage))
+        .route(
+            "/account/holds",
+            get(handlers::holds::list_holds).put(handlers::holds::set_holds),
+        )
         .route("/orgs/{id}/members", get(handlers::orgs::list_org_members))
         .route(
             "/orgs/{id}/members/{user_id}",
