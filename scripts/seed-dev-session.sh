@@ -43,7 +43,9 @@ WITH u AS (
   RETURNING id
 ), a AS (
   -- Quotas hang off the account, not the org: open the dev user's the way
-  -- signup does, on `founding` because that is what a real signup still gets.
+  -- signup does, on 'founding' because that is what a real signup still gets.
+  -- Note: this heredoc is unquoted so \${EMAIL} expands, which means backticks
+  -- here would run as command substitution. Keep SQL comments backtick-free.
   INSERT INTO accounts (owner_user_id, plan_id)
   SELECT u.id, 'founding' FROM u
   ON CONFLICT (owner_user_id) WHERE owner_user_id IS NOT NULL

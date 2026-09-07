@@ -225,6 +225,26 @@ run-passkeys:
     RUST_LOG="${RUST_LOG:-uptimepage=debug,sqlx=warn,hyper=warn,tower_http=info,info}" \
         cargo run --bin uptimepage
 
+# Creates everything the plan allows through the API, then inserts the overflow
+# directly — a create that would put an account over its cap is refused by
+# design, so the over-cap state has to be made the way a shrinking plan leaves
+# it. The account's plan is never touched, because it is cached for 300s and any
+# plan juggling races that cache.
+#
+# Needs `just dev-login` first. Nothing is ever deleted by a hold.
+#
+# Put the dev account over its plan so the hold surfaces have something to show.
+seed-holds:
+    bash scripts/seed-dev-holds.sh
+
+# Re-run just the reconcile, for when the plan cache had not turned over yet.
+seed-holds-reconcile:
+    RECONCILE_ONLY=1 bash scripts/seed-dev-holds.sh
+
+# Delete what `seed-holds` made, then seed it again from scratch.
+seed-holds-reset:
+    RESET=1 bash scripts/seed-dev-holds.sh
+
 # Give the dev operator three linked sign-in methods and a credential trail,
 # so /settings/account has something to show. Needs `just dev-login` first.
 dev-sign-in-methods:
