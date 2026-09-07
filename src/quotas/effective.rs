@@ -9,7 +9,9 @@ use async_trait::async_trait;
 use crate::domain::{OrgId, Plan, Target, min_interval_secs_for_kind};
 use crate::error::Result;
 use crate::quotas::QuotaService;
-use crate::storage::admin::{EnabledTargetSource, EnabledTargetStream, PublicTargetCursor};
+use crate::storage::admin::{AdminRepo, EnabledTargetStream, PublicTargetCursor};
+
+pub type PlanMap = HashMap<OrgId, Option<Arc<Plan>>>;
 
 /// The same floor the write path enforces: a row stored below its kind's
 /// minimum predates that minimum, and handing it out unclamped would probe at
@@ -26,8 +28,8 @@ pub fn governed_interval(requested: Duration, plan: &Plan, kind: &str) -> Durati
 pub async fn resolve_plans(
     quotas: &QuotaService,
     orgs: impl IntoIterator<Item = OrgId>,
-) -> HashMap<OrgId, Option<Arc<Plan>>> {
-    let mut plans: HashMap<OrgId, Option<Arc<Plan>>> = HashMap::new();
+) -> PlanMap {
+    let mut plans = PlanMap::new();
     for org in orgs {
         if plans.contains_key(&org) {
             continue;
@@ -56,7 +58,7 @@ pub async fn govern(quotas: &QuotaService, targets: &mut [(OrgId, Target)]) {
 
 /// For a caller that already resolved the plans, so the same resolution can
 /// also decide whether the work needed sending at all.
-pub fn govern_with(plans: &HashMap<OrgId, Option<Arc<Plan>>>, targets: &mut [(OrgId, Target)]) {
+pub fn govern_with(plans: &PlanMap, targets: &mut [(OrgId, Target)]) {
     for (org, target) in targets.iter_mut() {
         // A heartbeat's interval is the schedule its sender promised, not a
         // probe rate we pay for; slowing it only delays the missed-ping alarm.
@@ -69,13 +71,66 @@ pub fn govern_with(plans: &HashMap<OrgId, Option<Arc<Plan>>>, targets: &mut [(Or
     }
 }
 
-/// Stable over the inputs that move an interval, so a tier change invalidates a
-/// cached pull that no target row has touched.
-pub fn plan_digest(plans: &HashMap<OrgId, Option<Arc<Plan>>>) -> String {
+/// Per-org ceiling on how many of a monitor's regions are probed. An org whose
+/// plan did not resolve is absent, which the query reads as no ceiling.
+///
+/// The two arrays are bound to a single `unnest`, which pads the shorter one
+/// with NULLs rather than erroring — a length that drifted would silently lift
+/// the ceiling for whichever orgs fell off the end. They are private and only
+/// [`RegionCaps::from`] fills them, so the lengths cannot disagree.
+#[derive(Debug, Default, Clone)]
+pub struct RegionCaps {
+    org_ids: Vec<uuid::Uuid>,
+    limits: Vec<i32>,
+}
+
+impl RegionCaps {
+    /// The org ids and their ceilings, positionally paired for `unnest`.
+    pub fn arrays(&self) -> (&[uuid::Uuid], &[i32]) {
+        (&self.org_ids, &self.limits)
+    }
+}
+
+impl From<&PlanMap> for RegionCaps {
+    fn from(plans: &PlanMap) -> Self {
+        let mut caps = Self::default();
+        for (org, plan) in plans {
+            if let Some(plan) = plan {
+                caps.org_ids.push(org.0);
+                caps.limits.push(plan.max_regions);
+            }
+        }
+        caps
+    }
+}
+
+/// One region's share of the work, under the plans the caller resolved: the
+/// monitors whose region set reaches this region within the plan's cap, each
+/// at its governed interval. The scheduler's own region and an agent's pull
+/// both come through here so neither can be handed what the other refuses.
+pub async fn region_targets(
+    repo: &AdminRepo,
+    region: &str,
+    flow_capable: bool,
+    plans: &PlanMap,
+) -> Result<Vec<(OrgId, Target)>> {
+    let mut targets = repo
+        .list_enabled_targets_for_region(region, flow_capable, &RegionCaps::from(plans))
+        .await?;
+    govern_with(plans, &mut targets);
+    Ok(targets)
+}
+
+/// Stable over the inputs that move an interval or drop a region, so a tier
+/// change invalidates a cached pull that no target row has touched.
+pub fn plan_digest(plans: &PlanMap) -> String {
     let mut parts: Vec<String> = plans
         .iter()
         .map(|(org, plan)| match plan {
-            Some(p) => format!("{}:{}:{}", org.0, p.id, p.min_check_interval_secs),
+            Some(p) => format!(
+                "{}:{}:{}:{}",
+                org.0, p.id, p.min_check_interval_secs, p.max_regions
+            ),
             None => format!("{}:?", org.0),
         })
         .collect();
@@ -83,11 +138,10 @@ pub fn plan_digest(plans: &HashMap<OrgId, Option<Arc<Plan>>>) -> String {
     crate::auth::sha256_hex(&parts.join(","))
 }
 
-/// Applies the plan floor to every hand-out of enabled targets, whether the
-/// consumer takes the full snapshot (scheduler) or pages through it (incident
-/// writer). Both must see the same interval: the writer sizes its lookback
-/// window from it, and a window sized to the stored rate cannot hold enough
-/// results from a monitor the plan has slowed down.
+/// Applies the plan floor to the incident writer's walk over enabled targets.
+/// It must see the same interval the scheduler runs: the writer sizes its
+/// lookback window from it, and a window sized to the stored rate cannot hold
+/// enough results from a monitor the plan has slowed down.
 pub struct PlanGoverned<S: ?Sized> {
     inner: Arc<S>,
     quotas: Arc<QuotaService>,
@@ -96,15 +150,6 @@ pub struct PlanGoverned<S: ?Sized> {
 impl<S: ?Sized> PlanGoverned<S> {
     pub fn new(inner: Arc<S>, quotas: Arc<QuotaService>) -> Self {
         Self { inner, quotas }
-    }
-}
-
-#[async_trait]
-impl<S: EnabledTargetSource + ?Sized> EnabledTargetSource for PlanGoverned<S> {
-    async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
-        let mut targets = self.inner.list_all_enabled_targets().await?;
-        govern(&self.quotas, &mut targets).await;
-        Ok(targets)
     }
 }
 

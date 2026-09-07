@@ -334,6 +334,55 @@ async fn fanout_lists_verified_recent_public_updates_only() {
 
 #[tokio::test]
 #[ignore = "needs live Postgres (DATABASE_URL)"]
+async fn a_verified_custom_domain_is_served_only_while_the_plan_sells_one() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let org = seed_org(&pool).await;
+    let target = seed_target(&pool, org).await;
+    let page = seed_page(&pool, org).await;
+    add_component(&pool, org, page, target).await;
+    let sub_id = confirmed_subscriber(&pool, org, page, "cd@example.com").await;
+    let incident = seed_public_incident(&pool, org, target).await;
+    add_update(&pool, org, incident, 0).await;
+    sqlx::query(
+        "UPDATE status_pages SET custom_domain = $2, custom_domain_verified_at = now() \
+         WHERE id = $1",
+    )
+    .bind(page)
+    .bind(format!("{}.example.com", unique_slug("st")))
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mine = |pending: Vec<subscribers::PendingUpdate>| {
+        pending
+            .into_iter()
+            .find(|p| p.subscriber_id == sub_id)
+            .expect("the update is pending")
+    };
+    let on_free = mine(subscribers::list_pending(&pool, 100).await.unwrap());
+    assert!(
+        !on_free.custom_domain_verified,
+        "a plan without custom domains links the page's own subdomain"
+    );
+
+    sqlx::query(
+        "UPDATE accounts SET plan_id = 'team' \
+         WHERE id = (SELECT account_id FROM organizations WHERE id = $1)",
+    )
+    .bind(org)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let on_team = mine(subscribers::list_pending(&pool, 100).await.unwrap());
+    assert!(on_team.custom_domain_verified);
+
+    cleanup(&pool, org).await;
+}
+
+#[tokio::test]
+#[ignore = "needs live Postgres (DATABASE_URL)"]
 async fn unpublished_incident_fans_out_only_the_resolved_closer() {
     let Some(pool) = pg_pool_from_env().await else {
         return;

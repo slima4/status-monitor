@@ -9,6 +9,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::error::Result;
+use crate::storage::status_pages::{PAGE_CUSTOM_DOMAIN_LIVE, PAGE_PLAN_JOIN};
 use crate::storage::subscribers::{
     CLAIM_ORPHAN_MINUTES, FANOUT_LOOKBACK_HOURS, FANOUT_MAX_ATTEMPTS,
 };
@@ -37,7 +38,7 @@ pub struct PendingMaintenance {
 /// — the window's creation for `scheduled`, its end for `completed` — gates the
 /// lookback and the subscribed-since check so neither phase resurrects history.
 pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMaintenance>> {
-    let rows = sqlx::query_as::<_, PendingMaintenance>(
+    let sql = format!(
         "SELECT DISTINCT subscriber_id, maintenance_id, org_id, channel, target, phase, title,
                 description, starts_at, ends_at, page_name, slug, custom_domain,
                 custom_domain_verified, signing_secret
@@ -48,12 +49,13 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
                     COALESCE(NULLIF(sp.public_display_name, ''), sp.name) AS page_name,
                     sp.slug::text AS slug,
                     sp.custom_domain::text AS custom_domain,
-                    (sp.custom_domain_verified_at IS NOT NULL) AS custom_domain_verified,
+                    {PAGE_CUSTOM_DOMAIN_LIVE} AS custom_domain_verified,
                     s.config ->> 'signing_secret' AS signing_secret,
                     CASE WHEN mw.ends_at <= now() THEN 'completed' ELSE 'scheduled' END AS phase,
                     CASE WHEN mw.ends_at <= now() THEN mw.ends_at ELSE mw.created_at END AS event_at
              FROM status_page_subscribers s
              JOIN status_pages sp ON sp.id = s.status_page_id
+             {PAGE_PLAN_JOIN}
              JOIN status_page_components c
                   ON c.status_page_id = s.status_page_id AND c.org_id = s.org_id
              JOIN maintenance_window_components mwc
@@ -73,14 +75,15 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingMainte
                    OR (n.status = 'queued' AND n.created_at > now() - make_interval(mins => $3))
                    OR (n.status = 'failed' AND n.attempts >= $4)))
          ORDER BY starts_at
-         LIMIT $1",
-    )
-    .bind(limit)
-    .bind(FANOUT_LOOKBACK_HOURS as i32)
-    .bind(CLAIM_ORPHAN_MINUTES as i32)
-    .bind(FANOUT_MAX_ATTEMPTS)
-    .fetch_all(pool)
-    .await
-    .context("subscriber_maintenance::list_pending")?;
+         LIMIT $1"
+    );
+    let rows = sqlx::query_as::<_, PendingMaintenance>(&sql)
+        .bind(limit)
+        .bind(FANOUT_LOOKBACK_HOURS as i32)
+        .bind(CLAIM_ORPHAN_MINUTES as i32)
+        .bind(FANOUT_MAX_ATTEMPTS)
+        .fetch_all(pool)
+        .await
+        .context("subscriber_maintenance::list_pending")?;
     Ok(rows)
 }

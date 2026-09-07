@@ -327,6 +327,7 @@ async fn main() -> Result<()> {
             storage::admin::AdminRepo::new(pg_pool.clone(), cipher.clone(), "scheduler_refresh"),
             cfg.scheduler.region.clone(),
             pool.heartbeat_runtime(),
+            Arc::clone(&quotas),
             cfg.flow.enabled,
         ))
     } else {
@@ -335,10 +336,6 @@ async fn main() -> Result<()> {
             pool.heartbeat_runtime(),
         ))
     };
-    // Only the local source: a remote agent is governed when its pull is answered.
-    let scheduler_source: Arc<dyn storage::admin::EnabledTargetSource> = Arc::new(
-        quotas::PlanGoverned::new(scheduler_source, Arc::clone(&quotas)),
-    );
     let registry = Arc::new(TargetRegistry::new(scheduler_source));
 
     let batcher_cfg = BatcherConfig {
@@ -574,8 +571,10 @@ async fn main() -> Result<()> {
             });
         let stale_after = std::time::Duration::from_secs(cfg.operator.agent_stale_after_secs);
         let token = root.clone();
+        let quotas = Arc::clone(&quotas);
         tokio::spawn(async move {
-            uptimepage::observability::silence::run(store, delivery, stale_after, token).await
+            uptimepage::observability::silence::run(store, delivery, quotas, stale_after, token)
+                .await
         })
     };
 

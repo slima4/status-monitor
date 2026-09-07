@@ -12,6 +12,7 @@ use crate::auth::sha256_hex;
 use crate::auth::token_hash::generate_raw_token;
 use crate::domain::{NewSubscriber, Subscriber, SubscriberChannel};
 use crate::error::Result;
+use crate::storage::status_pages::{PAGE_CUSTOM_DOMAIN_LIVE, PAGE_PLAN_JOIN};
 
 pub const CONFIRM_TTL_HOURS: i64 = 24;
 /// Confirm mints per subscriber per 24 h — bounds re-subscribe mail spam.
@@ -254,7 +255,7 @@ pub struct PendingUpdate {
 /// unpublished, only the `resolved` closer still fans out, so an incident taken
 /// off the page before it ends doesn't strand subscribers on its last update.
 pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate>> {
-    let rows = sqlx::query_as::<_, PendingUpdate>(
+    let sql = format!(
         "SELECT s.id AS subscriber_id, u.id AS update_id, s.org_id, s.channel, s.target,
                 u.phase, u.message,
                 i.id AS incident_id,
@@ -262,10 +263,11 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
                 COALESCE(NULLIF(sp.public_display_name, ''), sp.name) AS page_name,
                 sp.slug::text AS slug,
                 sp.custom_domain::text AS custom_domain,
-                (sp.custom_domain_verified_at IS NOT NULL) AS custom_domain_verified,
+                {PAGE_CUSTOM_DOMAIN_LIVE} AS custom_domain_verified,
                 s.config ->> 'signing_secret' AS signing_secret
          FROM status_page_subscribers s
          JOIN status_pages sp ON sp.id = s.status_page_id
+         {PAGE_PLAN_JOIN}
          JOIN status_page_components c
               ON c.status_page_id = s.status_page_id AND c.org_id = s.org_id
          JOIN incidents i
@@ -286,15 +288,16 @@ pub async fn list_pending(pool: &PgPool, limit: i64) -> Result<Vec<PendingUpdate
                    OR (n.status = 'queued' AND n.created_at > now() - make_interval(mins => $3))
                    OR (n.status = 'failed' AND n.attempts >= $4)))
          ORDER BY u.posted_at
-         LIMIT $1",
-    )
-    .bind(limit)
-    .bind(FANOUT_LOOKBACK_HOURS as i32)
-    .bind(CLAIM_ORPHAN_MINUTES as i32)
-    .bind(FANOUT_MAX_ATTEMPTS)
-    .fetch_all(pool)
-    .await
-    .context("subscribers::list_pending")?;
+         LIMIT $1"
+    );
+    let rows = sqlx::query_as::<_, PendingUpdate>(&sql)
+        .bind(limit)
+        .bind(FANOUT_LOOKBACK_HOURS as i32)
+        .bind(CLAIM_ORPHAN_MINUTES as i32)
+        .bind(FANOUT_MAX_ATTEMPTS)
+        .fetch_all(pool)
+        .await
+        .context("subscribers::list_pending")?;
     Ok(rows)
 }
 

@@ -19,6 +19,7 @@ use crate::auth::url::token_link;
 use crate::domain::{NewSubscriber, SubscriberChannel};
 use crate::email::{EmailAddress, EmailTemplate, TransactionalEmail};
 use crate::http_outbound::post_bytes_with_headers;
+use crate::storage::status_pages::{PAGE_CUSTOM_DOMAIN_LIVE, PAGE_PLAN_JOIN};
 use crate::storage::subscribers::{self, CONFIRM_TTL_HOURS};
 use crate::web::error::WebResult;
 use crate::web::filters;
@@ -384,16 +385,25 @@ struct PageMeta {
 }
 
 async fn page_meta(pool: &sqlx::PgPool, page_id: Uuid) -> Option<PageMeta> {
-    let row: (String, String, Option<String>, bool) = sqlx::query_as(
-        "SELECT COALESCE(NULLIF(public_display_name, ''), name), slug::text,
-                custom_domain::text, custom_domain_verified_at IS NOT NULL
-         FROM status_pages WHERE id = $1",
-    )
-    .bind(page_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten()?;
+    let sql = format!(
+        "SELECT COALESCE(NULLIF(sp.public_display_name, ''), sp.name), sp.slug::text,
+                sp.custom_domain::text, {PAGE_CUSTOM_DOMAIN_LIVE}
+         FROM status_pages sp {PAGE_PLAN_JOIN} WHERE sp.id = $1"
+    );
+    // A read error here must not be mistaken for "no such page": the caller's
+    // fallback origin is the operator's own host, which is exactly the leak
+    // `page_origin` exists to prevent, so say so rather than fail quietly.
+    let row: (String, String, Option<String>, bool) = match sqlx::query_as(&sql)
+        .bind(page_id)
+        .fetch_optional(pool)
+        .await
+    {
+        Ok(row) => row?,
+        Err(err) => {
+            tracing::warn!(%page_id, %err, "status page metadata unreadable; falling back to the app origin");
+            return None;
+        }
+    };
     Some(PageMeta {
         name: row.0,
         slug: row.1,

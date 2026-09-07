@@ -25,6 +25,8 @@ use uuid::Uuid;
 
 use crate::domain::{OrgId, Target};
 use crate::error::Result;
+use crate::quotas::QuotaService;
+use crate::quotas::effective::{self, RegionCaps};
 use crate::security::Cipher;
 use crate::storage::postgres::{TargetRow, decode_target_row};
 
@@ -55,6 +57,7 @@ pub struct RegionTargetSource {
     repo: AdminRepo,
     region: String,
     heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
+    quotas: Arc<QuotaService>,
     /// Whether this control plane runs flow in-process (single-node/self-host).
     /// Distributed deployments leave flow to a capable agent and set this `false`.
     flow_capable: bool,
@@ -65,14 +68,22 @@ impl RegionTargetSource {
         repo: AdminRepo,
         region: String,
         heartbeat: Arc<crate::worker::heartbeat::HeartbeatRuntime>,
+        quotas: Arc<QuotaService>,
         flow_capable: bool,
     ) -> Self {
         Self {
             repo,
             region,
             heartbeat,
+            quotas,
             flow_capable,
         }
+    }
+
+    async fn governed_region_targets(&self) -> Result<Vec<(OrgId, Target)>> {
+        let orgs = self.repo.region_org_ids(&self.region).await?;
+        let plans = effective::resolve_plans(&self.quotas, orgs).await;
+        effective::region_targets(&self.repo, &self.region, self.flow_capable, &plans).await
     }
 }
 
@@ -80,8 +91,7 @@ impl RegionTargetSource {
 impl EnabledTargetSource for RegionTargetSource {
     async fn list_all_enabled_targets(&self) -> Result<Vec<(OrgId, Target)>> {
         let (mut targets, heartbeats) = tokio::try_join!(
-            self.repo
-                .list_enabled_targets_for_region(&self.region, self.flow_capable),
+            self.governed_region_targets(),
             enabled_heartbeats_synced(&self.repo, &self.heartbeat),
         )?;
         targets.extend(heartbeats);
@@ -193,6 +203,34 @@ type RegionPullEtagRow = (
 /// scheduler-snapshot and incident-writer-keyset queries return the same
 /// `targets` shape that [`decode_target_row`] consumes.
 const TARGET_COLUMNS: &str = "t.org_id, t.id, t.name, t.check_spec, t.interval_secs, t.enabled, t.tags, t.alerts, t.region_policy, t.alert_confirmations, t.notify_recovery, t.renotify_interval_secs, t.group_name, t.owner_user_id, t.write_source, t.created_at, t.updated_at";
+
+/// The per-org region ceiling, joined in as `cap`. `$2` carries the org ids and
+/// `$3` their limits; an org missing from the arrays has no ceiling. Written
+/// against a `targets` aliased `t`.
+pub(crate) const REGION_CAP_JOIN: &str = "LEFT JOIN unnest($2::uuid[], $3::int[]) AS cap(org_id, max_regions) \
+     ON cap.org_id = t.org_id";
+
+/// Whether this region is one of the monitor's first `max_regions`: rank its
+/// enabled regions default-on first and then by id, and keep the row while that
+/// rank is within the cap. Written against the aliases `t`, `tr`, `rg` and
+/// [`REGION_CAP_JOIN`]. Every hand-out shares it — the pull, the etag that
+/// validates it, and silence detection — so a rank that moved (a plan retuned,
+/// another region enabled or disabled, a default flipped) reaches all three.
+///
+/// The middle test is what keeps the cheap paths cheap: a monitor can never be
+/// assigned more regions than exist, so a ceiling at or above the enabled-region
+/// count cannot bind. It is uncorrelated, so Postgres runs it once per query and
+/// short-circuits the per-row rank for every plan that sells unlimited regions —
+/// which, outside `free`, is all of them.
+pub(crate) const REGION_CAP_PREDICATE: &str = "(cap.max_regions IS NULL \
+     OR cap.max_regions >= (SELECT count(*) FROM regions WHERE enabled) \
+     OR cap.max_regions >= ( \
+     SELECT count(*) FROM target_regions tr2 \
+     JOIN regions rg2 ON rg2.id = tr2.region \
+     WHERE tr2.target_id = t.id AND rg2.enabled \
+       AND (rg2.default_selected > rg.default_selected \
+            OR (rg2.default_selected = rg.default_selected \
+                AND tr2.region <= tr.region))))";
 
 /// Per-row lenient decode: skip (logged + counted) any row whose `check_spec`,
 /// `alerts`, or credential decrypt won't parse, rather than failing the whole
@@ -457,14 +495,21 @@ impl AdminRepo {
     /// leaves `updated_at` untouched — so an agent never serves stale config off
     /// a `304`. Still no decrypt: it hashes the stored (encrypted) ciphertext.
     ///
-    /// `plan_digest` is supplied by the caller so the etag and the interval
-    /// clamp are derived from one resolution of the plan, not two that can
-    /// disagree: a stale clamp behind a fresh etag latches once the agent
-    /// stores it and never re-pulls.
-    pub async fn region_pull_etag(&self, region: &str, plan_digest: &str) -> Result<String> {
+    /// `caps` and `plan_digest` are supplied by the caller so the etag and the
+    /// pull it validates are derived from one resolution of the plan, not two
+    /// that can disagree: a stale clamp behind a fresh etag latches once the
+    /// agent stores it and never re-pulls. The same cap predicate the pull uses
+    /// filters the digest, so a region the cap admits or drops — including one
+    /// freed by a *different* region being disabled — moves the etag.
+    pub async fn region_pull_etag(
+        &self,
+        region: &str,
+        caps: &RegionCaps,
+        plan_digest: &str,
+    ) -> Result<String> {
         // The fourth column digests each region org's variables, so a variable
         // edit (which never touches targets.updated_at) still bumps the etag.
-        let row: RegionPullEtagRow = sqlx::query_as(
+        let sql = format!(
             "SELECT count(*)::bigint, max(t.updated_at), \
                         md5(coalesce(string_agg(t.id::text || ':' || md5(t.check_spec::text), \
                                                 ',' ORDER BY t.id), '')), \
@@ -480,13 +525,19 @@ impl AdminRepo {
                  JOIN targets t ON t.id = tr.target_id \
                  JOIN organizations o ON o.id = t.org_id \
                  JOIN regions rg ON rg.id = tr.region \
+                 {REGION_CAP_JOIN} \
                  WHERE tr.region = $1 AND t.enabled = true AND o.deleted_at IS NULL \
-                   AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat'",
-        )
-        .bind(region)
-        .fetch_one(&self.pool)
-        .await
-        .context("admin: region pull etag")?;
+                   AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat' \
+                   AND {REGION_CAP_PREDICATE}"
+        );
+        let (cap_orgs, cap_limits) = caps.arrays();
+        let row: RegionPullEtagRow = sqlx::query_as(&sql)
+            .bind(region)
+            .bind(cap_orgs)
+            .bind(cap_limits)
+            .fetch_one(&self.pool)
+            .await
+            .context("admin: region pull etag")?;
         let (count, max_updated, digest, var_digest) = row;
         let ts = max_updated.map(|d| d.timestamp_millis()).unwrap_or(0);
         Ok(format!(
@@ -501,10 +552,16 @@ impl AdminRepo {
     /// [`Self::list_all_enabled_targets`]. Heartbeat monitors are excluded:
     /// their region rows are inert and an agent has no ping state to evaluate
     /// them against.
+    ///
+    /// `caps` limits how many of a monitor's regions are served: the first
+    /// `max_regions` of its enabled ones, defaults first then by id, so a plan
+    /// moving under a monitor drops the same regions on every node and the
+    /// assignment row survives for when the plan comes back.
     pub async fn list_enabled_targets_for_region(
         &self,
         region: &str,
         include_flow: bool,
+        caps: &RegionCaps,
     ) -> Result<Vec<(OrgId, Target)>> {
         // Flow monitors run only on flow-capable nodes; a node that can't run
         // one must never be handed it (it would just error every cycle).
@@ -514,12 +571,17 @@ impl AdminRepo {
              JOIN organizations o ON o.id = t.org_id \
              JOIN target_regions tr ON tr.target_id = t.id \
              JOIN regions rg ON rg.id = tr.region \
+             {REGION_CAP_JOIN} \
              WHERE t.enabled = true AND o.deleted_at IS NULL AND tr.region = $1 \
                AND rg.enabled AND t.kind IS DISTINCT FROM 'heartbeat' \
-               AND ($2 OR t.kind IS DISTINCT FROM 'flow')"
+               AND ($4 OR t.kind IS DISTINCT FROM 'flow') \
+               AND {REGION_CAP_PREDICATE}"
         );
+        let (cap_orgs, cap_limits) = caps.arrays();
         let rows: Vec<OrgTargetRow> = sqlx::query_as::<_, OrgTargetRow>(&sql)
             .bind(region)
+            .bind(cap_orgs)
+            .bind(cap_limits)
             .bind(include_flow)
             .fetch_all(&self.pool)
             .await

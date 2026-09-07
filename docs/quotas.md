@@ -33,7 +33,7 @@ the rest carry their own names; see the
 | `evidence_days` | 7 | 7 | 7 | 7 | How long a failed browser-flow run keeps the page it captured. Clamped to `raw_days`, since the run it explains goes then |
 | `max_flow_steps` | 30 | 30 | 30 | 30 | Steps one flow monitor may declare. Clamped to the engine ceiling of 30, so a larger value has no effect |
 | `max_flow_checks` | 0 | 1 | 3 | 10 | Browser flow monitors the org can create; 0 doubles as the feature gate, so a create returns `403 FLOW_CHECKS_DISABLED` rather than a quota error. A flow also needs `flow.enabled` on the process that runs it, so a cap alone does not switch it on |
-| `max_regions` | 3 | ∞ | ∞ | ∞ | Regions a single monitor can be assigned to |
+| `max_regions` | 3 | ∞ | ∞ | ∞ | Regions a single monitor is probed from. Enforced on assignment and again at hand-out: past the cap, a monitor's default-on regions come first, then the rest by id |
 | `max_members` | 3 | 5 | 5 | 15 | Distinct people across the account's orgs — one person in two orgs holds one seat |
 | `max_pending_invitations` | 10 | 15 | 15 | 25 | Outstanding (unaccepted) invitations |
 | `max_api_tokens_per_user` | 5 | 7 | 7 | 10 | API tokens a single user may hold |
@@ -49,6 +49,9 @@ the rest carry their own names; see the
 
 Feature flags ride on the same row: `custom_domain_enabled`, `white_label_enabled`,
 `sms_alerts_enabled`, `incident_narration_enabled`, `on_call_enabled`.
+`custom_domain_enabled` gates the origin subscriber mail and webhooks link to:
+on a plan without it, a verified custom domain is ignored and those links point
+at the page's own subdomain.
 `white_label_enabled` is what makes the status-page "powered by" toggle real:
 on a plan without it the badge always renders, whatever the page setting says.
 
@@ -125,15 +128,22 @@ The write is not the last word. A plan can move under a monitor that already
 exists, and refusing the next edit would not slow a monitor already running
 three times faster than its tier allows. So the floor is applied again where
 work is handed out: the scheduler's own set and the answer an agent pulls are
-both clamped to `max(stored interval, plan floor)` on every refresh.
+both clamped to `max(stored interval, plan floor)` on every refresh. The region
+cap is applied the same way: a region is served a monitor only while it sits
+within the first `max_regions` of that monitor's enabled regions, default-on
+ones first and then by id, so every node drops the same regions. No-data
+detection reads the same set, so a live agent in a region the plan has dropped
+does not count as coverage and a monitor left with only dark regions is
+reported unmonitored.
 
 The clamp never writes back. The row keeps the interval its owner asked for,
 so a plan that goes back up restores the original behaviour with nothing to
 repair, and the usage page keeps showing what was requested. A plan change is
 visible within `plan_cache_ttl_secs`; the agent pull's etag digests each org's
-plan, floor and override, so a tier change invalidates a cached pull that no
-target row has touched. If a plan lookup fails, those monitors run as stored
-and a warning is logged: one unreadable org must not stop everyone's
+plan, floor, region cap and override, and is counted over the monitors the cap
+actually admits, so neither a tier change nor a region enabled or disabled
+elsewhere can hide behind a `304`. If a plan lookup fails, those monitors run
+as stored and a warning is logged: one unreadable org must not stop everyone's
 monitoring.
 
 Feature flags are gated at the write, like the counted caps. Creating an SMS

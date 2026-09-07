@@ -29,6 +29,8 @@ use crate::http_outbound::OutboundHttpClient;
 use crate::notifier::event::IncidentNotice;
 use crate::notifier::{CentralBotDelivery, EmailDelivery, build_notifier};
 use crate::observability::metrics::names;
+use crate::quotas::QuotaService;
+use crate::quotas::effective::RegionCaps;
 use crate::storage::{NotificationChannelStore, SilenceStore, TargetStore};
 
 const TICK: Duration = Duration::from_secs(30);
@@ -138,6 +140,7 @@ impl SilenceDelivery for SilenceNotifier {
 pub async fn run(
     store: Arc<dyn SilenceStore>,
     delivery: Arc<dyn SilenceDelivery>,
+    quotas: Arc<QuotaService>,
     stale_after: Duration,
     shutdown: CancellationToken,
 ) {
@@ -147,12 +150,33 @@ pub async fn run(
         tokio::select! {
             _ = shutdown.cancelled() => return,
             _ = ticker.tick() => {
-                if let Err(err) = sweep(store.as_ref(), Some(delivery.as_ref()), stale_after).await {
-                    tracing::warn!(error = %err, "silence sweep failed");
+                match region_caps(store.as_ref(), &quotas).await {
+                    // Resolved per tick, not held: a downgrade must reach the
+                    // sweep on the same cadence it reaches the agent pull.
+                    Ok(caps) => {
+                        if let Err(err) =
+                            sweep(store.as_ref(), Some(delivery.as_ref()), stale_after, &caps).await
+                        {
+                            tracing::warn!(error = %err, "silence sweep failed");
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!(error = %err, "silence sweep skipped: region caps unresolved")
+                    }
                 }
             }
         }
     }
+}
+
+/// The ceiling the agent pull is applying right now, for the orgs this sweep
+/// can see. Read from one place so silence and the pull cannot disagree about
+/// which regions are actually probing a monitor.
+async fn region_caps(store: &dyn SilenceStore, quotas: &QuotaService) -> Result<RegionCaps> {
+    let orgs = store.orgs_with_assigned_targets().await?;
+    Ok(RegionCaps::from(
+        &crate::quotas::effective::resolve_plans(quotas, orgs).await,
+    ))
 }
 
 /// One sweep: diff the live unmonitored set against recorded-open silences,
@@ -163,10 +187,11 @@ pub async fn sweep(
     store: &dyn SilenceStore,
     delivery: Option<&dyn SilenceDelivery>,
     stale_after: Duration,
+    caps: &RegionCaps,
 ) -> Result<()> {
     let now = Utc::now();
     let unmonitored: HashSet<_> = store
-        .unmonitored(stale_after.as_secs())
+        .unmonitored(stale_after.as_secs(), caps)
         .await?
         .into_iter()
         .collect();
@@ -261,11 +286,25 @@ mod tests {
         let store = InMemorySilenceStore::new();
 
         store.set_unmonitored(vec![(org, a), (org, b)]);
-        sweep(&store, None, Duration::from_secs(120)).await.unwrap();
+        sweep(
+            &store,
+            None,
+            Duration::from_secs(120),
+            &RegionCaps::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(store.open_target_ids(), sorted(vec![a, b]));
 
         store.set_unmonitored(vec![(org, b)]);
-        sweep(&store, None, Duration::from_secs(120)).await.unwrap();
+        sweep(
+            &store,
+            None,
+            Duration::from_secs(120),
+            &RegionCaps::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(store.open_target_ids(), vec![b]);
         assert_eq!(store.resolved_target_ids(), vec![a]);
     }
@@ -280,19 +319,34 @@ mod tests {
 
         // Silent across two sweeps → exactly one NoData notice.
         store.set_unmonitored(vec![(org, a)]);
-        sweep(&store, Some(&d), Duration::from_secs(120))
-            .await
-            .unwrap();
-        sweep(&store, Some(&d), Duration::from_secs(120))
-            .await
-            .unwrap();
+        sweep(
+            &store,
+            Some(&d),
+            Duration::from_secs(120),
+            &RegionCaps::default(),
+        )
+        .await
+        .unwrap();
+        sweep(
+            &store,
+            Some(&d),
+            Duration::from_secs(120),
+            &RegionCaps::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(count(&d, NotificationReason::NoData), 1);
 
         // Recovery → one DataResumed (it had been notified).
         store.set_unmonitored(vec![]);
-        sweep(&store, Some(&d), Duration::from_secs(120))
-            .await
-            .unwrap();
+        sweep(
+            &store,
+            Some(&d),
+            Duration::from_secs(120),
+            &RegionCaps::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(count(&d, NotificationReason::DataResumed), 1);
     }
 
@@ -305,9 +359,14 @@ mod tests {
         // 6 of 10 silent (>25%) → no customer notices, state still recorded.
         let silent: Vec<_> = (0..6).map(|_| (org, Uuid::now_v7())).collect();
         store.set_unmonitored(silent.clone());
-        sweep(&store, Some(&d), Duration::from_secs(120))
-            .await
-            .unwrap();
+        sweep(
+            &store,
+            Some(&d),
+            Duration::from_secs(120),
+            &RegionCaps::default(),
+        )
+        .await
+        .unwrap();
         assert_eq!(count(&d, NotificationReason::NoData), 0);
         assert_eq!(store.open_target_ids().len(), 6);
     }

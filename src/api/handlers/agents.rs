@@ -62,7 +62,11 @@ pub async fn pull_targets(
     // Validate the cheap etag first so an unchanged poll returns 304 without
     // decrypting any credentials.
     let etag = repo
-        .region_pull_etag(&region, &crate::quotas::effective::plan_digest(&plans))
+        .region_pull_etag(
+            &region,
+            &crate::quotas::effective::RegionCaps::from(&plans),
+            &crate::quotas::effective::plan_digest(&plans),
+        )
         .await?;
     if headers
         .get(header::IF_NONE_MATCH)
@@ -83,10 +87,8 @@ pub async fn pull_targets(
         tracing::warn!(error = %err, "persisting agent flow_capable failed");
     }
 
-    let mut targets = repo
-        .list_enabled_targets_for_region(&region, flow_capable)
-        .await?;
-    crate::quotas::effective::govern_with(&plans, &mut targets);
+    let targets =
+        crate::quotas::effective::region_targets(&repo, &region, flow_capable, &plans).await?;
     let body = AgentTargetsResponse {
         region,
         targets: targets

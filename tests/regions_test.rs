@@ -147,7 +147,7 @@ async fn region_source_returns_only_that_region() {
 
     let repo = AdminRepo::new(pool.clone(), None, "test");
     let ids: Vec<Uuid> = repo
-        .list_enabled_targets_for_region("eu-rgtest2", true)
+        .list_enabled_targets_for_region("eu-rgtest2", true, &Default::default())
         .await
         .unwrap()
         .into_iter()
@@ -174,8 +174,14 @@ async fn pull_etag_reflects_membership_swap_at_equal_count() {
     assign(&pool, a, "eu-rgetag").await;
 
     let repo = AdminRepo::new(pool.clone(), None, "test");
-    let e1 = repo.region_pull_etag("eu-rgetag", "").await.unwrap();
-    let e1b = repo.region_pull_etag("eu-rgetag", "").await.unwrap();
+    let e1 = repo
+        .region_pull_etag("eu-rgetag", &Default::default(), "")
+        .await
+        .unwrap();
+    let e1b = repo
+        .region_pull_etag("eu-rgetag", &Default::default(), "")
+        .await
+        .unwrap();
     assert_eq!(e1, e1b, "etag stable when nothing changes");
 
     // Swap membership keeping the count at 1.
@@ -186,7 +192,10 @@ async fn pull_etag_reflects_membership_swap_at_equal_count() {
         .await
         .unwrap();
     assign(&pool, b, "eu-rgetag").await;
-    let e2 = repo.region_pull_etag("eu-rgetag", "").await.unwrap();
+    let e2 = repo
+        .region_pull_etag("eu-rgetag", &Default::default(), "")
+        .await
+        .unwrap();
     assert_ne!(e1, e2, "etag must change on a same-count membership swap");
 }
 

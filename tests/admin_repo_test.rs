@@ -224,7 +224,7 @@ async fn region_list_skips_undecodable_row() {
 
     let repo = AdminRepo::new(pool.clone(), None, "test");
     let ids: Vec<Uuid> = repo
-        .list_enabled_targets_for_region(region, true)
+        .list_enabled_targets_for_region(region, true, &Default::default())
         .await
         .unwrap()
         .into_iter()
@@ -279,7 +279,7 @@ async fn region_list_filters_flow_by_capability() {
 
     let repo = AdminRepo::new(pool.clone(), None, "test");
     let without: Vec<Uuid> = repo
-        .list_enabled_targets_for_region(region, false)
+        .list_enabled_targets_for_region(region, false, &Default::default())
         .await
         .unwrap()
         .into_iter()
@@ -292,7 +292,7 @@ async fn region_list_filters_flow_by_capability() {
     );
 
     let with: Vec<Uuid> = repo
-        .list_enabled_targets_for_region(region, true)
+        .list_enabled_targets_for_region(region, true, &Default::default())
         .await
         .unwrap()
         .into_iter()

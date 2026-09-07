@@ -12,6 +12,16 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
+/// The plan a page's account is on, for a query that aliases the page `sp`.
+pub(crate) const PAGE_PLAN_JOIN: &str = "JOIN organizations sp_org ON sp_org.id = sp.org_id \
+     JOIN accounts sp_acct ON sp_acct.id = sp_org.account_id \
+     JOIN plans sp_plan ON sp_plan.id = sp_acct.plan_id";
+
+/// A custom domain is served only while verified and while the plan sells one,
+/// so a downgrade sends readers back to the page's own subdomain.
+pub(crate) const PAGE_CUSTOM_DOMAIN_LIVE: &str =
+    "(sp.custom_domain_verified_at IS NOT NULL AND sp_plan.custom_domain_enabled)";
+
 use crate::api::error::codes;
 use crate::domain::{
     MonitorShareId, NewStatusPage, NewStatusPageComponent, OrgId, PublicOrgBranding, PublicStyle,

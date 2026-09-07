@@ -1,8 +1,10 @@
 //! Silence (no-data) detection state.
 //!
-//! A monitor is *silent* when every region it is assigned to (`target_regions`)
-//! has lost its probe — no enabled `agents` row for that region with a fresh
-//! `last_seen_at`. Detection is derived from agent liveness, not check results:
+//! A monitor is *silent* when every region that would actually be handed it has
+//! lost its probe — no enabled `agents` row for that region with a fresh
+//! `last_seen_at`. "Would be handed it" is the same question the agent pull
+//! answers: an assignment the plan's `max_regions` puts past the cap is probed
+//! by nobody, so a live agent there must not count as coverage. Detection is derived from agent liveness, not check results:
 //! a failing or timing-out check still reports an `Error` and opens a normal
 //! incident, so true silence means the probe stopped running (overwhelmingly,
 //! the agent/region died). `agents.last_seen_at` is real liveness — it is bumped
@@ -20,6 +22,8 @@ use uuid::Uuid;
 
 use crate::domain::OrgId;
 use crate::error::Result;
+use crate::quotas::effective::RegionCaps;
+use crate::storage::admin::{REGION_CAP_JOIN, REGION_CAP_PREDICATE};
 
 /// An open (unresolved) silence row. `notified` = the customer was already told.
 #[derive(Debug, Clone, Copy)]
@@ -31,10 +35,19 @@ pub struct OpenSilence {
 
 #[async_trait]
 pub trait SilenceStore: Send + Sync {
-    /// Enabled, assigned targets whose every region lacks a fresh, enabled agent
-    /// (`last_seen_at` within `stale_after_secs`) and that no active
-    /// alert-silencing maintenance window covers. The unmonitored set.
-    async fn unmonitored(&self, stale_after_secs: u64) -> Result<Vec<(OrgId, Uuid)>>;
+    /// Enabled, assigned targets whose every *served* region lacks a fresh,
+    /// enabled agent (`last_seen_at` within `stale_after_secs`) and that no
+    /// active alert-silencing maintenance window covers. The unmonitored set.
+    /// `caps` is the same per-org region ceiling the pull applies, so a region
+    /// the plan has dropped cannot pass for coverage.
+    async fn unmonitored(
+        &self,
+        stale_after_secs: u64,
+        caps: &RegionCaps,
+    ) -> Result<Vec<(OrgId, Uuid)>>;
+    /// Orgs owning at least one enabled, region-assigned target — the set whose
+    /// plans the sweep resolves to build `caps`.
+    async fn orgs_with_assigned_targets(&self) -> Result<Vec<OrgId>>;
     /// Open silences (`resolved_at IS NULL`), with whether each was notified.
     async fn list_open(&self) -> Result<Vec<OpenSilence>>;
     /// Target ids currently silent for one org — for the grey "no data" overlay
@@ -70,11 +83,16 @@ impl PgSilenceStore {
 
 #[async_trait]
 impl SilenceStore for PgSilenceStore {
-    async fn unmonitored(&self, stale_after_secs: u64) -> Result<Vec<(OrgId, Uuid)>> {
+    async fn unmonitored(
+        &self,
+        stale_after_secs: u64,
+        caps: &RegionCaps,
+    ) -> Result<Vec<(OrgId, Uuid)>> {
         let sql = format!(
             r#"SELECT t.org_id, t.id
                FROM targets t
                JOIN organizations o ON o.id = t.org_id
+               {REGION_CAP_JOIN}
                WHERE t.enabled AND o.deleted_at IS NULL
                  -- Heartbeats run on the control plane; agent liveness is moot.
                  AND t.kind IS DISTINCT FROM 'heartbeat'
@@ -84,17 +102,35 @@ impl SilenceStore for PgSilenceStore {
                      JOIN regions rg ON rg.id = tr.region AND rg.enabled
                      JOIN agents a   ON a.region = tr.region AND a.enabled
                                     AND a.last_seen_at > now() - ($1::bigint * interval '1 second')
-                     WHERE tr.target_id = t.id
+                     WHERE tr.target_id = t.id AND {REGION_CAP_PREDICATE}
                  )
                  AND NOT {window}"#,
             window = crate::storage::suppressing_window_sql("t.id", "t.org_id"),
         );
+        let (cap_orgs, cap_limits) = caps.arrays();
         let rows: Vec<(Uuid, Uuid)> = sqlx::query_as(&sql)
             .bind(stale_after_secs as i64)
+            .bind(cap_orgs)
+            .bind(cap_limits)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| anyhow::anyhow!("silence unmonitored: {e}"))?;
         Ok(rows.into_iter().map(|(o, t)| (OrgId(o), t)).collect())
+    }
+
+    async fn orgs_with_assigned_targets(&self) -> Result<Vec<OrgId>> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            "SELECT DISTINCT t.org_id \
+             FROM targets t \
+             JOIN organizations o ON o.id = t.org_id \
+             WHERE t.enabled AND o.deleted_at IS NULL \
+               AND t.kind IS DISTINCT FROM 'heartbeat' \
+               AND EXISTS (SELECT 1 FROM target_regions tr WHERE tr.target_id = t.id)",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("silence orgs: {e}"))?;
+        Ok(rows.into_iter().map(|(o,)| OrgId(o)).collect())
     }
 
     async fn list_open(&self) -> Result<Vec<OpenSilence>> {
@@ -251,8 +287,22 @@ impl InMemorySilenceStore {
 
 #[async_trait]
 impl SilenceStore for InMemorySilenceStore {
-    async fn unmonitored(&self, _stale_after_secs: u64) -> Result<Vec<(OrgId, Uuid)>> {
+    async fn unmonitored(
+        &self,
+        _stale_after_secs: u64,
+        _caps: &RegionCaps,
+    ) -> Result<Vec<(OrgId, Uuid)>> {
         Ok(self.inner.lock().unmonitored.clone())
+    }
+
+    async fn orgs_with_assigned_targets(&self) -> Result<Vec<OrgId>> {
+        Ok(self
+            .inner
+            .lock()
+            .unmonitored
+            .iter()
+            .map(|(org, _)| *org)
+            .collect())
     }
 
     async fn list_open(&self) -> Result<Vec<OpenSilence>> {

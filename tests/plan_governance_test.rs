@@ -16,8 +16,9 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uptimepage::config::AppConfig;
 use uptimepage::domain::{CheckSpec, ExpectedStatus, HeartbeatCheck, OrgId, Target, UserId};
+use uptimepage::quotas::effective::{RegionCaps, plan_digest, region_targets, resolve_plans};
 use uptimepage::quotas::{PlanGoverned, QuotaService, governed_interval};
-use uptimepage::storage::admin::{AdminRepo, EnabledTargetSource, EnabledTargetStream};
+use uptimepage::storage::admin::{AdminRepo, EnabledTargetStream};
 use uuid::Uuid;
 
 async fn org_on_plan(pool: &PgPool, plan: &str, interval_secs: i32) -> (OrgId, Uuid, UserId) {
@@ -115,21 +116,104 @@ fn sms_create_request(name: &str) -> Request<Body> {
         .unwrap()
 }
 
-async fn plan_digest_for(pool: &PgPool, region: &str) -> String {
+/// A region of its own per test: the seeded catalog is shared with every
+/// other suite on this database.
+async fn fresh_region(pool: &PgPool, prefix: &str, default_selected: bool) -> String {
+    let region = unique_slug(prefix);
+    sqlx::query(
+        "INSERT INTO regions (id, name, enabled, default_selected) VALUES ($1, $1, true, $2)",
+    )
+    .bind(&region)
+    .bind(default_selected)
+    .execute(pool)
+    .await
+    .expect("region");
+    region
+}
+
+async fn assign_region(pool: &PgPool, target: Uuid, region: &str) {
+    sqlx::query("INSERT INTO target_regions (target_id, region) VALUES ($1, $2)")
+        .bind(target)
+        .bind(region)
+        .execute(pool)
+        .await
+        .expect("assign region");
+}
+
+async fn drop_region(pool: &PgPool, region: &str) {
+    let _ = sqlx::query("DELETE FROM regions WHERE id = $1")
+        .bind(region)
+        .execute(pool)
+        .await;
+}
+
+async fn region_plans(pool: &PgPool, region: &str) -> uptimepage::quotas::effective::PlanMap {
     let cfg = AppConfig::load().expect("config");
     let quotas = QuotaService::new(&cfg, Some(pool.clone()));
     let repo = AdminRepo::new(pool.clone(), None, "plan_governance_test");
-    let mut plans = std::collections::HashMap::new();
-    for org in repo.region_org_ids(region).await.expect("org ids") {
-        plans.insert(org, quotas.limit_for_org(org).await.ok());
-    }
-    uptimepage::quotas::effective::plan_digest(&plans)
+    resolve_plans(&quotas, repo.region_org_ids(region).await.expect("org ids")).await
 }
 
-fn governed_source(pool: &PgPool, cfg: &AppConfig) -> PlanGoverned<AdminRepo> {
+/// The validator an agent polling `region` would be handed.
+async fn region_etag(pool: &PgPool, region: &str) -> String {
+    let repo = AdminRepo::new(pool.clone(), None, "plan_governance_test");
+    let plans = region_plans(pool, region).await;
+    repo.region_pull_etag(region, &RegionCaps::from(&plans), &plan_digest(&plans))
+        .await
+        .expect("etag")
+}
+
+/// What the scheduler in `region`, or an agent pulling for it, is handed.
+async fn region_set(pool: &PgPool, region: &str) -> Vec<(OrgId, Target)> {
+    let repo = AdminRepo::new(pool.clone(), None, "plan_governance_test");
+    let plans = region_plans(pool, region).await;
+    region_targets(&repo, region, true, &plans)
+        .await
+        .expect("region set")
+}
+
+fn governed_writer(pool: &PgPool, cfg: &AppConfig) -> PlanGoverned<AdminRepo> {
     let repo = AdminRepo::new(pool.clone(), None, "plan_governance_test");
     let quotas = Arc::new(QuotaService::new(cfg, Some(pool.clone())));
     PlanGoverned::new(Arc::new(repo), quotas)
+}
+
+/// Every enabled target as the incident writer pages through them.
+async fn writer_walk(pool: &PgPool, cfg: &AppConfig) -> Vec<(OrgId, Target)> {
+    let source = governed_writer(pool, cfg);
+    let mut cursor = None;
+    let mut paged = Vec::new();
+    loop {
+        let page = source
+            .next_enabled_target_page(cursor, 500)
+            .await
+            .expect("page");
+        let Some((last_org, last)) = page.last() else {
+            break;
+        };
+        cursor = Some(uptimepage::storage::admin::PublicTargetCursor::after(
+            *last_org, last.id,
+        ));
+        paged.extend(page);
+    }
+    paged
+}
+
+fn ids_of(targets: &[(OrgId, Target)]) -> Vec<Uuid> {
+    targets.iter().map(|(_, t)| t.id).collect()
+}
+
+async fn set_override(pool: &PgPool, org: OrgId, override_json: &str) {
+    sqlx::query(
+        "INSERT INTO plan_overrides (account_id, override_json, reason) \
+         SELECT account_id, $2::jsonb, 'test' FROM organizations WHERE id = $1 \
+         ON CONFLICT (account_id) DO UPDATE SET override_json = excluded.override_json",
+    )
+    .bind(org.0)
+    .bind(override_json)
+    .execute(pool)
+    .await
+    .expect("override");
 }
 
 fn interval_of(targets: &[(OrgId, Target)], id: Uuid) -> Duration {
@@ -146,16 +230,15 @@ async fn a_monitor_below_its_plan_floor_is_slowed_for_the_scheduler() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let cfg = AppConfig::load().expect("config");
     let (org, target, user) = org_on_plan(&pool, "free", 60).await;
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
 
-    let listed = governed_source(&pool, &cfg)
-        .list_all_enabled_targets()
-        .await
-        .expect("list");
+    let listed = region_set(&pool, &region).await;
     assert_eq!(interval_of(&listed, target), Duration::from_secs(180));
 
     cleanup(&pool, org, user).await;
+    drop_region(&pool, &region).await;
 }
 
 #[tokio::test]
@@ -164,13 +247,11 @@ async fn governing_never_rewrites_the_stored_interval() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let cfg = AppConfig::load().expect("config");
     let (org, target, user) = org_on_plan(&pool, "free", 60).await;
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
 
-    let _ = governed_source(&pool, &cfg)
-        .list_all_enabled_targets()
-        .await
-        .expect("list");
+    let _ = region_set(&pool, &region).await;
 
     let (stored,): (i32,) = sqlx::query_as("SELECT interval_secs FROM targets WHERE id = $1")
         .bind(target)
@@ -180,6 +261,7 @@ async fn governing_never_rewrites_the_stored_interval() {
     assert_eq!(stored, 60, "the clamp must not write back");
 
     cleanup(&pool, org, user).await;
+    drop_region(&pool, &region).await;
 }
 
 #[tokio::test]
@@ -188,16 +270,15 @@ async fn a_monitor_above_its_plan_floor_is_left_alone() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let cfg = AppConfig::load().expect("config");
     let (org, target, user) = org_on_plan(&pool, "team", 60).await;
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
 
-    let listed = governed_source(&pool, &cfg)
-        .list_all_enabled_targets()
-        .await
-        .expect("list");
+    let listed = region_set(&pool, &region).await;
     assert_eq!(interval_of(&listed, target), Duration::from_secs(60));
 
     cleanup(&pool, org, user).await;
+    drop_region(&pool, &region).await;
 }
 
 #[tokio::test]
@@ -206,13 +287,11 @@ async fn a_downgrade_takes_effect_without_touching_the_monitor() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let cfg = AppConfig::load().expect("config");
     let (org, target, user) = org_on_plan(&pool, "team", 60).await;
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
 
-    let before = governed_source(&pool, &cfg)
-        .list_all_enabled_targets()
-        .await
-        .expect("list");
+    let before = region_set(&pool, &region).await;
     assert_eq!(interval_of(&before, target), Duration::from_secs(60));
 
     sqlx::query(
@@ -224,13 +303,11 @@ async fn a_downgrade_takes_effect_without_touching_the_monitor() {
     .await
     .expect("downgrade");
 
-    let after = governed_source(&pool, &cfg)
-        .list_all_enabled_targets()
-        .await
-        .expect("list");
+    let after = region_set(&pool, &region).await;
     assert_eq!(interval_of(&after, target), Duration::from_secs(180));
 
     cleanup(&pool, org, user).await;
+    drop_region(&pool, &region).await;
 }
 
 #[tokio::test]
@@ -242,22 +319,7 @@ async fn the_incident_writer_walks_the_same_slowed_interval_as_the_scheduler() {
     let cfg = AppConfig::load().expect("config");
     let (org, target, user) = org_on_plan(&pool, "free", 30).await;
 
-    let source = governed_source(&pool, &cfg);
-    let mut cursor = None;
-    let mut paged = Vec::new();
-    loop {
-        let page = source
-            .next_enabled_target_page(cursor, 500)
-            .await
-            .expect("page");
-        let Some((last_org, last)) = page.last() else {
-            break;
-        };
-        cursor = Some(uptimepage::storage::admin::PublicTargetCursor::after(
-            *last_org, last.id,
-        ));
-        paged.extend(page);
-    }
+    let paged = writer_walk(&pool, &cfg).await;
     assert_eq!(interval_of(&paged, target), Duration::from_secs(180));
 
     cleanup(&pool, org, user).await;
@@ -269,27 +331,139 @@ async fn an_override_lifts_the_floor_for_one_account() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let cfg = AppConfig::load().expect("config");
     let (org, target, user) = org_on_plan(&pool, "free", 60).await;
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
+    set_override(&pool, org, r#"{"min_check_interval_secs": 30}"#).await;
 
-    sqlx::query(
-        "INSERT INTO plan_overrides (account_id, override_json, reason) \
-         SELECT account_id, '{\"min_check_interval_secs\": 30}'::jsonb, 'test' \
-           FROM organizations WHERE id = $1 \
-         ON CONFLICT (account_id) DO UPDATE SET override_json = excluded.override_json",
-    )
-    .bind(org.0)
-    .execute(&pool)
-    .await
-    .expect("override");
-
-    let listed = governed_source(&pool, &cfg)
-        .list_all_enabled_targets()
-        .await
-        .expect("list");
+    let listed = region_set(&pool, &region).await;
     assert_eq!(interval_of(&listed, target), Duration::from_secs(60));
 
     cleanup(&pool, org, user).await;
+    drop_region(&pool, &region).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_monitor_over_its_region_cap_is_probed_from_its_first_regions_only() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org, target, user) = org_on_plan(&pool, "team", 60).await;
+    // Sorts ahead by id, yet the default-on region comes first.
+    let extra = fresh_region(&pool, "a-reg", false).await;
+    let home = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &extra).await;
+    assign_region(&pool, target, &home).await;
+
+    assert!(ids_of(&region_set(&pool, &home).await).contains(&target));
+    assert!(ids_of(&region_set(&pool, &extra).await).contains(&target));
+
+    set_override(&pool, org, r#"{"max_regions": 1}"#).await;
+
+    assert!(
+        ids_of(&region_set(&pool, &home).await).contains(&target),
+        "the default-on region keeps the monitor"
+    );
+    assert!(
+        !ids_of(&region_set(&pool, &extra).await).contains(&target),
+        "the region past the cap is no longer served"
+    );
+    let (assigned,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM target_regions WHERE target_id = $1")
+            .bind(target)
+            .fetch_one(&pool)
+            .await
+            .expect("assignments");
+    assert_eq!(assigned, 2, "the cap must not unassign a region");
+
+    cleanup(&pool, org, user).await;
+    drop_region(&pool, &extra).await;
+    drop_region(&pool, &home).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_disabled_region_does_not_take_a_slot_from_the_cap() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org, target, user) = org_on_plan(&pool, "team", 60).await;
+    let dark = fresh_region(&pool, "reg", true).await;
+    sqlx::query("UPDATE regions SET enabled = false WHERE id = $1")
+        .bind(&dark)
+        .execute(&pool)
+        .await
+        .expect("disable region");
+    let live = fresh_region(&pool, "reg", false).await;
+    assign_region(&pool, target, &dark).await;
+    assign_region(&pool, target, &live).await;
+    set_override(&pool, org, r#"{"max_regions": 1}"#).await;
+
+    assert!(ids_of(&region_set(&pool, &live).await).contains(&target));
+
+    cleanup(&pool, org, user).await;
+    drop_region(&pool, &dark).await;
+    drop_region(&pool, &live).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_region_etag_changes_when_the_region_cap_does() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org, target, user) = org_on_plan(&pool, "team", 60).await;
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
+
+    let before = region_etag(&pool, &region).await;
+    set_override(&pool, org, r#"{"max_regions": 1}"#).await;
+    let after = region_etag(&pool, &region).await;
+    assert_ne!(
+        before, after,
+        "a region cap change must invalidate the pull"
+    );
+
+    cleanup(&pool, org, user).await;
+    drop_region(&pool, &region).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn the_region_etag_changes_when_another_region_frees_a_slot() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (org, target, user) = org_on_plan(&pool, "team", 60).await;
+    let home = fresh_region(&pool, "reg", true).await;
+    let spare = fresh_region(&pool, "reg", false).await;
+    assign_region(&pool, target, &home).await;
+    assign_region(&pool, target, &spare).await;
+    set_override(&pool, org, r#"{"max_regions": 1}"#).await;
+
+    let before = region_etag(&pool, &spare).await;
+    assert!(!ids_of(&region_set(&pool, &spare).await).contains(&target));
+
+    sqlx::query("UPDATE regions SET enabled = false WHERE id = $1")
+        .bind(&home)
+        .execute(&pool)
+        .await
+        .expect("disable region");
+
+    assert!(
+        ids_of(&region_set(&pool, &spare).await).contains(&target),
+        "the freed slot must hand the monitor to the next region"
+    );
+    assert_ne!(
+        before,
+        region_etag(&pool, &spare).await,
+        "a monitor arriving from another region's slot must invalidate the pull"
+    );
+
+    cleanup(&pool, org, user).await;
+    drop_region(&pool, &home).await;
+    drop_region(&pool, &spare).await;
 }
 
 #[tokio::test]
@@ -298,25 +472,11 @@ async fn the_region_etag_changes_when_the_plan_does() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let region = unique_slug("reg");
     let (org, target, user) = org_on_plan(&pool, "team", 60).await;
-    sqlx::query("INSERT INTO regions (id, name, enabled) VALUES ($1, $1, true)")
-        .bind(&region)
-        .execute(&pool)
-        .await
-        .expect("region");
-    sqlx::query("INSERT INTO target_regions (target_id, region) VALUES ($1, $2)")
-        .bind(target)
-        .bind(&region)
-        .execute(&pool)
-        .await
-        .expect("assign region");
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
 
-    let repo = AdminRepo::new(pool.clone(), None, "plan_governance_test");
-    let before = repo
-        .region_pull_etag(&region, &plan_digest_for(&pool, &region).await)
-        .await
-        .expect("etag");
+    let before = region_etag(&pool, &region).await;
 
     sqlx::query(
         "UPDATE accounts SET plan_id = 'free' \
@@ -327,20 +487,14 @@ async fn the_region_etag_changes_when_the_plan_does() {
     .await
     .expect("downgrade");
 
-    let after = repo
-        .region_pull_etag(&region, &plan_digest_for(&pool, &region).await)
-        .await
-        .expect("etag");
+    let after = region_etag(&pool, &region).await;
     assert_ne!(
         before, after,
         "a plan change must invalidate the region pull"
     );
 
     cleanup(&pool, org, user).await;
-    let _ = sqlx::query("DELETE FROM regions WHERE id = $1")
-        .bind(&region)
-        .execute(&pool)
-        .await;
+    drop_region(&pool, &region).await;
 }
 
 #[tokio::test]
@@ -349,7 +503,6 @@ async fn the_region_etag_changes_when_the_plans_floor_is_retuned() {
     let Some(pool) = pg_pool_from_env().await else {
         return;
     };
-    let region = unique_slug("reg");
     // Its own plan row: retuning a seeded tier would race every other suite
     // sharing this database.
     let plan = unique_slug("pl").replace('-', "_");
@@ -369,41 +522,22 @@ async fn the_region_etag_changes_when_the_plans_floor_is_retuned() {
     .await
     .expect("throwaway plan");
     let (org, target, user) = org_on_plan(&pool, &plan, 60).await;
-    sqlx::query("INSERT INTO regions (id, name, enabled) VALUES ($1, $1, true)")
-        .bind(&region)
-        .execute(&pool)
-        .await
-        .expect("region");
-    sqlx::query("INSERT INTO target_regions (target_id, region) VALUES ($1, $2)")
-        .bind(target)
-        .bind(&region)
-        .execute(&pool)
-        .await
-        .expect("assign region");
+    let region = fresh_region(&pool, "reg", true).await;
+    assign_region(&pool, target, &region).await;
 
-    let repo = AdminRepo::new(pool.clone(), None, "plan_governance_test");
-    let before = repo
-        .region_pull_etag(&region, &plan_digest_for(&pool, &region).await)
-        .await
-        .expect("etag");
+    let before = region_etag(&pool, &region).await;
 
     sqlx::query("UPDATE plans SET min_check_interval_secs = 45 WHERE id = $1")
         .bind(&plan)
         .execute(&pool)
         .await
         .expect("retune");
-    let after = repo
-        .region_pull_etag(&region, &plan_digest_for(&pool, &region).await)
-        .await
-        .expect("etag");
+    let after = region_etag(&pool, &region).await;
 
     assert_ne!(before, after, "a retuned floor must invalidate the pull");
 
     cleanup(&pool, org, user).await;
-    let _ = sqlx::query("DELETE FROM regions WHERE id = $1")
-        .bind(&region)
-        .execute(&pool)
-        .await;
+    drop_region(&pool, &region).await;
     let _ = sqlx::query("DELETE FROM plans WHERE id = $1")
         .bind(&plan)
         .execute(&pool)
@@ -470,10 +604,7 @@ async fn a_heartbeat_keeps_its_own_interval_under_a_slower_plan() {
         .await
         .expect("make heartbeat");
 
-    let listed = governed_source(&pool, &cfg)
-        .list_all_enabled_targets()
-        .await
-        .expect("list");
+    let listed = writer_walk(&pool, &cfg).await;
     assert_eq!(interval_of(&listed, target), Duration::from_secs(60));
 
     cleanup(&pool, org, user).await;
