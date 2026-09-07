@@ -56,9 +56,12 @@ and everything keeps its settings exactly as you left them. Moving back up
 releases them as they were.
 
 We hold the newest first, on the assumption that the ones you set up earliest
-are the ones you rely on. If that is wrong, tell us what to keep and we will
-hold the rest instead. Held items still count toward your limit, so freeing a
-slot means deleting something rather than leaving it parked.
+are the ones you rely on. If that is wrong, **Settings → Usage** lets you tick
+exactly what to keep, and we hold the rest. Ticking fewer than your plan allows
+is fine: we do not fill the spare slot back up with something you just chose to
+let go. Once your plan covers everything again, all of it comes back, including
+what you had left unticked. Held items still count toward your limit, so
+freeing a slot means deleting something rather than leaving it parked.
 
 ## Raising a limit
 

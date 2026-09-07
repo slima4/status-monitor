@@ -69,9 +69,21 @@ const AUDIT_SAMPLE: usize = 100;
 /// by the next sweep, putting back on hold the very row they chose to keep.
 /// Set it with [`set_keep`].
 ///
+/// A pick is authoritative in both directions: what it names is kept, and what
+/// it leaves out is held even when a seat is free. Refilling a free seat from
+/// the rows the customer just gave up would make un-picking a monitor do
+/// literally nothing, since the row that lost the seat is the one that ranks
+/// first to reclaim it. Keeping fewer than the plan sells is theirs to choose.
+///
 /// Failing a pick, rows rank live-before-paused and then oldest-first: a
 /// monitor that is switched off is the cheapest one to hold, and the oldest
 /// are what the account was built around.
+///
+/// The pick only binds while a cap is actually exceeded. Once the plan covers
+/// everything the whole held set clears, including rows the pick left out —
+/// a hold is the plan's mechanism, and a customer who wants a monitor quiet
+/// inside their plan has `enabled` for that. The pick itself is dropped at the
+/// same moment, so it cannot arm a later shortage it was never asked about.
 pub async fn reconcile_account(
     pool: &PgPool,
     account: AccountId,
@@ -88,6 +100,7 @@ pub async fn reconcile_account(
 
     let targets = reconcile_targets(&mut tx, account, plan).await?;
     let pages = reconcile_status_pages(&mut tx, account, plan).await?;
+    forget_spent_pick(&mut tx, account, plan).await?;
 
     let mut out = Reconciled::default();
     for (moved, held_action, release_action) in [
@@ -126,6 +139,12 @@ async fn reconcile_targets(
                FROM targets
                WHERE org_id IN ({orgs})
            ),
+           pick AS (
+               SELECT coalesce(bool_or(kept), false) AS picked,
+                      count(*) > $3 AS over_targets,
+                      count(*) FILTER (WHERE is_flow) > $2 AS over_flows
+               FROM pool
+           ),
            flow_ranked AS (
                SELECT *,
                       CASE WHEN is_flow THEN row_number() OVER (
@@ -138,7 +157,7 @@ async fn reconcile_targets(
                SELECT *, coalesce(flow_rank > $2, false) AS flow_held FROM flow_ranked
            ),
            ranked AS (
-               SELECT id, org_id, name, flow_held,
+               SELECT id, org_id, name, flow_held, kept, is_flow,
                       row_number() OVER (
                           PARTITION BY flow_held
                           ORDER BY kept DESC, enabled DESC, created_at ASC, id ASC
@@ -146,7 +165,11 @@ async fn reconcile_targets(
                FROM after_flow
            ),
            want AS (
-               SELECT id, org_id, name, (flow_held OR rank > $3) AS hold FROM ranked
+               SELECT r.id, r.org_id, r.name,
+                      (r.flow_held OR r.rank > $3
+                       OR (p.picked AND NOT r.kept
+                           AND (p.over_targets OR (r.is_flow AND p.over_flows)))) AS hold
+               FROM ranked r CROSS JOIN pick p
            )
            UPDATE targets t
            SET plan_hold_at = CASE WHEN w.hold THEN now() ELSE NULL END,
@@ -172,16 +195,27 @@ async fn reconcile_status_pages(
     plan: &Plan,
 ) -> Result<Vec<Moved>> {
     let sql = format!(
-        r#"WITH ranked AS (
-               SELECT id, org_id, name,
-                      row_number() OVER (
-                          ORDER BY plan_keep DESC, enabled DESC, created_at ASC, id ASC
-                      ) AS rank
+        r#"WITH pool AS (
+               SELECT id, org_id, name, created_at, enabled, plan_keep AS kept
                FROM status_pages
                WHERE org_id IN ({orgs})
            ),
+           pick AS (
+               SELECT coalesce(bool_or(kept), false) AS picked,
+                      count(*) > $2 AS over_cap
+               FROM pool
+           ),
+           ranked AS (
+               SELECT id, org_id, name, kept,
+                      row_number() OVER (
+                          ORDER BY kept DESC, enabled DESC, created_at ASC, id ASC
+                      ) AS rank
+               FROM pool
+           ),
            want AS (
-               SELECT id, org_id, name, rank > $2 AS hold FROM ranked
+               SELECT r.id, r.org_id, r.name,
+                      (r.rank > $2 OR (p.picked AND p.over_cap AND NOT r.kept)) AS hold
+               FROM ranked r CROSS JOIN pick p
            )
            UPDATE status_pages sp
            SET plan_hold_at = CASE WHEN w.hold THEN now() ELSE NULL END,
@@ -198,6 +232,52 @@ async fn reconcile_status_pages(
         .await
         .context("reconcile_account: status pages")
         .map_err(AppError::from)
+}
+
+/// Drops a pick once its plan covers the whole pool again.
+///
+/// A pick answers one question — which rows lose their slots — and that
+/// question only exists while a cap is exceeded. Left behind, it silently arms
+/// the next shortage: an account that picked forty monitors a year ago would
+/// have every monitor added since count as "not chosen" the moment any cap
+/// slipped, holding rows the customer never declined. Scoped per table, so a
+/// monitor shortage does not clear a status page pick.
+async fn forget_spent_pick(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    account: AccountId,
+    plan: &Plan,
+) -> Result<()> {
+    let orgs = live_orgs("$1");
+    let targets = format!(
+        "UPDATE targets SET plan_keep = false \
+         WHERE org_id IN ({orgs}) AND plan_keep \
+           AND NOT EXISTS ( \
+               SELECT 1 FROM ( \
+                   SELECT count(*) AS n, \
+                          count(*) FILTER (WHERE kind = 'flow') AS flows \
+                   FROM targets WHERE org_id IN ({orgs}) \
+               ) c WHERE c.n > $3 OR c.flows > $2)"
+    );
+    sqlx::query(&targets)
+        .bind(account.0)
+        .bind(i64::from(plan.max_flow_checks))
+        .bind(i64::from(plan.max_targets))
+        .execute(&mut **tx)
+        .await
+        .context("reconcile_account: forget target pick")?;
+
+    let pages = format!(
+        "UPDATE status_pages SET plan_keep = false \
+         WHERE org_id IN ({orgs}) AND plan_keep \
+           AND (SELECT count(*) FROM status_pages WHERE org_id IN ({orgs})) <= $2"
+    );
+    sqlx::query(&pages)
+        .bind(account.0)
+        .bind(i64::from(plan.max_status_pages))
+        .execute(&mut **tx)
+        .await
+        .context("reconcile_account: forget page pick")?;
+    Ok(())
 }
 
 /// One audit row per org per direction. An account's orgs are audited
@@ -408,11 +488,23 @@ pub async fn list_held(pool: &PgPool, account: AccountId) -> Result<(Vec<Held>, 
 /// previous answer. Ids that are not the account's own are ignored rather than
 /// rejected, so a stale page listing a since-deleted monitor still saves.
 ///
+/// One list per resource, and `None` leaves that resource's answer alone. A
+/// single pooled list could not say the difference between "keep no status
+/// page" and "this caller was not asked about status pages", so a picker shown
+/// only the monitors would silently wipe the page pick the customer made
+/// during their last shortage.
+///
 /// Stored, not applied: the caller reconciles afterwards, and every later run
 /// reads the same flag, which is what stops the daily sweep undoing the choice.
-pub async fn set_keep(pool: &PgPool, account: AccountId, keep: &[Uuid]) -> Result<()> {
+pub async fn set_keep(
+    pool: &PgPool,
+    account: AccountId,
+    targets: Option<&[Uuid]>,
+    status_pages: Option<&[Uuid]>,
+) -> Result<()> {
     let orgs = live_orgs("$1");
-    for table in ["targets", "status_pages"] {
+    for (table, keep) in [("targets", targets), ("status_pages", status_pages)] {
+        let Some(keep) = keep else { continue };
         sqlx::query(&format!(
             "UPDATE {table} SET plan_keep = (id = ANY($2)) \
              WHERE org_id IN ({orgs}) AND plan_keep <> (id = ANY($2))"
@@ -450,6 +542,11 @@ pub async fn holds_anything(pool: &PgPool, account: AccountId) -> Result<bool> {
 /// precisely to get another one running should not wait a day to see it. Does
 /// nothing, and takes no lock, for an account holding nothing.
 ///
+/// A freed slot releases something only while the default order is in charge.
+/// Once the customer has picked, every held row is one they declined, so a
+/// delete leaves the slot empty and the picker is where they take it back —
+/// which is the point of a pick that binds in both directions.
+///
 /// Failure is logged and swallowed: the delete the caller just made is done and
 /// must not be reported as failed because a release could not be computed, and
 /// the sweep is the backstop.
@@ -470,4 +567,61 @@ pub async fn release_after_delete(pool: &PgPool, quotas: &crate::quotas::QuotaSe
         Ok(_) => {}
         Err(err) => tracing::warn!(org = %org.0, error = %err, "plan holds: release after delete"),
     }
+}
+
+/// One row in the account's pool, for the picker: everything the caps apply
+/// to, whether or not it is currently held.
+#[derive(sqlx::FromRow)]
+pub struct PoolRow {
+    pub id: Uuid,
+    pub name: String,
+    pub held: bool,
+    /// What the customer last chose, not what is running. The two differ
+    /// whenever a pick could not be honoured in full, and a picker that showed
+    /// the running set instead would quietly drop those rows on the next save.
+    pub kept: bool,
+    /// Spends a flow slot as well as a monitor slot, so it answers to a second
+    /// cap the picker has to show separately. Always false for status pages.
+    pub is_flow: bool,
+}
+
+/// How many rows the picker will render. Past this the panel stops offering a
+/// choice rather than emitting a checkbox per row: a truncated list cannot
+/// express a pick, since every row it omits would read as declined.
+pub const MAX_PICKER_ROWS: usize = 500;
+
+/// The account's monitors and status pages, held rows first and the rest in
+/// the order the reconcile would give them up. Reads one row past
+/// [`MAX_PICKER_ROWS`] so a caller can see that it has been cut.
+pub async fn list_pool(pool: &PgPool, account: AccountId) -> Result<(Vec<PoolRow>, Vec<PoolRow>)> {
+    let orgs = live_orgs("$1");
+    // Held first. The rank order below is what decides who keeps a slot, but
+    // the picker is read to answer "what did I lose", and burying those rows
+    // under twenty live ones puts the answer off-screen.
+    let order = "ORDER BY plan_hold_at IS NOT NULL DESC, \
+                 plan_keep DESC, enabled DESC, created_at ASC, id ASC";
+    // One past the ceiling, so the caller can tell a full list from a cut one
+    // without a second count.
+    let over_limit = MAX_PICKER_ROWS as i64 + 1;
+    let targets = sqlx::query_as(&format!(
+        "SELECT id, name, plan_hold_at IS NOT NULL AS held, plan_keep AS kept, \
+                kind = 'flow' AS is_flow \
+         FROM targets WHERE org_id IN ({orgs}) {order} LIMIT $2"
+    ))
+    .bind(account.0)
+    .bind(over_limit)
+    .fetch_all(pool)
+    .await
+    .context("list_pool: targets")?;
+    let pages = sqlx::query_as(&format!(
+        "SELECT id, name, plan_hold_at IS NOT NULL AS held, plan_keep AS kept, \
+                false AS is_flow \
+         FROM status_pages WHERE org_id IN ({orgs}) {order} LIMIT $2"
+    ))
+    .bind(account.0)
+    .bind(over_limit)
+    .fetch_all(pool)
+    .await
+    .context("list_pool: status pages")?;
+    Ok((targets, pages))
 }

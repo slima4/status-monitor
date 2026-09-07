@@ -25,7 +25,10 @@
     <div class="sticker-card page-card">
       <div class="flex min-w-0 items-start justify-between gap-2">
         <a href="/settings/pages/{{ r.id }}" class="page-card__name hover:underline">{{ r.name }}</a>
-        {% if r.enabled %}
+        {% if r.plan_held %}
+        <span class="status-badge status-badge--held shrink-0"
+              title="Your plan no longer covers this page, so its URL returns 404 and its subscribers are not mailed. Nothing has been deleted.">held</span>
+        {% else if r.enabled %}
         <span class="status-badge status-badge--up shrink-0">published</span>
         {% else %}
         <span class="status-badge status-badge--disabled shrink-0">draft</span>
@@ -41,6 +44,7 @@
 
       <p class="page-card__meta">
         {{ r.subscriber_count }} subscriber{% if r.subscriber_count != 1 %}s{% endif %}
+        {% if r.plan_held %}&middot; back to {% if r.enabled %}published{% else %}draft{% endif %} when the plan covers it{% endif %}
       </p>
 
       <div class="page-card__foot">
@@ -89,6 +93,7 @@
       <p># run several — e.g. a public page and a separate internal one</p>
       <p># a monitor can sit on more than one page</p>
       <p># unpublished = draft, its URL 404s until you publish it</p>
+      <p># held ....... over your plan's page count; nothing deleted, choose which to keep under usage</p>
     </div>
   </details>
 </div>

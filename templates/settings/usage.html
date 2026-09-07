@@ -29,6 +29,72 @@
     </div>
   </div>
 
+
+  {% if held_total > 0 %}
+  <div class="sticker-card overflow-hidden" id="holds">
+    <header class="card-band">
+      <h2 class="panel-label">held by plan</h2>
+    </header>
+    <div class="space-y-4 p-5">
+      <p class="max-w-prose text-sm text-muted">
+        Your plan does not cover everything on this account, so {{ held_total }} of your
+        things are <em class="not-italic text-body">held</em>. Nothing was deleted: held
+        monitors are not checked, held pages return 404. Move up a plan and every one of
+        them comes back exactly as it was.
+      </p>
+
+      {% if holds_locked %}
+      <p class="max-w-prose text-sm text-muted">
+        Which ones run is the account owner's to choose, and the pool is shared with
+        the other organizations on this account.
+      </p>
+      {% else if holds_too_large %}
+      <p class="max-w-prose text-sm text-muted">
+        There are too many to choose from here. <code>GET</code> and <code>PUT</code>
+        <code>/api/v1/account/holds</code> take the same choice as a list of ids.
+      </p>
+      {% else %}
+      <p class="max-w-prose text-sm text-muted">
+        Until then you choose which ones run. Tick what you want checked, up to what the
+        plan covers; anything you leave unticked is held, even if a place is free. Tick
+        nothing and the plan keeps the oldest for you.
+      </p>
+
+      <form data-holds-form class="space-y-5">
+        {% for set in holds %}
+        <fieldset data-holds-field="{{ set.field }}"
+                  data-holds-label="{{ set.label }}"
+                  data-holds-seats="{{ set.seats }}"
+                  {% if set.has_flows %}data-holds-flow-seats="{{ set.flow_seats }}"{% endif %}>
+          <legend class="holds-legend">
+            <span>{{ set.label }}</span>
+            <span class="cli-brackets" data-holds-count>{{ set.kept }} of {{ set.seats }} kept</span>
+            {% if set.has_flows %}
+            <span class="cli-brackets" data-holds-flow-count>flows {{ set.flow_kept }} of {{ set.flow_seats }}</span>
+            {% endif %}
+          </legend>
+          <div class="holds-list" role="group" aria-label="{{ set.label }} to keep">
+            {% for r in set.rows %}
+            <label class="holds-item{% if r.held %} holds-item--held{% endif %}">
+              <input type="checkbox" value="{{ r.id }}"{% if r.flow %} data-holds-flow{% endif %}{% if r.keep %} checked{% endif %}>
+              <span class="holds-item__name">{{ r.name }}</span>
+              {% if r.held %}<span class="held-chip">held</span>{% endif %}
+            </label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        {% endfor %}
+
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="submit" class="sticker-btn sticker-btn--primary px-4 py-2">save what to keep</button>
+          <span data-holds-msg class="font-mono text-xs text-quiet" role="status"></span>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
   <div class="grid gap-4 sm:grid-cols-2">
     <div class="sticker-card overflow-hidden">
       <header class="card-band">
@@ -62,7 +128,12 @@
     <p># color ...... green ok · amber ≥80% · red at the limit</p>
     <p># ∞ .......... no ceiling on your plan</p>
     <p># limits ..... rate limits are per-minute, per API token</p>
+    <p># held ....... over a cap; nothing deleted, and it returns when the plan covers it</p>
     <p># raise ...... need a higher cap? <a class="underline decoration-dotted hover:text-body" href="mailto:support@uptimepage.dev">email us</a></p>
   </div>
 </section>
+{% if held_total > 0 && !holds_locked && !holds_too_large %}
+<script defer src="{{ "js/ui/api_form.js"|asset }}"></script>
+<script defer src="{{ "js/ui/holds_form.js"|asset }}"></script>
+{% endif %}
 {% endblock %}

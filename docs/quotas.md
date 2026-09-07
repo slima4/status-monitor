@@ -294,8 +294,32 @@ account create fresh monitors on top of the ones it has parked.
 
 By default the oldest rows keep the slots and the newest are held, on the
 grounds that the oldest are what the account was built around. `PUT
-/api/v1/account/holds` replaces that guess with a list of ids to keep;
-`GET` on the same path lists what is currently held. Every hold and release
+/api/v1/account/holds` replaces that guess with `keep_monitors` and
+`keep_status_pages`, a list of ids each; `GET` on the same path lists what is
+currently held.
+
+A list is authoritative both ways: what it names runs, and what it leaves out
+is held even when a slot is free. Refilling a spare slot from the rows the
+customer just declined would make un-picking one do nothing, since the row that
+lost the slot is the one that ranks first to take it back — so keeping fewer
+than the plan sells is theirs to choose. An empty list is not "hold
+everything", it is a reset back to the default order, and an *omitted* list
+leaves that resource's previous answer alone, so a caller shown only its
+monitors cannot wipe the status page choice. `{}` is therefore a plain
+reconcile.
+
+The pick only binds while a cap is exceeded. Once the plan covers the whole
+pool everything is released, including rows the pick left out, because a hold
+is the plan's mechanism and `enabled` is how a customer quiets a monitor inside
+their plan; the pick itself is dropped at the same moment, so it cannot arm a
+later shortage it was never asked about. Each cap is judged on its own: running
+more browser flows than the plan covers holds flows, and says nothing about
+ordinary monitors that are inside their own cap.
+
+Both endpoints check the caller against `accounts.owner_user_id`, and so does
+the picker on **Settings → Usage**. The pool spans every organization the
+account owns, so an ordinary member of one of them is shown how much is held
+but not the rows, which would name a sibling organization's monitors. Every hold and release
 writes an org audit row (`target.plan_hold` / `target.plan_release`, and the
 `status_page.` pair).
 

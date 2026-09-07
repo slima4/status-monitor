@@ -64,12 +64,20 @@ pub struct HoldsResponse {
     pub status_pages: Vec<HeldItem>,
 }
 
-/// The ids to keep. Anything the plan cannot cover after honouring these is
-/// held, newest first.
+/// The ids to keep, one list per resource. Anything the plan cannot cover
+/// after honouring them is held, newest first, and so is anything a list
+/// leaves out — naming what to keep is also declining the rest.
+///
+/// An omitted list means "not asked about", leaving that resource's previous
+/// answer untouched; an empty list clears it and hands the choice back to the
+/// default order. A caller shown only its monitors therefore cannot wipe the
+/// status page pick, and `{}` is a plain reconcile.
 #[derive(Debug, Clone, Default, Deserialize, ToSchema)]
 pub struct KeepRequest {
     #[serde(default)]
-    pub keep: Vec<Uuid>,
+    pub keep_monitors: Option<Vec<Uuid>>,
+    #[serde(default)]
+    pub keep_status_pages: Option<Vec<Uuid>>,
 }
 
 /// A pick can name at most this many rows. Well past any plan's ceilings, and
@@ -107,7 +115,8 @@ pub async fn set_holds(
     CurrentUser(actor): CurrentUser,
     Json(body): Json<KeepRequest>,
 ) -> Result<Json<HoldsResponse>> {
-    if body.keep.len() > MAX_KEEP {
+    let named = |l: &Option<Vec<Uuid>>| l.as_ref().map_or(0, Vec::len);
+    if named(&body.keep_monitors) > MAX_KEEP || named(&body.keep_status_pages) > MAX_KEEP {
         return Err(AppError::bad_request(
             codes::BULK_TOO_LARGE,
             "too many rows named at once",
@@ -118,7 +127,13 @@ pub async fn set_holds(
     let plan = state.quotas.limit_for_org(org).await?;
     // Stored before reconciling, so the daily sweep reads the same answer and
     // cannot put back on hold what the customer just asked to keep.
-    crate::quotas::holds::set_keep(pool, account, &body.keep).await?;
+    crate::quotas::holds::set_keep(
+        pool,
+        account,
+        body.keep_monitors.as_deref(),
+        body.keep_status_pages.as_deref(),
+    )
+    .await?;
     crate::quotas::holds::reconcile_account(pool, account, &plan, Some(actor)).await?;
     let (targets, status_pages) = crate::quotas::holds::list_held(pool, account).await?;
     Ok(Json(HoldsResponse {

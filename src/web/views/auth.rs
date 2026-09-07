@@ -724,11 +724,51 @@ pub mod settings {
         }
     }
 
+    /// One monitor or page in the keep picker.
+    #[derive(Clone)]
+    pub struct HoldPick {
+        pub id: String,
+        pub name: String,
+        pub held: bool,
+        pub keep: bool,
+        /// Answers to the flow cap as well, which the legend counts apart.
+        pub flow: bool,
+    }
+
+    /// One resource's worth of picker: the pool to choose from and the seats
+    /// the plan sells. Flows carry a second, smaller budget inside the first,
+    /// since a flow monitor spends a slot in both.
+    pub struct HoldSet {
+        pub label: &'static str,
+        /// The request field this list is saved under, which is what keeps a
+        /// picker showing one resource from clearing the other's choice.
+        pub field: &'static str,
+        pub seats: usize,
+        pub kept: usize,
+        pub flow_seats: usize,
+        pub flow_kept: usize,
+        pub has_flows: bool,
+        pub held: usize,
+        pub rows: Vec<HoldPick>,
+    }
+
     #[derive(Template, WebTemplate)]
     #[template(path = "settings/usage.html")]
     pub struct UsagePage {
         pub active_tab: &'static str,
         pub plan_name: String,
+        /// How much the plan is holding, which is what decides whether the
+        /// panel appears at all.
+        pub held_total: usize,
+        /// One per resource that actually has something held. Empty for a
+        /// caller who may look but not choose.
+        pub holds: Vec<HoldSet>,
+        /// The caller is in the account but does not own it, so the choice is
+        /// not theirs to make. Saying so beats a form that can only 403.
+        pub holds_locked: bool,
+        /// Too many rows to render a checkbox each. A cut list cannot express
+        /// a pick, since every row it left out would read as declined.
+        pub holds_too_large: bool,
         pub bars: Vec<UsageBar>,
         pub min_check_interval_secs: i32,
         pub retention_days: i32,
@@ -748,6 +788,7 @@ pub mod settings {
     pub async fn usage_page(
         State(state): State<AppState>,
         org: Result<CurrentOrg, AppError>,
+        user: Result<crate::web::CurrentUser, AppError>,
     ) -> WebResult<Response> {
         let org = match resolve_org(org, "/settings/usage") {
             Ok(o) => o,
@@ -755,9 +796,17 @@ pub mod settings {
         };
         let u = state.quotas.account_usage(org).await?;
         let p = &u.plan;
+        let holds = match state.db.as_ref() {
+            Some(pool) => holds_panel(pool, org, user.ok().map(|c| c.0), p).await?,
+            None => HoldsPanel::default(),
+        };
         Ok(UsagePage {
             active_tab: TAB_USAGE,
             plan_name: p.name.clone(),
+            held_total: holds.held_total,
+            holds: holds.sets,
+            holds_locked: holds.locked,
+            holds_too_large: holds.too_large,
             bars: vec![
                 UsageBar::new("organisations", u.orgs, p.max_orgs),
                 UsageBar::new("targets", u.targets, p.max_targets),
@@ -796,6 +845,129 @@ pub mod settings {
         .into_response())
     }
 
+    #[derive(Default)]
+    struct HoldsPanel {
+        held_total: usize,
+        sets: Vec<HoldSet>,
+        locked: bool,
+        too_large: bool,
+    }
+
+    /// The account's pool, shaped for the picker. Read only when something is
+    /// actually held, so the panel and its whole-pool scan cost nothing on the
+    /// overwhelming majority of accounts that fit their plan.
+    ///
+    /// The pool spans every org the account owns, because that is what the
+    /// caps are pooled across — and monitor names from a sibling org are not
+    /// something an ordinary member of this one may read. Only the account
+    /// owner is shown the rows, which is the same line
+    /// `/api/v1/account/holds` draws.
+    async fn holds_panel(
+        pool: &sqlx::PgPool,
+        org: crate::domain::OrgId,
+        user: Option<crate::domain::UserId>,
+        plan: &crate::domain::Plan,
+    ) -> Result<HoldsPanel, AppError> {
+        let account = crate::storage::accounts::account_for_org(pool, org).await?;
+        if !crate::quotas::holds::holds_anything(pool, account).await? {
+            return Ok(HoldsPanel::default());
+        }
+        let owner = match user {
+            Some(u) => crate::storage::accounts::account_for_user(pool, u).await? == Some(account),
+            None => false,
+        };
+        let (targets, pages) = crate::quotas::holds::list_pool(pool, account).await?;
+        let held_total =
+            targets.iter().filter(|r| r.held).count() + pages.iter().filter(|r| r.held).count();
+        if !owner {
+            return Ok(HoldsPanel {
+                held_total,
+                locked: true,
+                ..HoldsPanel::default()
+            });
+        }
+        if targets.len() > crate::quotas::holds::MAX_PICKER_ROWS
+            || pages.len() > crate::quotas::holds::MAX_PICKER_ROWS
+        {
+            return Ok(HoldsPanel {
+                held_total,
+                too_large: true,
+                ..HoldsPanel::default()
+            });
+        }
+
+        let mut sets = Vec::new();
+        for (label, field, cap, flow_cap, rows) in [
+            (
+                "monitors",
+                "keep_monitors",
+                plan.max_targets,
+                plan.max_flow_checks,
+                targets,
+            ),
+            (
+                "status pages",
+                "keep_status_pages",
+                plan.max_status_pages,
+                0,
+                pages,
+            ),
+        ] {
+            // A resource the plan still covers has nothing to decide, and a
+            // full pool of ticked boxes beside the one that does only invites
+            // an accidental save.
+            if !rows.iter().any(|r| r.held) {
+                continue;
+            }
+            sets.push(HoldSet::new(label, field, cap, flow_cap, rows));
+        }
+        Ok(HoldsPanel {
+            held_total,
+            sets,
+            ..HoldsPanel::default()
+        })
+    }
+
+    impl HoldSet {
+        fn new(
+            label: &'static str,
+            field: &'static str,
+            cap: i32,
+            flow_cap: i32,
+            rows: Vec<crate::quotas::holds::PoolRow>,
+        ) -> Self {
+            // Whether the customer has answered at all. Before they do, the
+            // running set is the answer; after, their own choice is, including
+            // the parts of it the plan could not honour — showing the running
+            // set instead would drop those on the next save.
+            let picked = rows.iter().any(|r| r.kept);
+            let rows: Vec<HoldPick> = rows
+                .into_iter()
+                .map(|r| HoldPick {
+                    id: r.id.to_string(),
+                    name: r.name,
+                    held: r.held,
+                    keep: if picked { r.kept } else { !r.held },
+                    flow: r.is_flow,
+                })
+                .collect();
+            let flows = rows.iter().filter(|r| r.flow).count();
+            Self {
+                label,
+                field,
+                // Never more seats than there are rows to fill them: a pool
+                // smaller than the cap asks for everything, not the impossible.
+                seats: usize::try_from(cap).unwrap_or(0).min(rows.len()),
+                kept: rows.iter().filter(|r| r.keep).count(),
+                flow_seats: usize::try_from(flow_cap).unwrap_or(0).min(flows),
+                flow_kept: rows.iter().filter(|r| r.flow && r.keep).count(),
+                has_flows: flows > 0,
+                held: rows.iter().filter(|r| r.held).count(),
+                rows,
+            }
+        }
+    }
+
     fn short_hash(h: Option<&str>) -> String {
         match h {
             Some(s) if s.len() >= 12 => s[..12].to_string(),
@@ -808,11 +980,156 @@ pub mod settings {
     mod tests {
         use super::*;
 
+        fn set(
+            label: &'static str,
+            field: &'static str,
+            seats: usize,
+            rows: Vec<HoldPick>,
+        ) -> HoldSet {
+            HoldSet {
+                label,
+                field,
+                seats,
+                kept: rows.iter().filter(|r| r.keep).count(),
+                flow_seats: 0,
+                flow_kept: 0,
+                has_flows: false,
+                held: rows.iter().filter(|r| r.held).count(),
+                rows,
+            }
+        }
+
+        fn usage_html(sets: Vec<HoldSet>) -> String {
+            let held_total = sets.iter().map(|s| s.held).sum();
+            UsagePage {
+                active_tab: super::super::TAB_USAGE,
+                plan_name: "Free".into(),
+                held_total,
+                holds: sets,
+                holds_locked: false,
+                holds_too_large: false,
+                bars: vec![UsageBar::new("Targets", 7, 10)],
+                min_check_interval_secs: 60,
+                retention_days: 90,
+                max_logo_size_label: "1 MB".into(),
+                max_api_tokens_per_user: 5,
+                api_writes_per_minute: 600,
+                api_reads_per_minute: 6000,
+                bulk_ops_per_minute: 30,
+                test_now_per_minute: 60,
+                check_now_per_minute: 60,
+            }
+            .render()
+            .expect("render")
+        }
+
+        fn pick(name: &str, held: bool) -> HoldPick {
+            HoldPick {
+                id: "44444444-4444-4444-4444-444444444444".into(),
+                name: name.into(),
+                held,
+                keep: !held,
+                flow: false,
+            }
+        }
+
+        #[test]
+        fn an_account_that_fits_its_plan_is_shown_no_holds_panel() {
+            let html = usage_html(Vec::new());
+            assert!(!html.contains("held by plan"));
+            assert!(
+                !html.contains("holds_form.js"),
+                "the picker's script is not even fetched when there is nothing to pick"
+            );
+        }
+
+        #[test]
+        fn a_held_monitor_puts_the_picker_on_the_page() {
+            let html = usage_html(vec![set(
+                "monitors",
+                "keep_monitors",
+                10,
+                vec![pick("api", true), pick("web", false)],
+            )]);
+            assert!(html.contains("held by plan"));
+            assert!(html.contains("holds_form.js"));
+            // The picker lists the whole pool, not only what is held: keeping a
+            // held monitor means giving up a running one, so both must be
+            // visible and tickable together.
+            assert!(html.contains("api") && html.contains("web"));
+            assert!(html.contains("save what to keep"));
+        }
+
+        #[test]
+        fn each_resource_saves_under_its_own_field() {
+            // A picker showing only status pages must not send an empty
+            // monitor list, which would clear a pick made in an earlier
+            // shortage.
+            let html = usage_html(vec![set(
+                "status pages",
+                "keep_status_pages",
+                1,
+                vec![pick("status", true), pick("ops", false)],
+            )]);
+            assert!(html.contains(r#"data-holds-field="keep_status_pages""#));
+            assert!(
+                !html.contains("keep_monitors"),
+                "a resource with nothing held gets no list and sends no answer"
+            );
+        }
+
+        #[test]
+        fn the_picker_counts_the_seats_the_plan_sells() {
+            let html = usage_html(vec![set(
+                "monitors",
+                "keep_monitors",
+                1,
+                vec![pick("api", true), pick("web", false)],
+            )]);
+            assert!(
+                html.contains("1 of 1 kept"),
+                "the ticked count and the seats both belong in the legend: {html}"
+            );
+        }
+
+        #[test]
+        fn a_member_who_does_not_own_the_account_is_told_rather_than_shown() {
+            let html = UsagePage {
+                active_tab: super::super::TAB_USAGE,
+                plan_name: "Free".into(),
+                held_total: 3,
+                holds: Vec::new(),
+                holds_locked: true,
+                holds_too_large: false,
+                bars: vec![UsageBar::new("Targets", 7, 10)],
+                min_check_interval_secs: 60,
+                retention_days: 90,
+                max_logo_size_label: "1 MB".into(),
+                max_api_tokens_per_user: 5,
+                api_writes_per_minute: 600,
+                api_reads_per_minute: 6000,
+                bulk_ops_per_minute: 30,
+                test_now_per_minute: 60,
+                check_now_per_minute: 60,
+            }
+            .render()
+            .expect("render");
+            assert!(html.contains("held by plan"), "the count is not a secret");
+            assert!(
+                !html.contains("data-holds-form") && !html.contains("holds_form.js"),
+                "a sibling org's monitor names stay out of a non-owner's page"
+            );
+        }
+
         #[test]
         fn usage_page_renders_progress_bars_and_contact_link() {
             let html = UsagePage {
                 active_tab: super::super::TAB_USAGE,
                 plan_name: "Free".into(),
+                held_total: 0,
+                holds: Vec::new(),
+                holds_locked: false,
+                holds_too_large: false,
                 bars: vec![
                     UsageBar::new("Targets", 7, 10),
                     UsageBar::new("Members", 1, i32::MAX),

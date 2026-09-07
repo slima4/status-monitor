@@ -2512,6 +2512,13 @@
         background: var(--theme-surface-sunk);
         color: var(--theme-text);
     }
+    /* A page the plan stopped covering. Not `--disabled`: draft is the
+       customer's own choice and held is not, and the card's foot tells them
+       which state it returns to. */
+    .status-badge--held {
+        background: var(--theme-state-bad-bg);
+        color: var(--theme-state-bad-fg-strong);
+    }
     .status-badge--tag {
         background: var(--theme-surface-sunk);
         color: var(--theme-text);
@@ -4754,7 +4761,9 @@
     /* Named, not positional: a tenth column would stop the actions cell
        matching `:last-child` and drag the row menu back under the dim. */
     .monitors-row[data-paused="true"] > *:not(.monitors-row__actions) > *,
-    .monitors-row[data-paused="true"] .monitors-menu__btn { opacity: var(--sm-monitors-row-paused-opacity); }
+    .monitors-row[data-held="true"] > *:not(.monitors-row__actions) > *,
+    .monitors-row[data-paused="true"] .monitors-menu__btn,
+    .monitors-row[data-held="true"] .monitors-menu__btn { opacity: var(--sm-monitors-row-paused-opacity); }
     .monitors-row[data-paused="true"] .monitors-menu__btn:hover,
     .monitors-row[data-paused="true"] .monitors-menu__btn:focus-visible,
     .monitors-row[data-paused="true"] .monitors-menu[data-open="true"] .monitors-menu__btn { opacity: 1; }
@@ -4868,6 +4877,62 @@
         color: var(--theme-state-warn-fg-strong);
         letter-spacing: 0.05em;
         border: 1px solid var(--theme-state-warn-line-soft);
+    }
+
+    /* The keep picker on /settings/usage. Its own section head rather than
+       .form-legend: that one numbers its sections for a walk-through form, and
+       a counted step is meaningless on two independent budgets. */
+    .holds-legend {
+        @apply mb-2 flex w-full items-center gap-2.5 font-mono;
+        font-size: 0.8125rem;
+        color: var(--theme-text-muted);
+    }
+    .holds-legend::after {
+        content: "";
+        @apply h-px flex-1;
+        background: var(--theme-line);
+    }
+
+    /* More ticked than the plan seats. Under is not an error: keeping fewer
+       is a choice the reconcile honours. */
+    .holds-count--over { color: var(--theme-state-bad-fg-strong); }
+
+    /* Scrolls rather than growing without bound: an account can hold hundreds
+       of rows, and the panel sits above the policy cards. Held rows sort
+       first, so what the customer came to read is never below the fold. */
+    .holds-list {
+        @apply flex max-h-72 flex-col gap-px overflow-y-auto rounded;
+        border: 1px solid var(--theme-line);
+        background: var(--theme-surface-sunk);
+    }
+
+    .holds-item {
+        @apply flex cursor-pointer items-center gap-2 px-3 py-1.5 font-mono text-xs;
+        background: var(--theme-surface-elev);
+        color: var(--theme-text);
+    }
+
+    .holds-item__name {
+        @apply min-w-0 flex-1 truncate;
+    }
+
+    /* A held row in the picker keeps full-strength text: it is the one the
+       customer most needs to read. The chip carries the state; dimming the
+       name as well would bury the row the panel exists to show. */
+
+    /* A monitor the plan stopped covering. Same shape as `.flapping-chip`, in
+       the neutral-bad family rather than warn: flapping is a monitor
+       misbehaving, a hold is us not running it, and the two must not read as
+       the same condition at a glance. */
+    .monitors-row[data-held="true"] .held-chip { opacity: 1; }
+
+    .held-chip {
+        @apply inline-flex items-center rounded font-mono text-[9.5px] font-medium uppercase;
+        padding: 1px 5px;
+        background: var(--theme-state-bad-bg);
+        color: var(--theme-state-bad-fg-strong);
+        letter-spacing: 0.05em;
+        border: 1px solid var(--theme-state-bad-line-soft);
     }
 
     .monitors-tag {

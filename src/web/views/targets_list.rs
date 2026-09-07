@@ -87,6 +87,10 @@ pub struct MonitorRow {
     pub managed_by: Option<&'static str>,
     /// Failing and recovering often enough that its alerts are being held.
     pub flapping: bool,
+    /// The plan no longer covers this monitor, so nothing is probing it. Shown
+    /// rather than hidden: the row is still the customer's, and a monitor that
+    /// silently vanished from the list would read as data loss.
+    pub plan_held: bool,
 }
 
 pub struct OwnerView {
@@ -532,6 +536,11 @@ fn build_row(
         },
         _ => "",
     };
+    // A held monitor is not being probed, so whatever it last reported is a
+    // claim about the past. It falls back to the same "no status" the code
+    // already models for a monitor with no samples, which keeps a green dot
+    // off a row nothing is watching.
+    let class = status_while_watched(class, t.plan_hold_at.is_some());
     let last_status = class;
     let status_class = class;
 
@@ -575,6 +584,7 @@ fn build_row(
         owner,
         managed_by: t.write_source.managed_label(),
         flapping: flapping.contains(&t.id),
+        plan_held: t.plan_hold_at.is_some(),
     }
 }
 
@@ -626,6 +636,14 @@ fn avg_uptime_label(rows: &[MonitorRow]) -> String {
     } else {
         format!("{:.2}%", sum / n as f64)
     }
+}
+
+/// A held monitor is not being probed, so whatever it last reported is a claim
+/// about the past. It falls back to the same "no status" already modelled for a
+/// monitor with no samples, which is what keeps a green dot off a row nothing is
+/// watching, and out of the up filter that would count it as fine.
+fn status_while_watched(class: &'static str, held: bool) -> &'static str {
+    if held { "" } else { class }
 }
 
 fn worst_of(acc: &'static str, next: &'static str) -> &'static str {
@@ -736,7 +754,19 @@ mod tests {
             owner: None,
             managed_by: None,
             flapping: false,
+            plan_held: false,
         }
+    }
+
+    #[test]
+    fn a_held_monitor_reports_no_status_at_all() {
+        assert_eq!(
+            status_while_watched("up", true),
+            "",
+            "nothing has probed it since the hold, so green is a claim about last week"
+        );
+        assert_eq!(status_while_watched("down", true), "");
+        assert_eq!(status_while_watched("up", false), "up");
     }
 
     #[test]
@@ -900,5 +930,65 @@ mod tests {
         let html = page.render().unwrap();
         assert!(html.contains("flapping-chip"));
         assert!(html.contains(">flapping<"));
+    }
+
+    #[test]
+    fn a_held_row_says_so_instead_of_disappearing() {
+        let mut r = row("api", Some("API & Web"), "up", true);
+        r.plan_held = true;
+        // What build_row produces for a held monitor: no status, so no dot and
+        // no answer to the up filter.
+        r.status_class = "";
+        r.last_status = "";
+        let g = GroupBlock {
+            name: "API & Web".into(),
+            has_name: true,
+            total: 1,
+            worst_status: "up",
+            avg_uptime_label: "99.99%".into(),
+            rows: vec![r],
+        };
+        let page = ListPage {
+            active_tab: "targets",
+            groups: vec![g],
+            total: 1,
+            paused_total: 0,
+            type_chips: vec![],
+            owner_options: vec![],
+            group_options: vec![],
+            page_sizes: vec![],
+            query_suffix: String::new(),
+            has_more: false,
+            limit: 50,
+            offset: 0,
+            pager_prev: None,
+            pager_next: None,
+            q: String::new(),
+
+            tag: String::new(),
+            enabled: None,
+            group: String::new(),
+            owner: None,
+            kind: String::new(),
+            sort: "recent",
+            onboarding: false,
+        };
+        let html = page.render().unwrap();
+        assert!(
+            html.contains("held-chip") && html.contains(">held<"),
+            "a held monitor stays on the list wearing its reason; dropping the row would read as data loss"
+        );
+        assert!(!html.contains("flapping-chip"), "held is not flapping");
+        // Nothing is probing it, so the last colour it wore is a claim about a
+        // week ago. An operator scanning the list must not read it as watched.
+        let row = &html[html.find("data-row-id").expect("row")..];
+        assert!(
+            row.contains(r#"data-held="true""#) && !row.contains(r#"data-status="up""#),
+            "a held monitor is neither up nor down, and must not answer the up filter"
+        );
+        assert!(
+            !row.contains("monitors-dot--up"),
+            "a green dot on an unprobed monitor is the whole failure"
+        );
     }
 }

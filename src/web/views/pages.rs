@@ -37,6 +37,10 @@ pub struct PageRow {
     /// Absolute live URL, or empty in path mode.
     pub url: String,
     pub subscriber_count: i64,
+    /// The plan no longer covers this page, so its URL 404s and its
+    /// subscribers hear nothing. `enabled` is untouched underneath, which is
+    /// what it returns to.
+    pub plan_held: bool,
 }
 
 #[derive(Template, WebTemplate)]
@@ -78,6 +82,7 @@ async fn build_rows(state: &AppState, org: OrgId) -> WebResult<Vec<PageRow>> {
                 name: p.name,
                 slug: p.slug,
                 enabled: p.enabled,
+                plan_held: p.plan_hold_at.is_some(),
                 url,
                 subscriber_count,
             }
@@ -614,6 +619,7 @@ mod tests {
             enabled: true,
             url: format!("https://{name}.uptimepage.dev"),
             subscriber_count: 1,
+            plan_held: false,
         }
     }
 

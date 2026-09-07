@@ -240,7 +240,7 @@ async fn the_customers_pick_survives_a_reconcile() {
         ..plan_for(&pool, org).await
     };
     // The newest monitor is the one that matters; default order would hold it.
-    uptimepage::quotas::holds::set_keep(&pool, account, &[ids[4]])
+    uptimepage::quotas::holds::set_keep(&pool, account, Some(&[ids[4]]), None)
         .await
         .expect("set keep");
     reconcile_account(&pool, account, &plan, None)
@@ -251,7 +251,75 @@ async fn the_customers_pick_survives_a_reconcile() {
         !held.contains(&ids[4]),
         "a named monitor keeps its slot even though it is the newest"
     );
-    assert_eq!(held.len(), 3);
+    assert_eq!(
+        held.len(),
+        4,
+        "one seat of the two goes unused: naming one monitor is also declining \
+         the rest, and the spare is not refilled from them"
+    );
+    cleanup(&pool, org, user).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_pick_smaller_than_the_plan_leaves_the_spare_seats_empty() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (account, org, ids, user) = account_with_targets(&pool, "free", 5).await;
+    let plan = Plan {
+        max_targets: 4,
+        ..plan_for(&pool, org).await
+    };
+    // Four seats, two named. Refilling the other two from the rows the
+    // customer just gave up is what makes un-picking a monitor do nothing.
+    uptimepage::quotas::holds::set_keep(&pool, account, Some(&[ids[0], ids[1]]), None)
+        .await
+        .expect("set keep");
+    reconcile_account(&pool, account, &plan, None)
+        .await
+        .expect("reconcile");
+    let mut held = held_ids(&pool, org).await;
+    held.sort();
+    let mut want = vec![ids[2], ids[3], ids[4]];
+    want.sort();
+    assert_eq!(held, want, "everything the pick left out is held");
+    cleanup(&pool, org, user).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_plan_that_covers_everything_releases_what_the_pick_left_out() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (account, org, ids, user) = account_with_targets(&pool, "free", 5).await;
+    let small = Plan {
+        max_targets: 4,
+        ..plan_for(&pool, org).await
+    };
+    uptimepage::quotas::holds::set_keep(&pool, account, Some(&[ids[0]]), None)
+        .await
+        .expect("set keep");
+    reconcile_account(&pool, account, &small, None)
+        .await
+        .expect("hold");
+    assert_eq!(held_ids(&pool, org).await.len(), 4);
+
+    // A hold is the plan's mechanism. Once the plan covers the whole pool
+    // there is nothing left for the pick to ration, and a customer who wants
+    // one monitor quiet inside their plan pauses it instead.
+    let big = Plan {
+        max_targets: 5,
+        ..plan_for(&pool, org).await
+    };
+    reconcile_account(&pool, account, &big, None)
+        .await
+        .expect("release");
+    assert!(
+        held_ids(&pool, org).await.is_empty(),
+        "the pick stops binding once no cap is exceeded"
+    );
     cleanup(&pool, org, user).await;
 }
 
@@ -277,6 +345,100 @@ async fn a_flow_cap_holds_flows_before_it_touches_ordinary_monitors() {
     let held = held_ids(&pool, org).await;
     assert_eq!(held, vec![f2], "only the newer flow is held");
     assert!(!held.contains(&ids[0]) && !held.contains(&ids[1]) && !held.contains(&f1));
+    cleanup(&pool, org, user).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_flow_shortage_does_not_hold_the_monitors_nobody_picked() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (account, org, ids, user) = account_with_targets(&pool, "free", 3).await;
+    let flows = [
+        add_target(&pool, org, "f0", 10, true).await,
+        add_target(&pool, org, "f1", 11, true).await,
+    ];
+    // Only the flow cap is breached. A pick made about monitors says nothing
+    // about a shortage in a cap it was never shown.
+    uptimepage::quotas::holds::set_keep(&pool, account, Some(&[ids[0], flows[0]]), None)
+        .await
+        .expect("set keep");
+    let plan = Plan {
+        max_targets: 50,
+        max_flow_checks: 1,
+        ..plan_for(&pool, org).await
+    };
+    reconcile_account(&pool, account, &plan, None)
+        .await
+        .expect("reconcile");
+    assert_eq!(
+        held_ids(&pool, org).await,
+        vec![flows[1]],
+        "the flow cap holds a flow; the ordinary monitors are inside their own cap"
+    );
+    cleanup(&pool, org, user).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn a_pick_is_forgotten_once_the_plan_covers_everything() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (account, org, ids, user) = account_with_targets(&pool, "free", 4).await;
+    uptimepage::quotas::holds::set_keep(&pool, account, Some(&[ids[0]]), None)
+        .await
+        .expect("set keep");
+    let small = Plan {
+        max_targets: 2,
+        ..plan_for(&pool, org).await
+    };
+    reconcile_account(&pool, account, &small, None)
+        .await
+        .expect("hold");
+
+    let big = Plan {
+        max_targets: 10,
+        ..plan_for(&pool, org).await
+    };
+    reconcile_account(&pool, account, &big, None)
+        .await
+        .expect("release");
+    let (kept,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1 AND plan_keep")
+            .bind(org.0)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(
+        kept, 0,
+        "a spent pick would arm the next shortage against rows nobody declined"
+    );
+    cleanup(&pool, org, user).await;
+}
+
+#[tokio::test]
+#[ignore = "requires DATABASE_URL"]
+async fn naming_no_status_pages_leaves_the_monitor_pick_alone() {
+    let Some(pool) = pg_pool_from_env().await else {
+        return;
+    };
+    let (account, org, ids, user) = account_with_targets(&pool, "free", 3).await;
+    uptimepage::quotas::holds::set_keep(&pool, account, Some(&[ids[2]]), None)
+        .await
+        .expect("set monitors");
+    // A picker showing only status pages saves only status pages.
+    uptimepage::quotas::holds::set_keep(&pool, account, None, Some(&[]))
+        .await
+        .expect("set pages");
+    let (kept,): (i64,) =
+        sqlx::query_as("SELECT count(*) FROM targets WHERE org_id = $1 AND plan_keep")
+            .bind(org.0)
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+    assert_eq!(kept, 1, "the monitor pick was not part of that request");
     cleanup(&pool, org, user).await;
 }
 
@@ -498,7 +660,7 @@ async fn the_customers_pick_survives_the_next_sweep() {
         max_targets: 2,
         ..plan_for(&pool, org).await
     };
-    uptimepage::quotas::holds::set_keep(&pool, account, &[ids[4]])
+    uptimepage::quotas::holds::set_keep(&pool, account, Some(&[ids[4]]), None)
         .await
         .expect("set keep");
     reconcile_account(&pool, account, &plan, None)
@@ -673,7 +835,7 @@ async fn an_org_owner_who_is_not_the_account_owner_cannot_touch_the_pool() {
                 .uri("/api/v1/account/holds")
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    serde_json::json!({ "keep": [secret] }).to_string(),
+                    serde_json::json!({ "keep_monitors": [secret] }).to_string(),
                 ))
                 .unwrap(),
         )
