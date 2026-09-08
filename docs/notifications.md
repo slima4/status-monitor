@@ -18,7 +18,7 @@ The point of the split is blast radius. A noisy marketing-site monitor and your 
 
 | Type | What you provide | Notes |
 |---|---|---|
-| Slack, Discord, Teams, Google Chat | An incoming webhook URL | Discord, Teams and Google Chat URLs are host-checked, so a wrong-vendor paste is refused up front. A Slack URL is only checked for `https`, so verify it with a test send. Slack and Discord also take an optional group ping, see below |
+| Slack, Discord, Teams, Google Chat, Mattermost | An incoming webhook URL | Discord, Teams and Google Chat URLs are host-checked, so a wrong-vendor paste is refused up front. A Slack URL is only checked for `https`, so verify it with a test send. Mattermost has no single host to check — Cloud and on-prem installs each serve their own — so its URL is checked for `https` and for the `/hooks/<key>` path every incoming webhook ends in, and a URL copied from the REST API is refused. Slack, Discord and Mattermost also take an optional group ping, see below |
 | Telegram | One-tap link, or your own bot token and chat id | The one-tap flow is available where the platform runs a central bot |
 | WhatsApp | One-tap link, or Business Cloud API credentials and a template | Bring-your-own needs an approved one-parameter template |
 | SMS | Credentials for your own gateway: Twilio, Vonage, Telnyx, Plivo, or Sinch | One message per alert, trimmed to bound per-segment cost |
@@ -44,19 +44,21 @@ Two types need a second step:
 
 Secrets are sealed at rest and never shown again. On edit they stay masked behind a replace toggle, and leaving the toggle off keeps the stored value untouched.
 
-### Pinging a group in Slack or Discord
+### Pinging a group in Slack, Discord or Mattermost
 
 A message in a busy channel is easy to miss, so a Slack channel takes an optional **ping on alert** that leads the text: `@here`, `@channel`, a user-group id (`S…`) or a member id (`U…`, or `W…` on Enterprise Grid), space or comma separated, up to five. A plain `@sre` handle is inert in a webhook message, which is why the id is what the field wants; you find a group's id on its page under **Slack → People → User groups**, and a member's under their profile's **Copy member ID**. Only the events that need a human carry the ping: opened, reopened, escalated, and monitoring interrupted. Recovery and resumed messages stay silent, and a **test now** send drops `@here`/`@channel` so checking your config does not wake the room — a group or member ping still rides along, so a wrong id shows up as dead text on the test.
 
 Discord takes the same field with its own tokens: `@everyone`, `@here`, a role id (`&123…`) or a member id (`123…`), which you copy after turning on **Advanced → Developer Mode** in Discord. Discord copies a role id and a member id in the same shape, so a role's has to be typed with the leading `&`; without it the message pings a member that does not exist, which shows up as dead text. Discord resolves no mention inside a card, so the ping rides the line above it, and the message allows exactly the roles and members you listed. Nothing else in it can ping, whatever a monitor happens to be named.
 
+Mattermost is the simplest of the three, because it resolves a plain handle: `@channel`, `@here`, `@all`, or a username or group name, up to five. No ids to copy. Handles there are lowercase, so the field is lowercased on the way in and a pasted `@Bob` still reaches Bob. The trade is that Mattermost only resolves the name when the alert lands, so a handle belonging to nobody cannot be caught when you save it — the ping is simply absent from the message. The same lifecycle applies: recovery stays silent, and a **test now** send drops `@channel`/`@here`/`@all`. Nothing a monitor is named can ping the channel either, whatever it contains.
+
 Changing the ping goes through the same replace-config toggle as the webhook URL, so re-enter the webhook when you edit it.
 
 ### What a chat alert looks like
 
-Slack, Discord and Teams get a laid-out card rather than one line of text. The heading names the monitor with a colour or emoji for how bad it is, and under it sit the state, the start time rendered in each reader's own timezone, and, for a monitor watched from several regions, which ones are down and which are still up. An open incident also carries the error the check saw, and one you declared by hand says so instead of claiming a detection. A resolved message reports how long the incident ran, and an interrupted one how long it has been quiet. Wherever the app knows its own public address, which self-hosters set in config, the card carries a link straight to the incident.
+Slack, Discord, Teams and Mattermost get a laid-out card rather than one line of text. The heading names the monitor with a colour or emoji for how bad it is, and under it sit the state, the start time rendered in each reader's own timezone, and, for a monitor watched from several regions, which ones are down and which are still up. An open incident also carries the error the check saw, and one you declared by hand says so instead of claiming a detection. A resolved message reports how long the incident ran, and an interrupted one how long it has been quiet. Wherever the app knows its own public address, which self-hosters set in config, the card carries a link straight to the incident.
 
-Each of the three renders that same card in its own format: Block Kit on Slack, an embed with a coloured bar on Discord, an Adaptive Card on Teams. The layout is fixed, so there is nothing to configure. On Slack the one-line version still rides along as the text a phone shows in its notification preview. Google Chat still gets plain text.
+Each renders that same card in its own format: Block Kit on Slack, an embed with a coloured bar on Discord, an Adaptive Card on Teams, a message attachment with a coloured bar on Mattermost. The layout is fixed, so there is nothing to configure. On Slack the one-line version still rides along as the text a phone shows in its notification preview. Google Chat still gets plain text.
 
 ### Delegating the connect step
 

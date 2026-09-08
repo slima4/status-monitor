@@ -58,10 +58,11 @@ pub use monitor_share::{
 };
 pub use notification_channel::{
     ChannelConfig, ChannelKind, DiscordConfig, DiscordMention, EmailConfig, GoogleChatConfig,
-    GotifyConfig, MAX_CHANNEL_NAME_LEN, MsTeamsConfig, NewNotificationChannel, NotificationChannel,
-    NotificationChannelUpdate, NtfyConfig, PagerDutyConfig, PushoverConfig, SlackConfig, SmsConfig,
-    TelegramAppConfig, TelegramConfig, TransportConfig, WebhookConfig, WhatsAppAppConfig,
-    WhatsAppConfig, failure_run_reached, matches_folded, tag_rule_matches, validate_channel_name,
+    GotifyConfig, MAX_CHANNEL_NAME_LEN, MattermostConfig, MsTeamsConfig, NewNotificationChannel,
+    NotificationChannel, NotificationChannelUpdate, NtfyConfig, PagerDutyConfig, PushoverConfig,
+    SlackConfig, SmsConfig, TelegramAppConfig, TelegramConfig, TransportConfig, WebhookConfig,
+    WhatsAppAppConfig, WhatsAppConfig, failure_run_reached, matches_folded, tag_rule_matches,
+    validate_channel_name,
 };
 pub use on_call::{
     NewOnCallLayer, NewOnCallOverride, NewOnCallParticipant, NewOnCallSchedule, OnCallLayer,

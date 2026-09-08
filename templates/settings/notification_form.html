@@ -55,6 +55,7 @@
       <div class="check-type-cards">
         {% call reg::chooser_card("data-kind-card", "kind", "msteams", form.kind == "msteams", "teams", "Workflows webhook", icon="msteams") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "google_chat", form.kind == "google_chat", "google chat", "space webhook", icon="google-chat") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "mattermost", form.kind == "mattermost", "mattermost", "incoming webhook", icon="mattermost") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "pagerduty", form.kind == "pagerduty", "pagerduty", "Events API v2", icon="pagerduty") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "pushover", form.kind == "pushover", "pushover", "phone push", icon="pushover") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "ntfy", form.kind == "ntfy", "ntfy", "topic push", icon="ntfy") %}{% endcall %}
@@ -363,6 +364,44 @@
             </label>
           </div>
         </details>
+      </div>
+
+      <div data-variant="mattermost" class="space-y-4{% if form.kind != "mattermost" %} hidden{% endif %}">
+        <p class="text-sm text-muted">
+          Alerts post to a
+          <a href="https://mattermost.com/" target="_blank" rel="noopener"
+             class="underline decoration-dotted hover:text-body">Mattermost</a>
+          channel, on Cloud or your own server. Create a webhook under
+          <span class="font-mono">Integrations &rarr; Incoming Webhook</span>
+          and pick the channel it posts to.
+        </p>
+        <label class="field-outline">
+          <span class="field-outline__label">Mattermost incoming webhook URL</span>
+          <input name="mattermost_webhook_url" type="url" value="{{ form.config.mattermost_webhook_url }}"
+                 placeholder="https://mattermost.example.com/hooks/xxxxxxxxxxxxxxxxxxxxxxxxxx"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Ends in <span class="font-mono">/hooks/&lt;key&gt;</span>, so a URL copied from the
+            REST API is refused. A subpath install behind a reverse proxy is fine. Must be
+            reachable from the public internet, and the key is a secret &mdash; anyone holding it
+            can post to your server.
+          </span>
+        </label>
+        <label class="field-outline">
+          <span class="field-outline__label">Ping on alert (optional)</span>
+          <input name="mattermost_mention" type="text" value="{{ form.config.mattermost_mention }}"
+                 placeholder="@here oncall-sre"
+                 autocomplete="off" spellcheck="false" class="w-full field font-mono">
+          <span class="mt-1 block text-xs text-muted">
+            Leads the message so it wakes someone: <code>@channel</code>, <code>@here</code>,
+            <code>@all</code>, or a username or group name. Space or comma separated, up to 5,
+            lowercased on the way in. Mattermost resolves the name when the alert lands, so a
+            handle that belongs to nobody is only caught then. Recovery messages never ping, and
+            a test send drops <code>@channel</code>/<code>@here</code>/<code>@all</code> so trying
+            your config out stays quiet. Changing this later goes through
+            <em>replace transport config</em>, so keep the webhook URL to hand.
+          </span>
+        </label>
       </div>
 
       <div data-variant="gotify" class="space-y-5{% if form.kind != "gotify" %} hidden{% endif %}">

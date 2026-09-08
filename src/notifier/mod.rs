@@ -4,6 +4,7 @@ pub mod email;
 pub mod event;
 pub mod google_chat;
 pub mod gotify;
+pub mod mattermost;
 pub mod msteams;
 pub mod ntfy;
 pub mod pagerduty;
@@ -26,6 +27,7 @@ use crate::notifier::email::EmailNotifier;
 use crate::notifier::event::IncidentNotice;
 use crate::notifier::google_chat::GoogleChatNotifier;
 use crate::notifier::gotify::GotifyNotifier;
+use crate::notifier::mattermost::MattermostNotifier;
 use crate::notifier::msteams::MsTeamsNotifier;
 use crate::notifier::ntfy::NtfyNotifier;
 use crate::notifier::pagerduty::PagerDutyNotifier;
@@ -210,6 +212,11 @@ pub fn build_notifier(
             c.emergency,
         )) as Arc<dyn Notifier>,
         ChannelConfig::Sms(c) => Arc::new(SmsNotifier::new(http.clone(), c)?) as Arc<dyn Notifier>,
+        ChannelConfig::Mattermost(c) => Arc::new(MattermostNotifier::new(
+            http.clone(),
+            parse(&c.webhook_url)?,
+            c.mention_markup(),
+        )) as Arc<dyn Notifier>,
     })
 }
 

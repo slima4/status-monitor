@@ -110,8 +110,8 @@ const FAQS: &[(&str, &str)] = &[
     ),
     (
         "Where do alerts come from?",
-        "Slack, Discord, Teams, Telegram, email, PagerDuty, ntfy, Pushover, \
-         Gotify, WhatsApp, or any HTTPS webhook. Each monitor binds its own channels, so \
+        "Slack, Discord, Teams, Mattermost, Telegram, email, PagerDuty, ntfy, \
+         Pushover, Gotify, WhatsApp, or any HTTPS webhook. Each monitor binds its own channels, so \
          a marketing-site flap doesn’t page on-call.",
     ),
     (

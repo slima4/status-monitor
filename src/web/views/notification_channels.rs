@@ -97,6 +97,8 @@ pub struct ConfigFields {
     pub ntfy_access_token: String,
     pub gotify_server_url: String,
     pub gotify_token: String,
+    pub mattermost_webhook_url: String,
+    pub mattermost_mention: String,
     pub pushover_token: String,
     pub pushover_user: String,
     pub pushover_device: String,
@@ -151,6 +153,8 @@ impl Default for ConfigFields {
             ntfy_access_token: String::new(),
             gotify_server_url: String::new(),
             gotify_token: String::new(),
+            mattermost_webhook_url: String::new(),
+            mattermost_mention: String::new(),
             pushover_token: String::new(),
             pushover_user: String::new(),
             pushover_device: String::new(),
@@ -542,6 +546,10 @@ fn form_from_channel(c: NotificationChannel) -> ChannelFormModel {
             config.ntfy_server_url = c.server_url;
             config.ntfy_topic = c.topic;
             config.ntfy_access_token = c.access_token.unwrap_or_default();
+        }
+        ChannelConfig::Mattermost(c) => {
+            config.mattermost_webhook_url = c.webhook_url;
+            config.mattermost_mention = c.mention.unwrap_or_default();
         }
         ChannelConfig::Gotify(c) => {
             config.gotify_server_url = c.server_url;

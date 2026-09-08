@@ -73,7 +73,7 @@ Embed your own with the snippet in **Settings → Pages → your page → Badge*
 |---|---|
 | **Checks** | HTTP, TCP, ICMP ping, heartbeat (inbound dead-man's-switch), DNS, TLS-cert expiry, domain expiry, browser login flow with per-step timings — per-host circuit breaking, designed for ~50k concurrent in-flight |
 | **Public status page** | HTML + JSON + RSS, per-component opt-in, incident narration, maintenance windows, email + webhook subscribers |
-| **Alerting** | Slack, PagerDuty, Discord, Microsoft Teams, Google Chat, Telegram, WhatsApp, SMS, email, webhook, ntfy, Gotify, Pushover — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
+| **Alerting** | Slack, PagerDuty, Discord, Microsoft Teams, Google Chat, Mattermost, Telegram, WhatsApp, SMS, email, webhook, ntfy, Gotify, Pushover — per-org channels, sealed secrets, fire-once + recovery, repeat until acknowledged |
 | **Incidents** | Internal incident state ⊥ public phase, acknowledge to silence paging, per-monitor reminder cadence |
 | **Multi-region** | Regional probe agents, per-region views, run your own agent anywhere |
 | **Automation** | REST API, scoped API tokens, Terraform provider, MCP server for LLM clients |

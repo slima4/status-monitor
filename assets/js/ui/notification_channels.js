@@ -214,6 +214,7 @@
             ["email_to", trimmed],
             ["ntfy_topic", trimmed],
             ["gotify_server_url", hostName],
+            ["mattermost_webhook_url", hostName],
             ["whatsapp_to", trimmed],
             ["sms_to", trimmed],
         ];
@@ -835,7 +836,7 @@
     function buildConfig() {
         const data = new FormData(form);
         const kind = currentKind();
-        if (["slack", "discord", "msteams", "google_chat"].includes(kind)) {
+        if (["slack", "discord", "msteams", "google_chat", "mattermost"].includes(kind)) {
             const config = {
                 type: kind,
                 webhook_url: (data.get(`${kind}_webhook_url`) || "").trim(),

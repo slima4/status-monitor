@@ -165,6 +165,7 @@ pub(crate) fn channel_kind_icon(kind: crate::domain::ChannelKind) -> &'static st
         ChannelKind::Pushover => "pushover",
         ChannelKind::Ntfy => "ntfy",
         ChannelKind::Gotify => "gotify",
+        ChannelKind::Mattermost => "mattermost",
         ChannelKind::Sms => "sms",
         ChannelKind::Webhook => "webhook",
     }

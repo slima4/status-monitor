@@ -361,6 +361,30 @@ async fn gotify_round_trips_with_token_masked_and_server_visible() {
 }
 
 #[tokio::test]
+async fn mattermost_round_trips_with_the_hook_url_masked_and_the_ping_visible() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-mattermost",
+            "config": {
+                "type": "mattermost",
+                "webhook_url": "https://mm.example.com/hooks/zzMMSECRETKEYzz",
+                "mention": "@Here, OnCall-SRE"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "mattermost");
+    assert_eq!(created["config"]["webhook_url"], "***");
+    assert_eq!(created["config"]["mention"], "@here, oncall-sre");
+    assert!(!created.to_string().contains("zzMMSECRETKEYzz"));
+}
+
+#[tokio::test]
 async fn pushover_round_trips_with_both_keys_masked() {
     let app = app();
     let (st, created) = send(
@@ -443,6 +467,18 @@ async fn paging_kinds_reject_malformed_configs() {
         (
             "gotify-no-token",
             json!({ "type": "gotify", "server_url": "https://push.example.com", "token": "" }),
+        ),
+        (
+            "mm-plain-http",
+            json!({ "type": "mattermost", "webhook_url": "http://mm.internal/hooks/abc" }),
+        ),
+        (
+            "mm-rest-api-url",
+            json!({ "type": "mattermost", "webhook_url": "https://mm.example.com/api/v4/posts" }),
+        ),
+        (
+            "mm-unpingable-mention",
+            json!({ "type": "mattermost", "webhook_url": "https://mm.example.com/hooks/abc", "mention": "@ops team!" }),
         ),
         (
             "po-bad-user",

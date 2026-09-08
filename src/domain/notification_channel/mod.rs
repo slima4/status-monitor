@@ -23,6 +23,7 @@ mod discord;
 mod email;
 mod google_chat;
 mod gotify;
+mod mattermost;
 mod mention;
 mod msteams;
 mod ntfy;
@@ -41,6 +42,7 @@ pub use discord::{DiscordConfig, DiscordMention};
 pub use email::EmailConfig;
 pub use google_chat::GoogleChatConfig;
 pub use gotify::GotifyConfig;
+pub use mattermost::MattermostConfig;
 pub use msteams::MsTeamsConfig;
 pub use ntfy::NtfyConfig;
 pub use pagerduty::PagerDutyConfig;
@@ -83,6 +85,7 @@ pub enum ChannelKind {
     Gotify,
     Pushover,
     Sms,
+    Mattermost,
 }
 
 impl ChannelKind {
@@ -105,6 +108,7 @@ impl ChannelKind {
         Self::Gotify,
         Self::Pushover,
         Self::Sms,
+        Self::Mattermost,
     ];
 
     /// Stable string used in the Postgres `kind` CHECK constraint and the
@@ -126,6 +130,7 @@ impl ChannelKind {
             Self::Gotify => "gotify",
             Self::Pushover => "pushover",
             Self::Sms => "sms",
+            Self::Mattermost => "mattermost",
         }
     }
 }
@@ -156,6 +161,7 @@ pub enum ChannelConfig {
     Gotify(GotifyConfig),
     Pushover(PushoverConfig),
     Sms(SmsConfig),
+    Mattermost(MattermostConfig),
 }
 
 /// Apply `$body` to the inner [`TransportConfig`] of any variant. The one
@@ -178,6 +184,7 @@ macro_rules! with_transport {
             ChannelConfig::Gotify($c) => $body,
             ChannelConfig::Pushover($c) => $body,
             ChannelConfig::Sms($c) => $body,
+            ChannelConfig::Mattermost($c) => $body,
         }
     };
 }
@@ -402,6 +409,8 @@ mod tests {
             r#"{"type":"ntfy","server_url":"https://ntfy.sh","topic":"uptime-alerts"}"#,
             r#"{"type":"ntfy","server_url":"https://ntfy.example.com","topic":"ops","access_token":"tk_x"}"#,
             r#"{"type":"gotify","server_url":"https://push.example.com","token":"AbCdEfGhIjKlMnO"}"#,
+            r#"{"type":"mattermost","webhook_url":"https://mm.example.com/hooks/abc"}"#,
+            r#"{"type":"mattermost","webhook_url":"https://mm.example.com/hooks/abc","mention":"@here"}"#,
             r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG"}"#,
             r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG","device":"droid2"}"#,
             r#"{"type":"sms","provider":"twilio","to":"+15551234567","from":"+15557654321","account_sid":"AC0123456789ABCDEF0123456789ABCDEF","auth_token":"tok"}"#,
@@ -490,6 +499,10 @@ mod tests {
                 from: "+15557654321".into(),
                 account_sid: "AC0123456789ABCDEF0123456789ABCDEF".into(),
                 auth_token: "tok".into(),
+            }),
+            ChannelConfig::Mattermost(MattermostConfig {
+                webhook_url: "https://mm.example.com/hooks/abc".into(),
+                mention: None,
             }),
         ];
         assert_eq!(configs.len(), ChannelKind::ALL.len());
@@ -930,6 +943,62 @@ mod tests {
         assert!(bad(|g| g.token = "x".repeat(201)).is_err());
         // A subpath install is normal behind a reverse proxy.
         assert!(bad(|g| g.server_url = "https://push.example.com/gotify".into()).is_ok());
+    }
+
+    #[test]
+    fn mattermost_masks_the_hook_url_and_pins_the_hooks_path() {
+        let mut c = ChannelConfig::Mattermost(MattermostConfig {
+            webhook_url: "https://mm.example.com/hooks/abc123".into(),
+            mention: Some("@here".into()),
+        });
+        assert!(c.validate().is_ok());
+        assert_eq!(c.abuse_url(), Some("https://mm.example.com/hooks/abc123"));
+        let r = c.redacted();
+        assert_eq!(r["webhook_url"], MASK);
+        assert_eq!(r["mention"], "@here");
+        c.redact_in_place();
+        assert!(c.has_redaction_sentinel());
+
+        let bad = |f: fn(&mut MattermostConfig)| {
+            let mut m = MattermostConfig {
+                webhook_url: "https://mm.example.com/hooks/abc123".into(),
+                mention: None,
+            };
+            f(&mut m);
+            ChannelConfig::Mattermost(m).validate()
+        };
+        assert!(bad(|m| m.webhook_url = "http://mm.example.com/hooks/abc".into()).is_err());
+        assert!(bad(|m| m.webhook_url = "https://mm.example.com/api/v4/posts".into()).is_err());
+        assert!(bad(|m| m.webhook_url = "https://mm.example.com/hooks/".into()).is_err());
+        assert!(bad(|m| m.mention = Some("@nobody!".into())).is_err());
+        assert!(bad(|m| m.mention = Some("Upper".into())).is_err());
+        assert!(bad(|m| m.mention = Some("x".repeat(65))).is_err());
+        assert!(bad(|m| m.mention = Some("a b c d e f".into())).is_err());
+        assert!(bad(|m| m.mention = Some("9lives".into())).is_ok());
+        assert!(bad(|m| m.mention = Some("ab".into())).is_ok());
+        assert!(bad(|m| m.mention = Some("svc.monitoring.oncall.emea".into())).is_ok());
+        assert!(bad(|m| m.webhook_url = "https://co.test/mm/hooks/abc/".into()).is_ok());
+        assert!(bad(|m| m.mention = Some("@all, oncall-sre".into())).is_ok());
+    }
+
+    #[test]
+    fn a_mattermost_ping_is_lowercased_and_a_test_send_drops_the_broadcast() {
+        let mut c = ChannelConfig::Mattermost(MattermostConfig {
+            webhook_url: " https://mm.example.com/hooks/abc123 ".into(),
+            mention: Some("@Channel, OnCall-SRE".into()),
+        });
+        c.normalize();
+        assert!(c.validate().is_ok());
+        let ChannelConfig::Mattermost(m) = &c else {
+            panic!()
+        };
+        assert_eq!(m.webhook_url, "https://mm.example.com/hooks/abc123");
+        assert_eq!(m.mention_markup().as_deref(), Some("@channel @oncall-sre"));
+
+        let ChannelConfig::Mattermost(m) = &c.quieted_for_test() else {
+            panic!()
+        };
+        assert_eq!(m.mention_markup().as_deref(), Some("@oncall-sre"));
     }
 
     #[test]
