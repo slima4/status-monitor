@@ -1,9 +1,16 @@
 {# Shared console-register macros. #}
 
-{% macro chooser_card(data_attr, name, value, checked, label, desc, badge = "", badge_tone = "") %}
+{% macro chooser_card(data_attr, name, value, checked, label, desc, badge = "", badge_tone = "", icon = "") %}
 <label class="check-type-card" {{ data_attr }}>
   <input type="radio" name="{{ name }}" value="{{ value }}"{% if checked %} checked{% endif %} class="sr-only">
+  {% if icon != "" %}
+  <span class="check-type-card__head">
+    <svg class="check-type-card__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ci-{{ icon }}"></use></svg>
+    <span class="check-type-card__name">{{ label }}</span>
+  </span>
+  {% else %}
   <span class="check-type-card__name">{{ label }}</span>
+  {% endif %}
   <span class="check-type-card__desc">{{ desc }}</span>
   {% if badge != "" %}<span class="card-badge card-badge--{{ badge_tone }}">{{ badge }}</span>{% endif %}
 </label>

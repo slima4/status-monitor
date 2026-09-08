@@ -18,7 +18,7 @@
         <span class="inline-flex items-center gap-2"><a href="/settings/notifications/{{ c.id }}/edit" class="font-medium hover:underline decoration-dotted underline-offset-2">{{ c.name }}</a>{% if let Some(m) = c.managed_by %}<span class="managed-chip" title="Managed by {{ m }} — changes made here may be overwritten on the next apply">{{ m }}</span>{% endif %}</span>
       </td>
       <td class="px-4 py-2 align-top">
-        <span class="status-badge status-badge--tag">{{ c.kind }}</span>
+        <span class="status-badge status-badge--tag kind-badge"><svg class="kind-badge__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><use href="#ci-{{ c.icon }}"></use></svg>{{ c.kind }}</span>
       </td>
       <td class="px-4 py-2 align-top">
         {% if c.enabled %}

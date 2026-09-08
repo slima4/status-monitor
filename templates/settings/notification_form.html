@@ -40,34 +40,34 @@
       <legend class="panel-label">channel type</legend>
       {# Most-popular channels first; the rest sit below a divider. #}
       <div class="check-type-cards">
-        {% call reg::chooser_card("data-kind-card", "kind", "slack", form.kind == "slack", "slack", "incoming webhook") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "discord", form.kind == "discord", "discord", "channel webhook") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "email", form.kind == "email", "email", "verified address") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "slack", form.kind == "slack", "slack", "incoming webhook", icon="slack") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "discord", form.kind == "discord", "discord", "channel webhook", icon="discord") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "email", form.kind == "email", "email", "verified address", icon="email") %}{% endcall %}
         {% if form.offers_telegram_app() %}
-        {% call reg::chooser_card("data-kind-card", "kind", "telegram_app", form.kind == "telegram_app", "telegram", "one-tap chat link") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "telegram_app", form.kind == "telegram_app", "telegram", "one-tap chat link", icon="telegram") %}{% endcall %}
         {% else %}
-        {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token", icon="telegram") %}{% endcall %}
         {% endif %}
       </div>
 
       <div class="kind-divider" aria-hidden="true"></div>
 
       <div class="check-type-cards">
-        {% call reg::chooser_card("data-kind-card", "kind", "msteams", form.kind == "msteams", "teams", "Workflows webhook") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "google_chat", form.kind == "google_chat", "google chat", "space webhook") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "pagerduty", form.kind == "pagerduty", "pagerduty", "Events API v2") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "pushover", form.kind == "pushover", "pushover", "phone push") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "ntfy", form.kind == "ntfy", "ntfy", "topic push") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "gotify", form.kind == "gotify", "gotify", "self-hosted push") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "msteams", form.kind == "msteams", "teams", "Workflows webhook", icon="msteams") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "google_chat", form.kind == "google_chat", "google chat", "space webhook", icon="google-chat") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "pagerduty", form.kind == "pagerduty", "pagerduty", "Events API v2", icon="pagerduty") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "pushover", form.kind == "pushover", "pushover", "phone push", icon="pushover") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "ntfy", form.kind == "ntfy", "ntfy", "topic push", icon="ntfy") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "gotify", form.kind == "gotify", "gotify", "self-hosted push", icon="gotify") %}{% endcall %}
         {% if form.offers_whatsapp_app() %}
-        {% call reg::chooser_card("data-kind-card", "kind", "whatsapp_app", form.kind == "whatsapp_app", "whatsapp", "one-tap number link") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "whatsapp_app", form.kind == "whatsapp_app", "whatsapp", "one-tap number link", icon="whatsapp") %}{% endcall %}
         {% endif %}
         {% if form.offers_telegram_app() %}
-        {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "telegram", form.kind == "telegram", "telegram bot", "your own bot token", icon="telegram") %}{% endcall %}
         {% endif %}
-        {% call reg::chooser_card("data-kind-card", "kind", "whatsapp", form.kind == "whatsapp", "whatsapp", "Cloud API message") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "sms", form.kind == "sms", "sms", "Twilio · Vonage · Telnyx · Plivo · Sinch") %}{% endcall %}
-        {% call reg::chooser_card("data-kind-card", "kind", "webhook", form.kind == "webhook", "webhook", "POST to your endpoint") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "whatsapp", form.kind == "whatsapp", "whatsapp", "Cloud API message", icon="whatsapp") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "sms", form.kind == "sms", "sms", "Twilio · Vonage · Telnyx · Plivo · Sinch", icon="sms") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "webhook", form.kind == "webhook", "webhook", "POST to your endpoint", icon="webhook") %}{% endcall %}
       </div>
       {% if form.mode != "create" && form.kind != "telegram_app" && form.kind != "whatsapp_app" %}
       <p data-kind-locked-hint class="hidden font-mono text-xs text-quiet"># type locked — tick "Replace transport config" below to change it</p>

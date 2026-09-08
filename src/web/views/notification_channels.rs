@@ -39,6 +39,7 @@ pub struct ChannelRow {
     pub id: String,
     pub name: String,
     pub kind: &'static str,
+    pub icon: &'static str,
     pub enabled: bool,
     /// Email channel still awaiting address verification.
     pub unverified: bool,
@@ -313,6 +314,7 @@ pub async fn list_partial(
         .map(|c| ChannelRow {
             id: c.id.to_string(),
             kind: super::channel_kind_label(c.kind),
+            icon: super::channel_kind_icon(c.kind),
             enabled: c.enabled,
             unverified: c.awaiting_verification(),
             disabled_reason: c.disabled_reason.clone().unwrap_or_default(),
@@ -1198,6 +1200,7 @@ mod tests {
                 id: "abc".into(),
                 name: "Ops Slack".into(),
                 kind: "slack",
+                icon: "slack",
                 enabled: true,
                 unverified: false,
                 disabled_reason: String::new(),
@@ -1213,6 +1216,7 @@ mod tests {
         assert!(html.contains(r#"href="/settings/notifications/abc/edit""#));
         assert!(html.contains(r#"hx-post="/api/v1/notification-channels/abc/test""#));
         assert!(html.contains(r#"hx-delete="/api/v1/notification-channels/abc""#));
+        assert!(html.contains(r##"<use href="#ci-slack">"##));
     }
 
     /// A channel the platform turned off has to say so where an operator looks
@@ -1224,6 +1228,7 @@ mod tests {
                 id: "abc".into(),
                 name: "Ops Slack".into(),
                 kind: "slack",
+                icon: "slack",
                 enabled: false,
                 unverified: false,
                 disabled_reason: "unlinked from the Telegram side".into(),
@@ -1247,6 +1252,7 @@ mod tests {
                 id: "abc".into(),
                 name: "Ops Slack".into(),
                 kind: "slack",
+                icon: "slack",
                 enabled: true,
                 unverified: false,
                 disabled_reason: String::new(),

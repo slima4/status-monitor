@@ -149,6 +149,26 @@ pub(crate) fn channel_kind_label(kind: crate::domain::ChannelKind) -> &'static s
     }
 }
 
+/// Exhaustive so a new kind cannot ship naming a symbol that does not exist.
+pub(crate) fn channel_kind_icon(kind: crate::domain::ChannelKind) -> &'static str {
+    use crate::domain::ChannelKind;
+    match kind {
+        ChannelKind::Slack => "slack",
+        ChannelKind::Discord => "discord",
+        ChannelKind::Email => "email",
+        ChannelKind::Telegram | ChannelKind::TelegramApp => "telegram",
+        ChannelKind::WhatsApp | ChannelKind::WhatsAppApp => "whatsapp",
+        ChannelKind::MsTeams => "msteams",
+        ChannelKind::GoogleChat => "google-chat",
+        ChannelKind::PagerDuty => "pagerduty",
+        ChannelKind::Pushover => "pushover",
+        ChannelKind::Ntfy => "ntfy",
+        ChannelKind::Gotify => "gotify",
+        ChannelKind::Sms => "sms",
+        ChannelKind::Webhook => "webhook",
+    }
+}
+
 pub(crate) fn fmt_ts(t: DateTime<Utc>) -> String {
     t.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
@@ -216,6 +236,20 @@ impl fmt::Display for HumanDur {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The icon ids are plain strings the compiler cannot check against the
+    /// sprite, so a kind pointing at a missing symbol has to fail here.
+    #[test]
+    fn every_channel_kind_has_a_symbol_in_the_sprite() {
+        let sprite = include_str!("../../../templates/settings/_channel_icons.html");
+        for kind in crate::domain::ChannelKind::ALL {
+            let id = format!(r#"id="ci-{}""#, channel_kind_icon(*kind));
+            assert!(
+                sprite.contains(&id),
+                "{kind:?} names a missing symbol: {id}"
+            );
+        }
+    }
 
     #[test]
     fn humanize_duration_picks_largest_unit() {

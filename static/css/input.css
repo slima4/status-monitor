@@ -2523,6 +2523,12 @@
         background: var(--theme-surface-sunk);
         color: var(--theme-text);
     }
+    .kind-badge { @apply gap-1.5; }
+    .kind-badge__icon {
+        @apply size-3.5 shrink-0;
+        fill: currentColor;
+        color: var(--theme-text-muted);
+    }
 
     /* 90-day history strip; cells are direct <button> children. */
     .day-strip {
@@ -3274,6 +3280,7 @@
     /* Dim what is unavailable, not the badge that explains why. */
     .check-type-card--static:has(.card-badge) { opacity: 1; }
     .check-type-card--static:has(.card-badge) .check-type-card__name,
+    .check-type-card--static:has(.card-badge) .check-type-card__icon,
     .check-type-card--static:has(.card-badge) .check-type-card__desc { opacity: 0.5; }
     .check-type-card:has(input:checked),
     .check-type-card--on {
@@ -3296,6 +3303,16 @@
     button.check-type-card:focus-visible {
         outline: 1px dotted currentColor;
         outline-offset: -3px;
+    }
+    .check-type-card__head { @apply flex items-center gap-2; }
+    .check-type-card__icon {
+        @apply size-4 shrink-0;
+        fill: currentColor;
+        color: var(--theme-text-muted);
+    }
+    .check-type-card:has(input:checked) .check-type-card__icon,
+    .check-type-card--on .check-type-card__icon {
+        color: var(--theme-surface);
     }
     .check-type-card__name {
         @apply text-sm font-semibold;
