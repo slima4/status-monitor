@@ -52,7 +52,7 @@ How to tell this apart from real downtime:
 - Look at connect time on the checks that did succeed. If they connect in a couple of hundred milliseconds and the failures are hard timeouts, the path is being dropped rather than being slow.
 - Open the URL yourself, from a connection that is not a datacentre. If it answers there and times out from every region you assigned, the difference is who is asking, not whether the service is up.
 
-For an HTTP policy block, the durable fix is a small health endpoint that is exempt from browser challenges and authenticated with a secret request header. UptimePage can source that header from an [org secret](../variables.md), so the endpoint does not need to be open to everyone. A narrowly scoped WAF rule matching both the health path and the header is safer than weakening protection for the public site. For a network that refuses datacentre traffic before HTTP, point the monitor at an endpoint that will answer us or switch to a heartbeat monitor and have the system itself ping us.
+For an HTTP policy block, the durable fix is a small health endpoint that is exempt from browser challenges and authenticated with a secret request header. Uptimepage can source that header from an [org secret](../variables.md), so the endpoint does not need to be open to everyone. A narrowly scoped WAF rule matching both the health path and the header is safer than weakening protection for the public site. For a network that refuses datacentre traffic before HTTP, point the monitor at an endpoint that will answer us or switch to a heartbeat monitor and have the system itself ping us.
 
 ## Practical notes
 
