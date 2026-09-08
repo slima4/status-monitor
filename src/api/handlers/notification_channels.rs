@@ -1108,6 +1108,7 @@ async fn deliver_test(state: &AppState, config: &ChannelConfig) -> Result<()> {
         whatsapp,
         Some(&email),
         None,
+        None,
     )?;
     let notice = IncidentNotice {
         incident_id: Uuid::nil(),

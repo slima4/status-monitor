@@ -97,6 +97,18 @@ A channel only ever fails where something tries to page it, so one bound to quie
 
 Two more messages exist that are not incident alerts: **monitoring stopped** and **monitoring resumed**. They fire when every probe covering a monitor has gone silent longer than expected and when results start flowing again. They mean the service is unwatched, not that it is down: no incident opens, and the webhook payload carries the distinct reasons `nodata` and `dataresumed`. A platform-wide probe outage on our side is suppressed rather than fanned out as a flood of these.
 
+## Acknowledging from the notification
+
+A page on ntfy carries an **Acknowledge** button. One tap takes the incident, without leaving the notification: reminders stop and the escalation ladder halts. The notification clears only if the acknowledgement actually landed, so a tap that is refused stays on screen rather than telling you it worked. Tapping the notification itself still opens the incident. The incident stays open until someone resolves it or the monitor recovers. Pushover does the same through its own app — acknowledging an emergency-priority page there now acknowledges the incident here, which it did not do before, so a responder who took the page no longer keeps getting reminders about it. Acknowledging also cancels the emergency pages still repeating on any other Pushover channel bound to that incident.
+
+The link carries no login. Holding the notification is the whole proof, so the timeline records the acknowledgement as coming from a notification rather than crediting a member, and the person who acknowledged first stays the one on record even if someone else acknowledges afterwards. Each link is signed, works for one incident, and lapses after a week.
+
+It is also pinned to the outage it was sent for. If an incident resolves and then comes back, tapping an alert still sitting on a phone from the earlier round is refused: the outage running now is not the one that alert was about, and silencing it on the strength of an old page would be exactly the wrong outcome. The notification stays on screen, since the tap did nothing. Your phone shows a failed-request message rather than the reason, so open the alert to see whether it was superseded or something else went wrong; the page sent for the new round carries a button that works.
+
+That has a consequence worth knowing if you publish to an open ntfy topic: on ntfy.sh a topic's name is its only access control, so anyone subscribed to it can read your alerts *and* use the acknowledge link in them. Acknowledging never resolves or hides anything and it cannot close an incident, but there is no way to un-acknowledge one either, so on a shared instance prefer a protected topic with an access token. The topic the form generates for you is already unguessable.
+
+Gotify has no action buttons, so its notifications keep their one tap-through to the incident instead.
+
 Scheduled maintenance windows do **not** silence channel alerting. They repaint the public status page and notify status-page subscribers, but a monitor that fails during a window still opens an incident and still pages its channels. To stay quiet through planned work, disable the monitor or unbind its channels for the duration.
 
 ## On-call

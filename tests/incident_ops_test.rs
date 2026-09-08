@@ -295,7 +295,7 @@ async fn acknowledge_then_manual_resolve_pg() {
 
     let acked = updated(
         store
-            .acknowledge(org, id, Actor::User(user), Some("on it".into()))
+            .acknowledge(org, id, Actor::User(user), Some("on it".into()), None)
             .await
             .unwrap(),
     );
@@ -348,7 +348,7 @@ async fn reopen_after_resolve_clears_state_pg() {
     let (org, user, id) = seed(&pool, "increopen").await;
     let store = PgIncidentOpsStore::new(pool.clone());
     store
-        .acknowledge(org, id, Actor::User(user), None)
+        .acknowledge(org, id, Actor::User(user), None, None)
         .await
         .unwrap();
     store
@@ -381,7 +381,7 @@ async fn illegal_transition_is_reported_pg() {
         .unwrap();
     // Acknowledging a resolved incident is illegal (reopen first).
     let out = store
-        .acknowledge(org, id, Actor::User(user), None)
+        .acknowledge(org, id, Actor::User(user), None, None)
         .await
         .unwrap();
     assert!(matches!(out, LifecycleOutcome::IllegalTransition(_)));
@@ -459,7 +459,7 @@ async fn cross_org_cannot_touch_incident_pg() {
 
     assert!(store.get(other_org.id, id).await.unwrap().is_none());
     let out = store
-        .acknowledge(other_org.id, id, Actor::User(other_user), None)
+        .acknowledge(other_org.id, id, Actor::User(other_user), None, None)
         .await
         .unwrap();
     assert!(matches!(out, LifecycleOutcome::NotFound));
@@ -699,7 +699,7 @@ async fn metrics_rolls_up_mtta_mttr_and_counts_pg() {
 
     // A: human-acknowledged then human-resolved (contributes MTTA + MTTR).
     store
-        .acknowledge(org, a, Actor::User(user), None)
+        .acknowledge(org, a, Actor::User(user), None, None)
         .await
         .unwrap();
     store
@@ -1578,4 +1578,295 @@ async fn resolve_after_unpublish_still_writes_closing_update_pg() {
             .await
             .unwrap();
     assert_eq!(none, 0, "internal-only incident stays silent");
+}
+
+/// An acknowledgement that arrives through a notification names nobody, and
+/// that unknown identity is as much "the first responder" as a named one: a
+/// later ack must not backfill itself over it. It is still recorded, though —
+/// an engineer taking a page a notification already acknowledged is a real
+/// action, and reporting success while writing nothing would hide it.
+#[tokio::test]
+#[ignore]
+async fn an_unattributed_ack_keeps_its_credit_but_still_logs_the_next_one_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "inclinkack").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    let first = updated(
+        store
+            .acknowledge(
+                org,
+                id,
+                Actor::Link,
+                Some("Acknowledged in Pushover".into()),
+                None,
+            )
+            .await
+            .unwrap(),
+    );
+    assert_eq!(first.state, IncidentState::Acknowledged);
+    assert_eq!(first.acknowledged_by, None);
+    let acked_at = first.acknowledged_at.expect("stamped");
+
+    // A named user acking afterwards takes no credit for it.
+    let again = updated(
+        store
+            .acknowledge(org, id, Actor::User(user), Some("me too".into()), None)
+            .await
+            .unwrap(),
+    );
+    assert_eq!(again.acknowledged_by, None, "credit stays with the first");
+    assert_eq!(again.acknowledged_at, Some(acked_at));
+
+    // Both actions are on the timeline.
+    let events: Vec<(String, Option<Uuid>, Option<String>)> = sqlx::query_as(
+        "SELECT actor_type, actor_id, message FROM incident_events \
+         WHERE incident_id = $1 AND kind = 'acknowledged' ORDER BY occurred_at",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await
+    .expect("read events");
+    assert_eq!(events.len(), 2);
+    assert_eq!(events[0].0, "link");
+    assert_eq!(events[0].1, None);
+    assert_eq!(events[0].2.as_deref(), Some("Acknowledged in Pushover"));
+    assert_eq!(events[1].0, "user");
+    assert_eq!(events[1].1, Some(user.0));
+
+    // The trail records the anonymous one too, even with no user to point at.
+    let audit: Vec<(Option<Uuid>, serde_json::Value)> = sqlx::query_as(
+        "SELECT actor_id, metadata FROM org_audit_log \
+         WHERE org_id = $1 AND action = 'incident.acknowledged' ORDER BY occurred_at",
+    )
+    .bind(org.0)
+    .fetch_all(&pool)
+    .await
+    .expect("read audit log");
+    assert_eq!(audit.len(), 2);
+    assert_eq!(audit[0].0, None);
+    assert_eq!(audit[0].1["actor_type"], "link");
+    assert_eq!(audit[0].1["incident_id"], id.to_string());
+    assert_eq!(audit[1].0, Some(user.0));
+}
+
+/// A resolve that lands twice writes the second to the internal timeline, but
+/// the customer-facing page does not get told the same thing twice.
+#[tokio::test]
+#[ignore]
+async fn a_repeated_resolve_posts_one_public_update_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "increresolve").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    store
+        .publish(org, id, Some("outage".into()), None, Actor::User(user))
+        .await
+        .expect("publish");
+    store
+        .resolve(org, id, Actor::User(user), Some("fixed".into()))
+        .await
+        .expect("resolve");
+    store
+        .resolve(org, id, Actor::User(user), Some("still fixed".into()))
+        .await
+        .expect("resolve again");
+
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM incident_events WHERE incident_id = $1 AND kind = 'resolved'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .expect("count events");
+    assert_eq!(events, 2, "both actions are on the internal timeline");
+
+    let updates: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM incident_updates WHERE incident_id = $1 AND phase = 'resolved'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .expect("count updates");
+    assert_eq!(updates, 1);
+}
+
+/// The episode guard, on the real SQL: a page from before a resolve/reopen must
+/// not silence the outage that followed it. Counted off the append-only
+/// timeline and checked under the same lock as the transition.
+#[tokio::test]
+#[ignore]
+async fn an_ack_pinned_to_a_finished_episode_is_refused_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "incepisode").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+
+    assert_eq!(store.generation(org, id).await.unwrap(), Some(0));
+    store
+        .resolve(org, id, Actor::User(user), None)
+        .await
+        .expect("resolve");
+    store
+        .reopen(org, id, Actor::User(user), None)
+        .await
+        .expect("reopen");
+    assert_eq!(store.generation(org, id).await.unwrap(), Some(1));
+
+    let outcome = store
+        .acknowledge(
+            org,
+            id,
+            Actor::Link,
+            Some("from the old page".into()),
+            Some(0),
+        )
+        .await
+        .expect("acknowledge");
+    assert!(
+        matches!(outcome, LifecycleOutcome::Stale),
+        "expected Stale, got {outcome:?}"
+    );
+    let after = store.get(org, id).await.unwrap().expect("incident");
+    assert_eq!(after.state, IncidentState::Triggered);
+    assert_eq!(after.acknowledged_at, None);
+
+    // A refusal leaves no trace on the timeline: nothing happened.
+    let acks: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM incident_events WHERE incident_id = $1 AND kind = 'acknowledged'",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .expect("count acks");
+    assert_eq!(acks, 0);
+
+    // The page for the outage that is actually running does work.
+    let outcome = store
+        .acknowledge(
+            org,
+            id,
+            Actor::Link,
+            Some("from the new page".into()),
+            Some(1),
+        )
+        .await
+        .expect("acknowledge");
+    assert_eq!(
+        updated(outcome).state,
+        IncidentState::Acknowledged,
+        "the current episode's page still acknowledges"
+    );
+
+    // A console ack pins no episode and is unaffected by any of this.
+    assert_eq!(store.generation(org, Uuid::now_v7()).await.unwrap(), None);
+}
+
+/// A Pushover page carries the episode it belonged to, so an acknowledgement
+/// that arrives in the provider's app long after a reopen cannot land on the
+/// outage that followed. The engine must not have to rely on the reopen having
+/// cancelled the receipt: the reopen signal can be dropped under load, and the
+/// cancel itself can fail.
+#[tokio::test]
+#[ignore]
+async fn an_emergency_receipt_remembers_the_outage_it_paged_for_pg() {
+    let Some(pool) = common::pg_pool_from_env().await else {
+        return;
+    };
+    let (org, user, id) = seed(&pool, "increceiptgen").await;
+    let store = PgIncidentOpsStore::new(pool.clone());
+    let channel_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO notification_channels (org_id, name, kind, config) \
+         VALUES ($1, 'pager', 'pushover', '{}'::jsonb) RETURNING id",
+    )
+    .bind(org.0)
+    .fetch_one(&pool)
+    .await
+    .expect("insert channel");
+
+    let record = |receipt: &str| {
+        let receipt = receipt.to_string();
+        async {
+            store
+                .record_notification(NewIncidentNotification {
+                    org,
+                    incident_id: id,
+                    escalation_level: None,
+                    target_user_id: None,
+                    channel_id: Some(channel_id),
+                    transport: "pushover".to_string(),
+                    reason: NotificationReason::Opened,
+                    status: NotificationStatus::Sent,
+                    attempt: 1,
+                    error: None,
+                    sent_at: Some(chrono::Utc::now()),
+                })
+                .await
+                .expect("record notification");
+            let row: Uuid = sqlx::query_scalar(
+                "UPDATE incident_notifications SET provider_receipt = $2 \
+                 WHERE id = (SELECT id FROM incident_notifications \
+                             WHERE incident_id = $1 ORDER BY created_at DESC LIMIT 1) \
+                 RETURNING id",
+            )
+            .bind(id)
+            .bind(receipt)
+            .fetch_one(&pool)
+            .await
+            .expect("attach receipt");
+            row
+        }
+    };
+
+    let first = record("rcpt-first").await;
+    store
+        .resolve(org, id, Actor::User(user), None)
+        .await
+        .expect("resolve");
+    store
+        .reopen(org, id, Actor::User(user), None)
+        .await
+        .expect("reopen");
+    let second = record("rcpt-second").await;
+
+    let acks = store
+        .emergency_acks_for_incident(org, id)
+        .await
+        .expect("emergency acks");
+    let gen_of = |row: Uuid| {
+        acks.iter()
+            .find(|a| a.id == row)
+            .map(|a| a.generation)
+            .expect("receipt listed")
+    };
+    assert_eq!(gen_of(first), 0, "paged before the reopen");
+    assert_eq!(gen_of(second), 1, "paged after it");
+
+    // The old page cannot take the new outage; the new one can.
+    assert!(matches!(
+        store
+            .acknowledge(org, id, Actor::Link, None, Some(gen_of(first)))
+            .await
+            .expect("acknowledge"),
+        LifecycleOutcome::Stale
+    ));
+    assert_eq!(
+        store.get(org, id).await.unwrap().unwrap().state,
+        IncidentState::Triggered
+    );
+    assert_eq!(
+        updated(
+            store
+                .acknowledge(org, id, Actor::Link, None, Some(gen_of(second)))
+                .await
+                .expect("acknowledge")
+        )
+        .state,
+        IncidentState::Acknowledged
+    );
 }

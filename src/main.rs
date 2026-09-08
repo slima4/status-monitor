@@ -504,6 +504,13 @@ async fn main() -> Result<()> {
     )
     .await
     .map_err(|e| AppError::Other(anyhow::anyhow!("alert-channel stop secret: {e}")))?;
+    let incident_ack_secret = uptimepage::storage::app_secrets::ensure_secret(
+        &pg_pool_for_stores,
+        cipher.as_deref(),
+        "incident_ack",
+    )
+    .await
+    .map_err(|e| AppError::Other(anyhow::anyhow!("incident ack secret: {e}")))?;
     let org_directory: Arc<dyn uptimepage::storage::orgs::OrgDirectory> = Arc::new(
         uptimepage::storage::orgs::PgOrgDirectory::new(pg_pool_for_stores.clone()),
     );
@@ -527,6 +534,7 @@ async fn main() -> Result<()> {
                 cfg: cfg.escalation.clone(),
                 base_url: cfg.auth.public_base_url.clone(),
                 alert_channel_stop_secret: alert_channel_stop_secret.clone(),
+                incident_ack_secret: incident_ack_secret.clone(),
                 central_bot: cfg.telegram.enabled().then(|| {
                     uptimepage::notifier::CentralBotDelivery {
                         token: cfg.telegram.bot_token.clone(),
@@ -800,6 +808,7 @@ async fn main() -> Result<()> {
         .with_incident_signals(incident_signal_tx)
         .with_subscription_unsubscribe_secret(unsubscribe_secret)
         .with_alert_channel_stop_secret(alert_channel_stop_secret)
+        .with_incident_ack_secret(incident_ack_secret)
         .with_shutdown(root.clone());
     // Hot-reload the abuse deny-lists on SIGHUP when enabled (validate then
     // atomic swap; a bad edit is rejected and the running rules stay).

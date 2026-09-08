@@ -53,7 +53,7 @@ impl McpServer {
         let outcome = self
             .state
             .incident_ops_store
-            .acknowledge(auth.org, id, Actor::Mcp(auth.user_id), note)
+            .acknowledge(auth.org, id, Actor::Mcp(auth.user_id), note, None)
             .await
             .map_err(|e| McpToolError::internal(format!("acknowledge_incident: {e}")))?;
         incident_action_result(id, outcome)

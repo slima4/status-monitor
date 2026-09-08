@@ -81,6 +81,12 @@ pub fn routes(state: AppState) -> Router {
             "/alert-channel/stop",
             get(views::alert_channel_stop::confirm).post(views::alert_channel_stop::stop),
         )
+        // Same GET-confirms/POST-acts shape: a prefetch must not silence a
+        // live incident.
+        .route(
+            "/incident/ack",
+            get(views::incident_ack::confirm).post(views::incident_ack::ack),
+        )
         // Public status-page subscriptions: confirm/unsubscribe carry their own
         // token/HMAC proof, so they're always mounted like the verify link.
         .route("/subscribe", post(views::subscribe::subscribe))

@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
 use crate::domain::{
@@ -31,6 +32,69 @@ mod tests;
 pub use memory::InMemoryIncidentOpsStore;
 pub use pg::PgIncidentOpsStore;
 
+/// Bounds a leaked link: unlike a mailed one this rides in a push payload that
+/// may sit on someone else's server.
+pub const ACK_LINK_TTL_SECS: i64 = 7 * 24 * 60 * 60;
+
+/// Proof for the public acknowledge link, bound to one outage on one incident.
+/// Reproduced at verify time, nothing persisted.
+pub fn incident_ack_token(
+    secret: &str,
+    org: OrgId,
+    incident_id: Uuid,
+    channel_id: Uuid,
+    generation: i64,
+    expires_at: i64,
+) -> String {
+    let gen_exp = format!("{generation}:{expires_at}");
+    crate::auth::mac::hmac_sha256_hex(
+        secret.as_bytes(),
+        &[
+            org.0.as_bytes(),
+            incident_id.as_bytes(),
+            channel_id.as_bytes(),
+            gen_exp.as_bytes(),
+        ],
+    )
+}
+
+pub fn verify_incident_ack(
+    secret: &str,
+    org: OrgId,
+    incident_id: Uuid,
+    channel_id: Uuid,
+    generation: i64,
+    expires_at: i64,
+    presented: &str,
+) -> bool {
+    incident_ack_token(secret, org, incident_id, channel_id, generation, expires_at)
+        .as_bytes()
+        .ct_eq(presented.as_bytes())
+        .into()
+}
+
+/// `None` when the base URL or secret is unset, so no dead link reaches a phone.
+pub fn incident_ack_url(
+    base_url: &str,
+    secret: &str,
+    org: OrgId,
+    incident_id: Uuid,
+    channel_id: Uuid,
+    generation: i64,
+    now: DateTime<Utc>,
+) -> Option<String> {
+    let base = base_url.trim_end_matches('/');
+    if base.is_empty() || secret.is_empty() {
+        return None;
+    }
+    let exp = now.timestamp() + ACK_LINK_TTL_SECS;
+    let mac = incident_ack_token(secret, org, incident_id, channel_id, generation, exp);
+    Some(format!(
+        "{base}/incident/ack?o={}&i={incident_id}&c={channel_id}&g={generation}&e={exp}&t={mac}",
+        org.0
+    ))
+}
+
 /// Who is performing an action. Maps onto `incident_events.actor_type` +
 /// `actor_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,6 +102,10 @@ pub enum Actor {
     System,
     User(UserId),
     Mcp(UserId),
+    /// A signed acknowledge link, or a push app that acknowledged on its own
+    /// side. Carries no user: possession is the proof, and naming a person
+    /// would be a guess.
+    Link,
 }
 
 impl Actor {
@@ -46,11 +114,12 @@ impl Actor {
             Self::System => ActorType::System,
             Self::User(_) => ActorType::User,
             Self::Mcp(_) => ActorType::Mcp,
+            Self::Link => ActorType::Link,
         }
     }
     pub fn user_id(self) -> Option<UserId> {
         match self {
-            Self::System => None,
+            Self::System | Self::Link => None,
             Self::User(u) | Self::Mcp(u) => Some(u),
         }
     }
@@ -63,6 +132,9 @@ pub enum LifecycleOutcome {
     Updated(Box<OpsIncident>),
     NotFound,
     IllegalTransition(TransitionError),
+    /// Aimed at an episode the incident has already left: a page from before a
+    /// resolve/reopen must not silence the outage that followed.
+    Stale,
 }
 
 /// Filter for the operator incident console.
@@ -155,6 +227,10 @@ pub struct EmergencyAck {
     pub incident_id: Uuid,
     pub channel_id: Uuid,
     pub receipt: String,
+    /// Episode this page went out for. A reopen tries to cancel the receipt,
+    /// but a dropped signal or a failed cancel both leave it outstanding, so
+    /// the ack cannot lean on that.
+    pub generation: i64,
 }
 
 /// A triggered incident whose escalation timer is due. Carries the owning
@@ -215,13 +291,21 @@ pub trait IncidentOpsStore: Send + Sync {
         new: NewManualIncident,
         actor: Actor,
     ) -> Result<OpsIncident>;
+    /// `expect_generation` pins the acknowledgement to one episode: `None` for
+    /// a human at the console, who sees the incident as it is now; `Some` for a
+    /// link or receipt minted by a page, which may predate a reopen.
     async fn acknowledge(
         &self,
         org: OrgId,
         id: Uuid,
         actor: Actor,
         note: Option<String>,
+        expect_generation: Option<i64>,
     ) -> Result<LifecycleOutcome>;
+
+    /// How many times the incident has reopened — its episode number. `None`
+    /// when the incident is gone.
+    async fn generation(&self, org: OrgId, id: Uuid) -> Result<Option<i64>>;
     /// Manual resolve by a human (`resolved_by` = the actor's user).
     async fn resolve(
         &self,

@@ -1,0 +1,37 @@
+{% extends "chromeless_base.html" %}
+{% block title %}{% if phase == "done" %}Incident acknowledged{% else if phase == "resolved" %}Already resolved{% else if phase == "stale" %}Alert out of date{% else if phase == "confirm" %}Acknowledge incident{% else %}Link invalid{% endif %}{% endblock %}
+{% block main %}
+    <main class="mx-auto flex min-h-screen max-w-md flex-col justify-center gap-4 px-6 text-center">
+        {% if phase == "confirm" %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>acknowledge</h1>
+        <p class="text-sm text-muted">
+            Take this incident? Reminders stop and the escalation ladder halts.
+            The incident stays open until someone resolves it.
+        </p>
+        <form method="post" action="/incident/ack?o={{ o }}&amp;i={{ i }}&amp;c={{ c }}&amp;g={{ g }}&amp;e={{ e }}&amp;t={{ t }}">
+            <button type="submit" class="sticker-btn sticker-btn--primary px-3 py-1.5 text-sm font-medium">acknowledge</button>
+        </form>
+        {% else if phase == "done" %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>acknowledged</h1>
+        <p class="text-sm text-muted">
+            Reminders have stopped. Resolve it from the console when the
+            monitor recovers, or leave it to close itself.
+        </p>
+        {% else if phase == "resolved" %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>already resolved</h1>
+        <p class="text-sm text-muted">
+            This incident closed before you got here. Nothing to acknowledge.
+        </p>
+        {% else if phase == "stale" %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>alert out of date</h1>
+        <p class="text-sm text-muted">
+            This alert is from an earlier outage on the same monitor, which
+            closed and then came back. Nothing was acknowledged. Open the
+            incident in the console to take the one that is running now.
+        </p>
+        {% else %}
+        <h1 class="page-title justify-center"><span class="page-title__prefix" aria-hidden="true">$</span>link invalid</h1>
+        <p class="text-sm text-muted">This link is invalid or has expired.</p>
+        {% endif %}
+    </main>
+{% endblock %}

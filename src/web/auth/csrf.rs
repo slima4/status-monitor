@@ -38,6 +38,7 @@ pub const CSRF_HEADER_VALUE: &str = "uptimepage";
 /// token.
 const TOKEN_AUTHENTICATED_PATHS: &[&str] = &[
     "/alert-channel/stop",
+    "/incident/ack",
     "/subscribe/unsubscribe",
     "/auth/magic-link/verify",
     "/auth/magic-link/code",
@@ -134,6 +135,7 @@ mod tests {
     #[test]
     fn token_authenticated_paths_are_exempt() {
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/alert-channel/stop"));
+        assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/incident/ack"));
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/subscribe/unsubscribe"));
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/auth/magic-link/verify"));
         assert!(TOKEN_AUTHENTICATED_PATHS.contains(&"/auth/magic-link/code"));

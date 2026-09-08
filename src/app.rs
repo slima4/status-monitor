@@ -350,6 +350,9 @@ pub struct AppState {
     /// Keys the one-click stop link mailed to alert-channel recipients.
     /// Separate from the subscriber secret so the two authorities don't overlap.
     pub alert_channel_stop_secret: String,
+    /// Keys the acknowledge link pushed to phones. Its own authority: that
+    /// link silences an incident, the stop link retires a channel.
+    pub incident_ack_secret: String,
 }
 
 /// Run unconditionally at boot after config parse. Encodes the per-org
@@ -706,6 +709,7 @@ impl AppState {
             shutdown: None,
             subscription_unsubscribe_secret: String::new(),
             alert_channel_stop_secret: String::new(),
+            incident_ack_secret: String::new(),
         }
     }
 
@@ -718,6 +722,12 @@ impl AppState {
     /// Set the persisted secret that keys alert-channel one-click stop links.
     pub fn with_alert_channel_stop_secret(mut self, secret: String) -> Self {
         self.alert_channel_stop_secret = secret;
+        self
+    }
+
+    /// Set the persisted secret that keys incident acknowledge links.
+    pub fn with_incident_ack_secret(mut self, secret: String) -> Self {
+        self.incident_ack_secret = secret;
         self
     }
 

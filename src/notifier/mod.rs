@@ -37,6 +37,7 @@ use crate::notifier::webhook::WebhookNotifier;
 use crate::notifier::whatsapp::WhatsAppNotifier;
 
 pub use crate::notifier::email::{EmailAlert, EmailDelivery, email_alert_for};
+pub use crate::notifier::ntfy::PushAck;
 
 #[async_trait]
 pub trait Notifier: Send + Sync {
@@ -96,6 +97,7 @@ pub fn build_notifier(
     whatsapp: Option<&crate::config::WhatsAppAppBotConfig>,
     email: Option<&EmailDelivery>,
     email_alert: Option<EmailAlert>,
+    push_ack: Option<PushAck>,
 ) -> Result<Arc<dyn Notifier>> {
     let parse = |s: &str| -> Result<url::Url> {
         s.parse::<url::Url>().map_err(|e| {
@@ -193,6 +195,7 @@ pub fn build_notifier(
             parse(&c.server_url)?,
             c.topic.clone(),
             c.access_token.clone(),
+            push_ack,
         )) as Arc<dyn Notifier>,
         ChannelConfig::Gotify(c) => Arc::new(GotifyNotifier::new(
             http.clone(),

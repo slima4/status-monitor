@@ -704,7 +704,7 @@ async fn due_for_renotify_selects_overdue_open_unacked_live_pg() {
     );
 
     // Acknowledging the overdue one silences it.
-    ops.acknowledge(org, overdue, Actor::System, None)
+    ops.acknowledge(org, overdue, Actor::System, None, None)
         .await
         .unwrap();
     let due: Vec<uuid::Uuid> = ops

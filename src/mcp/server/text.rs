@@ -170,5 +170,8 @@ pub(super) fn incident_action_result(
         LifecycleOutcome::IllegalTransition(err) => {
             Err(McpToolError::invalid_argument(err.to_string()))
         }
+        LifecycleOutcome::Stale => Err(McpToolError::invalid_argument(
+            "this incident has reopened since the action was prepared",
+        )),
     }
 }

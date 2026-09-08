@@ -9,7 +9,7 @@ use crate::domain::{
 };
 use crate::error::Result;
 use crate::notifier::pushover::PushoverReceipts;
-use crate::storage::{Actor, DueIncident, EmergencyAck};
+use crate::storage::{Actor, DueIncident, EmergencyAck, LifecycleOutcome};
 
 use super::rules::{
     DAMPED_TRANSPORT, Damper, FlapState, MAINTENANCE_TRANSPORT, RELEASED_TRANSPORT,
@@ -269,6 +269,10 @@ impl Worker {
                 Ok(())
             }
             NotificationReason::Opened | NotificationReason::Reopened => {
+                // Retire the last episode's pages before the new one starts.
+                if reason == NotificationReason::Reopened {
+                    self.cancel_emergency(org, incident.id).await;
+                }
                 self.open_episode(org, &incident, &target, reason, damper)
                     .await
             }
@@ -545,20 +549,29 @@ impl Worker {
 
     /// Build a Pushover receipt client from the channel's stored application
     /// token. `None` if the channel is gone or not a Pushover channel.
-    async fn pushover_receipts(&self, org: OrgId, channel_id: Uuid) -> Option<PushoverReceipts> {
-        let channel = self.channels.get(org, channel_id).await.ok()??;
-        match &channel.config {
-            ChannelConfig::Pushover(c) => {
-                Some(PushoverReceipts::new(self.http.clone(), c.token.clone()))
-            }
-            _ => None,
-        }
+    /// `Err` means the lookup failed and the caller must not conclude anything
+    /// about the channel; `Ok(None)` means it is genuinely gone or is not a
+    /// Pushover channel, and its receipt can never be cancelled or read.
+    async fn pushover_receipts(
+        &self,
+        org: OrgId,
+        channel_id: Uuid,
+    ) -> Result<Option<PushoverReceipts>> {
+        Ok(match self.channels.get(org, channel_id).await? {
+            Some(channel) => match &channel.config {
+                ChannelConfig::Pushover(c) => {
+                    Some(PushoverReceipts::new(self.http.clone(), c.token.clone()))
+                }
+                _ => None,
+            },
+            None => None,
+        })
     }
 
-    /// Cancel every outstanding emergency page for a resolved incident so it
-    /// stops repeating. Best-effort: a failed cancel still clears the receipt so
-    /// the poll sweep doesn't keep chasing it; Pushover's `expire` is the
-    /// backstop.
+    /// Stop every emergency page still repeating for an incident. A receipt is
+    /// retired only once its cancel lands, or a failure would leave the page
+    /// sounding with nothing left to retry it; Pushover's `expire` bounds one
+    /// that never lands.
     async fn cancel_emergency(&self, org: OrgId, incident_id: Uuid) {
         let acks = match self.ops.emergency_acks_for_incident(org, incident_id).await {
             Ok(a) => a,
@@ -568,10 +581,23 @@ impl Worker {
             }
         };
         for ack in acks {
-            if let Some(client) = self.pushover_receipts(org, ack.channel_id).await
-                && let Err(err) = client.cancel(&ack.receipt).await
-            {
+            let client = match self.pushover_receipts(org, ack.channel_id).await {
+                // Nothing can cancel it — retire the receipt.
+                Ok(None) => {
+                    let _ = self.ops.clear_receipt(org, ack.id).await;
+                    continue;
+                }
+                Ok(Some(client)) => client,
+                // Leave it for the next sweep: retiring a receipt we could not
+                // even look up would strand a page that keeps sounding.
+                Err(err) => {
+                    tracing::warn!(error = %err, "pushover channel lookup failed");
+                    continue;
+                }
+            };
+            if let Err(err) = client.cancel(&ack.receipt).await {
                 tracing::warn!(incident_id = %incident_id, error = %err, "pushover emergency cancel failed");
+                continue;
             }
             if let Err(err) = self.ops.clear_receipt(org, ack.id).await {
                 tracing::warn!(error = %err, "clearing emergency receipt failed");
@@ -628,11 +654,26 @@ impl Worker {
         Ok(())
     }
 
-    /// A failed lookup reads as still-watched, so an error never cancels.
-    pub(super) async fn page_target_paused(&self, ack: &EmergencyAck) -> bool {
-        let Ok(Some(incident)) = self.ops.get(ack.org, ack.incident_id).await else {
-            return false;
+    /// Nothing is left for this page to acknowledge: its incident was taken by
+    /// somebody, resolved, or removed, its outage ended and another has since
+    /// started, or its monitor is no longer watched. One incident read serves
+    /// all three. Any failed lookup reads as still paging, so an error never
+    /// cancels a live page.
+    pub(super) async fn page_is_spent(&self, ack: &EmergencyAck) -> bool {
+        let incident = match self.ops.get(ack.org, ack.incident_id).await {
+            Ok(Some(incident)) => incident,
+            Ok(None) => return true,
+            Err(_) => return false,
         };
+        if incident.state != crate::domain::IncidentState::Triggered {
+            return true;
+        }
+        if matches!(
+            self.ops.generation(ack.org, ack.incident_id).await,
+            Ok(Some(current)) if current != ack.generation
+        ) {
+            return true;
+        }
         let Some(target_id) = incident.target_id else {
             return false;
         };
@@ -669,10 +710,17 @@ impl Worker {
     }
 
     async fn poll_one_ack(&self, ack: EmergencyAck) {
-        let Some(client) = self.pushover_receipts(ack.org, ack.channel_id).await else {
-            // Channel gone: nothing can cancel or read it — retire the receipt.
-            let _ = self.ops.clear_receipt(ack.org, ack.id).await;
-            return;
+        let client = match self.pushover_receipts(ack.org, ack.channel_id).await {
+            // Nothing can cancel or read it — retire the receipt.
+            Ok(None) => {
+                let _ = self.ops.clear_receipt(ack.org, ack.id).await;
+                return;
+            }
+            Ok(Some(client)) => client,
+            Err(err) => {
+                tracing::warn!(error = %err, "pushover channel lookup failed");
+                return;
+            }
         };
         let state = match client.poll(&ack.receipt).await {
             Ok(s) => s,
@@ -682,25 +730,49 @@ impl Worker {
             }
         };
         if state.acknowledged {
-            if let Err(err) = self
+            // Pushover stops its own retries on an ack, but until this landed
+            // nothing here knew the page was taken, so renotify kept paging.
+            match self
                 .ops
-                .append_event(
+                .acknowledge(
                     ack.org,
                     ack.incident_id,
-                    IncidentEventKind::Note,
-                    Actor::System,
-                    Some("emergency page acknowledged in Pushover".to_string()),
+                    Actor::Link,
+                    Some("Acknowledged in Pushover".to_string()),
+                    // A reopen tries to cancel this receipt, but the signal
+                    // can be dropped under load and the cancel can fail, so
+                    // the episode is pinned rather than assumed.
+                    Some(ack.generation),
                 )
                 .await
             {
-                tracing::warn!(error = %err, "recording emergency ack failed");
+                Ok(LifecycleOutcome::Updated(_)) => {
+                    // Marked first, so the sweep below skips this row.
+                    let _ = self.ops.mark_acked(ack.org, ack.id, Utc::now()).await;
+                    self.cancel_emergency(ack.org, ack.incident_id).await;
+                }
+                // Terminal: no later poll does better.
+                Ok(
+                    LifecycleOutcome::NotFound
+                    | LifecycleOutcome::IllegalTransition(_)
+                    | LifecycleOutcome::Stale,
+                ) => {
+                    let _ = self.ops.mark_acked(ack.org, ack.id, Utc::now()).await;
+                }
+                // Unmarked, so the next sweep retries; marking it here would
+                // lose the acknowledgement for good.
+                Err(err) => {
+                    tracing::warn!(error = %err, "recording emergency ack failed");
+                }
             }
-            let _ = self.ops.mark_acked(ack.org, ack.id, Utc::now()).await;
         } else if state.expired {
             let _ = self.ops.clear_receipt(ack.org, ack.id).await;
-        } else if self.page_target_paused(&ack).await {
+        } else if self.page_is_spent(&ack).await {
+            // Nothing should still be sounding for it. Retired only once the
+            // cancel lands, so a failure comes back on the next sweep.
             if let Err(err) = client.cancel(&ack.receipt).await {
                 tracing::warn!(incident_id = %ack.incident_id, error = %err, "pushover emergency cancel failed");
+                return;
             }
             let _ = self.ops.clear_receipt(ack.org, ack.id).await;
         }

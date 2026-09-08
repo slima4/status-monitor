@@ -276,6 +276,12 @@ fn lifecycle_response(outcome: LifecycleOutcome) -> Result<Json<OpsIncident>> {
             codes::INCIDENT_INVALID_STATE,
             err.to_string(),
         )),
+        // Unreachable: only a notification-borne acknowledgement pins an
+        // episode. A conflict rather than a panic.
+        LifecycleOutcome::Stale => Err(AppError::conflict(
+            codes::INCIDENT_INVALID_STATE,
+            "this incident has reopened since the action was prepared",
+        )),
     }
 }
 
@@ -415,7 +421,7 @@ pub async fn acknowledge_incident(
     let note = clean_note(body.note)?;
     let outcome = state
         .incident_ops_store
-        .acknowledge(org, id, Actor::User(user), note)
+        .acknowledge(org, id, Actor::User(user), note, None)
         .await?;
     lifecycle_response(outcome)
 }

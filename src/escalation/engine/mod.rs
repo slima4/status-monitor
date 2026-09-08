@@ -90,6 +90,8 @@ pub struct EngineDeps {
     pub base_url: String,
     /// Keys the one-click stop link in alert mail; empty omits the link.
     pub alert_channel_stop_secret: String,
+    /// Keys the acknowledge link pushed to phones; empty omits the link.
+    pub incident_ack_secret: String,
     /// Operator token + shared send budget for `telegram_app` delivery.
     pub central_bot: Option<crate::notifier::CentralBotDelivery>,
     /// Operator Cloud API credentials for `whatsapp_app` delivery.
@@ -113,6 +115,7 @@ struct Worker {
     cfg: EscalationConfig,
     base_url: String,
     alert_channel_stop_secret: String,
+    incident_ack_secret: String,
     central_bot: Option<crate::notifier::CentralBotDelivery>,
     central_whatsapp: Option<crate::config::WhatsAppAppBotConfig>,
     email: Option<crate::notifier::EmailDelivery>,
@@ -144,6 +147,7 @@ impl EscalationEngine {
             cfg,
             base_url,
             alert_channel_stop_secret,
+            incident_ack_secret,
             central_bot,
             central_whatsapp,
             email,
@@ -163,6 +167,7 @@ impl EscalationEngine {
                 cfg,
                 base_url,
                 alert_channel_stop_secret,
+                incident_ack_secret,
                 central_bot,
                 central_whatsapp,
                 email,
@@ -235,8 +240,8 @@ impl EscalationEngine {
         self.w.page(org, incident_id, reason).await
     }
     #[cfg(test)]
-    async fn page_target_paused(&self, ack: &crate::storage::EmergencyAck) -> bool {
-        self.w.page_target_paused(ack).await
+    async fn page_is_spent(&self, ack: &crate::storage::EmergencyAck) -> bool {
+        self.w.page_is_spent(ack).await
     }
     #[cfg(test)]
     async fn escalate_due(&self) {

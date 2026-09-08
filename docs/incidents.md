@@ -58,7 +58,7 @@ Acknowledge and resolve prompt for an optional note so you can capture the *why*
 
 ### The activity log
 
-Every lifecycle action writes an append-only event to the incident's internal timeline. Each entry answers **who, when, and what**: the acting member's email (system-driven transitions show `system`; an action taken through the MCP server is badged `via MCP`), an exact timestamp, and any note. This is the audit trail — the foundation for tracking response is a healthy habit of leaving notes, and the log makes that habit visible.
+Every lifecycle action writes an append-only event to the incident's internal timeline. Each entry answers **who, when, and what**: the acting member's email (system-driven transitions show `system`; an action taken through the MCP server is badged `via MCP`; one taken from a push notification shows `notification`, since holding the alert is the only proof and there is no member to name), an exact timestamp, and any note. This is the audit trail — the foundation for tracking response is a healthy habit of leaving notes, and the log makes that habit visible.
 
 ## Paging and escalation
 

@@ -15,12 +15,20 @@ use crate::notifier::{Notifier, truncate_bytes};
 // are off), so the cap must count bytes, not chars.
 const MAX_MESSAGE_BYTES: usize = 4096;
 
+/// Acknowledge action for a push notification. Its own type so the factory
+/// call site reads, the way [`crate::notifier::EmailAlert`] does for mail.
+#[derive(Clone)]
+pub struct PushAck {
+    pub url: String,
+}
+
 pub struct NtfyNotifier {
     client: OutboundHttpClient,
     /// Server root; JSON publishes POST here with the topic in the body.
     server_url: Url,
     topic: String,
     access_token: Option<String>,
+    ack: Option<PushAck>,
 }
 
 #[derive(Serialize)]
@@ -32,6 +40,23 @@ struct Publish<'a> {
     tags: [&'static str; 1],
     #[serde(skip_serializing_if = "Option::is_none")]
     click: Option<&'a str>,
+    /// ntfy allows at most three; we spend one. Tapping the notification body
+    /// already opens the incident, so a second button would only repeat it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    actions: Vec<Action<'a>>,
+}
+
+/// One tap from the notification, no browser. `clear` is safe here because on
+/// an `http` action ntfy only clears once the request succeeds — a refused
+/// acknowledgement leaves the page on screen rather than telling the responder
+/// they took an outage they did not.
+#[derive(Serialize)]
+struct Action<'a> {
+    action: &'static str,
+    label: &'static str,
+    url: &'a str,
+    method: &'static str,
+    clear: bool,
 }
 
 impl NtfyNotifier {
@@ -40,16 +65,22 @@ impl NtfyNotifier {
         server_url: Url,
         topic: String,
         access_token: Option<String>,
+        ack: Option<PushAck>,
     ) -> Self {
         Self {
             client,
             server_url,
             topic,
             access_token,
+            ack,
         }
     }
 
-    fn publish<'a>(topic: &'a str, notice: &'a IncidentNotice) -> Publish<'a> {
+    fn publish<'a>(
+        topic: &'a str,
+        notice: &'a IncidentNotice,
+        ack: Option<&'a PushAck>,
+    ) -> Publish<'a> {
         let resolved = notice.reason == NotificationReason::Resolved;
         Publish {
             topic,
@@ -66,6 +97,16 @@ impl NtfyNotifier {
                 ["rotating_light"]
             },
             click: notice.url.as_deref(),
+            actions: match ack.filter(|_| !resolved) {
+                Some(a) => vec![Action {
+                    action: "http",
+                    label: "Acknowledge",
+                    url: &a.url,
+                    method: "POST",
+                    clear: true,
+                }],
+                None => Vec::new(),
+            },
         }
     }
 }
@@ -80,7 +121,7 @@ impl Notifier for NtfyNotifier {
         post_json_with_headers(
             &self.client,
             &self.server_url,
-            &Self::publish(&self.topic, notice),
+            &Self::publish(&self.topic, notice, self.ack.as_ref()),
             &headers,
         )
         .await
@@ -117,7 +158,7 @@ mod tests {
     #[test]
     fn open_publish_matches_wire_shape() {
         let n = notice(NotificationReason::Opened, IncidentUrgency::High);
-        let v = serde_json::to_value(NtfyNotifier::publish("ops", &n)).unwrap();
+        let v = serde_json::to_value(NtfyNotifier::publish("ops", &n, None)).unwrap();
         assert_eq!(
             v,
             serde_json::json!({
@@ -132,18 +173,47 @@ mod tests {
     }
 
     #[test]
+    fn ack_action_rides_an_open_page_and_not_a_resolve() {
+        let ack = PushAck {
+            url: "https://app.uptimepage.dev/incident/ack?o=1&i=7&c=2&e=99&t=ab".into(),
+        };
+
+        let open = notice(NotificationReason::Opened, IncidentUrgency::High);
+        let v = serde_json::to_value(NtfyNotifier::publish("ops", &open, Some(&ack))).unwrap();
+        assert_eq!(
+            v["actions"],
+            serde_json::json!([{
+                "action": "http",
+                "label": "Acknowledge",
+                "url": "https://app.uptimepage.dev/incident/ack?o=1&i=7&c=2&e=99&t=ab",
+                "method": "POST",
+                "clear": true
+            }])
+        );
+
+        // The key is absent rather than an empty array, so the body of a page
+        // without one is unchanged.
+        let done = notice(NotificationReason::Resolved, IncidentUrgency::High);
+        let v = serde_json::to_value(NtfyNotifier::publish("ops", &done, Some(&ack))).unwrap();
+        assert!(v.get("actions").is_none());
+
+        let v = serde_json::to_value(NtfyNotifier::publish("ops", &open, None)).unwrap();
+        assert!(v.get("actions").is_none());
+    }
+
+    #[test]
     fn priorities_and_tags_follow_lifecycle() {
         let low = notice(NotificationReason::Opened, IncidentUrgency::Low);
-        assert_eq!(NtfyNotifier::publish("t", &low).priority, 3);
+        assert_eq!(NtfyNotifier::publish("t", &low, None).priority, 3);
 
         let resolved = notice(NotificationReason::Resolved, IncidentUrgency::High);
-        let p = NtfyNotifier::publish("t", &resolved);
+        let p = NtfyNotifier::publish("t", &resolved, None);
         assert_eq!(p.priority, 3);
         assert_eq!(p.tags, ["white_check_mark"]);
 
         let mut no_url = notice(NotificationReason::Opened, IncidentUrgency::High);
         no_url.url = None;
-        let v = serde_json::to_value(NtfyNotifier::publish("t", &no_url)).unwrap();
+        let v = serde_json::to_value(NtfyNotifier::publish("t", &no_url, None)).unwrap();
         assert!(v.get("click").is_none());
     }
 }

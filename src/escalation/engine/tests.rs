@@ -183,6 +183,7 @@ fn engine_cfg(
             cfg,
             base_url: String::new(),
             alert_channel_stop_secret: String::new(),
+            incident_ack_secret: String::new(),
             central_bot: None,
             central_whatsapp: None,
             email: None,
@@ -233,6 +234,7 @@ fn engine_mailing_owned(
             cfg,
             base_url: "https://app.test".into(),
             alert_channel_stop_secret: String::new(),
+            incident_ack_secret: String::new(),
             central_bot: None,
             central_whatsapp: None,
             email: Some(crate::notifier::EmailDelivery {
@@ -287,6 +289,7 @@ fn engine_maint_policies(
             cfg: EscalationConfig::default(),
             base_url: String::new(),
             alert_channel_stop_secret: String::new(),
+            incident_ack_secret: String::new(),
             central_bot: None,
             central_whatsapp: None,
             email: None,
@@ -320,6 +323,7 @@ fn engine_with(
             cfg: EscalationConfig::default(),
             base_url: String::new(),
             alert_channel_stop_secret: String::new(),
+            incident_ack_secret: String::new(),
             central_bot: None,
             central_whatsapp: None,
             email: None,
@@ -364,6 +368,7 @@ async fn an_outstanding_page_reads_its_monitors_paused_flag() {
         incident_id: id,
         channel_id,
         receipt: "rcpt".into(),
+        generation: 0,
     };
 
     let watched = Arc::new(InMemoryTargetStore::from_vec(vec![target.clone()]));
@@ -373,7 +378,7 @@ async fn an_outstanding_page_reads_its_monitors_paused_flag() {
         watched,
         channels.clone(),
     );
-    assert!(!eng.page_target_paused(&ack(cid)).await);
+    assert!(!eng.page_is_spent(&ack(cid)).await);
 
     target.enabled = false;
     let paused = Arc::new(InMemoryTargetStore::from_vec(vec![target]));
@@ -383,7 +388,7 @@ async fn an_outstanding_page_reads_its_monitors_paused_flag() {
         paused,
         channels,
     );
-    assert!(eng.page_target_paused(&ack(cid)).await);
+    assert!(eng.page_is_spent(&ack(cid)).await);
 }
 
 #[tokio::test]
@@ -400,16 +405,20 @@ async fn a_page_with_no_readable_monitor_keeps_polling() {
         channels,
     );
 
-    for incident_id in [targetless, missing_target, Uuid::now_v7()] {
-        let ack = crate::storage::EmergencyAck {
-            id: Uuid::now_v7(),
-            org: org(),
-            incident_id,
-            channel_id: cid,
-            receipt: "rcpt".into(),
-        };
-        assert!(!eng.page_target_paused(&ack).await);
+    let ack = |incident_id| crate::storage::EmergencyAck {
+        id: Uuid::now_v7(),
+        org: org(),
+        incident_id,
+        channel_id: cid,
+        receipt: "rcpt".into(),
+        generation: 0,
+    };
+    for incident_id in [targetless, missing_target] {
+        assert!(!eng.page_is_spent(&ack(incident_id)).await);
     }
+    // An incident that is not there at all is a different matter: nothing is
+    // left to acknowledge, so the page should stop rather than sound on.
+    assert!(eng.page_is_spent(&ack(Uuid::now_v7())).await);
 }
 
 #[tokio::test]
@@ -661,7 +670,7 @@ async fn acknowledge_halts_the_sweep() {
         .await
         .unwrap();
     // A responder acks → next_escalation_at cleared, state acknowledged.
-    ops.acknowledge(org(), id, Actor::System, None)
+    ops.acknowledge(org(), id, Actor::System, None, None)
         .await
         .unwrap();
     eng.escalate_due().await;
@@ -751,7 +760,7 @@ async fn renotify_re_pages_an_open_unacked_incident_then_stops_once_acked() {
         "reminder re-pages the bound channel while down + unacked"
     );
 
-    ops.acknowledge(org(), id, Actor::System, None)
+    ops.acknowledge(org(), id, Actor::System, None, None)
         .await
         .unwrap();
     eng.renotify_one(&due).await.unwrap();

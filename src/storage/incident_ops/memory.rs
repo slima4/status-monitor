@@ -33,6 +33,24 @@ struct MemState {
     renotify_counts: std::collections::HashMap<Uuid, u32>,
 }
 
+/// Episode number off the timeline, matching the Postgres store.
+fn reopen_count(state: &MemState, incident_id: Uuid) -> i64 {
+    reopens_before(state, incident_id, Utc::now())
+}
+
+/// The same count as it stood at `at`.
+fn reopens_before(state: &MemState, incident_id: Uuid, at: DateTime<Utc>) -> i64 {
+    state
+        .events
+        .iter()
+        .filter(|e| {
+            e.incident_id == incident_id
+                && e.kind == IncidentEventKind::Reopened
+                && e.occurred_at <= at
+        })
+        .count() as i64
+}
+
 impl InMemoryIncidentOpsStore {
     pub fn new() -> Self {
         Self::default()
@@ -100,6 +118,15 @@ impl InMemoryIncidentOpsStore {
         });
     }
 
+    fn generation_of(&self, id: Uuid) -> Option<i64> {
+        let g = self.inner.lock();
+        g.incidents
+            .iter()
+            .any(|i| i.id == id)
+            .then(|| reopen_count(&g, id))
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn apply(
         &self,
         id: Uuid,
@@ -107,18 +134,29 @@ impl InMemoryIncidentOpsStore {
         kind: IncidentEventKind,
         actor: Actor,
         note: Option<String>,
+        expect_generation: Option<i64>,
         mutate: impl FnOnce(&mut OpsIncident),
     ) -> LifecycleOutcome {
         let mut g = self.inner.lock();
         let Some(idx) = g.incidents.iter().position(|i| i.id == id) else {
             return LifecycleOutcome::NotFound;
         };
-        let from = g.incidents[idx].state;
-        if let Err(err) = next_state(from, transition) {
-            return LifecycleOutcome::IllegalTransition(err);
+        if let Some(expected) = expect_generation
+            && reopen_count(&g, id) != expected
+        {
+            return LifecycleOutcome::Stale;
         }
-        mutate(&mut g.incidents[idx]);
-        g.incidents[idx].updated_at = Utc::now();
+        let from = g.incidents[idx].state;
+        let to = match next_state(from, transition) {
+            Ok(to) => to,
+            Err(err) => return LifecycleOutcome::IllegalTransition(err),
+        };
+        // Mirrors the Postgres store: a transition that moves nothing leaves
+        // the row alone but still records that somebody acted.
+        if from != to {
+            mutate(&mut g.incidents[idx]);
+            g.incidents[idx].updated_at = Utc::now();
+        }
         let updated = g.incidents[idx].clone();
         Self::push_event(&mut g, id, kind, actor, note);
         LifecycleOutcome::Updated(Box::new(updated))
@@ -343,6 +381,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         id: Uuid,
         actor: Actor,
         note: Option<String>,
+        expect_generation: Option<i64>,
     ) -> Result<LifecycleOutcome> {
         Ok(self.apply(
             id,
@@ -350,6 +389,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             IncidentEventKind::Acknowledged,
             actor,
             note,
+            expect_generation,
             |i| {
                 i.state = IncidentState::Acknowledged;
                 i.acknowledged_at.get_or_insert_with(Utc::now);
@@ -374,6 +414,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             IncidentEventKind::Resolved,
             actor,
             note,
+            None,
             |i| {
                 i.state = IncidentState::Resolved;
                 i.ended_at.get_or_insert_with(Utc::now);
@@ -383,12 +424,17 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         ))
     }
 
+    async fn generation(&self, _org: OrgId, id: Uuid) -> Result<Option<i64>> {
+        Ok(self.generation_of(id))
+    }
+
     async fn auto_resolve(&self, _org: OrgId, id: Uuid) -> Result<LifecycleOutcome> {
         Ok(self.apply(
             id,
             IncidentTransition::AutoResolve,
             IncidentEventKind::Resolved,
             Actor::System,
+            None,
             None,
             |i| {
                 i.state = IncidentState::Resolved;
@@ -412,6 +458,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
             IncidentEventKind::Reopened,
             actor,
             note,
+            None,
             |i| {
                 i.state = IncidentState::Triggered;
                 i.ended_at = None;
@@ -612,10 +659,8 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
     }
 
     async fn due_emergency_acks(&self, limit: usize) -> Result<Vec<EmergencyAck>> {
-        Ok(self
-            .inner
-            .lock()
-            .notifications
+        let g = self.inner.lock();
+        Ok(g.notifications
             .iter()
             .filter(|(_, n)| {
                 n.status == NotificationStatus::Sent
@@ -630,6 +675,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
                 incident_id: n.incident_id,
                 channel_id: n.channel_id.expect("filtered some"),
                 receipt: n.provider_receipt.clone().expect("filtered some"),
+                generation: reopens_before(&g, n.incident_id, n.sent_at.unwrap_or(n.created_at)),
             })
             .collect())
     }
@@ -639,10 +685,8 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
         org: OrgId,
         incident_id: Uuid,
     ) -> Result<Vec<EmergencyAck>> {
-        Ok(self
-            .inner
-            .lock()
-            .notifications
+        let g = self.inner.lock();
+        Ok(g.notifications
             .iter()
             .filter(|(o, n)| {
                 *o == org
@@ -658,6 +702,7 @@ impl IncidentOpsStore for InMemoryIncidentOpsStore {
                 incident_id: n.incident_id,
                 channel_id: n.channel_id.expect("filtered some"),
                 receipt: n.provider_receipt.clone().expect("filtered some"),
+                generation: reopens_before(&g, n.incident_id, n.sent_at.unwrap_or(n.created_at)),
             })
             .collect())
     }

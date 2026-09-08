@@ -656,6 +656,8 @@ fn actor_label(e: &IncidentEvent, members: &HashMap<UserId, String>) -> (String,
     use crate::domain::ActorType;
     match e.actor_type {
         ActorType::System => ("system".to_string(), false),
+        // Whoever held the notification; the event message says which one.
+        ActorType::Link => ("notification".to_string(), false),
         ActorType::User | ActorType::Mcp => {
             let who = match e.actor_id {
                 Some(u) => members
@@ -1783,6 +1785,15 @@ mod tests {
         assert_eq!(
             actor_label(&ev(ActorType::Mcp, Some(u)), &members),
             ("alice@example.com".into(), true)
+        );
+        // Names nobody, and must not borrow one from a stray actor_id.
+        assert_eq!(
+            actor_label(&ev(ActorType::Link, None), &members),
+            ("notification".into(), false)
+        );
+        assert_eq!(
+            actor_label(&ev(ActorType::Link, Some(u)), &members),
+            ("notification".into(), false)
         );
         // An actor who has left the org no longer resolves to an email.
         let gone = UserId(Uuid::now_v7());

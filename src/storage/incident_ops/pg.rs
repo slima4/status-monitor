@@ -220,17 +220,44 @@ async fn insert_event_tx(
 /// Mirror an operator's incident action into `org_audit_log`: incidents and
 /// their events cascade away with the monitor, leaving no trace the incident
 /// existed. System transitions are skipped, or every recovery writes a row.
+/// An actor with no user id still writes one, with its kind in the metadata to
+/// say why `actor_id` is null.
 async fn record_incident_audit_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     org: OrgId,
     actor: Actor,
     action: &str,
-    metadata: Value,
+    mut metadata: Value,
 ) -> Result<()> {
-    let Some(user) = actor.user_id() else {
+    if matches!(actor, Actor::System) {
         return Ok(());
-    };
-    crate::storage::orgs::record_audit_tx(tx, org, Some(user), action, metadata).await
+    }
+    if let Value::Object(map) = &mut metadata {
+        map.insert(
+            "actor_type".to_string(),
+            Value::from(actor.actor_type().as_db_str()),
+        );
+    }
+    crate::storage::orgs::record_audit_tx(tx, org, actor.user_id(), action, metadata).await
+}
+
+/// Counted off the append-only timeline rather than a column of its own, so it
+/// cannot run backwards: nothing deletes `incident_events` short of the
+/// incident itself cascading away, which voids every link to it anyway.
+async fn reopen_count_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    org: OrgId,
+    id: Uuid,
+) -> Result<i64> {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM incident_events \
+         WHERE incident_id = $1 AND org_id = $2 AND kind = 'reopened'",
+    )
+    .bind(id)
+    .bind(org.0)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|e| anyhow::anyhow!("reopen count: {e}").into())
 }
 
 async fn incident_was_published(
@@ -265,6 +292,7 @@ impl PgIncidentOpsStore {
         note: Option<String>,
         update_sql: &str,
         public_resolution: Option<String>,
+        expect_generation: Option<i64>,
     ) -> Result<LifecycleOutcome> {
         let mut tx = self
             .pool
@@ -285,33 +313,58 @@ impl PgIncidentOpsStore {
         let Some((state_str,)) = current else {
             return Ok(LifecycleOutcome::NotFound);
         };
-        let from = IncidentState::from_db_str(&state_str);
-        if let Err(err) = next_state(from, transition) {
-            return Ok(LifecycleOutcome::IllegalTransition(err));
+        // Under the transition's own locks, so a reopen cannot slip between
+        // this check and the update.
+        if let Some(expected) = expect_generation
+            && reopen_count_tx(&mut tx, org, id).await? != expected
+        {
+            return Ok(LifecycleOutcome::Stale);
         }
 
-        let row: OpsIncidentRow = match sqlx::query_as(update_sql)
-            .bind(id)
-            .bind(org.0)
-            .bind(actor.user_id())
-            .fetch_one(&mut *tx)
-            .await
-        {
-            Ok(row) => row,
-            // Reopen clears ended_at; if one of the same origin is already open
-            // for the target, its unique index rejects it — surface 409.
-            Err(e)
-                if matches!(
-                    e.as_database_error().and_then(|d| d.constraint()),
-                    Some("idx_incidents_org_open_monitor" | "idx_incidents_org_open_manual")
-                ) =>
+        let from = IncidentState::from_db_str(&state_str);
+        let to = match next_state(from, transition) {
+            Ok(to) => to,
+            Err(err) => return Ok(LifecycleOutcome::IllegalTransition(err)),
+        };
+        // A transition that moves nothing leaves the row alone, so the first
+        // acknowledger keeps the credit an unknown one included, which the
+        // update's `COALESCE` would otherwise backfill. It is still logged: an
+        // engineer taking a page a notification already acknowledged is a real
+        // action. The public update is not repeated, though — subscribers
+        // should not read the same resolution twice.
+        let unchanged = from == to;
+        let row: OpsIncidentRow = if unchanged {
+            let sql = format!("SELECT {OPS_COLS} FROM incidents WHERE id = $1 AND org_id = $2");
+            sqlx::query_as(&sql)
+                .bind(id)
+                .bind(org.0)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(|e| anyhow::anyhow!("load unchanged incident: {e}"))?
+        } else {
+            match sqlx::query_as(update_sql)
+                .bind(id)
+                .bind(org.0)
+                .bind(actor.user_id())
+                .fetch_one(&mut *tx)
+                .await
             {
-                return Err(crate::error::AppError::conflict(
-                    crate::api::error::codes::INCIDENT_ALREADY_OPEN,
-                    "another incident is already open for this monitor",
-                ));
+                Ok(row) => row,
+                // Reopen clears ended_at; if one of the same origin is already open
+                // for the target, its unique index rejects it — surface 409.
+                Err(e)
+                    if matches!(
+                        e.as_database_error().and_then(|d| d.constraint()),
+                        Some("idx_incidents_org_open_monitor" | "idx_incidents_org_open_manual")
+                    ) =>
+                {
+                    return Err(crate::error::AppError::conflict(
+                        crate::api::error::codes::INCIDENT_ALREADY_OPEN,
+                        "another incident is already open for this monitor",
+                    ));
+                }
+                Err(e) => return Err(anyhow::anyhow!("apply transition: {e}").into()),
             }
-            Err(e) => return Err(anyhow::anyhow!("apply transition: {e}").into()),
         };
 
         insert_event_tx(&mut tx, org, id, event_kind, actor, note.as_deref()).await?;
@@ -327,6 +380,7 @@ impl PgIncidentOpsStore {
         // were told it opened; write the closing update whenever it was ever
         // public, not only while currently public.
         if let Some(message) = public_resolution
+            && !unchanged
             && (row.visibility == "public" || incident_was_published(&mut tx, org, id).await?)
         {
             let author = actor
@@ -626,6 +680,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         id: Uuid,
         actor: Actor,
         note: Option<String>,
+        expect_generation: Option<i64>,
     ) -> Result<LifecycleOutcome> {
         // COALESCE preserves the first acker + ack time on a re-ack (the state
         // machine treats Acknowledged→Acknowledged as idempotent), so MTTA and
@@ -647,8 +702,23 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             note,
             &sql,
             None,
+            expect_generation,
         )
         .await
+    }
+
+    async fn generation(&self, org: OrgId, id: Uuid) -> Result<Option<i64>> {
+        let row: Option<(i64,)> = sqlx::query_as(
+            "SELECT (SELECT count(*) FROM incident_events e \
+                     WHERE e.incident_id = i.id AND e.org_id = i.org_id AND e.kind = 'reopened') \
+             FROM incidents i WHERE i.id = $1 AND i.org_id = $2",
+        )
+        .bind(id)
+        .bind(org.0)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| anyhow::anyhow!("incident generation: {e}"))?;
+        Ok(row.map(|(n,)| n))
     }
 
     async fn resolve(
@@ -677,6 +747,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             note,
             &sql,
             public_resolution,
+            None,
         )
         .await
     }
@@ -700,6 +771,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             None,
             &sql,
             Some(AUTO_RESOLVED_MESSAGE.to_string()),
+            None,
         )
         .await
     }
@@ -731,6 +803,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             actor,
             note,
             &sql,
+            None,
             None,
         )
         .await
@@ -1104,6 +1177,9 @@ impl IncidentOpsStore for PgIncidentOpsStore {
         Ok(())
     }
 
+    /// Dated by `sent_at`: the retry sweep reuses the row it was queued on, so
+    /// an attempt that failed before a reopen and landed after it belongs to
+    /// the new episode.
     async fn due_emergency_acks(&self, limit: usize) -> Result<Vec<EmergencyAck>> {
         let cap = (limit as i64).clamp(1, 1000);
         #[derive(sqlx::FromRow)]
@@ -1113,10 +1189,15 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             incident_id: Uuid,
             channel_id: Uuid,
             provider_receipt: String,
+            generation: i64,
         }
         let rows: Vec<Row> = sqlx::query_as(
-            r#"SELECT id, org_id, incident_id, channel_id, provider_receipt
-               FROM incident_notifications
+            r#"SELECT id, org_id, incident_id, channel_id, provider_receipt,
+                      (SELECT count(*) FROM incident_events e
+                       WHERE e.incident_id = n.incident_id AND e.org_id = n.org_id
+                         AND e.kind = 'reopened'
+                         AND e.occurred_at <= COALESCE(n.sent_at, n.created_at)) AS generation
+               FROM incident_notifications n
                WHERE provider_receipt IS NOT NULL AND acked_at IS NULL
                  AND status = 'sent' AND channel_id IS NOT NULL
                ORDER BY sent_at ASC LIMIT $1"#,
@@ -1133,6 +1214,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                 incident_id: r.incident_id,
                 channel_id: r.channel_id,
                 receipt: r.provider_receipt,
+                generation: r.generation,
             })
             .collect())
     }
@@ -1149,10 +1231,15 @@ impl IncidentOpsStore for PgIncidentOpsStore {
             incident_id: Uuid,
             channel_id: Uuid,
             provider_receipt: String,
+            generation: i64,
         }
         let rows: Vec<Row> = sqlx::query_as(
-            r#"SELECT id, org_id, incident_id, channel_id, provider_receipt
-               FROM incident_notifications
+            r#"SELECT id, org_id, incident_id, channel_id, provider_receipt,
+                      (SELECT count(*) FROM incident_events e
+                       WHERE e.incident_id = n.incident_id AND e.org_id = n.org_id
+                         AND e.kind = 'reopened'
+                         AND e.occurred_at <= COALESCE(n.sent_at, n.created_at)) AS generation
+               FROM incident_notifications n
                WHERE org_id = $1 AND incident_id = $2
                  AND provider_receipt IS NOT NULL AND acked_at IS NULL
                  AND status = 'sent' AND channel_id IS NOT NULL"#,
@@ -1170,6 +1257,7 @@ impl IncidentOpsStore for PgIncidentOpsStore {
                 incident_id: r.incident_id,
                 channel_id: r.channel_id,
                 receipt: r.provider_receipt,
+                generation: r.generation,
             })
             .collect())
     }

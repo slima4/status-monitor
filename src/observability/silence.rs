@@ -118,6 +118,7 @@ impl SilenceDelivery for SilenceNotifier {
                 self.central_whatsapp.as_ref(),
                 self.email.as_ref(),
                 email_alert,
+                None,
             ) {
                 Ok(n) => n.notify_incident(&notice).await.is_ok(),
                 Err(_) => false,

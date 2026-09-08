@@ -367,21 +367,27 @@ pub enum ActorType {
     System,
     User,
     Mcp,
+    /// A person acting through a signed link or a push app's own
+    /// acknowledgement. Possession of the notification is the whole proof, so
+    /// there is no user to name.
+    Link,
 }
 
 impl ActorType {
-    pub const ALL: &'static [Self] = &[Self::System, Self::User, Self::Mcp];
+    pub const ALL: &'static [Self] = &[Self::System, Self::User, Self::Mcp, Self::Link];
     pub fn as_db_str(self) -> &'static str {
         match self {
             Self::System => "system",
             Self::User => "user",
             Self::Mcp => "mcp",
+            Self::Link => "link",
         }
     }
     pub fn from_db_str(s: &str) -> Self {
         match s {
             "user" => Self::User,
             "mcp" => Self::Mcp,
+            "link" => Self::Link,
             _ => Self::System,
         }
     }
