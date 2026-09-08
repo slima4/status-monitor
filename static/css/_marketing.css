@@ -2951,6 +2951,11 @@ html:has(.marketing-shell) {
 .mk-hero__copy {
     max-width: 47rem;
 }
+/* Homepage signup and screenshot actions stay comfortable on touch screens. */
+.mk-home .mk-cta,
+.mk-home .mk-start__field { min-height: 2.75rem; }
+.mk-home .mk-start__input { min-height: 1.5rem; }
+.mk-home .mk-h3 { text-wrap: balance; }
 .mk-hero__map {
     align-self: start;
     z-index: -1;
@@ -2983,6 +2988,17 @@ html:has(.marketing-shell) {
 
 .mk-hero__map .mk-map__legend {
     margin-top: clamp(1rem, 2vw, 1.5rem);
+}
+
+@media (max-width: 640px) {
+    /* Keep decorative region labels out of the narrow column of hero copy. */
+    .mk-home .mk-hero__map {
+        min-width: 0;
+        overflow: hidden;
+        translate: none;
+        opacity: 0.3;
+    }
+    .mk-home .mk-hero__map .mk-map__legend { display: none; }
 }
 
 /* Architecture hero: a translucent flow-schema backdrop, same layering as the

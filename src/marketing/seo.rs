@@ -19,8 +19,8 @@ use serde::Serialize;
 
 use super::blog::list_published;
 use super::config::{
-    AUTHOR, BRAND, CONTACT_EMAIL, META_DESCRIPTION, MarketingCfg, ORG_COUNTRY, ORG_LOCALITY,
-    SOURCE_URL, TAGLINE, TERRAFORM_URL,
+    AUTHOR, BRAND, CONTACT_EMAIL, META_DESCRIPTION, MarketingCfg, ORG_COUNTRY, ORG_FOUNDING_DATE,
+    ORG_LOCALITY, SOURCE_URL, TAGLINE, TERRAFORM_URL,
 };
 use super::gallery;
 use super::landings;
@@ -195,9 +195,22 @@ pub fn json_ld_organization(canonical_origin: &str) -> JsonLd {
             "addressLocality": ORG_LOCALITY,
             "addressCountry": ORG_COUNTRY,
         },
+        "foundingDate": ORG_FOUNDING_DATE,
+        "founder": founder(canonical_origin),
         "sameAs": ORG_SAME_AS,
     });
     JsonLd::from_value(payload)
+}
+
+/// A reference node: the full Person lives on the about page under the same
+/// `@id`, so the organization links to one entity instead of restating it.
+fn founder(canonical_origin: &str) -> serde_json::Value {
+    serde_json::json!({
+        "@type": "Person",
+        "@id": author_id(canonical_origin),
+        "name": AUTHOR.name,
+        "url": format!("{canonical_origin}{AUTHOR_PAGE}"),
+    })
 }
 
 /// Canonical product entity (`@id`), with a freemium `AggregateOffer` so
@@ -1070,6 +1083,9 @@ mod tests {
         assert_eq!(v["address"]["@type"], "PostalAddress");
         assert_eq!(v["address"]["addressLocality"], ORG_LOCALITY);
         assert_eq!(v["address"]["addressCountry"], ORG_COUNTRY);
+        assert_eq!(v["foundingDate"], ORG_FOUNDING_DATE);
+        assert_eq!(v["founder"]["@id"], author_id("https://uptimepage.dev"));
+        assert_eq!(v["founder"]["name"], AUTHOR.name);
         let about = landings::LANDINGS
             .iter()
             .find(|l| l.path == "/about")

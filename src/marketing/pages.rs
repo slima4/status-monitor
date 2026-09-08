@@ -89,13 +89,6 @@ struct LandingPage {
 /// One source for the rendered FAQ and its `FAQPage` schema, so they can't drift.
 const FAQS: &[(&str, &str)] = &[
     (
-        "Is it really free?",
-        "The Standard plan is $0 a month with no credit card. The first 1,000 \
-         accounts get the more generous founding plan and keep it for life. Pro \
-         and Team are paid and coming soon. Whatever plan you sign up on stays \
-         yours, and you can self-host the whole thing under AGPL for free.",
-    ),
-    (
         "Can I use my own domain for the status page?",
         "Every org gets <code class=\"mk-chip\" translate=\"no\">your-org.uptimepage.dev</code> \
          out of the box. A custom CNAME (<code class=\"mk-chip\" translate=\"no\">status.yourcompany.com</code>) \

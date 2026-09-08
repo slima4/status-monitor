@@ -42,6 +42,8 @@ pub const SOURCE_URL: &str = "https://github.com/uptimepage/uptimepage";
 pub const CONTACT_EMAIL: &str = "hello@uptimepage.dev";
 pub const ORG_LOCALITY: &str = "Nicosia";
 pub const ORG_COUNTRY: &str = "CY";
+/// Month the first commit landed.
+pub const ORG_FOUNDING_DATE: &str = "2026-05";
 
 /// Named blog author — a verifiable Person for search-engine E-E-A-T.
 #[derive(Debug, Clone)]
