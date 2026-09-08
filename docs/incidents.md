@@ -62,7 +62,7 @@ Every lifecycle action writes an append-only event to the incident's internal ti
 
 ## Paging and escalation
 
-When an incident opens, the escalation engine pages the responsible channels. Paging reuses the same transports as regular notifications, every channel kind included: Slack, Discord, Teams, Google Chat, Telegram (one-tap linked or bring-your-own bot), WhatsApp, email, SMS, PagerDuty, ntfy, Pushover, and webhooks (see [Notifications](notifications.md)). Pushover emergency-priority pages are receipt-tracked and cancelled on resolve. Telegram rate-limit responses are honoured: a 429 with `retry_after` pushes the retry out at least that far.
+When an incident opens, the escalation engine pages the responsible channels. Paging reuses the same transports as regular notifications, every channel kind included: Slack, Discord, Teams, Google Chat, Telegram (one-tap linked or bring-your-own bot), WhatsApp, email, SMS, PagerDuty, ntfy, Pushover, Gotify, and webhooks (see [Notifications](notifications.md)). Pushover emergency-priority pages are receipt-tracked and cancelled on resolve. Telegram rate-limit responses are honoured: a 429 with `retry_after` pushes the retry out at least that far.
 
 An **escalation policy** is an ordered ladder of levels. Each level waits a delay, then pages its targets; if no one acknowledges, the engine advances to the next level, and can repeat the ladder a configured number of times before giving up. Acknowledging the incident halts the walk.
 

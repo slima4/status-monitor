@@ -33,7 +33,7 @@ The monitor starts checking immediately. Give it a couple of intervals and its d
 
 A monitor with no channel opens incidents that nobody hears about. This is the step people skip and regret.
 
-**Settings → Notifications → add channel.** Slack and Discord are one click if your operator has connected them; otherwise paste an incoming webhook URL. Email, SMS, PagerDuty, Telegram, ntfy, Pushover, and plain webhooks are all there too.
+**Settings → Notifications → add channel.** Slack and Discord are one click if your operator has connected them; otherwise paste an incoming webhook URL. Email, SMS, PagerDuty, Telegram, ntfy, Pushover, Gotify, and plain webhooks are all there too.
 
 Hit **test now** before saving. It sends a real synthetic alert through the real transport, so a wrong URL or an expired token surfaces now rather than during your first outage.
 

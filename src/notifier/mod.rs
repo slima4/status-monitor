@@ -3,6 +3,7 @@ pub mod discord;
 pub mod email;
 pub mod event;
 pub mod google_chat;
+pub mod gotify;
 pub mod msteams;
 pub mod ntfy;
 pub mod pagerduty;
@@ -24,6 +25,7 @@ use crate::notifier::discord::DiscordNotifier;
 use crate::notifier::email::EmailNotifier;
 use crate::notifier::event::IncidentNotice;
 use crate::notifier::google_chat::GoogleChatNotifier;
+use crate::notifier::gotify::GotifyNotifier;
 use crate::notifier::msteams::MsTeamsNotifier;
 use crate::notifier::ntfy::NtfyNotifier;
 use crate::notifier::pagerduty::PagerDutyNotifier;
@@ -191,6 +193,11 @@ pub fn build_notifier(
             parse(&c.server_url)?,
             c.topic.clone(),
             c.access_token.clone(),
+        )) as Arc<dyn Notifier>,
+        ChannelConfig::Gotify(c) => Arc::new(GotifyNotifier::new(
+            http.clone(),
+            parse(&c.publish_url())?,
+            c.token.clone(),
         )) as Arc<dyn Notifier>,
         ChannelConfig::Pushover(c) => Arc::new(PushoverNotifier::new(
             http.clone(),

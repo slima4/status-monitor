@@ -58,6 +58,7 @@
         {% call reg::chooser_card("data-kind-card", "kind", "pagerduty", form.kind == "pagerduty", "pagerduty", "Events API v2") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "pushover", form.kind == "pushover", "pushover", "phone push") %}{% endcall %}
         {% call reg::chooser_card("data-kind-card", "kind", "ntfy", form.kind == "ntfy", "ntfy", "topic push") %}{% endcall %}
+        {% call reg::chooser_card("data-kind-card", "kind", "gotify", form.kind == "gotify", "gotify", "self-hosted push") %}{% endcall %}
         {% if form.offers_whatsapp_app() %}
         {% call reg::chooser_card("data-kind-card", "kind", "whatsapp_app", form.kind == "whatsapp_app", "whatsapp", "one-tap number link") %}{% endcall %}
         {% endif %}
@@ -362,6 +363,40 @@
             </label>
           </div>
         </details>
+      </div>
+
+      <div data-variant="gotify" class="space-y-5{% if form.kind != "gotify" %} hidden{% endif %}">
+        <p class="text-sm text-muted">
+          Alerts publish to your own
+          <a href="https://gotify.net/" target="_blank" rel="noopener"
+             class="underline decoration-dotted hover:text-body">Gotify</a>
+          server and arrive in its apps. Create an application in the Gotify UI
+          and paste the token it shows — messages appear under that application.
+        </p>
+        <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <label class="field-outline">
+            <span class="field-outline__label">Server URL</span>
+            <input name="gotify_server_url" type="url" value="{{ form.config.gotify_server_url }}"
+                   placeholder="https://push.example.com"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            <span class="mt-1 block text-xs text-muted">
+              Base URL of your server, subpath included if it sits behind a
+              reverse proxy — not the /message endpoint. Must be reachable
+              from the public internet.
+            </span>
+          </label>
+          <label class="field-outline">
+            <span class="field-outline__label">Application token</span>
+            <input name="gotify_token" type="password" value="{{ form.config.gotify_token }}"
+                   placeholder="token from Apps → create application"
+                   autocomplete="off" spellcheck="false" class="w-full field font-mono">
+            <span class="mt-1 block text-xs text-muted">
+              Sent as <span class="font-mono">X-Gotify-Key</span>. An application
+              token, not a client token. Gotify 3 shows it once, when you
+              create the application or rotate the token.
+            </span>
+          </label>
+        </div>
       </div>
 
       <div data-variant="webhook" class="space-y-5{% if form.kind != "webhook" %} hidden{% endif %}">

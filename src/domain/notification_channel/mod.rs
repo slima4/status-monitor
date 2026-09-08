@@ -22,6 +22,7 @@
 mod discord;
 mod email;
 mod google_chat;
+mod gotify;
 mod mention;
 mod msteams;
 mod ntfy;
@@ -39,6 +40,7 @@ mod whatsapp_app;
 pub use discord::{DiscordConfig, DiscordMention};
 pub use email::EmailConfig;
 pub use google_chat::GoogleChatConfig;
+pub use gotify::GotifyConfig;
 pub use msteams::MsTeamsConfig;
 pub use ntfy::NtfyConfig;
 pub use pagerduty::PagerDutyConfig;
@@ -78,6 +80,7 @@ pub enum ChannelKind {
     #[serde(rename = "pagerduty")]
     PagerDuty,
     Ntfy,
+    Gotify,
     Pushover,
     Sms,
 }
@@ -99,6 +102,7 @@ impl ChannelKind {
         Self::Email,
         Self::PagerDuty,
         Self::Ntfy,
+        Self::Gotify,
         Self::Pushover,
         Self::Sms,
     ];
@@ -119,6 +123,7 @@ impl ChannelKind {
             Self::Email => "email",
             Self::PagerDuty => "pagerduty",
             Self::Ntfy => "ntfy",
+            Self::Gotify => "gotify",
             Self::Pushover => "pushover",
             Self::Sms => "sms",
         }
@@ -148,6 +153,7 @@ pub enum ChannelConfig {
     #[serde(rename = "pagerduty")]
     PagerDuty(PagerDutyConfig),
     Ntfy(NtfyConfig),
+    Gotify(GotifyConfig),
     Pushover(PushoverConfig),
     Sms(SmsConfig),
 }
@@ -169,6 +175,7 @@ macro_rules! with_transport {
             ChannelConfig::Email($c) => $body,
             ChannelConfig::PagerDuty($c) => $body,
             ChannelConfig::Ntfy($c) => $body,
+            ChannelConfig::Gotify($c) => $body,
             ChannelConfig::Pushover($c) => $body,
             ChannelConfig::Sms($c) => $body,
         }
@@ -394,6 +401,7 @@ mod tests {
             r#"{"type":"pagerduty","routing_key":"R0123456789abcdef0123456789abcde"}"#,
             r#"{"type":"ntfy","server_url":"https://ntfy.sh","topic":"uptime-alerts"}"#,
             r#"{"type":"ntfy","server_url":"https://ntfy.example.com","topic":"ops","access_token":"tk_x"}"#,
+            r#"{"type":"gotify","server_url":"https://push.example.com","token":"AbCdEfGhIjKlMnO"}"#,
             r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG"}"#,
             r#"{"type":"pushover","token":"azGDORePK8gMaC0QOYAMyEEuzJnyUi","user":"uQiRzpo4DXghDmr9QzzfQu27cmVRsG","device":"droid2"}"#,
             r#"{"type":"sms","provider":"twilio","to":"+15551234567","from":"+15557654321","account_sid":"AC0123456789ABCDEF0123456789ABCDEF","auth_token":"tok"}"#,
@@ -466,6 +474,10 @@ mod tests {
                 server_url: "https://ntfy.sh".into(),
                 topic: "uptime-alerts".into(),
                 access_token: None,
+            }),
+            ChannelConfig::Gotify(GotifyConfig {
+                server_url: "https://push.example.com".into(),
+                token: "AbCdEfGhIjKlMnO".into(),
             }),
             ChannelConfig::Pushover(PushoverConfig {
                 token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
@@ -889,6 +901,38 @@ mod tests {
     }
 
     #[test]
+    fn gotify_masks_token_and_keeps_base_url() {
+        let mut c = ChannelConfig::Gotify(GotifyConfig {
+            server_url: "https://push.example.com/gotify".into(),
+            token: "AbCdEfGhIjKlMnO".into(),
+        });
+        assert!(c.validate().is_ok());
+        assert_eq!(c.abuse_url(), Some("https://push.example.com/gotify"));
+        let r = c.redacted();
+        assert_eq!(r["server_url"], "https://push.example.com/gotify");
+        assert_eq!(r["token"], MASK);
+        c.redact_in_place();
+        assert!(c.has_redaction_sentinel());
+
+        let bad = |f: fn(&mut GotifyConfig)| {
+            let mut g = GotifyConfig {
+                server_url: "https://push.example.com".into(),
+                token: "AbCdEfGhIjKlMnO".into(),
+            };
+            f(&mut g);
+            ChannelConfig::Gotify(g).validate()
+        };
+        assert!(bad(|g| g.server_url = "http://push.example.com".into()).is_err());
+        assert!(bad(|g| g.server_url = "https://push.example.com/?x=1".into()).is_err());
+        assert!(bad(|g| g.server_url = "https://u:p@push.example.com".into()).is_err());
+        assert!(bad(|g| g.token = "".into()).is_err());
+        assert!(bad(|g| g.token = "tok en".into()).is_err());
+        assert!(bad(|g| g.token = "x".repeat(201)).is_err());
+        // A subpath install is normal behind a reverse proxy.
+        assert!(bad(|g| g.server_url = "https://push.example.com/gotify".into()).is_ok());
+    }
+
+    #[test]
     fn pushover_masks_both_keys_and_validates_shape() {
         let mut c = ChannelConfig::Pushover(PushoverConfig {
             token: "azGDORePK8gMaC0QOYAMyEEuzJnyUi".into(),
@@ -1101,6 +1145,34 @@ mod normalize_tests {
         assert!(pd.validate().is_err(), "33 chars until it is trimmed");
         pd.normalize();
         assert!(pd.validate().is_ok());
+    }
+
+    #[test]
+    fn a_gotify_base_url_keeps_the_path_the_install_is_served_under() {
+        let mut gotify = ChannelConfig::Gotify(GotifyConfig {
+            server_url: " https://push.example.com/gotify/ ".into(),
+            token: " AbCdEfGhIjKlMnO ".into(),
+        });
+        gotify.normalize();
+        assert!(gotify.validate().is_ok());
+        let ChannelConfig::Gotify(g) = &gotify else {
+            unreachable!()
+        };
+        assert_eq!(g.server_url, "https://push.example.com/gotify");
+        assert_eq!(g.token, "AbCdEfGhIjKlMnO");
+        assert_eq!(g.publish_url(), "https://push.example.com/gotify/message");
+
+        // A server that really is mounted at /message publishes one level
+        // deeper — the path is never guessed away.
+        let mut odd = ChannelConfig::Gotify(GotifyConfig {
+            server_url: "https://push.example.com/message".into(),
+            token: "AbCdEfGhIjKlMnO".into(),
+        });
+        odd.normalize();
+        let ChannelConfig::Gotify(g) = &odd else {
+            unreachable!()
+        };
+        assert_eq!(g.publish_url(), "https://push.example.com/message/message");
     }
 
     #[test]

@@ -24,7 +24,7 @@ The point of the split is blast radius. A noisy marketing-site monitor and your 
 | SMS | Credentials for your own gateway: Twilio, Vonage, Telnyx, Plivo, or Sinch | One message per alert, trimmed to bound per-segment cost |
 | Email | One address | Must be verified before anything is delivered, see below |
 | PagerDuty | An Events API v2 routing key | The only type that drives the destination's own incident lifecycle |
-| ntfy, Pushover | Server and topic, or app and user key | Urgency maps to the service's own priority levels |
+| ntfy, Pushover, Gotify | Server and topic, app and user key, or your own Gotify server and an application token | Urgency maps to the service's own priority levels |
 | Webhook | An HTTPS URL, optional headers, optional signing secret | The escape hatch for anything not listed above |
 
 PagerDuty is worth calling out: opens send a `trigger` and resolutions send a `resolve`, correlated by the incident id, so one incident here maps to exactly one PagerDuty alert that opens and closes with it rather than a pile of unrelated pages.

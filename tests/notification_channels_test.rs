@@ -333,6 +333,34 @@ async fn ntfy_round_trips_with_token_masked_and_topic_visible() {
 }
 
 #[tokio::test]
+async fn gotify_round_trips_with_token_masked_and_server_visible() {
+    let app = app();
+    let (st, created) = send(
+        &app,
+        "POST",
+        "/api/v1/notification-channels",
+        json!({
+            "name": "oncall-gotify",
+            "config": {
+                "type": "gotify",
+                "server_url": "https://push.example.com/gotify/",
+                "token": "zzGOTIFYSECRETzz"
+            }
+        }),
+    )
+    .await;
+    assert_eq!(st, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "gotify");
+    // A subpath install keeps its path; only the trailing slash is dropped.
+    assert_eq!(
+        created["config"]["server_url"],
+        "https://push.example.com/gotify"
+    );
+    assert_eq!(created["config"]["token"], "***");
+    assert!(!created.to_string().contains("zzGOTIFYSECRETzz"));
+}
+
+#[tokio::test]
 async fn pushover_round_trips_with_both_keys_masked() {
     let app = app();
     let (st, created) = send(
@@ -407,6 +435,14 @@ async fn paging_kinds_reject_malformed_configs() {
         (
             "ntfy-plain-http",
             json!({ "type": "ntfy", "server_url": "http://ntfy.internal", "topic": "ops" }),
+        ),
+        (
+            "gotify-plain-http",
+            json!({ "type": "gotify", "server_url": "http://push.internal", "token": "tok" }),
+        ),
+        (
+            "gotify-no-token",
+            json!({ "type": "gotify", "server_url": "https://push.example.com", "token": "" }),
         ),
         (
             "po-bad-user",

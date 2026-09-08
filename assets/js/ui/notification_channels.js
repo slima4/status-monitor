@@ -213,6 +213,7 @@
             ["webhook_url", hostName],
             ["email_to", trimmed],
             ["ntfy_topic", trimmed],
+            ["gotify_server_url", hostName],
             ["whatsapp_to", trimmed],
             ["sms_to", trimmed],
         ];
@@ -909,6 +910,15 @@
             const token = (data.get("ntfy_access_token") || "").trim();
             if (token) config.access_token = token;
             return { config };
+        }
+        if (kind === "gotify") {
+            return {
+                config: {
+                    type: "gotify",
+                    server_url: (data.get("gotify_server_url") || "").trim().replace(/\/+$/, ""),
+                    token: (data.get("gotify_token") || "").trim(),
+                },
+            };
         }
         if (kind === "sms") {
             const provider = currentSmsProvider();
