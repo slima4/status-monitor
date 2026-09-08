@@ -324,9 +324,9 @@ writes an org audit row (`target.plan_hold` / `target.plan_release`, and the
 `status_page.` pair).
 
 Reconciliation runs when a monitor or page is deleted, when the customer picks,
-and once a day for every account that is over a cap or holding something. The
-daily pass is what notices a plan changed by an operator `UPDATE`, which
-notifies nothing on its own.
+at startup, and once a day for every account that is over a cap or holding
+something. Those last two are what notice a plan changed by an operator
+`UPDATE`, which notifies nothing on its own.
 
 On-call and escalation are gated separately and at write time only, like text
 message alerts: a plan without `on_call_enabled` refuses a new policy, schedule,

@@ -20,7 +20,10 @@ use uptimepage::{
     config::AppConfig,
     error::{AppError, Result},
     http_client::client::build_clients,
-    jobs::{periodic::run_purge_loop, retention},
+    jobs::{
+        periodic::{run_purge_loop, run_purge_loop_from_boot},
+        retention,
+    },
     marketing, observability,
     pipeline::{BatcherConfig, ResultBatcher},
     public_status::{
@@ -712,12 +715,13 @@ async fn main() -> Result<()> {
         uptimepage::storage::subscriber_deliveries::purge_old,
     ));
 
-    // Daily: a plan moves by an operator UPDATE today, which notifies nothing,
-    // so this is what turns a downgrade into holds and an upgrade into their
-    // release. The candidate query skips every account that already fits.
+    // A plan moves by an operator UPDATE, which notifies nothing, so this turns
+    // a downgrade into holds and an upgrade into their release. It runs at boot
+    // too, because the plan can have moved while the process was down. The
+    // candidate query skips every account that already fits.
     let plan_holds_handle: JoinHandle<()> = {
         let quotas = Arc::clone(&quotas);
-        tokio::spawn(run_purge_loop(
+        tokio::spawn(run_purge_loop_from_boot(
             pg_pool_for_stores.clone(),
             root.clone(),
             Duration::from_secs(24 * 60 * 60),
