@@ -446,9 +446,10 @@ async fn status_fragment_returns_region_without_doctype() {
     // The component still surfaces inside the region.
     assert!(html.contains(PUBLIC_COMPONENT_NAME));
     // Region keeps the self-rearming HTMX hooks so subsequent swaps continue
-    // (acceptance #5: "auto-refreshes every 30 s without full reload").
+    // to refresh every 30s without a full reload.
     assert!(html.contains(r#"hx-get="?fragment=1""#));
-    assert!(html.contains(r#"hx-trigger="every 30s""#));
+    assert!(html.contains(r#"hx-trigger="every 30s, sm:poll-resume from:body""#));
+    assert!(html.contains("data-poll-pause"));
 }
 
 // ── ClickHouse reachable, no history data ─────────────────────────────────

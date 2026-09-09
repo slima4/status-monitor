@@ -15,25 +15,6 @@
         }
     }
 
-    // Pause #detail-live-kpi polling while the tab is hidden. A user
-    // who left the tab open in the background doesn't need fresh KPIs
-    // until they come back, so silencing the every-60s + ticker-driven
-    // refresh kills a sustained per-viewer request the server doesn't
-    // have to serve. A single catch-up refresh fires on becoming
-    // visible again. Manual paths (Run check now, Enable/Disable) are
-    // user-initiated → by definition fire while visible, so they're
-    // never blocked by the interceptor.
-    document.body.addEventListener("htmx:beforeRequest", (ev) => {
-        const elt = ev.detail && ev.detail.elt;
-        if (!elt || elt.id !== "detail-live-kpi") return;
-        if (document.visibilityState === "hidden") {
-            ev.preventDefault();
-        }
-    });
-    document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible") refreshLive();
-    });
-
     // Run check now: persist a fresh check, render the verbose result
     // pill, then ask the live partial to pick up the new row + uptime.
     const btn = document.querySelector("[data-detail-test-now]");

@@ -150,6 +150,16 @@ fn partial_omits_chrome() {
     assert!(!html.contains("<nav"));
     assert!(html.contains(r#"id="dashboard-table""#));
     assert!(html.contains("99.92%"));
+    // An outerHTML swap inserts every top-level node beside the target.
+    assert!(html.starts_with("<div id=\"dashboard-table\""));
+    assert!(html.ends_with("</div>"));
+    // The resume carries the filter guard too: without it a catch-up poll
+    // built from pre-click params can land after the filtered swap.
+    assert!(html.contains(
+        r#"hx-trigger="every 5s [!document.querySelector('#dashboard-table .htmx-request')], sm:poll-resume[!document.querySelector('#dashboard-table .htmx-request')] from:body""#
+    ));
+    // Re-armed on every swap, so the pause survives the zone replacing itself.
+    assert!(html.contains("data-poll-pause"));
 }
 
 #[test]

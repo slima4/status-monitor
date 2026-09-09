@@ -83,9 +83,11 @@ fn full_page_renders_chrome_and_components() {
     assert!(html.contains("Gateway"));
     // Relative so the poll stays on whichever URL served the page.
     assert!(html.contains(r#"hx-get="?fragment=1""#));
-    assert!(html.contains(r#"hx-trigger="every 30s""#));
+    assert!(html.contains(r#"hx-trigger="every 30s, sm:poll-resume from:body""#));
     assert!(html.contains("data-tz"));
     assert!(html.contains(&crate::web::assets::url("js/htmx.min.js")));
+    // Without it nothing honours [data-poll-pause] and the region polls on.
+    assert!(html.contains(&crate::web::assets::url("js/ui/poll_visibility.js")));
     assert!(html.contains(&crate::web::assets::url("js/ui/localtime.js")));
     assert!(html.contains(&crate::web::assets::url("js/public/day_popover.js")));
     assert!(html.contains("/api/public/v1/incidents.rss"));
@@ -201,8 +203,13 @@ fn fragment_renders_region_without_doctype() {
     assert!(!html.contains("<!doctype html>"));
     assert!(!html.contains("<nav"));
     assert!(html.contains(r#"id="status-region""#));
-    assert!(html.contains(r#"hx-trigger="every 30s""#));
+    assert!(html.contains(r#"hx-trigger="every 30s, sm:poll-resume from:body""#));
     assert!(html.contains("Gateway"));
+    // Re-armed on every swap, so the pause survives the zone replacing itself.
+    assert!(html.contains("data-poll-pause"));
+    // An outerHTML swap inserts every top-level node beside the target.
+    assert!(html.starts_with("<div id=\"status-region\""));
+    assert!(html.ends_with("</div>"));
 }
 
 #[test]

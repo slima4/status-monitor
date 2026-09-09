@@ -45,7 +45,7 @@
 
 {% macro loading(text) %}
 {# Mirror of loadingPlaceholder() in htmx_loader.js — keep in step. #}
-<p class="px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
+<p data-hx-loading class="px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
 {% endmacro %}
 
 {# One postmortem action item, shared by the prefill loop and the clone <template>. #}

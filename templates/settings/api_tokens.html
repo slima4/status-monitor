@@ -112,10 +112,11 @@
 
   <div id="tokens-list" data-hx-loader
        hx-get="/web/partials/settings/api-tokens"
-       hx-trigger="load, every 60s, tokens:refresh from:body"
+       hx-trigger="load, every 60s, tokens:refresh from:body, sm:poll-resume from:body"
+       data-poll-pause
        hx-swap="innerHTML"
        class="sticker-card overflow-hidden">
-    <p class="px-4 py-3 text-sm text-muted">Loading…</p>
+    <p data-hx-loading class="px-4 py-3 text-sm text-muted">Loading…</p>
   </div>
 
   <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>

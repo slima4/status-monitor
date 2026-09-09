@@ -1,6 +1,6 @@
 {# Re-rendered out of band by the live poll, so it agrees with the KPIs above.
-   Binds `lv`: the enclosing block already holds the ping card's own `hb`. #}
-{% if let Some(lv) = liveness %}
+   Binds `lv`: the enclosing block already holds the ping card's own `hb`. -#}
+{% if let Some(lv) = liveness -%}
 <div id="hb-liveness"{% if liveness_oob %} hx-swap-oob="true"{% endif %}>
   {% if lv.pending %}
   <div class="space-y-1 border-l-2 border-[color:var(--theme-line)] pl-3 font-mono text-xs text-quiet">
@@ -35,4 +35,4 @@
   </div>
   {% endif %}
 </div>
-{% endif %}
+{%- endif %}

@@ -2,10 +2,13 @@
    Poll vs filter-click race guards: the tick skips while any request from
    inside the zone is in flight, and hx-sync lets a user action abort an
    in-flight poll — otherwise a stale poll response (built from pre-click
-   params) can land last and silently reset the selection. #}
+   params) can land last and silently reset the selection.
+   No whitespace may surround the zone: an outerHTML swap inserts every
+   top-level node of the response and removes only the target. -#}
 <div id="dashboard-table"
      hx-get="/web/partials/dashboard?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r }}{% endif %}{% if let Some(s) = selected_status %}&status={{ s }}{% endif %}{% if let Some(k) = selected_kind %}&type={{ k }}{% endif %}{% if let Some(c) = drill %}&down_at={{ c.down_at }}{% endif %}"
-     hx-trigger="every 5s [!document.querySelector('#dashboard-table .htmx-request')]"
+     hx-trigger="every 5s [!document.querySelector('#dashboard-table .htmx-request')], sm:poll-resume[!document.querySelector('#dashboard-table .htmx-request')] from:body"
+     data-poll-pause
      hx-sync="this:replace"
      hx-swap="outerHTML"
      class="space-y-4">

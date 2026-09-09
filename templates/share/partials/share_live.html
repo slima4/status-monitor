@@ -1,21 +1,26 @@
 {# Response for /m/{token}/live — token-scoped twin of detail_live.html.
    Same KPI swap target + OOB Recent-results tbody + count, but the self-rearm
-   hx-get points at the share surface. See detail_live.html for the <template>
-   wrapper rationale. #}
+   hx-get points at the share surface. The OOB <tbody> rides inside a
+   <template>: it isn't the first node of the response, so htmx's table-aware
+   parse doesn't apply and a bare <tbody> would be dropped before the OOB pass
+   sees it. No whitespace between the top-level nodes, as in detail_live.html. -#}
 <section id="detail-live-kpi"
          hx-get="/m/{{ token }}/live?range={{ range }}"
-         hx-trigger="every 60s, sm:refresh-live from:body"
+         hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body"
+         data-poll-pause
          hx-swap="outerHTML"
          hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
          data-newest-ts="{{ last_at_iso }}"
          class="grid gap-4 md:grid-cols-4">
   {% include "targets/partials/detail_live_kpi_cards.html" %}
 </section>
+{#- -#}
 <template>
   <tbody id="detail-live-recent" hx-swap-oob="true">
     {% include "targets/partials/detail_live_rows.html" %}
   </tbody>
 </template>
+{#- -#}
 <span id="detail-recent-count" hx-swap-oob="true" class="text-xs text-muted">latest {{ results.len() }}{% if results_has_more %}+{% endif %}</span>
-{% import "targets/partials/_status_badge.html" as sb %}
-{% call sb::show(last_status, enabled, true) %}{% endcall %}
+{%- import "targets/partials/_status_badge.html" as sb -%}
+{%- call sb::show(last_status, enabled, true) %}{% endcall -%}

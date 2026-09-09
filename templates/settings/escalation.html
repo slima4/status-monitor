@@ -20,10 +20,11 @@
 
   <div id="escalation-list" data-hx-loader
        hx-get="/web/partials/settings/escalation"
-       hx-trigger="load, every 60s, escalation:refresh from:body"
+       hx-trigger="load, every 60s, escalation:refresh from:body, sm:poll-resume from:body"
+       data-poll-pause
        hx-swap="innerHTML"
        class="space-y-6">
-    <p class="sticker-card px-4 py-3 text-sm text-muted">Loading…</p>
+    <p data-hx-loading class="sticker-card px-4 py-3 text-sm text-muted">Loading…</p>
   </div>
 </section>
 

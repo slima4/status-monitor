@@ -83,8 +83,9 @@
        the filtered swap and shows the wrong rows for up to 10s. #}
     <div id="incident-table"
          hx-get="/web/partials/incidents?{{ data.partial_query }}"
-         hx-trigger="every 10s [!document.querySelector('#incidents-filter.htmx-request')]"
+         hx-trigger="every 10s [!document.querySelector('#incidents-filter.htmx-request')], sm:poll-resume[!document.querySelector('#incidents-filter.htmx-request')] from:body"
          hx-sync="this:replace"
+         data-poll-pause
          hx-swap="innerHTML"
          data-hx-loader>
       {% include "incidents/_console_table.html" %}

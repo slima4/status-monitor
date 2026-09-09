@@ -1,12 +1,15 @@
 {# Auto-refreshing public status region.
    Self-rearms via hx-swap="outerHTML" — each replacement still carries the
    every-30s trigger. Works without JavaScript: the trigger is purely an
-   enhancement, and full HTTP refresh produces the same content. #}
-{% import "public/_incident_chips.html" as chips %}
-{% import "public/_incident_card.html" as card %}
+   enhancement, and full HTTP refresh produces the same content.
+   No whitespace may surround the div: an outerHTML swap inserts every
+   top-level node of the response and removes only the target. -#}
+{%- import "public/_incident_chips.html" as chips -%}
+{%- import "public/_incident_card.html" as card -%}
 <div id="status-region"
      hx-get="?fragment=1"
-     hx-trigger="every 30s"
+     hx-trigger="every 30s, sm:poll-resume from:body"
+     data-poll-pause
      hx-swap="outerHTML"
      class="space-y-10">
 

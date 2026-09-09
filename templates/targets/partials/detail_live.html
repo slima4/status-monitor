@@ -2,17 +2,20 @@
    swap target (KPI section, replaced outerHTML) plus an OOB re-render of the
    uptime ribbon so a single request keeps both current while leaving the charts
    (which live between them in detail.html) untouched. The KPI section self-rearms
-   by carrying the hx-get + hx-trigger attrs on every render. #}
+   by carrying the hx-get + hx-trigger attrs on every render. No whitespace
+   between the top-level nodes: an outerHTML swap inserts them all beside the
+   target and removes only the target. -#}
 <section id="detail-live-kpi"
          hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
-         hx-trigger="every 60s, sm:refresh-live from:body"
+         hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body"
+         data-poll-pause
          hx-swap="outerHTML"
          hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
          data-newest-ts="{{ last_at_iso }}"
          class="grid gap-4 md:grid-cols-4">
   {% include "targets/partials/detail_live_kpi_cards.html" %}
 </section>
-{% include "targets/partials/detail_ribbon.html" %}
-{% include "targets/partials/_heartbeat_liveness.html" %}
-{% import "targets/partials/_status_badge.html" as sb %}
-{% call sb::show(last_status, enabled, true) %}{% endcall %}
+{%- include "targets/partials/detail_ribbon.html" -%}
+{%- include "targets/partials/_heartbeat_liveness.html" -%}
+{%- import "targets/partials/_status_badge.html" as sb -%}
+{%- call sb::show(last_status, enabled, true) %}{% endcall -%}

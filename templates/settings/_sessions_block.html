@@ -20,7 +20,8 @@
   </header>
   <div id="sessions-list" data-hx-loader
        hx-get="/web/partials/settings/sessions"
-       hx-trigger="load, every 60s, sessions:refresh from:body"
+       hx-trigger="load, every 60s, sessions:refresh from:body, sm:poll-resume from:body"
+       data-poll-pause
        hx-swap="innerHTML">
     {% call reg::loading("loading…") %}{% endcall %}
   </div>

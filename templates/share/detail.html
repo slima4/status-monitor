@@ -12,7 +12,8 @@
 
   <section id="detail-live-kpi"
            hx-get="/m/{{ token }}/live?range={{ range }}"
-           hx-trigger="every 60s, sm:refresh-live from:body"
+           hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body"
+           data-poll-pause
            hx-swap="outerHTML"
            hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
            data-newest-ts="{{ last_at_iso }}"

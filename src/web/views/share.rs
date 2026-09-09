@@ -518,6 +518,51 @@ mod tests {
     }
 
     #[test]
+    fn live_partial_has_no_whitespace_between_its_top_level_nodes() {
+        let html = ShareLive {
+            token: "tok".into(),
+            range: "24h",
+            enabled: true,
+            last_status: "up",
+            uptime: Arc::new(UptimeStatsView {
+                total: 100,
+                up: 100,
+                down: 0,
+                degraded: 0,
+                error: 0,
+                uptime_pct: Some("100.00".into()),
+            }),
+            pings: None,
+            kpi: Arc::new(Default::default()),
+            results: Arc::from(vec![]),
+            results_has_more: false,
+            last_at_iso: Arc::from("2026-07-13T12:00:00Z"),
+            show_region: false,
+            show_guidance: false,
+        }
+        .render()
+        .unwrap();
+        // An outerHTML swap inserts every top-level node beside the target.
+        assert!(html.starts_with("<section id=\"detail-live-kpi\""));
+        assert!(html.contains(
+            r#"hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body""#
+        ));
+        assert!(html.contains("data-poll-pause"));
+        assert!(html.contains("</section><template>"));
+        assert!(html.contains("</template><span id=\"detail-recent-count\""));
+        assert!(html.contains("</span><span id=\"detail-status-badge\""));
+        assert!(html.ends_with("</span>"));
+    }
+
+    #[test]
+    fn share_page_loads_the_poll_pause_guard() {
+        let html = share_page(false).render().unwrap();
+        assert!(html.contains("data-poll-pause"));
+        // Without it nothing honours the marker and the KPI zone polls on.
+        assert!(html.contains(&crate::web::assets::url("js/ui/poll_visibility.js")));
+    }
+
+    #[test]
     fn multi_region_share_charts_say_they_merge_regions() {
         let html = share_page(true).render().unwrap();
         assert!(html.contains("latency breakdown · all regions"));

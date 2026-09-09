@@ -1393,6 +1393,17 @@ mod tests {
     }
 
     #[test]
+    fn console_pauses_polling_while_hidden() {
+        let html = page(vec![]).render().unwrap();
+        // The resume carries the filter guard too: without it a catch-up poll
+        // built from pre-click params can land after the filtered swap.
+        assert!(html.contains(
+            r#"hx-trigger="every 10s [!document.querySelector('#incidents-filter.htmx-request')], sm:poll-resume[!document.querySelector('#incidents-filter.htmx-request')] from:body""#
+        ));
+        assert!(html.contains("data-poll-pause"));
+    }
+
+    #[test]
     fn console_empty_renders_empty_state() {
         let html = page(vec![]).render().unwrap();
         assert!(html.contains("No incidents match"));

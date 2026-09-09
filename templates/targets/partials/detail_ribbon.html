@@ -1,7 +1,7 @@
 {# Uptime ribbon strip + meta. Rendered on the full page (ribbon_oob=false) and
    re-rendered by the 60s live poll (ribbon_oob=true) so the newest cell and the
    uptime figure stay current. The drill drawer lives outside this element so an
-   open inspection survives the swap. #}
+   open inspection survives the swap. -#}
 <div id="detail-ribbon"{% if ribbon_oob %} hx-swap-oob="true"{% endif %}>
   {% if !segments.is_empty() %}
   {# data-tip-date flags multi-day ranges so the tooltip JS renders the

@@ -1040,15 +1040,52 @@ fn live_partial_renders_kpi_swap_target_plus_oob_ribbon() {
     assert!(html.contains(
         "hx-get=\"/web/partials/targets/00000000-0000-0000-0000-000000000001/live?range=24h\""
     ));
-    assert!(html.contains(r#"hx-trigger="every 60s, sm:refresh-live from:body""#));
+    assert!(html.contains(
+        r#"hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body""#
+    ));
+    assert!(html.contains("data-poll-pause"));
     assert!(html.contains(r#"hx-swap="outerHTML""#));
     assert!(html.contains(r#"data-newest-ts="2026-05-13T12:00:00Z""#));
+    // An outerHTML swap inserts every top-level node beside the target.
+    assert!(html.starts_with("<section id=\"detail-live-kpi\""));
+    assert!(html.contains("</section><div id=\"detail-ribbon\""));
+    assert!(html.contains("</div><span id=\"detail-status-badge\""));
+    assert!(html.ends_with("</span>"));
     // The ribbon rides along as an out-of-band swap so the newest cell stays
     // current without a full-page reload; the recent-results table is gone.
     assert!(html.contains(r#"id="detail-ribbon""#));
     assert!(html.contains(r#"hx-swap-oob="true""#));
     assert!(!html.contains(r#"id="detail-live-recent""#));
     assert!(html.contains("99.00"));
+}
+
+/// A heartbeat monitor renders a third top-level node between the ribbon and
+/// the badge, so it has a seam the probed shape never exercises.
+#[test]
+fn live_partial_seams_stay_bare_for_a_heartbeat_monitor() {
+    let mut live = sample_live();
+    live.liveness = Some(super::HeartbeatLiveness {
+        pending: false,
+        since: None,
+        due_at: None,
+        down_at: None,
+        late: false,
+        overdue: false,
+    });
+    let html = live.render().unwrap();
+    assert!(html.starts_with("<section id=\"detail-live-kpi\""));
+    assert!(html.contains("</section><div id=\"detail-ribbon\""));
+    assert!(html.contains("</div><div id=\"hb-liveness\""));
+    assert!(html.contains("</div><span id=\"detail-status-badge\""));
+    assert!(html.ends_with("</span>"));
+}
+
+#[test]
+fn detail_page_loads_the_poll_pause_guard() {
+    let html = sample_page().render().unwrap();
+    assert!(html.contains("data-poll-pause"));
+    // Without it nothing honours the marker and the KPI zone polls on.
+    assert!(html.contains(&crate::web::assets::url("js/ui/poll_visibility.js")));
 }
 
 #[test]

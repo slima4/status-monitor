@@ -20,10 +20,11 @@
 
   <div id="on-call-list" data-hx-loader
        hx-get="/web/partials/settings/on-call"
-       hx-trigger="load, every 60s, oncall:refresh from:body"
+       hx-trigger="load, every 60s, oncall:refresh from:body, sm:poll-resume from:body"
+       data-poll-pause
        hx-swap="innerHTML"
        class="space-y-4">
-    <p class="sticker-card px-4 py-3 text-sm text-muted">Loading…</p>
+    <p data-hx-loading class="sticker-card px-4 py-3 text-sm text-muted">Loading…</p>
   </div>
 
   <section class="space-y-3" aria-labelledby="contacts-heading">
