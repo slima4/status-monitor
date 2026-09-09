@@ -46,7 +46,7 @@
        hx-swap="innerHTML"
        hx-on::response-error="window.smToast({message:'team list failed to load — refresh the page'})"
        class="sticker-card overflow-hidden">
-    {% call reg::loading("loading…") %}{% endcall %}
+    {% call reg::loading("loading…", "") %}{% endcall %}
   </div>
 
   {% if is_owner %}

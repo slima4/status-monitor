@@ -1044,7 +1044,7 @@ fn live_partial_renders_kpi_swap_target_plus_oob_ribbon() {
         r#"hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body""#
     ));
     assert!(html.contains("data-poll-pause"));
-    assert!(html.contains("data-poll-stop-on-404"));
+    assert!(html.contains("data-reload-on-404"));
     assert!(!html.contains("hx-on::response-error"));
     assert!(html.contains(r#"hx-swap="outerHTML""#));
     assert!(html.contains(r#"data-newest-ts="2026-05-13T12:00:00Z""#));
@@ -1086,14 +1086,12 @@ fn live_partial_seams_stay_bare_for_a_heartbeat_monitor() {
 fn detail_page_loads_the_polling_module() {
     let html = sample_page().render().unwrap();
     assert!(html.contains("data-poll-pause"));
-    // A deleted monitor 404s the live endpoint; without this the zone keeps
-    // asking every 60s for the life of the tab.
-    assert!(html.contains("data-poll-stop-on-404"));
+    // A deleted monitor 404s the live endpoint; reload onto the real 404.
+    assert!(html.contains("data-reload-on-404"));
     // Without the module nothing honours either marker.
     assert!(html.contains(&crate::web::assets::url("js/ui/polling.js")));
-    // The inline handler this replaced was dead twice over: htmx builds
-    // hx-on bodies with Function(), and dropping hx-trigger alone cancels
-    // neither the timer nor the from:body listeners.
+    // The hx-on it replaced was dead twice over: Function() under the CSP,
+    // and dropping hx-trigger cancels neither timer nor from:body listeners.
     assert!(!html.contains("hx-on::response-error"));
 }
 

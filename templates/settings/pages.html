@@ -14,7 +14,7 @@
        hx-get="/web/partials/settings/pages"
        hx-trigger="load, pages:refresh from:body"
        hx-swap="innerHTML">
-    {% call reg::loading("loading…") %}{% endcall %}
+    {% call reg::loading("loading…", "") %}{% endcall %}
   </div>
 
   <script>

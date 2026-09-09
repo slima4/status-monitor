@@ -43,9 +43,10 @@
 </button>
 {% endmacro %}
 
-{% macro loading(text) %}
-{# Mirror of loadingPlaceholder() in htmx_loader.js — keep in step. #}
-<p data-hx-loading class="px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
+{# `extra`: "" when the wrapper is already a card, "sticker-card" when the
+   placeholder stands in for one. htmx_loader.js clones this on retry. #}
+{% macro loading(text, extra) %}
+<p data-hx-loading class="{% if !extra.is_empty() %}{{ extra }} {% endif %}px-4 py-3 font-mono text-xs text-quiet"># {{ text }}</p>
 {% endmacro %}
 
 {# One postmortem action item, shared by the prefill loop and the clone <template>. #}

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_register.html" as reg %}
 {% block title %}API tokens · Uptimepage{% endblock %}
 {% block content %}
 <section class="space-y-6">
@@ -116,7 +117,7 @@
        data-poll-pause
        hx-swap="innerHTML"
        class="sticker-card overflow-hidden">
-    <p data-hx-loading class="px-4 py-3 text-sm text-muted">Loading…</p>
+    {% call reg::loading("loading…", "") %}{% endcall %}
   </div>
 
   <script defer src="{{ "js/ui/api_form.js"|asset }}"></script>

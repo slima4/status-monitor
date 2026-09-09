@@ -23,6 +23,6 @@
        hx-trigger="load, every 60s, sessions:refresh from:body, sm:poll-resume from:body"
        data-poll-pause
        hx-swap="innerHTML">
-    {% call reg::loading("loading…") %}{% endcall %}
+    {% call reg::loading("loading…", "") %}{% endcall %}
   </div>
 </div>

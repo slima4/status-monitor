@@ -84,9 +84,8 @@ fn full_page_renders_chrome_and_components() {
     // Relative so the poll stays on whichever URL served the page.
     assert!(html.contains(r#"hx-get="?fragment=1""#));
     assert!(html.contains(r#"hx-trigger="every 30s, sm:poll-resume from:body""#));
-    // An unpublished page 404s the fragment; without this the tab asks
-    // again every 30s for the rest of its life.
-    assert!(html.contains("data-poll-stop-on-404"));
+    // An unpublished page 404s the fragment; reload rather than ask forever.
+    assert!(html.contains("data-reload-on-404"));
     assert!(html.contains("data-tz"));
     assert!(html.contains(&crate::web::assets::url("js/htmx.min.js")));
     // Without it nothing honours [data-poll-pause] and the region polls on.
@@ -210,7 +209,7 @@ fn fragment_renders_region_without_doctype() {
     assert!(html.contains("Gateway"));
     // Re-armed on every swap, so both markers survive the zone replacing itself.
     assert!(html.contains("data-poll-pause"));
-    assert!(html.contains("data-poll-stop-on-404"));
+    assert!(html.contains("data-reload-on-404"));
     // An outerHTML swap inserts every top-level node beside the target.
     assert!(html.starts_with("<div id=\"status-region\""));
     assert!(html.ends_with("</div>"));

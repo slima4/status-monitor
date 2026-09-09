@@ -9,7 +9,7 @@
          hx-get="/web/partials/targets/{{ id }}/live?range={{ range }}{% if let Some(r) = selected_region %}&region={{ r|urlencode }}{% endif %}"
          hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body"
          data-poll-pause
-         data-poll-stop-on-404
+         data-reload-on-404
          hx-swap="outerHTML"
          data-newest-ts="{{ last_at_iso }}"
          class="grid gap-4 md:grid-cols-4">

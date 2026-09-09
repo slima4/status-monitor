@@ -14,7 +14,7 @@
            hx-get="/m/{{ token }}/live?range={{ range }}"
            hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body"
            data-poll-pause
-           data-poll-stop-on-404
+           data-reload-on-404
            hx-swap="outerHTML"
            data-newest-ts="{{ last_at_iso }}"
            class="grid gap-4 md:grid-cols-4">

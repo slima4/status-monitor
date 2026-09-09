@@ -1,4 +1,4 @@
-// Auto-loaded list partials (marked [data-hx-loader]) sit on their "Loading…"
+// Auto-loaded list partials (marked [data-hx-loader]) sit on their loading
 // placeholder forever when the fetch fails — htmx leaves the target untouched
 // on a 4xx/5xx or network error. Swap in an inline error with a retry instead,
 // but only while the placeholder is still up: see onError.
@@ -10,18 +10,11 @@
         return elt && elt.matches && elt.matches("[data-hx-loader]") ? elt : null;
     }
 
-    // Mirrors the `reg::loading` Askama macro — keep both in step.
-    function loadingPlaceholder() {
-        const p = Object.assign(document.createElement("p"), {
-            className: "px-4 py-3 font-mono text-xs text-quiet",
-            textContent: "# loading…",
-        });
-        p.setAttribute("data-hx-loading", "");
-        return p;
-    }
-
     function showError(box) {
         const url = box.getAttribute("hx-get");
+        // Clone the box's own: some lists render the placeholder bare inside
+        // a card, others carry the card themselves.
+        const placeholder = box.querySelector("[data-hx-loading]").cloneNode(true);
         box.replaceChildren();
         const card = document.createElement("p");
         card.className = "sticker-card px-4 py-3 text-sm text-muted";
@@ -32,9 +25,9 @@
         retry.className = "row-link text-sm";
         retry.textContent = "retry";
         retry.addEventListener("click", () => {
-            box.replaceChildren(loadingPlaceholder());
-            // source: the retry request must carry the box as its elt, or
-            // htmx reports document.body and a second failure goes unseen.
+            box.replaceChildren(placeholder.cloneNode(true));
+            // source, or htmx reports document.body as the elt and a second
+            // failure goes unseen.
             window.htmx.ajax("GET", url, { source: box, target: box, swap: "innerHTML" });
         });
         card.appendChild(retry);

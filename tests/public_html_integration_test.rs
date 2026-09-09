@@ -450,7 +450,7 @@ async fn status_fragment_returns_region_without_doctype() {
     assert!(html.contains(r#"hx-get="?fragment=1""#));
     assert!(html.contains(r#"hx-trigger="every 30s, sm:poll-resume from:body""#));
     assert!(html.contains("data-poll-pause"));
-    assert!(html.contains("data-poll-stop-on-404"));
+    assert!(html.contains("data-reload-on-404"));
 }
 
 // ── ClickHouse reachable, no history data ─────────────────────────────────
