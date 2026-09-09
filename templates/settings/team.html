@@ -44,7 +44,7 @@
        hx-get="/web/partials/settings/team"
        hx-trigger="load, team:refresh from:body"
        hx-swap="innerHTML"
-       hx-on::response-error="window.smToast({message:'team list failed to load — refresh the page'})"
+       data-on-fail-toast="team list failed to load — refresh the page"
        class="sticker-card overflow-hidden">
     {% call reg::loading("loading…", "") %}{% endcall %}
   </div>

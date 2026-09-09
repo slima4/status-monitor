@@ -47,7 +47,7 @@
           <button type="button"
                   hx-delete="/api/v1/variables/{{ v.id }}"
                   hx-headers='{"X-Requested-With":"uptimepage"}'
-                  hx-on::after-request="if(event.detail.successful){htmx.trigger('body','variables:refresh')}"
+                  data-on-ok-trigger="variables:refresh"
                   data-confirm-modal
                   data-confirm-title="Delete variable?"
                   data-confirm-body="&lbrace;&lbrace;{{ v.key }}&rbrace;&rbrace; is removed permanently. Monitors that later reference this key will fail to resolve until it is recreated."

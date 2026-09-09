@@ -49,21 +49,6 @@
   </fieldset>
 
   <script defer src="{{ "js/ui/delegate_links.js"|asset }}"></script>
-  <script>
-    // Send-test result: the API returns 200 {delivered:true} or a 4xx error
-    // envelope. Render the outcome into the row's result cell instead of
-    // letting HTMX swap anything.
-    window.smChannelTestResult = function (btn, ev) {
-      const cell = btn.parentElement.querySelector('[data-test-result]');
-      if (!cell) return;
-      if (ev.detail.successful) {
-        cell.textContent = '✓ sent';
-        cell.className = 'flash-text flash-text--ok text-xs font-medium';
-      } else {
-        cell.textContent = '✗ ' + window.smErrMsg(ev.detail.xhr, 'delivery failed');
-        cell.className = 'flash-text flash-text--bad text-xs font-medium';
-      }
-    };
-  </script>
+  <script defer src="{{ "js/ui/channel_test.js"|asset }}"></script>
 </section>
 {% endblock %}

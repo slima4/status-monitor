@@ -9,6 +9,9 @@
 #                                  `// SAFE:` to opt out a specific call.
 #   org_audit_single_writer        only `storage::orgs::record_audit_tx`
 #                                  may INSERT INTO org_audit_log.
+#   no inline hx-on                 htmx compiles those bodies with
+#                                  Function(); use the data-on-* markers
+#                                  in assets/js/ui/hx_actions.js.
 #
 # Tenant-isolation rule (`no_raw_tenant_sql`) is intentionally NOT
 # included — it has file-level allow-lists and a per-statement escape
@@ -22,3 +25,8 @@ cd "$(dirname "$0")/.."
 ast-grep scan --rule scripts/sg-rules/admin_repo_static_reason.yml src/
 ast-grep scan --rule scripts/sg-rules/no_unredacted_pii_in_logs.yml src/
 ast-grep scan --rule scripts/sg-rules/org_audit_single_writer.yml src/
+
+if grep -rn 'hx-on' templates/; then
+  echo "error: inline hx-on needs script-src 'unsafe-eval' and dies silently without it — see assets/js/ui/hx_actions.js" >&2
+  exit 1
+fi

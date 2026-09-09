@@ -47,7 +47,7 @@
         </button>
         <button type="button" role="menuitem"
                 hx-delete="/api/v1/targets/{{ id }}"
-                hx-on::after-request="if (event.detail.successful) window.location='/targets'"
+                data-on-ok-href="/targets"
                 data-confirm-modal
                 data-confirm-title="Delete monitor?"
                 data-confirm-body="Permanently deletes {{ name }}, its history, and any incidents bound to it. Notification channels are untouched. This cannot be undone."

@@ -47,13 +47,13 @@
                   hx-post="/api/v1/notification-channels/{{ c.id }}/test"
                   hx-headers='{"X-Requested-With":"uptimepage"}'
                   hx-swap="none"
-                  hx-on::after-request="window.smChannelTestResult(this, event)"
+                  data-channel-test
                   class="row-link font-mono" title="send a test alert"
                   aria-label="send a test alert to {{ c.name }}"><span class="cli-brackets">▶</span></button>
           <button type="button"
                   hx-delete="/api/v1/notification-channels/{{ c.id }}"
                   hx-headers='{"X-Requested-With":"uptimepage"}'
-                  hx-on::after-request="if(event.detail.successful){htmx.trigger('body','channels:refresh')}"
+                  data-on-ok-trigger="channels:refresh"
                   data-confirm-modal
                   data-confirm-title="Delete notification channel?"
                   data-confirm-body="Monitors bound to {{ c.name }} stop alerting through it. Channel can be re-added later but bindings must be re-applied."

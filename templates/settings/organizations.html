@@ -16,7 +16,7 @@
        hx-get="/web/partials/settings/organizations"
        hx-trigger="load"
        hx-swap="innerHTML"
-       hx-on::response-error="window.smToast({message:'organization list failed to load — refresh the page'})"
+       data-on-fail-toast="organization list failed to load — refresh the page"
        class="sticker-card overflow-hidden">
     {% call reg::loading("loading…", "") %}{% endcall %}
   </div>

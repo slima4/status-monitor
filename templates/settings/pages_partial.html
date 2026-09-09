@@ -51,7 +51,7 @@
         <button type="button"
                 hx-delete="/api/v1/status-pages/{{ r.id }}"
                 hx-headers='{"X-Requested-With":"uptimepage"}'
-                hx-on::after-request="if(event.detail.successful){htmx.trigger('body','pages:refresh')}"
+                data-on-ok-trigger="pages:refresh"
                 data-confirm-modal
                 data-confirm-title="Delete status page?"
                 data-confirm-body="Deletes the page {{ r.name }} and its component selection. Monitors and their data are untouched."

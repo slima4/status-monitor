@@ -32,5 +32,5 @@
 <button type="button" role="menuitem"
         hx-post="/auth/logout"
         hx-headers='{"X-Requested-With":"uptimepage"}'
-        hx-on::after-request="window.location.href='/login'"
+        data-on-done-href="/login"
         class="monitors-popover__item monitors-popover__item--danger"><svg class="mp-icon" aria-hidden="true"><use href="#i-logout" /></svg>log out</button>

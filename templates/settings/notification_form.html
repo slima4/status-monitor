@@ -941,7 +941,9 @@
     <button type="button"
             hx-delete="{{ form.action }}"
             hx-headers='{"X-Requested-With":"uptimepage"}'
-            hx-on::after-request="if(event.detail.successful){window.location='/settings/notifications'}else{window.smRenderClientError(document.getElementById('form-errors'),'Delete failed — the channel may already be gone. Refresh and try again.')}"
+            data-on-ok-href="/settings/notifications"
+            data-on-fail-into="#form-errors"
+            data-on-fail-message="Delete failed — the channel may already be gone. Refresh and try again."
             data-confirm-modal
             data-confirm-title="Delete notification channel?"
             data-confirm-body="Monitors bound to {{ form.name }} stop alerting through it. Channel can be re-added later but bindings must be re-applied."

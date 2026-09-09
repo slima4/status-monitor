@@ -31,7 +31,7 @@
         <button type="button"
                 hx-delete="/api/v1/me/api-tokens/{{ t.id }}"
                 hx-headers='{"X-Requested-With":"uptimepage"}'
-                hx-on::after-request="if(event.detail.successful){htmx.trigger('body','tokens:refresh')}"
+                data-on-ok-trigger="tokens:refresh"
                 data-confirm-modal
                 data-confirm-title="Revoke API token?"
                 data-confirm-body="Token {{ t.name }} can no longer be used. Existing callers receive 401 on the next request. Cannot be undone."

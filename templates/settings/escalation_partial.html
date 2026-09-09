@@ -50,7 +50,7 @@
             <button type="button"
                     hx-delete="/api/v1/escalation-policies/{{ p.id }}"
                     hx-headers='{"X-Requested-With":"uptimepage"}'
-                    hx-on::after-request="if(event.detail.successful){htmx.trigger('body','escalation:refresh')}"
+                    data-on-ok-trigger="escalation:refresh"
                     data-confirm-modal
                     data-confirm-title="Delete escalation policy?"
                     data-confirm-body="Monitors bound to {{ p.name }} stop escalating through it and fall back to the org default (if any)."

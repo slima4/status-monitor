@@ -226,7 +226,7 @@
                 <button type="button"
                         hx-delete="/api/v1/status-pages/{{ id }}/subscribers/{{ s.id }}"
                         hx-headers='{"X-Requested-With":"uptimepage"}'
-                        hx-on::after-request="if(event.detail.successful){this.closest('tr').remove()}"
+                        data-on-ok-remove="tr"
                         data-confirm-modal
                         data-confirm-title="Remove subscriber?"
                         data-confirm-body="Stops sending updates to {{ s.contact }}. They can re-subscribe from the public page."

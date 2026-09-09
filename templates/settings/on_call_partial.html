@@ -35,7 +35,7 @@
             <button type="button"
                     hx-delete="/api/v1/on-call/schedules/{{ s.id }}"
                     hx-headers='{"X-Requested-With":"uptimepage"}'
-                    hx-on::after-request="if(event.detail.successful){htmx.trigger('body','oncall:refresh')}"
+                    data-on-ok-trigger="oncall:refresh"
                     data-confirm-modal
                     data-confirm-title="Delete on-call schedule?"
                     data-confirm-body="Escalation policies that page {{ s.name }} reach no one through it until repointed."
