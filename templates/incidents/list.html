@@ -86,8 +86,7 @@
          hx-trigger="every 10s [!document.querySelector('#incidents-filter.htmx-request')], sm:poll-resume[!document.querySelector('#incidents-filter.htmx-request')] from:body"
          hx-sync="this:replace"
          data-poll-pause
-         hx-swap="innerHTML"
-         data-hx-loader>
+         hx-swap="innerHTML">
       {% include "incidents/_console_table.html" %}
     </div>
   </div>

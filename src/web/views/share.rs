@@ -548,6 +548,8 @@ mod tests {
             r#"hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body""#
         ));
         assert!(html.contains("data-poll-pause"));
+        assert!(html.contains("data-poll-stop-on-404"));
+        assert!(!html.contains("hx-on::response-error"));
         assert!(html.contains("</section><template>"));
         assert!(html.contains("</template><span id=\"detail-recent-count\""));
         assert!(html.contains("</span><span id=\"detail-status-badge\""));
@@ -555,11 +557,18 @@ mod tests {
     }
 
     #[test]
-    fn share_page_loads_the_poll_pause_guard() {
+    fn share_page_loads_the_polling_module() {
         let html = share_page(false).render().unwrap();
         assert!(html.contains("data-poll-pause"));
-        // Without it nothing honours the marker and the KPI zone polls on.
-        assert!(html.contains(&crate::web::assets::url("js/ui/poll_visibility.js")));
+        // A revoked token 404s the live endpoint; without this the zone keeps
+        // asking every 60s for the life of the tab.
+        assert!(html.contains("data-poll-stop-on-404"));
+        // Without the module nothing honours either marker.
+        assert!(html.contains(&crate::web::assets::url("js/ui/polling.js")));
+        // The inline handler this replaced was dead twice over: htmx builds
+        // hx-on bodies with Function(), and dropping hx-trigger alone cancels
+        // neither the timer nor the from:body listeners.
+        assert!(!html.contains("hx-on::response-error"));
     }
 
     #[test]

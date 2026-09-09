@@ -14,8 +14,8 @@
            hx-get="/m/{{ token }}/live?range={{ range }}"
            hx-trigger="every 60s, sm:refresh-live from:body, sm:poll-resume from:body"
            data-poll-pause
+           data-poll-stop-on-404
            hx-swap="outerHTML"
-           hx-on::response-error="if(event.detail.xhr.status===404){this.removeAttribute('hx-trigger')}"
            data-newest-ts="{{ last_at_iso }}"
            class="grid gap-4 md:grid-cols-4">
     {% include "targets/partials/detail_live_kpi_cards.html" %}

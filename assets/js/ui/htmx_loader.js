@@ -33,7 +33,9 @@
         retry.textContent = "retry";
         retry.addEventListener("click", () => {
             box.replaceChildren(loadingPlaceholder());
-            window.htmx.ajax("GET", url, { target: box, swap: "innerHTML" });
+            // source: the retry request must carry the box as its elt, or
+            // htmx reports document.body and a second failure goes unseen.
+            window.htmx.ajax("GET", url, { source: box, target: box, swap: "innerHTML" });
         });
         card.appendChild(retry);
         box.appendChild(card);
